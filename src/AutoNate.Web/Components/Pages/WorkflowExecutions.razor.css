@@ -1,0 +1,171 @@
+.workflow-executions-copy {
+    max-width: 68rem;
+    color: #4b5563;
+}
+
+.workflow-executions-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.workflow-executions-loading {
+    color: #6b7280;
+}
+
+.workflow-executions-card {
+    background: #fff;
+    border: 1px solid #dbe3f0;
+    border-radius: 1rem;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+}
+
+.workflow-executions-table {
+    margin-bottom: 0;
+}
+
+.workflow-execution-row {
+    cursor: pointer;
+}
+
+.workflow-execution-row:hover {
+    background: #f8fafc;
+}
+
+.workflow-executions-table thead th {
+    background: #f8fafc;
+    border-bottom-width: 1px;
+    color: #334155;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.workflow-execution-id {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.92rem;
+}
+
+.workflow-executions-empty {
+    margin: 0;
+    padding: 1.25rem;
+    color: #6b7280;
+}
+
+.workflow-execution-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.workflow-execution-modal {
+    width: min(92vw, 1100px);
+    max-height: 90vh;
+    overflow: auto;
+    background: #fff;
+    border-radius: 1rem;
+    box-shadow: 0 30px 80px rgba(15, 23, 42, 0.25);
+    padding: 1.25rem;
+}
+
+.workflow-execution-modal-header {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.workflow-execution-modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.workflow-execution-modal-copy {
+    margin: 0.35rem 0 0;
+    color: #64748b;
+}
+
+.workflow-execution-legend {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+    color: #475569;
+    font-size: 0.95rem;
+}
+
+.workflow-execution-swatch {
+    display: inline-block;
+    width: 0.95rem;
+    height: 0.95rem;
+    margin-right: 0.4rem;
+    vertical-align: text-bottom;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.2rem;
+}
+
+.workflow-execution-swatch-completed {
+    background: #e5e7eb;
+}
+
+.workflow-execution-swatch-current {
+    background: #dcfce7;
+}
+
+.workflow-execution-swatch-future {
+    background: #fff;
+}
+
+.workflow-execution-viewer-shell {
+    min-height: 70vh;
+    background: #f8fafc;
+    border: 1px solid #dbe3f0;
+    border-radius: 0.85rem;
+    overflow: hidden;
+}
+
+.workflow-execution-viewer-canvas {
+    height: 70vh;
+    min-height: 34rem;
+    width: 100%;
+}
+
+.workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > rect,
+.workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > circle,
+.workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > ellipse,
+.workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > polygon,
+.workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > path:not(text),
+.workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > polyline {
+    fill: #e5e7eb !important;
+}
+
+.workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > rect,
+.workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > circle,
+.workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > ellipse,
+.workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > polygon,
+.workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > path:not(text),
+.workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > polyline {
+    fill: #dcfce7 !important;
+}
+
+@media (max-width: 900px) {
+    .workflow-execution-modal {
+        width: 100%;
+        max-height: 95vh;
+        padding: 1rem;
+    }
+
+    .workflow-execution-modal-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

@@ -104,6 +104,115 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         };
     }
 
+    public async Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(CancellationToken cancellationToken = default)
+    {
+        using var historicResponse = await _httpClient.GetAsync("service/history/historic-process-instances", cancellationToken);
+        await EnsureSuccessAsync(historicResponse, "query historic process instances");
+
+        using var runtimeResponse = await _httpClient.GetAsync("service/runtime/process-instances", cancellationToken);
+        await EnsureSuccessAsync(runtimeResponse, "query runtime process instances");
+
+        using var tasksResponse = await _httpClient.GetAsync("service/runtime/tasks", cancellationToken);
+        await EnsureSuccessAsync(tasksResponse, "query runtime tasks");
+
+        var historicPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(historicResponse, cancellationToken);
+        var runtimePayload = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(runtimeResponse, cancellationToken);
+        var tasksPayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(tasksResponse, cancellationToken);
+
+        var runtimeById = runtimePayload.Data
+            .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
+            .ToDictionary(instance => instance.Id!, StringComparer.Ordinal);
+
+        var currentTaskByProcessInstanceId = tasksPayload.Data
+            .Where(task => !string.IsNullOrWhiteSpace(task.ProcessInstanceId))
+            .GroupBy(task => task.ProcessInstanceId!, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderBy(task => task.CreateTime ?? DateTimeOffset.MaxValue)
+                    .ThenBy(task => task.Id, StringComparer.Ordinal)
+                    .First(),
+                StringComparer.Ordinal);
+
+        return historicPayload.Data
+            .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
+            .Select(instance =>
+            {
+                runtimeById.TryGetValue(instance.Id!, out var runtimeInstance);
+                currentTaskByProcessInstanceId.TryGetValue(instance.Id!, out var currentTask);
+
+                var isRunning = runtimeInstance is not null;
+                var currentStep = isRunning
+                    ? FirstNonEmpty(currentTask?.Name, runtimeInstance?.ActivityId)
+                    : null;
+
+                return new WorkflowExecutionSummary
+                {
+                    Id = instance.Id!,
+                    StartedAtUtc = instance.StartTime,
+                    Status = isRunning ? "Running" : "Complete",
+                    CurrentStep = currentStep
+                };
+            })
+            .OrderByDescending(execution => execution.StartedAtUtc ?? DateTimeOffset.MinValue)
+            .ThenByDescending(execution => execution.Id, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    public async Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        using var processInstanceResponse = await _httpClient.GetAsync($"service/history/historic-process-instances/{Uri.EscapeDataString(processInstanceId)}", cancellationToken);
+        await EnsureSuccessAsync(processInstanceResponse, "query the historic process instance");
+
+        var processInstance = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(processInstanceResponse, cancellationToken);
+        if (string.IsNullOrWhiteSpace(processInstance.ProcessDefinitionId))
+        {
+            throw new InvalidOperationException($"Execution '{processInstanceId}' does not have a process definition id.");
+        }
+
+        using var modelResponse = await _httpClient.GetAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(processInstance.ProcessDefinitionId)}/resourcedata",
+            cancellationToken);
+        await EnsureSuccessAsync(modelResponse, "load the BPMN model for the execution");
+
+        using var activitiesResponse = await _httpClient.GetAsync(
+            $"service/history/historic-activity-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}",
+            cancellationToken);
+        await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
+
+        var bpmnXml = await modelResponse.Content.ReadAsStringAsync(cancellationToken);
+        var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
+
+        var completedActivityIds = activitiesPayload.Data
+            .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId) && activity.EndTime is not null)
+            .Select(activity => activity.ActivityId!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var currentActivityIds = activitiesPayload.Data
+            .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId) && activity.EndTime is null)
+            .Select(activity => activity.ActivityId!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (currentActivityIds.Length == 0)
+        {
+            var runtimeInstance = await GetProcessInstanceAsync(processInstanceId, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(runtimeInstance?.ActivityId))
+            {
+                currentActivityIds = [runtimeInstance.ActivityId];
+            }
+        }
+
+        return new WorkflowExecutionDiagramDetail
+        {
+            ExecutionId = processInstanceId,
+            BpmnXml = bpmnXml,
+            CompletedActivityIds = completedActivityIds,
+            CurrentActivityIds = currentActivityIds
+        };
+    }
+
     public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default)
     {
         var url = $"service/runtime/tasks?processInstanceId={Uri.EscapeDataString(processInstanceId)}";
@@ -147,6 +256,11 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     {
         return variables?.Select(variable => new { name = variable.Key, value = variable.Value }).ToArray()
             ?? [];
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     }
 
     private async Task EnsureSuccessAsync(HttpResponseMessage response, string operation)
@@ -216,6 +330,24 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? ActivityId { get; init; }
 
         public bool Suspended { get; init; }
+    }
+
+    private sealed class FlowableHistoricProcessInstanceResponse
+    {
+        public string? Id { get; init; }
+
+        public string? ProcessDefinitionId { get; init; }
+
+        public DateTimeOffset? StartTime { get; init; }
+
+        public DateTimeOffset? EndTime { get; init; }
+    }
+
+    private sealed class FlowableHistoricActivityInstanceResponse
+    {
+        public string? ActivityId { get; init; }
+
+        public DateTimeOffset? EndTime { get; init; }
     }
 
     private sealed class FlowableTaskResponse
