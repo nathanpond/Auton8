@@ -1,5 +1,7 @@
 bin/
 obj/
+src/AutoNate.Web/App_Data/*
+src/AutoNate.Web/wwwRoot/vendor/*
 /packages/
 node_modules/
 riderModule.iml
@@ -8,4 +10,4 @@ riderModule.iml
 infra/mounts/**
 !infra/mounts/
 !infra/mounts/*/
-!infra/mounts/*/.gitkeep
+
