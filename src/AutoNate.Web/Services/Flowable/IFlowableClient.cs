@@ -1,0 +1,18 @@
+using AutoNate.Web.Models;
+
+namespace AutoNate.Web.Services.Flowable;
+
+public interface IFlowableClient
+{
+    Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowDraft draft, CancellationToken cancellationToken = default);
+
+    Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
+
+    Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(string processDefinitionKey, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
+
+    Task<FlowableProcessInstanceSummary?> GetProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
+    Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
+}

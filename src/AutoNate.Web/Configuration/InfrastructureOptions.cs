@@ -5,6 +5,10 @@ public sealed class FlowableOptions
     public const string SectionName = "Flowable";
 
     public string BaseUrl { get; set; } = string.Empty;
+
+    public string Username { get; set; } = string.Empty;
+
+    public string Password { get; set; } = string.Empty;
 }
 
 public sealed class DaprOptions

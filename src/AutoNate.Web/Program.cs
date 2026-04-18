@@ -1,5 +1,8 @@
 using AutoNate.Web.Components;
 using AutoNate.Web.Configuration;
+using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Workflow;
+using Microsoft.Extensions.Options;
 
 #if DEBUG
 // Rider's plain ".NET Project" launcher runs the built executable directly, which skips
@@ -31,6 +34,13 @@ builder.Services.AddOptions<FlowableOptions>()
     .BindConfiguration(FlowableOptions.SectionName);
 builder.Services.AddOptions<DaprOptions>()
     .BindConfiguration(DaprOptions.SectionName);
+builder.Services.AddSingleton<IWorkflowDraftStore, FileWorkflowDraftStore>();
+builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
+    .ConfigureHttpClient((serviceProvider, httpClient) =>
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<FlowableOptions>>().Value;
+        FlowableClient.ConfigureHttpClient(httpClient, options);
+    });
 
 var app = builder.Build();
 

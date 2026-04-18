@@ -2,12 +2,14 @@
 @rendermode InteractiveServer
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@inject IWorkflowDraftStore DraftStore
+@inject IFlowableClient FlowableClient
 
 <PageTitle>Workflow</PageTitle>
 
-<h1>Workflow</h1>
+<h1>Workflow Studio</h1>
 
-<p class="workflow-copy">Model BPMN workflows directly in the browser.</p>
+<p class="workflow-copy">Model a BPMN process in the browser, save it as an AutoNate draft, deploy it to Flowable, and execute a simple user-task flow.</p>
 
 @if (!string.IsNullOrWhiteSpace(_errorMessage))
 {
@@ -16,37 +18,170 @@
     </div>
 }
 
-<div class="workflow-shell">
-    <div @ref="_canvas" class="workflow-canvas" aria-label="BPMN modeler"></div>
+@if (!string.IsNullOrWhiteSpace(_statusMessage))
+{
+    <div class="alert alert-success" role="alert">
+        @_statusMessage
+    </div>
+}
+
+<div class="workflow-toolbar">
+    <div class="workflow-fields">
+        <label class="workflow-field">
+            <span>Workflow Name</span>
+            <input class="form-control" @bind="_workflowName" @bind:after="MarkMetadataDirty" />
+        </label>
+
+        <label class="workflow-field">
+            <span>Process Key</span>
+            <input class="form-control" @bind="_processKey" @bind:after="MarkMetadataDirty" />
+        </label>
+    </div>
+
+    <div class="workflow-actions">
+        <button class="btn btn-outline-secondary" @onclick="CreateNewWorkflowAsync" disabled="@_isBusy">New</button>
+        <button class="btn btn-primary" @onclick="SaveDraftAsync" disabled="@(!_modelerReady || _isBusy)">Save Draft</button>
+        <button class="btn btn-outline-primary" @onclick="DeployAsync" disabled="@(!_modelerReady || _isBusy)">Deploy to Flowable</button>
+        <button class="btn btn-outline-success" @onclick="StartInstanceAsync" disabled="@(!_modelerReady || _isBusy)">Start Instance</button>
+        <button class="btn btn-outline-dark" @onclick="RefreshRuntimeStateAsync" disabled="@(_isBusy || string.IsNullOrWhiteSpace(_activeProcessInstanceId))">Refresh Runtime State</button>
+    </div>
+</div>
+
+@if (_isBusy)
+{
+    <p class="workflow-busy">Working on @_busyOperation...</p>
+}
+
+<div class="workflow-layout">
+    <section class="workflow-main">
+        <div class="workflow-shell">
+            <div @ref="_canvas" class="workflow-canvas" aria-label="BPMN modeler"></div>
+        </div>
+    </section>
+
+    <aside class="workflow-sidebar">
+        <section class="workflow-card">
+            <h2>Draft</h2>
+            <dl class="workflow-meta">
+                <div>
+                    <dt>Draft ID</dt>
+                    <dd>@(_currentDraft?.Id.ToString() ?? "Unsaved")</dd>
+                </div>
+                <div>
+                    <dt>Status</dt>
+                    <dd>@(_isDirty ? "Unsaved changes" : "Saved")</dd>
+                </div>
+                <div>
+                    <dt>Updated</dt>
+                    <dd>@FormatTimestamp(_currentDraft?.UpdatedAtUtc)</dd>
+                </div>
+            </dl>
+        </section>
+
+        <section class="workflow-card">
+            <h2>Deployment</h2>
+
+            @if (_currentDraft?.LastDeployment is null)
+            {
+                <p class="workflow-muted">This draft has not been deployed yet, or the current BPMN has changed since the last deployment.</p>
+            }
+            else
+            {
+                <dl class="workflow-meta">
+                    <div>
+                        <dt>Definition ID</dt>
+                        <dd>@_currentDraft.LastDeployment.ProcessDefinitionId</dd>
+                    </div>
+                    <div>
+                        <dt>Version</dt>
+                        <dd>@_currentDraft.LastDeployment.ProcessDefinitionVersion</dd>
+                    </div>
+                    <div>
+                        <dt>Deployment ID</dt>
+                        <dd>@_currentDraft.LastDeployment.DeploymentId</dd>
+                    </div>
+                    <div>
+                        <dt>Deployed</dt>
+                        <dd>@FormatTimestamp(_currentDraft.LastDeployment.DeployedAtUtc)</dd>
+                    </div>
+                </dl>
+            }
+        </section>
+
+        <section class="workflow-card">
+            <h2>Runtime</h2>
+
+            <dl class="workflow-meta">
+                <div>
+                    <dt>Instance</dt>
+                    <dd>@(_activeProcessInstanceId ?? "Not started")</dd>
+                </div>
+                <div>
+                    <dt>Status</dt>
+                    <dd>@_runtimeStatus</dd>
+                </div>
+                <div>
+                    <dt>Active Tasks</dt>
+                    <dd>@_runtimeTasks.Count</dd>
+                </div>
+            </dl>
+
+            @if (_runtimeTasks.Count > 0)
+            {
+                <div class="workflow-task-list">
+                    @foreach (var task in _runtimeTasks)
+                    {
+                        <div class="workflow-task">
+                            <div>
+                                <strong>@task.Name</strong>
+                                <div class="workflow-task-meta">Task ID: @task.Id</div>
+                            </div>
+                            <button class="btn btn-sm btn-success" @onclick="() => CompleteTaskAsync(task.Id)">Complete @task.Name</button>
+                        </div>
+                    }
+                </div>
+            }
+            else if (!string.IsNullOrWhiteSpace(_activeProcessInstanceId))
+            {
+                <p class="workflow-muted">No active tasks are currently available for the selected process instance.</p>
+            }
+        </section>
+    </aside>
 </div>
 
 @code {
-    private const string StarterDiagram = """
-                                        <?xml version="1.0" encoding="UTF-8"?>
-                                        <bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                                                          xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
-                                                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-                                                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
-                                                          xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
-                                                          id="Definitions_1"
-                                                          targetNamespace="http://bpmn.io/schema/bpmn">
-                                          <bpmn:process id="Process_1" isExecutable="false">
-                                            <bpmn:startEvent id="StartEvent_1" name="Start" />
-                                          </bpmn:process>
-                                          <bpmndi:BPMNDiagram id="BPMNDiagram_1">
-                                            <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
-                                              <bpmndi:BPMNShape id="_BPMNShape_StartEvent_2" bpmnElement="StartEvent_1">
-                                                <dc:Bounds x="179" y="99" width="36" height="36" />
-                                              </bpmndi:BPMNShape>
-                                            </bpmndi:BPMNPlane>
-                                          </bpmndi:BPMNDiagram>
-                                        </bpmn:definitions>
-                                        """;
-
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private IJSObjectReference? _modelerHandle;
+    private DotNetObjectReference<Workflow>? _dotNetReference;
+    private WorkflowDraft? _currentDraft;
+    private string _workflowName = string.Empty;
+    private string _processKey = string.Empty;
+    private string _currentXml = string.Empty;
+    private string? _activeProcessInstanceId;
+    private string _runtimeStatus = "Not started";
+    private List<FlowableTaskSummary> _runtimeTasks = [];
     private string? _errorMessage;
+    private string? _statusMessage;
+    private string _busyOperation = "workflow";
+    private bool _isBusy;
+    private bool _modelerReady;
+    private bool _isDirty;
+    private bool _suppressDirtyNotifications;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentDraft = await DraftStore.GetMostRecentAsync();
+
+        if (_currentDraft is null)
+        {
+            ResetEditorState(CreateDraftTemplate());
+            return;
+        }
+
+        ResetEditorState(_currentDraft);
+        _isDirty = false;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -57,13 +192,277 @@
 
         try
         {
+            _dotNetReference = DotNetObjectReference.Create(this);
             _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/workflow.js");
-            _modelerHandle = await _module.InvokeAsync<IJSObjectReference>("createModeler", _canvas, StarterDiagram);
+            _modelerHandle = await _module.InvokeAsync<IJSObjectReference>("createModeler", _canvas, _currentXml, _dotNetReference);
+            _modelerReady = true;
         }
         catch (JSException)
         {
             _errorMessage = "The BPMN modeler could not be loaded. Check that the bpmn.io assets are reachable and refresh the page.";
             StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public Task NotifyDiagramChanged()
+    {
+        if (_suppressDirtyNotifications)
+        {
+            return Task.CompletedTask;
+        }
+
+        _isDirty = true;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task MarkMetadataDirty()
+    {
+        _isDirty = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateNewWorkflowAsync()
+    {
+        await RunBusyAsync("creating a new workflow", async () =>
+        {
+            var draft = CreateDraftTemplate();
+            ResetEditorState(draft);
+            _runtimeTasks.Clear();
+            _runtimeStatus = "Not started";
+            _activeProcessInstanceId = null;
+
+            if (_modelerReady)
+            {
+                await CreateNewDiagramAsync(draft.BpmnXml);
+            }
+
+            _statusMessage = "A fresh executable BPMN workflow template is ready.";
+        });
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        await RunBusyAsync("saving the draft", async () =>
+        {
+            var preparedDraft = await PrepareDraftAsync(clearDeploymentIfChanged: true);
+            _currentDraft = await DraftStore.SaveAsync(preparedDraft);
+            _statusMessage = $"Saved draft '{_currentDraft.Name}'.";
+            _isDirty = false;
+        });
+    }
+
+    private async Task DeployAsync()
+    {
+        await RunBusyAsync("deploying the workflow to Flowable", async () =>
+        {
+            var savedDraft = await DraftStore.SaveAsync(await PrepareDraftAsync(clearDeploymentIfChanged: true));
+            var deployment = await FlowableClient.DeployProcessAsync(savedDraft);
+            _currentDraft = await DraftStore.SaveAsync(savedDraft with { LastDeployment = deployment });
+            _statusMessage = $"Deployed '{_currentDraft.Name}' to Flowable as version {deployment.ProcessDefinitionVersion}.";
+            _isDirty = false;
+        });
+    }
+
+    private async Task StartInstanceAsync()
+    {
+        await RunBusyAsync("starting the process instance", async () =>
+        {
+            if (_isDirty)
+            {
+                throw new InvalidOperationException("Save and redeploy the workflow before starting a new instance.");
+            }
+
+            if (_currentDraft?.LastDeployment is null)
+            {
+                throw new InvalidOperationException("Deploy the workflow to Flowable before starting an instance.");
+            }
+
+            var instance = await FlowableClient.StartProcessInstanceAsync(_currentDraft.ProcessKey);
+            _activeProcessInstanceId = instance.Id;
+            _runtimeStatus = "Running";
+            _statusMessage = $"Started process instance {_activeProcessInstanceId}.";
+            await RefreshRuntimeStateCoreAsync();
+        });
+    }
+
+    private async Task RefreshRuntimeStateAsync()
+    {
+        await RunBusyAsync("refreshing runtime state", RefreshRuntimeStateCoreAsync);
+    }
+
+    private async Task CompleteTaskAsync(string taskId)
+    {
+        await RunBusyAsync("completing the user task", async () =>
+        {
+            await FlowableClient.CompleteTaskAsync(taskId);
+            _statusMessage = $"Completed task {taskId}.";
+            await RefreshRuntimeStateCoreAsync();
+        });
+    }
+
+    private async Task RefreshRuntimeStateCoreAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_activeProcessInstanceId))
+        {
+            _runtimeTasks.Clear();
+            _runtimeStatus = "Not started";
+            return;
+        }
+
+        var processInstance = await FlowableClient.GetProcessInstanceAsync(_activeProcessInstanceId);
+        _runtimeTasks = (await FlowableClient.GetTasksByProcessInstanceAsync(_activeProcessInstanceId)).ToList();
+
+        if (processInstance is null && _runtimeTasks.Count == 0)
+        {
+            _runtimeStatus = "Completed";
+            return;
+        }
+
+        _runtimeStatus = _runtimeTasks.Count > 0 ? "Waiting on user task" : "Running";
+    }
+
+    private async Task<WorkflowDraft> PrepareDraftAsync(bool clearDeploymentIfChanged)
+    {
+        if (!_modelerReady || _module is null || _modelerHandle is null)
+        {
+            throw new InvalidOperationException("The BPMN modeler is not ready yet.");
+        }
+
+        var exportedXml = await _module.InvokeAsync<string>("saveXml", _modelerHandle);
+        var normalizedName = WorkflowBpmnXml.NormalizeWorkflowName(_workflowName);
+        var normalizedProcessKey = WorkflowBpmnXml.NormalizeProcessKey(_processKey);
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(exportedXml, normalizedProcessKey, normalizedName);
+        var validationErrors = WorkflowBpmnXml.ValidateExecutableProcess(updatedXml);
+
+        if (validationErrors.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(" ", validationErrors));
+        }
+
+        _workflowName = normalizedName;
+        _processKey = normalizedProcessKey;
+
+        var existingDraft = _currentDraft ?? CreateDraftTemplate();
+        var definitionChanged = !string.Equals(existingDraft.BpmnXml, updatedXml, StringComparison.Ordinal);
+        var lastDeployment = clearDeploymentIfChanged && definitionChanged
+            ? null
+            : existingDraft.LastDeployment;
+
+        var preparedDraft = existingDraft with
+        {
+            Name = normalizedName,
+            ProcessKey = normalizedProcessKey,
+            BpmnXml = updatedXml,
+            LastDeployment = lastDeployment
+        };
+
+        _currentXml = updatedXml;
+        await LoadXmlIntoModelerAsync(updatedXml);
+
+        if (definitionChanged && clearDeploymentIfChanged)
+        {
+            _activeProcessInstanceId = null;
+            _runtimeStatus = "Not started";
+            _runtimeTasks.Clear();
+        }
+
+        return preparedDraft;
+    }
+
+    private async Task CreateNewDiagramAsync(string xml)
+    {
+        if (_module is null || _modelerHandle is null)
+        {
+            _currentXml = xml;
+            return;
+        }
+
+        _suppressDirtyNotifications = true;
+        try
+        {
+            await _module.InvokeVoidAsync("createNewDiagram", _modelerHandle, xml);
+            _currentXml = xml;
+            _isDirty = false;
+        }
+        finally
+        {
+            _suppressDirtyNotifications = false;
+        }
+    }
+
+    private async Task LoadXmlIntoModelerAsync(string xml)
+    {
+        if (_module is null || _modelerHandle is null)
+        {
+            _currentXml = xml;
+            return;
+        }
+
+        _suppressDirtyNotifications = true;
+        try
+        {
+            await _module.InvokeVoidAsync("loadXml", _modelerHandle, xml);
+            _currentXml = xml;
+            _isDirty = false;
+        }
+        finally
+        {
+            _suppressDirtyNotifications = false;
+        }
+    }
+
+    private WorkflowDraft CreateDraftTemplate()
+    {
+        var workflowName = WorkflowBpmnXml.BuildDefaultWorkflowName();
+        var processKey = WorkflowBpmnXml.BuildDefaultProcessKey();
+
+        return new WorkflowDraft
+        {
+            Id = Guid.NewGuid(),
+            Name = workflowName,
+            ProcessKey = processKey,
+            BpmnXml = WorkflowBpmnXml.CreateStarterDiagram(processKey, workflowName)
+        };
+    }
+
+    private void ResetEditorState(WorkflowDraft draft)
+    {
+        _currentDraft = draft;
+        _workflowName = draft.Name;
+        _processKey = draft.ProcessKey;
+        _currentXml = draft.BpmnXml;
+    }
+
+    private static string FormatTimestamp(DateTimeOffset? timestamp)
+    {
+        return timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "Not available";
+    }
+
+    private async Task RunBusyAsync(string operation, Func<Task> action)
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _busyOperation = operation;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            await action();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = exception.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -101,5 +500,7 @@
             {
             }
         }
+
+        _dotNetReference?.Dispose();
     }
 }
