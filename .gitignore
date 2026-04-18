@@ -1,5 +1,11 @@
 bin/
 obj/
 /packages/
+node_modules/
 riderModule.iml
 /_ReSharper.Caches/
+.env
+infra/mounts/**
+!infra/mounts/
+!infra/mounts/*/
+!infra/mounts/*/.gitkeep

@@ -1,0 +1,10 @@
+{
+  "name": "autonate",
+  "private": true,
+  "scripts": {
+    "vendor:bpmn": "node scripts/vendor-bpmn.mjs"
+  },
+  "dependencies": {
+    "bpmn-js": "^18.8.1"
+  }
+}

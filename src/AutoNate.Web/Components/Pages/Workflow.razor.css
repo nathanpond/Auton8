@@ -1,0 +1,18 @@
+.workflow-copy {
+    color: #52606d;
+    margin-bottom: 1rem;
+}
+
+.workflow-shell {
+    min-height: 70vh;
+    background: #f8fbfd;
+    border: 1px solid #d8e2e8;
+    border-radius: 0.75rem;
+    overflow: hidden;
+}
+
+.workflow-canvas {
+    height: 70vh;
+    min-height: 32rem;
+    width: 100%;
+}

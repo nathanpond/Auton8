@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: autonate-postgres
+    environment:
+      POSTGRES_USER: ${AUTONATE_POSTGRES_USER:-autonate}
+      POSTGRES_PASSWORD: ${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
+      POSTGRES_DB: flowable
+    ports:
+      - "${AUTONATE_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./mounts/postgres/data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  flowable:
+    build:
+      context: ./flowable
+    container_name: autonate-flowable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flowable
+      SPRING_DATASOURCE_USERNAME: ${AUTONATE_POSTGRES_USER:-autonate}
+      SPRING_DATASOURCE_PASSWORD: ${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
+    ports:
+      - "${AUTONATE_FLOWABLE_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: autonate-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${AUTONATE_REDIS_PORT:-6379}:6379"
+    volumes:
+      - ./mounts/redis/data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dapr-placement:
+    image: daprio/placement:1.17.4
+    container_name: autonate-dapr-placement
+    command: ["./placement", "--port", "50006"]
+    ports:
+      - "50006:50006"
+
+  dapr-scheduler:
+    image: daprio/scheduler:1.17.4
+    container_name: autonate-dapr-scheduler
+    command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
+    ports:
+      - "50007:50007"
+    user: root
+    volumes:
+      - ./mounts/dapr-scheduler/data:/data
+
+  dapr-dashboard:
+    image: daprio/dashboard:0.15.0
+    container_name: autonate-dapr-dashboard
+    command:
+      - --docker-compose=true
+      - --components-path=/components
+    profiles:
+      - dashboard
+    ports:
+      - "${AUTONATE_DAPR_DASHBOARD_PORT:-8081}:8080"
+    volumes:
+      - ./mounts/dapr-dashboard/components:/components:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      dapr-placement:
+        condition: service_started
+      dapr-scheduler:
+        condition: service_started
