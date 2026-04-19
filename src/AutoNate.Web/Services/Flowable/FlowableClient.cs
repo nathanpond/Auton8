@@ -20,17 +20,17 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     private readonly HttpClient _httpClient = httpClient;
     private readonly FlowableOptions _options = options.Value;
 
-    public async Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowDraft draft, CancellationToken cancellationToken = default)
+    public async Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default)
     {
         using var content = new MultipartFormDataContent();
-        var fileName = $"{draft.ProcessKey}.bpmn20.xml";
-        content.Add(new StringContent(draft.BpmnXml, Encoding.UTF8, "application/xml"), "file", fileName);
+        var fileName = $"{model.ProcessKey}.bpmn20.xml";
+        content.Add(new StringContent(model.BpmnXml, Encoding.UTF8, "application/xml"), "file", fileName);
 
         using var response = await _httpClient.PostAsync("service/repository/deployments", content, cancellationToken);
         await EnsureSuccessAsync(response, "deploy the BPMN workflow");
 
-        var processDefinition = await GetLatestProcessDefinitionAsync(draft.ProcessKey, cancellationToken)
-            ?? throw new InvalidOperationException($"Flowable accepted the deployment, but no process definition with key '{draft.ProcessKey}' was found.");
+        var processDefinition = await GetLatestProcessDefinitionAsync(model.ProcessKey, cancellationToken)
+            ?? throw new InvalidOperationException($"Flowable accepted the deployment, but no process definition with key '{model.ProcessKey}' was found.");
 
         return new WorkflowDeploymentInfo
         {

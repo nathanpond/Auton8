@@ -1,6 +1,6 @@
 namespace AutoNate.Web.Models;
 
-public sealed record class WorkflowDraft
+public sealed record class WorkflowModel
 {
     public Guid Id { get; init; }
 
@@ -11,6 +11,8 @@ public sealed record class WorkflowDraft
     public string BpmnXml { get; init; } = string.Empty;
 
     public WorkflowDeploymentInfo? LastDeployment { get; init; }
+
+    public string? ActiveProcessInstanceId { get; init; }
 
     public DateTimeOffset CreatedAtUtc { get; init; }
 

@@ -34,7 +34,7 @@
 
 <div class="workflow-executions-toolbar">
     <span class="badge text-bg-light">@_workflowEventConnectionStatus</span>
-    <button class="btn btn-outline-primary" @onclick="LoadExecutionsAsync" disabled="@_isLoading">Refresh</button>
+    <button class="btn btn-outline-primary" @onclick="LoadExecutionsAsync" disabled="@_isLoading" title="Refresh executions">Refresh</button>
 
     @if (_isLoading)
     {
@@ -112,7 +112,7 @@
                     <p class="workflow-execution-modal-copy">Read-only execution view with completed, current, and future steps highlighted.</p>
                 </div>
 
-                <button class="btn btn-outline-secondary" @onclick="CloseExecutionModalAsync">Close</button>
+                <button class="btn btn-outline-secondary" @onclick="CloseExecutionModalAsync" title="Close">Close</button>
             </div>
 
             @if (!string.IsNullOrWhiteSpace(_modalErrorMessage))

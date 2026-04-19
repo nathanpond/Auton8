@@ -197,6 +197,19 @@ public static partial class WorkflowBpmnXml
         return $"autonate_workflow_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}";
     }
 
+    public static string BuildProcessKeyForModel(string workflowName)
+    {
+        var normalizedName = NormalizeWorkflowName(workflowName);
+        var slug = UnsafeProcessKeyCharactersRegex().Replace(normalizedName.ToLowerInvariant(), "_").Trim('_');
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            slug = "autonate_workflow";
+        }
+
+        var uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
+        return NormalizeProcessKey($"{slug}_{uniqueSuffix}");
+    }
+
     [GeneratedRegex("[^A-Za-z0-9_-]+", RegexOptions.Compiled)]
     private static partial Regex UnsafeProcessKeyCharactersRegex();
 }

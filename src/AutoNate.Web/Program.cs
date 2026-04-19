@@ -38,7 +38,7 @@ builder.Services.AddOptions<DaprOptions>()
     .BindConfiguration(DaprOptions.SectionName);
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddSingleton<DaprSidecarProbe>();
-builder.Services.AddSingleton<IWorkflowDraftStore, FileWorkflowDraftStore>();
+builder.Services.AddSingleton<IWorkflowModelStore, PostgresWorkflowModelStore>();
 builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
     .ConfigureHttpClient((serviceProvider, httpClient) =>
     {

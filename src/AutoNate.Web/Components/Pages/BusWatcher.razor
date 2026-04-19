@@ -18,7 +18,7 @@
 
 <div class="bus-watcher-toolbar">
     <span class="bus-watcher-status @GetStatusClass()">@_connectionStatus</span>
-    <button class="btn btn-outline-secondary" @onclick="ClearLog">Clear Log</button>
+    <button class="btn btn-outline-secondary" @onclick="ClearLog" title="Clear log">Clear Log</button>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(_startupWarning))

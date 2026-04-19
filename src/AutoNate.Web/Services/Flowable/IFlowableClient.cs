@@ -4,7 +4,7 @@ namespace AutoNate.Web.Services.Flowable;
 
 public interface IFlowableClient
 {
-    Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowDraft draft, CancellationToken cancellationToken = default);
+    Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default);
 
     Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
 
