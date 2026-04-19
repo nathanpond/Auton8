@@ -50,13 +50,13 @@ public sealed record class FlowableTaskSummary
 
 public sealed record class WorkflowExecutionSummary
 {
-    public string Id { get; init; } = string.Empty;
+    public string Id { get; set; } = string.Empty;
 
-    public DateTimeOffset? StartedAtUtc { get; init; }
+    public DateTimeOffset? StartedAtUtc { get; set; }
 
-    public string Status { get; init; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
 
-    public string? CurrentStep { get; init; }
+    public string? CurrentStep { get; set; }
 }
 
 public sealed record class WorkflowExecutionDiagramDetail

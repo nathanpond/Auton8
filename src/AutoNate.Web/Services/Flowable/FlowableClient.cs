@@ -10,6 +10,8 @@ namespace AutoNate.Web.Services.Flowable;
 
 public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptions> options) : IFlowableClient
 {
+    private const int WorkflowExecutionQuerySize = 200;
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -106,13 +108,19 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
 
     public async Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(CancellationToken cancellationToken = default)
     {
-        using var historicResponse = await _httpClient.GetAsync("service/history/historic-process-instances", cancellationToken);
+        using var historicResponse = await _httpClient.GetAsync(
+            $"service/history/historic-process-instances?sort=startTime&order=desc&size={WorkflowExecutionQuerySize}",
+            cancellationToken);
         await EnsureSuccessAsync(historicResponse, "query historic process instances");
 
-        using var runtimeResponse = await _httpClient.GetAsync("service/runtime/process-instances", cancellationToken);
+        using var runtimeResponse = await _httpClient.GetAsync(
+            $"service/runtime/process-instances?sort=startTime&order=desc&size={WorkflowExecutionQuerySize}",
+            cancellationToken);
         await EnsureSuccessAsync(runtimeResponse, "query runtime process instances");
 
-        using var tasksResponse = await _httpClient.GetAsync("service/runtime/tasks", cancellationToken);
+        using var tasksResponse = await _httpClient.GetAsync(
+            $"service/runtime/tasks?sort=createTime&order=desc&size={WorkflowExecutionQuerySize}",
+            cancellationToken);
         await EnsureSuccessAsync(tasksResponse, "query runtime tasks");
 
         var historicPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(historicResponse, cancellationToken);

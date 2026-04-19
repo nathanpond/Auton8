@@ -2,25 +2,26 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using AutoNate.Web.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 
 namespace AutoNate.Web.Services.BusWatcher;
 
-public sealed class BusWatcherStreamService
+public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> logger)
 {
     public const string SubscriptionRoute = "/bus-watcher/messages";
     public const string WebSocketRoute = "/ws/bus-watcher";
-    public const string TopicPattern = "workflow.execution.>";
+    public const string TopicName = "workflow.execution";
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
     };
 
+    private readonly ILogger<BusWatcherStreamService> _logger = logger;
     private readonly ConcurrentDictionary<Guid, BusWatcherClientConnection> _connections = new();
+    private readonly ConcurrentDictionary<Guid, Func<BusWatcherMessage, Task>> _messageSubscribers = new();
 
     public object[] GetSubscriptions(DaprOptions options)
     {
@@ -29,7 +30,7 @@ public sealed class BusWatcherStreamService
             new
             {
                 pubsubname = options.PubSubName,
-                topic = TopicPattern,
+                topic = TopicName,
                 routes = new Dictionary<string, string>
                 {
                     ["default"] = SubscriptionRoute
@@ -45,6 +46,19 @@ public sealed class BusWatcherStreamService
     public async Task PublishAsync(HttpContext context, CancellationToken cancellationToken)
     {
         var message = await CreateMessageAsync(context, cancellationToken);
+        await PublishMessageAsync(message, cancellationToken);
+    }
+
+    private async Task PublishMessageAsync(BusWatcherMessage message, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "BusWatcher publishing message for topic {Topic} to {SubscriberCount} in-process subscribers and {WebSocketCount} websocket clients.",
+            message.Topic,
+            _messageSubscribers.Count,
+            _connections.Count);
+
+        await NotifySubscribersAsync(message);
+
         var payload = JsonSerializer.SerializeToUtf8Bytes(message, SerializerOptions);
         var disconnectedClientIds = new List<Guid>();
 
@@ -62,6 +76,29 @@ public sealed class BusWatcherStreamService
             if (_connections.TryRemove(disconnectedClientId, out var connection))
             {
                 await connection.DisposeAsync();
+            }
+        }
+    }
+
+    public IDisposable Subscribe(Func<BusWatcherMessage, Task> handler)
+    {
+        var subscriptionId = Guid.NewGuid();
+        _messageSubscribers[subscriptionId] = handler;
+        _logger.LogInformation("BusWatcher registered in-process subscriber {SubscriptionId}. Total subscribers: {SubscriberCount}.", subscriptionId, _messageSubscribers.Count);
+        return new BusWatcherSubscription(_messageSubscribers, subscriptionId, _logger);
+    }
+
+    private async Task NotifySubscribersAsync(BusWatcherMessage message)
+    {
+        foreach (var subscriber in _messageSubscribers.Values)
+        {
+            try
+            {
+                await subscriber(message);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "BusWatcher in-process subscriber threw while handling topic {Topic}.", message.Topic);
             }
         }
     }
@@ -119,7 +156,7 @@ public sealed class BusWatcherStreamService
         return TryGetHeaderValue(request.Headers, "ce-topic")
                ?? TryGetHeaderValue(request.Headers, "topic")
                ?? TryGetHeaderValue(request.Headers, "x-dapr-topic")
-               ?? TopicPattern;
+               ?? TopicName;
     }
 
     private static Dictionary<string, string> ResolveHeaders(IHeaderDictionary headers)
@@ -226,6 +263,18 @@ public sealed class BusWatcherStreamService
 
             socket.Dispose();
             _sendLock.Dispose();
+        }
+    }
+
+    private sealed class BusWatcherSubscription(
+        ConcurrentDictionary<Guid, Func<BusWatcherMessage, Task>> subscribers,
+        Guid subscriptionId,
+        ILogger<BusWatcherStreamService> logger) : IDisposable
+    {
+        public void Dispose()
+        {
+            subscribers.TryRemove(subscriptionId, out _);
+            logger.LogInformation("BusWatcher removed in-process subscriber {SubscriptionId}. Remaining subscribers: {SubscriberCount}.", subscriptionId, subscribers.Count);
         }
     }
 }

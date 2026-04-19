@@ -1,8 +1,13 @@
 @page "/workflow-executions"
 @rendermode InteractiveServer
 @implements IAsyncDisposable
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using AutoNate.Web.Services.BusWatcher
 @inject IJSRuntime JS
 @inject IFlowableClient FlowableClient
+@inject BusWatcherStreamService BusWatcherStreamService
+@inject ILogger<WorkflowExecutions> Logger
 
 <PageTitle>Workflow Executions</PageTitle>
 
@@ -28,6 +33,7 @@
 }
 
 <div class="workflow-executions-toolbar">
+    <span class="badge text-bg-light">@_workflowEventConnectionStatus</span>
     <button class="btn btn-outline-primary" @onclick="LoadExecutionsAsync" disabled="@_isLoading">Refresh</button>
 
     @if (_isLoading)
@@ -138,8 +144,13 @@
 
 @code {
     private ElementReference _viewerCanvas;
+    private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
     private List<WorkflowExecutionSummary> _executions = [];
-    private IJSObjectReference? _module;
+    private IDisposable? _busSubscription;
+    private IJSObjectReference? _viewerModule;
     private IJSObjectReference? _viewerHandle;
     private string? _errorMessage;
     private string? _successMessage;
@@ -151,6 +162,7 @@
     private bool _isExecutionDetailLoading;
     private bool _isExecutionModalOpen;
     private bool _viewerRefreshPending;
+    private string _workflowEventConnectionStatus = "Watching bus";
 
     protected override async Task OnInitializedAsync()
     {
@@ -159,6 +171,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _busSubscription = BusWatcherStreamService.Subscribe(message => InvokeAsync(() => ProcessBusMessageAsync(message)));
+            Logger.LogInformation("WorkflowExecutions subscribed to in-process bus messages.");
+        }
+
         if (!_isExecutionModalOpen || !_viewerRefreshPending || _selectedExecutionDetail is null)
         {
             return;
@@ -166,21 +184,21 @@
 
         try
         {
-            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/workflow.js");
+            _viewerModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/workflow.js");
 
             if (_viewerHandle is null)
             {
-                _viewerHandle = await _module.InvokeAsync<IJSObjectReference>(
+                _viewerHandle = await _viewerModule.InvokeAsync<IJSObjectReference>(
                     "createReadonlyViewer",
                     _viewerCanvas,
                     _selectedExecutionDetail.BpmnXml);
             }
             else
             {
-                await _module.InvokeVoidAsync("loadReadonlyDiagram", _viewerHandle, _selectedExecutionDetail.BpmnXml);
+                await _viewerModule.InvokeVoidAsync("loadReadonlyDiagram", _viewerHandle, _selectedExecutionDetail.BpmnXml);
             }
 
-            await _module.InvokeVoidAsync(
+            await _viewerModule.InvokeVoidAsync(
                 "highlightExecutionState",
                 _viewerHandle,
                 _selectedExecutionDetail.CompletedActivityIds,
@@ -195,6 +213,56 @@
             await DisposeViewerAsync();
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task ProcessBusMessageAsync(BusWatcherStreamService.BusWatcherMessage message)
+    {
+        if (!message.Topic.StartsWith(BusWatcherStreamService.TopicName, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(message.Payload))
+        {
+            return;
+        }
+
+        Logger.LogInformation("WorkflowExecutions received bus message for topic {Topic}.", message.Topic);
+
+        var payload = TryDeserializeWorkflowExecutionPayload(message.Payload);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.ProcessInstanceId))
+        {
+            Logger.LogWarning(
+                "WorkflowExecutions ignored bus message for topic {Topic} because payload could not be parsed. Payload: {Payload}",
+                message.Topic,
+                message.Payload);
+            return;
+        }
+
+        Logger.LogInformation(
+            "WorkflowExecutions processing event {EventType} for process {ProcessInstanceId}.",
+            payload.EventType,
+            payload.ProcessInstanceId);
+
+        var isNewExecution = !_executions.Any(item => string.Equals(item.Id, payload.ProcessInstanceId, StringComparison.Ordinal));
+        if (isNewExecution)
+        {
+            Logger.LogInformation("WorkflowExecutions detected new process {ProcessInstanceId}; reloading executions.", payload.ProcessInstanceId);
+            await LoadExecutionsAsync();
+        }
+
+        var shouldRefreshViewer = ApplyWorkflowExecutionEvent(payload);
+        if (shouldRefreshViewer && _viewerHandle is not null && _viewerModule is not null && _selectedExecutionDetail is not null)
+        {
+            await _viewerModule.InvokeVoidAsync(
+                "highlightExecutionState",
+                _viewerHandle,
+                _selectedExecutionDetail.CompletedActivityIds,
+                _selectedExecutionDetail.CurrentActivityIds);
+        }
+
+        await InvokeAsync(StateHasChanged);
+        Logger.LogInformation(
+            "WorkflowExecutions applied event {EventType} for process {ProcessInstanceId}. Execution count: {ExecutionCount}.",
+            payload.EventType,
+            payload.ProcessInstanceId,
+            _executions.Count);
     }
 
     private async Task LoadExecutionsAsync()
@@ -222,6 +290,225 @@
         }
     }
 
+    private bool ApplyWorkflowExecutionEvent(WorkflowExecutionEventPayload payload)
+    {
+        UpsertExecutionSummary(payload);
+        return UpdateSelectedExecutionDetail(payload);
+    }
+
+    private WorkflowExecutionEventPayload? TryDeserializeWorkflowExecutionPayload(string payloadJson)
+    {
+        var decodedCloudEventPayload = TryDecodeCloudEventPayload(payloadJson);
+        if (!string.IsNullOrWhiteSpace(decodedCloudEventPayload))
+        {
+            var decodedPayload = TryDeserializeWorkflowExecutionPayloadFromJson(decodedCloudEventPayload);
+            if (decodedPayload is not null)
+            {
+                return decodedPayload;
+            }
+
+            Logger.LogWarning("WorkflowExecutions could not parse decoded CloudEvent payload: {DecodedPayload}", decodedCloudEventPayload);
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<WorkflowExecutionEventPayload>(payloadJson, _serializerOptions);
+        }
+        catch (JsonException)
+        {
+        }
+
+        try
+        {
+            var envelope = JsonSerializer.Deserialize<WorkflowExecutionEventEnvelope>(payloadJson, _serializerOptions);
+            return envelope?.Payload ?? TryDeserializeWorkflowExecutionPayloadFromJson(payloadJson);
+        }
+        catch (JsonException)
+        {
+            return TryDeserializeWorkflowExecutionPayloadFromJson(payloadJson);
+        }
+    }
+
+    private static string? TryDecodeCloudEventPayload(string payloadJson)
+    {
+        try
+        {
+            var cloudEvent = JsonSerializer.Deserialize<WorkflowExecutionCloudEvent>(payloadJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (string.IsNullOrWhiteSpace(cloudEvent?.DataBase64))
+            {
+                return null;
+            }
+
+            var decodedPayloadBytes = Convert.FromBase64String(cloudEvent.DataBase64);
+            return System.Text.Encoding.UTF8.GetString(decodedPayloadBytes);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    private WorkflowExecutionEventPayload? TryDeserializeWorkflowExecutionPayloadFromJson(string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            var root = document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object
+                && TryGetProperty(root, "payload", out var nestedPayload)
+                && nestedPayload.ValueKind == JsonValueKind.Object)
+            {
+                root = nestedPayload;
+            }
+
+            if (root.ValueKind == JsonValueKind.Object
+                && TryGetProperty(root, "data", out var nestedData)
+                && nestedData.ValueKind == JsonValueKind.Object)
+            {
+                root = nestedData;
+            }
+
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                var nestedJson = root.GetString();
+                if (!string.IsNullOrWhiteSpace(nestedJson))
+                {
+                    return TryDeserializeWorkflowExecutionPayloadFromJson(nestedJson);
+                }
+            }
+
+            var processInstanceId = GetString(root, "processInstanceId");
+            var eventType = GetString(root, "eventType");
+            if (string.IsNullOrWhiteSpace(processInstanceId) || string.IsNullOrWhiteSpace(eventType))
+            {
+                return null;
+            }
+
+            return new WorkflowExecutionEventPayload(
+                GetString(root, "eventId") ?? string.Empty,
+                eventType,
+                GetDateTimeOffset(root, "occurredAtUtc"),
+                processInstanceId,
+                GetString(root, "processDefinitionId"),
+                GetString(root, "processDefinitionKey"),
+                GetString(root, "processDefinitionName"),
+                GetString(root, "activityId"),
+                GetString(root, "activityName"),
+                GetString(root, "taskId"),
+                GetString(root, "taskName"),
+                GetString(root, "assignee"),
+                GetString(root, "tenantId"),
+                GetString(root, "rawFlowableEventType"),
+                GetString(root, "sourceAppId"));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private void UpsertExecutionSummary(WorkflowExecutionEventPayload payload)
+    {
+        var execution = _executions.FirstOrDefault(item => string.Equals(item.Id, payload.ProcessInstanceId, StringComparison.Ordinal));
+        var currentStep = ResolveCurrentStep(payload);
+        var status = ResolveStatus(payload.EventType);
+
+        if (execution is null)
+        {
+            _executions.Add(new WorkflowExecutionSummary
+            {
+                Id = payload.ProcessInstanceId,
+                StartedAtUtc = payload.OccurredAtUtc,
+                Status = status,
+                CurrentStep = currentStep
+            });
+        }
+        else
+        {
+            execution.StartedAtUtc ??= payload.OccurredAtUtc;
+            execution.Status = status;
+
+            if (IsTerminalEvent(payload.EventType))
+            {
+                execution.CurrentStep = null;
+            }
+            else if (!string.IsNullOrWhiteSpace(currentStep))
+            {
+                execution.CurrentStep = currentStep;
+            }
+        }
+
+        SortExecutions();
+    }
+
+    private bool UpdateSelectedExecutionDetail(WorkflowExecutionEventPayload payload)
+    {
+        if (_selectedExecutionDetail is null
+            || !string.Equals(_selectedExecutionDetail.ExecutionId, payload.ProcessInstanceId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var completed = new HashSet<string>(_selectedExecutionDetail.CompletedActivityIds, StringComparer.Ordinal);
+        var current = new HashSet<string>(_selectedExecutionDetail.CurrentActivityIds, StringComparer.Ordinal);
+        var activityId = payload.ActivityId;
+
+        if (!string.IsNullOrWhiteSpace(activityId))
+        {
+            if (IsActivityCompletedEvent(payload.EventType))
+            {
+                current.Remove(activityId);
+                completed.Add(activityId);
+            }
+            else if (IsCurrentActivityEvent(payload.EventType))
+            {
+                if (!completed.Contains(activityId))
+                {
+                    current.Add(activityId);
+                }
+            }
+        }
+
+        if (IsTerminalEvent(payload.EventType))
+        {
+            current.Clear();
+        }
+
+        var completedList = completed.ToArray();
+        var currentList = current.ToArray();
+
+        if (_selectedExecutionDetail.CompletedActivityIds.SequenceEqual(completedList, StringComparer.Ordinal)
+            && _selectedExecutionDetail.CurrentActivityIds.SequenceEqual(currentList, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        _selectedExecutionDetail = _selectedExecutionDetail with
+        {
+            CompletedActivityIds = completedList,
+            CurrentActivityIds = currentList
+        };
+
+        return true;
+    }
+
+    private void SortExecutions()
+    {
+        _executions = _executions
+            .OrderByDescending(execution => execution.StartedAtUtc ?? DateTimeOffset.MinValue)
+            .ThenByDescending(execution => execution.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
     private bool IsDeletingExecution(string executionId)
     {
         return _deletingExecutionIds.Contains(executionId);
@@ -229,9 +516,18 @@
 
     private static string GetStatusBadgeClass(string status)
     {
-        return string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase)
-            ? "badge text-bg-primary"
-            : "badge text-bg-success";
+        if (string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase))
+        {
+            return "badge text-bg-primary";
+        }
+
+        if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "badge text-bg-danger";
+        }
+
+        return "badge text-bg-success";
     }
 
     private async Task OpenExecutionAsync(string executionId)
@@ -327,11 +623,13 @@
     {
         await DisposeViewerAsync();
 
-        if (_module is not null)
+        _busSubscription?.Dispose();
+
+        if (_viewerModule is not null)
         {
             try
             {
-                await _module.DisposeAsync();
+                await _viewerModule.DisposeAsync();
             }
             catch (JSDisconnectedException)
             {
@@ -339,13 +637,115 @@
         }
     }
 
+    private static string ResolveCurrentStep(WorkflowExecutionEventPayload payload)
+    {
+        return FirstNonEmpty(payload.TaskName, payload.ActivityName, payload.ActivityId) ?? "Running";
+    }
+
+    private static string ResolveStatus(string eventType)
+    {
+        return eventType switch
+        {
+            "process.completed" => "Complete",
+            "process.cancelled" => "Cancelled",
+            "process.completed.error" or "job.execution.failed" => "Failed",
+            _ => "Running"
+        };
+    }
+
+    private static bool IsCurrentActivityEvent(string eventType)
+    {
+        return eventType is "process.started" or "activity.started" or "task.created" or "task.assigned";
+    }
+
+    private static bool IsActivityCompletedEvent(string eventType)
+    {
+        return eventType is "activity.completed" or "task.completed";
+    }
+
+    private static bool IsTerminalEvent(string eventType)
+    {
+        return eventType is "process.completed" or "process.cancelled" or "process.completed.error" or "job.execution.failed";
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement propertyValue)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                propertyValue = property.Value;
+                return true;
+            }
+        }
+
+        propertyValue = default;
+        return false;
+    }
+
+    private static string? GetString(JsonElement element, string propertyName)
+    {
+        if (!TryGetProperty(element, propertyName, out var propertyValue))
+        {
+            return null;
+        }
+
+        return propertyValue.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.String => propertyValue.GetString(),
+            JsonValueKind.Number => propertyValue.GetRawText(),
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            _ => propertyValue.GetRawText()
+        };
+    }
+
+    private static DateTimeOffset GetDateTimeOffset(JsonElement element, string propertyName)
+    {
+        if (!TryGetProperty(element, propertyName, out var propertyValue))
+        {
+            return DateTimeOffset.UtcNow;
+        }
+
+        if (propertyValue.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(propertyValue.GetString(), out var parsedDateTimeOffset))
+        {
+            return parsedDateTimeOffset;
+        }
+
+        if (propertyValue.ValueKind == JsonValueKind.Number)
+        {
+            if (propertyValue.TryGetInt64(out var integerTimestamp))
+            {
+                return integerTimestamp >= 1_000_000_000_000
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(integerTimestamp)
+                    : DateTimeOffset.FromUnixTimeSeconds(integerTimestamp);
+            }
+
+            if (propertyValue.TryGetDouble(out var decimalTimestamp))
+            {
+                var seconds = (long)Math.Truncate(decimalTimestamp);
+                var fractionalSeconds = decimalTimestamp - seconds;
+                return DateTimeOffset.FromUnixTimeSeconds(seconds).AddSeconds(fractionalSeconds);
+            }
+        }
+
+        return DateTimeOffset.UtcNow;
+    }
+
     private async Task DisposeViewerAsync()
     {
-        if (_module is not null && _viewerHandle is not null)
+        if (_viewerModule is not null && _viewerHandle is not null)
         {
             try
             {
-                await _module.InvokeVoidAsync("disposeModeler", _viewerHandle);
+                await _viewerModule.InvokeVoidAsync("disposeModeler", _viewerHandle);
             }
             catch (JSDisconnectedException)
             {
@@ -373,4 +773,27 @@
             }
         }
     }
+    private sealed record WorkflowExecutionEventEnvelope(
+        string? Topic,
+        WorkflowExecutionEventPayload Payload);
+
+    private sealed record WorkflowExecutionCloudEvent(
+        [property: JsonPropertyName("data_base64")] string? DataBase64);
+
+    private sealed record WorkflowExecutionEventPayload(
+        string EventId,
+        string EventType,
+        DateTimeOffset OccurredAtUtc,
+        string ProcessInstanceId,
+        string? ProcessDefinitionId,
+        string? ProcessDefinitionKey,
+        string? ProcessDefinitionName,
+        string? ActivityId,
+        string? ActivityName,
+        string? TaskId,
+        string? TaskName,
+        string? Assignee,
+        string? TenantId,
+        string? RawFlowableEventType,
+        string? SourceAppId);
 }

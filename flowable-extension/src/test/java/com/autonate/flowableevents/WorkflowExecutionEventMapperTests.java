@@ -65,9 +65,9 @@ class WorkflowExecutionEventMapperTests {
             "flowable"
         );
 
-        var envelope = new WorkflowExecutionEventEnvelope("workflow.execution.process-2.process.started", payload);
+        var envelope = new WorkflowExecutionEventEnvelope("workflow.execution", payload);
 
-        assertEquals("workflow.execution.process-2.process.started", envelope.topic());
+        assertEquals("workflow.execution", envelope.topic());
         assertNotNull(envelope.payload());
         assertEquals("process-2", envelope.payload().processInstanceId());
     }

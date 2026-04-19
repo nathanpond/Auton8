@@ -91,8 +91,7 @@ final class WorkflowExecutionEventMapper {
     }
 
     private String topicFor(WorkflowExecutionEventPayload payload) {
-        var processInstanceId = sanitizeTopicSegment(payload.processInstanceId(), "unknown");
-        return properties.getTopicRoot() + "." + processInstanceId + "." + payload.eventType();
+        return properties.getTopicRoot();
     }
 
     private static ActivityDetails activityDetails(FlowableEngineEvent flowableEvent, DelegateExecution execution) {

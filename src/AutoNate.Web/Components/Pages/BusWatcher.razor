@@ -165,12 +165,30 @@
 
         if (_connectionHandle is not null)
         {
-            await _connectionHandle.DisposeAsync();
+            try
+            {
+                await _connectionHandle.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (JSException)
+            {
+            }
         }
 
         if (_module is not null)
         {
-            await _module.DisposeAsync();
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (JSException)
+            {
+            }
         }
 
         _selfReference?.Dispose();
