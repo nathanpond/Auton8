@@ -126,6 +126,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         var historicPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(historicResponse, cancellationToken);
         var runtimePayload = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(runtimeResponse, cancellationToken);
         var tasksPayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(tasksResponse, cancellationToken);
+        var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(historicPayload.Data, cancellationToken);
 
         var runtimeById = runtimePayload.Data
             .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
@@ -148,6 +149,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             {
                 runtimeById.TryGetValue(instance.Id!, out var runtimeInstance);
                 currentTaskByProcessInstanceId.TryGetValue(instance.Id!, out var currentTask);
+                processDefinitionNames.TryGetValue(instance.ProcessDefinitionId ?? string.Empty, out var workflowModelName);
 
                 var isRunning = runtimeInstance is not null;
                 var currentStep = isRunning
@@ -157,6 +159,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                 return new WorkflowExecutionSummary
                 {
                     Id = instance.Id!,
+                    WorkflowModelName = workflowModelName,
                     StartedAtUtc = instance.StartTime,
                     Status = isRunning ? "Running" : "Complete",
                     CurrentStep = currentStep
@@ -165,6 +168,37 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             .OrderByDescending(execution => execution.StartedAtUtc ?? DateTimeOffset.MinValue)
             .ThenByDescending(execution => execution.Id, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private async Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
+        IReadOnlyList<FlowableHistoricProcessInstanceResponse> historicInstances,
+        CancellationToken cancellationToken)
+    {
+        var processDefinitionIds = historicInstances
+            .Select(instance => instance.ProcessDefinitionId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var namesById = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var processDefinitionId in processDefinitionIds)
+        {
+            using var processDefinitionResponse = await _httpClient.GetAsync(
+                $"service/repository/process-definitions/{Uri.EscapeDataString(processDefinitionId!)}",
+                cancellationToken);
+            await EnsureSuccessAsync(processDefinitionResponse, $"query process definition '{processDefinitionId}'");
+
+            var processDefinition = await DeserializeAsync<FlowableProcessDefinitionResponse>(processDefinitionResponse, cancellationToken);
+            var resolvedName = FirstNonEmpty(processDefinition.Name, processDefinition.Key, processDefinition.Id);
+
+            if (!string.IsNullOrWhiteSpace(resolvedName))
+            {
+                namesById[processDefinitionId!] = resolvedName;
+            }
+        }
+
+        return namesById;
     }
 
     public async Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default)

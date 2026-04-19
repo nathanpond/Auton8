@@ -52,6 +52,8 @@ public sealed record class WorkflowExecutionSummary
 {
     public string Id { get; set; } = string.Empty;
 
+    public string? WorkflowModelName { get; set; }
+
     public DateTimeOffset? StartedAtUtc { get; set; }
 
     public string Status { get; set; } = string.Empty;

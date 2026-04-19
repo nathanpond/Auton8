@@ -54,6 +54,7 @@
                 <thead>
                 <tr>
                     <th scope="col">Execution ID</th>
+                    <th scope="col">Workflow Model</th>
                     <th scope="col">Started</th>
                     <th scope="col">Status</th>
                     <th scope="col">Current Step</th>
@@ -65,6 +66,7 @@
                 {
                     <tr class="workflow-execution-row" @onclick="() => OpenExecutionAsync(execution.Id)">
                         <td class="workflow-execution-id">@execution.Id</td>
+                        <td>@(execution.WorkflowModelName ?? "Unknown")</td>
                         <td>@FormatTimestamp(execution.StartedAtUtc)</td>
                         <td>
                             <span class="@GetStatusBadgeClass(execution.Status)">@execution.Status</span>
@@ -427,6 +429,7 @@
             _executions.Add(new WorkflowExecutionSummary
             {
                 Id = payload.ProcessInstanceId,
+                WorkflowModelName = payload.ProcessDefinitionName,
                 StartedAtUtc = payload.OccurredAtUtc,
                 Status = status,
                 CurrentStep = currentStep
@@ -434,6 +437,7 @@
         }
         else
         {
+            execution.WorkflowModelName ??= payload.ProcessDefinitionName;
             execution.StartedAtUtc ??= payload.OccurredAtUtc;
             execution.Status = status;
 
