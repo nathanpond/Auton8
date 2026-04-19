@@ -4,8 +4,6 @@ namespace AutoNate.Web.Services.Auth;
 
 public interface ILocalUserStore
 {
-    Task EnsureInitializedAsync(CancellationToken cancellationToken = default);
-
     Task<IReadOnlyList<LocalUser>> ListAsync(CancellationToken cancellationToken = default);
 
     Task<LocalUser?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default);

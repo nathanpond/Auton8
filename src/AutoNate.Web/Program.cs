@@ -1,6 +1,7 @@
 using AutoNate.Web.Components;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
+using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
@@ -9,6 +10,7 @@ using AutoNate.Web.Services.Workflow;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 const string DevelopmentAutoLoginClaimType = "dev_auto_login";
@@ -61,8 +63,12 @@ builder.Services.AddOptions<DaprOptions>()
     .BindConfiguration(DaprOptions.SectionName);
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddSingleton<DaprSidecarProbe>();
-builder.Services.AddSingleton<ILocalUserStore, PostgresLocalUserStore>();
-builder.Services.AddSingleton<IWorkflowModelStore, PostgresWorkflowModelStore>();
+builder.Services.AddDbContextFactory<AutoNateDbContext>(options =>
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("Default")
+        ?? throw new InvalidOperationException("Connection string 'Default' is required.")));
+builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();
+builder.Services.AddScoped<IWorkflowModelStore, EfCoreWorkflowModelStore>();
 builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
     .ConfigureHttpClient((serviceProvider, httpClient) =>
     {
@@ -281,8 +287,6 @@ app.MapPost(
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
-
-await app.Services.GetRequiredService<ILocalUserStore>().EnsureInitializedAsync();
 
 app.Run();
 
