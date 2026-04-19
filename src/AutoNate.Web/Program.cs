@@ -1,6 +1,7 @@
 using AutoNate.Web.Components;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.Options;
@@ -36,6 +37,7 @@ builder.Services.AddOptions<FlowableOptions>()
 builder.Services.AddOptions<DaprOptions>()
     .BindConfiguration(DaprOptions.SectionName);
 builder.Services.AddSingleton<BusWatcherStreamService>();
+builder.Services.AddSingleton<DaprSidecarProbe>();
 builder.Services.AddSingleton<IWorkflowDraftStore, FileWorkflowDraftStore>();
 builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
     .ConfigureHttpClient((serviceProvider, httpClient) =>

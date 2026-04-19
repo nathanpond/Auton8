@@ -3,7 +3,9 @@
 @implements IAsyncDisposable
 @using System.Text.Json
 @using System.Text.Json.Serialization
+@using AutoNate.Web.Services.Dapr
 @inject IJSRuntime JS
+@inject DaprSidecarProbe DaprSidecarProbe
 
 <PageTitle>Bus Watcher</PageTitle>
 
@@ -18,6 +20,13 @@
     <span class="bus-watcher-status @GetStatusClass()">@_connectionStatus</span>
     <button class="btn btn-outline-secondary" @onclick="ClearLog">Clear Log</button>
 </div>
+
+@if (!string.IsNullOrWhiteSpace(_startupWarning))
+{
+    <div class="bus-watcher-warning" role="alert">
+        @_startupWarning
+    </div>
+}
 
 <div class="bus-watcher-shell">
     @if (_entries.Count == 0)
@@ -61,6 +70,7 @@
     private IJSObjectReference? _module;
     private IJSObjectReference? _connectionHandle;
     private string _connectionStatus = "Connecting...";
+    private string? _startupWarning;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -72,6 +82,13 @@
         _selfReference = DotNetObjectReference.Create(this);
         _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/bus-watcher.js");
         _connectionHandle = await _module.InvokeAsync<IJSObjectReference>("createBusWatcherConnection", _selfReference);
+
+        if (!await DaprSidecarProbe.IsAvailableAsync())
+        {
+            _startupWarning =
+                "The web app is running without a reachable Dapr sidecar, so workflow pub/sub events will not arrive here. Start AutoNate with `make app-dapr` or a Rider run configuration that launches the app through Dapr.";
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     [JSInvokable]

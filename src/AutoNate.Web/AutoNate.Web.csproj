@@ -8,4 +8,9 @@
         <DefaultItemExcludes>$(DefaultItemExcludes);ColorAdmin\**</DefaultItemExcludes>
     </PropertyGroup>
 
+    <ItemGroup>
+      <PackageReference Include="Dapr.AspNetCore" Version="1.17.9" />
+      <PackageReference Include="Dapr.Client" Version="1.17.9" />
+    </ItemGroup>
+
 </Project>

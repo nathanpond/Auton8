@@ -46,11 +46,23 @@ make app
 ```
 
 `make app` now ensures the required Docker Compose services are up and ready before it launches `AutoNate.Web`.
+It does not start an app-side Dapr sidecar, so pub/sub-driven features such as the Bus Watcher will stay idle in this mode.
 
 For Rider, the repo includes shareable run configurations under `.run/`:
 
 - `infra: Local Stack` starts the Docker Compose infrastructure and shows it in Rider's Services window.
-- `AutoNate.Web: Rider` launches the `http` launch profile and runs `infra: Local Stack` as a `Before launch` task.
+- `infra: Ensure Up` runs `infra/ensure-up.sh` so the local stack is started only when needed and waits for readiness before continuing.
+- `dapr: AutoNate.Web Sidecar` starts only the local Dapr sidecar for the web app. Run this once before starting a Rider debug session.
+- `dapr: AutoNate.Web Sidecar Status` checks that the `autonate-web` sidecar is already running and fails fast with a clear message if it is not.
+- `AutoNate.Web: Rider` is the debugger path. It runs `infra: Ensure Up`, then `dapr: AutoNate.Web Sidecar Status`, and then launches the `http` launch profile as a normal Rider .NET debug session.
+- `AutoNate.Web: Dapr Run` is the shell-style Rider run config that mirrors `make app-dapr` for terminal parity.
+
+For stable Rider debugging, use this two-step flow:
+
+1. Run `dapr: AutoNate.Web Sidecar`.
+2. Start `AutoNate.Web: Rider`.
+
+This avoids Rider shell-script before-launch issues while still giving the app a Dapr sidecar and preserving normal breakpoint debugging. If the sidecar is not running, the Rider app config now fails before launch with an explicit sidecar-status error instead of starting the app without Dapr.
 
 Run the app with a Dapr sidecar:
 
@@ -59,6 +71,8 @@ make app-dapr
 ```
 
 `make app-dapr` uses the same infra readiness check before starting the app-scoped Dapr sidecar.
+Use this mode when you need Dapr pub/sub delivery, including the Bus Watcher page.
+The Rider debugger flow intentionally does not use `make app-dapr`, because Rider needs to own the `dotnet` process directly to support normal breakpoint debugging.
 
 Stop only the app when you are done iterating. Leave infrastructure running until you want to end the session.
 
