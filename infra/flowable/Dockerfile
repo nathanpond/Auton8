@@ -1,12 +1,14 @@
-FROM flowable/flowable-rest:latest
+FROM maven:3.9.9-eclipse-temurin-21 AS flowable-extension-build
 
-ARG POSTGRES_JDBC_VERSION=42.7.7
+WORKDIR /src
+
+COPY flowable-extension/pom.xml ./pom.xml
+COPY flowable-extension/src ./src
+
+RUN mvn --batch-mode test package
+
+FROM flowable/flowable-rest:latest
 
 USER root
 
-RUN mkdir -p /opt/flowable/drivers
-
-ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/${POSTGRES_JDBC_VERSION}/postgresql-${POSTGRES_JDBC_VERSION}.jar /opt/flowable/drivers/postgresql.jar
-
-ENV LOADER_PATH=/opt/flowable/drivers
-ENV JAVA_TOOL_OPTIONS="-Dloader.path=/opt/flowable/drivers"
+COPY --from=flowable-extension-build /src/target/autonate-flowable-events-1.0.0-SNAPSHOT.jar /app/WEB-INF/lib/autonate-flowable-events.jar

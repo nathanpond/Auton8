@@ -3,12 +3,13 @@ kind: Component
 metadata:
   name: pubsub
 spec:
-  type: pubsub.redis
+  type: pubsub.jetstream
   version: v1
   metadata:
-    - name: redisHost
-      value: localhost:6379
-    - name: redisPassword
-      value: ""
+    - name: natsURL
+      value: nats://localhost:4222
+    - name: streamName
+      value: workflow-execution
 scopes:
   - autonate-web
+  - flowable

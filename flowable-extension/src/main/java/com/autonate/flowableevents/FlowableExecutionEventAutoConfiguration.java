@@ -1,0 +1,58 @@
+package com.autonate.flowableevents;
+
+import java.util.ArrayList;
+import org.flowable.common.engine.api.delegate.event.FlowableEventListener;
+import org.flowable.spring.SpringProcessEngineConfiguration;
+import org.flowable.spring.boot.EngineConfigurationConfigurer;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.annotation.Bean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@AutoConfiguration
+@EnableConfigurationProperties(FlowableExecutionEventProperties.class)
+public class FlowableExecutionEventAutoConfiguration {
+
+    private static final Logger logger = LoggerFactory.getLogger(FlowableExecutionEventAutoConfiguration.class);
+
+    @Bean
+    WorkflowDefinitionMetadataResolver workflowDefinitionMetadataResolver() {
+        return new WorkflowDefinitionMetadataResolver();
+    }
+
+    @Bean
+    DaprWorkflowEventPublisher daprWorkflowEventPublisher(FlowableExecutionEventProperties properties) {
+        return new DaprWorkflowEventPublisher(properties);
+    }
+
+    @Bean
+    WorkflowExecutionEventMapper workflowExecutionEventMapper(
+        FlowableExecutionEventProperties properties,
+        WorkflowDefinitionMetadataResolver definitionMetadataResolver
+    ) {
+        return new WorkflowExecutionEventMapper(properties, definitionMetadataResolver);
+    }
+
+    @Bean
+    WorkflowExecutionEventListener workflowExecutionEventListener(
+        WorkflowExecutionEventMapper eventMapper,
+        DaprWorkflowEventPublisher publisher,
+        ObjectProvider<org.flowable.engine.RepositoryService> repositoryServiceProvider
+    ) {
+        return new WorkflowExecutionEventListener(eventMapper, publisher, repositoryServiceProvider);
+    }
+
+    @Bean
+    EngineConfigurationConfigurer<SpringProcessEngineConfiguration> workflowExecutionListenerConfigurer(
+        WorkflowExecutionEventListener listener
+    ) {
+        return engineConfiguration -> {
+            var eventListeners = new ArrayList<FlowableEventListener>();
+            eventListeners.add(listener);
+            engineConfiguration.setEventListeners(eventListeners);
+            logger.info("Registered AutoNate workflow execution event listener with the Flowable process engine.");
+        };
+    }
+}

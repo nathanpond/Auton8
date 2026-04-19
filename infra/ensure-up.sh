@@ -10,6 +10,7 @@ COMPOSE=(docker compose -f "$COMPOSE_FILE")
 POSTGRES_PORT="${AUTONATE_POSTGRES_PORT:-5432}"
 FLOWABLE_PORT="${AUTONATE_FLOWABLE_PORT:-8080}"
 REDIS_PORT="${AUTONATE_REDIS_PORT:-6379}"
+NATS_PORT="${AUTONATE_NATS_PORT:-4222}"
 DAPR_PLACEMENT_PORT="${AUTONATE_DAPR_PLACEMENT_PORT:-50006}"
 DAPR_SCHEDULER_PORT="${AUTONATE_DAPR_SCHEDULER_PORT:-50007}"
 WAIT_TIMEOUT_SECONDS="${AUTONATE_INFRA_WAIT_TIMEOUT_SECONDS:-120}"
@@ -18,7 +19,10 @@ POLL_INTERVAL_SECONDS=2
 REQUIRED_SERVICES=(
   postgres
   flowable
+  flowable-dapr
   redis
+  nats
+  nats-init
   dapr-placement
   dapr-scheduler
 )
@@ -39,7 +43,7 @@ require_command() {
 }
 
 compose_service_container_id() {
-  "${COMPOSE[@]}" ps -q "$1"
+  "${COMPOSE[@]}" ps -a -q "$1"
 }
 
 container_health_or_status() {
@@ -78,11 +82,20 @@ service_ready() {
     flowable)
       flowable_reachable
       ;;
+    flowable-dapr)
+      [[ "$(container_health_or_status "$container_id")" == "running" ]]
+      ;;
     dapr-placement)
       tcp_reachable "$DAPR_PLACEMENT_PORT"
       ;;
     dapr-scheduler)
       tcp_reachable "$DAPR_SCHEDULER_PORT"
+      ;;
+    nats)
+      tcp_reachable "$NATS_PORT"
+      ;;
+    nats-init)
+      [[ "$(container_health_or_status "$container_id")" == "exited" ]]
       ;;
     *)
       [[ "$(container_health_or_status "$container_id")" == "running" ]]
@@ -131,6 +144,9 @@ print_status_snapshot() {
           log "$service: container present, endpoint not ready"
         fi
         ;;
+      flowable-dapr)
+        log "$service: $(container_health_or_status "$container_id")"
+        ;;
       dapr-placement)
         if tcp_reachable "$DAPR_PLACEMENT_PORT"; then
           log "$service: reachable on 127.0.0.1:${DAPR_PLACEMENT_PORT}"
@@ -144,6 +160,16 @@ print_status_snapshot() {
         else
           log "$service: container present, port ${DAPR_SCHEDULER_PORT} not ready"
         fi
+        ;;
+      nats)
+        if tcp_reachable "$NATS_PORT"; then
+          log "$service: reachable on 127.0.0.1:${NATS_PORT}"
+        else
+          log "$service: container present, port ${NATS_PORT} not ready"
+        fi
+        ;;
+      nats-init)
+        log "$service: $(container_health_or_status "$container_id")"
         ;;
     esac
   done
@@ -163,12 +189,17 @@ main() {
   mkdir -p \
     "$REPO_ROOT/infra/mounts/postgres/data" \
     "$REPO_ROOT/infra/mounts/redis/data" \
+    "$REPO_ROOT/infra/mounts/nats/data" \
     "$REPO_ROOT/infra/mounts/dapr-scheduler/data" \
     "$REPO_ROOT/infra/mounts/dapr-dashboard/components" \
+    "$REPO_ROOT/infra/mounts/flowable-dapr/components" \
     "$REPO_ROOT/infra/mounts/flowable" \
     "$REPO_ROOT/infra/mounts/dapr-placement"
 
   cp "$REPO_ROOT"/infra/dapr/components/*.yaml "$REPO_ROOT/infra/mounts/dapr-dashboard/components/"
+  cp "$REPO_ROOT"/infra/dapr/components/pubsub.yaml "$REPO_ROOT/infra/mounts/flowable-dapr/components/"
+  sed -i.bak 's|nats://localhost:4222|nats://host.docker.internal:4222|' "$REPO_ROOT/infra/mounts/flowable-dapr/components/pubsub.yaml"
+  rm -f "$REPO_ROOT/infra/mounts/flowable-dapr/components/pubsub.yaml.bak"
 
   if all_services_ready; then
     log "Required infrastructure is already running and ready."
@@ -197,6 +228,8 @@ main() {
 
     sleep "$POLL_INTERVAL_SECONDS"
   done
+
+  "$REPO_ROOT/infra/ensure-nats-stream.sh"
 
   log "Required infrastructure is ready."
 }

@@ -10,14 +10,19 @@ DAPR_SCHEDULER_HOST_ADDRESS := 127.0.0.1:50007
 MOUNT_ROOT := ./infra/mounts
 POSTGRES_MOUNT := $(MOUNT_ROOT)/postgres/data
 REDIS_MOUNT := $(MOUNT_ROOT)/redis/data
+NATS_MOUNT := $(MOUNT_ROOT)/nats/data
 SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
+FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
 .PHONY: infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr
 
 infra-prepare:
-	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
+	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
 	cp ./infra/dapr/components/*.yaml $(DAPR_DASHBOARD_COMPONENTS)/
+	cp ./infra/dapr/components/pubsub.yaml $(FLOWABLE_DAPR_COMPONENTS)/
+	sed -i.bak 's|nats://localhost:4222|nats://host.docker.internal:4222|' $(FLOWABLE_DAPR_COMPONENTS)/pubsub.yaml && rm -f $(FLOWABLE_DAPR_COMPONENTS)/pubsub.yaml.bak
+	./infra/ensure-nats-stream.sh
 
 infra-ensure:
 	./infra/ensure-up.sh
@@ -33,7 +38,7 @@ infra-down:
 
 infra-reset:
 	$(COMPOSE) down
-	rm -rf $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS)
+	rm -rf $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS)
 	$(MAKE) infra-prepare
 
 infra-logs:

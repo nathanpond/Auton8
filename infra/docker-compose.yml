@@ -20,12 +20,17 @@ services:
 
   flowable:
     build:
-      context: ./flowable
+      context: ..
+      dockerfile: infra/flowable/Dockerfile
     container_name: autonate-flowable
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      AUTONATE_FLOWABLE_EVENTS_DAPR_PUBLISH_BASE_URL: http://127.0.0.1:3500
+      AUTONATE_FLOWABLE_EVENTS_PUBSUB_NAME: pubsub
+      AUTONATE_FLOWABLE_EVENTS_TOPIC_ROOT: workflow.execution
+      AUTONATE_FLOWABLE_EVENTS_SOURCE_APP_ID: flowable
       SERVER_PORT: 8080
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flowable
@@ -40,6 +45,40 @@ services:
       retries: 18
       start_period: 30s
 
+  flowable-dapr:
+    image: daprio/daprd:1.17.4
+    container_name: autonate-flowable-dapr
+    command:
+      - ./daprd
+      - --app-id
+      - flowable
+      - --app-port
+      - "8080"
+      - --app-channel-address
+      - "127.0.0.1"
+      - --dapr-http-port
+      - "3500"
+      - --resources-path
+      - /components
+      - --placement-host-address
+      - dapr-placement:50006
+      - --scheduler-host-address
+      - dapr-scheduler:50007
+    depends_on:
+      flowable:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      nats-init:
+        condition: service_completed_successfully
+      dapr-placement:
+        condition: service_started
+      dapr-scheduler:
+        condition: service_started
+    network_mode: "service:flowable"
+    volumes:
+      - ./mounts/flowable-dapr/components:/components:ro
+
   redis:
     image: redis:7.4-alpine
     container_name: autonate-redis
@@ -53,6 +92,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  nats:
+    image: nats:2.12-alpine
+    container_name: autonate-nats
+    command:
+      - --jetstream
+      - --store_dir
+      - /data
+      - --http_port
+      - "8222"
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./mounts/nats/data:/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "4222"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  nats-init:
+    image: natsio/nats-box:0.16.0
+    container_name: autonate-nats-init
+    depends_on:
+      nats:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/bootstrap-jetstream.sh"]
+    volumes:
+      - ./scripts/bootstrap-jetstream.sh:/scripts/bootstrap-jetstream.sh:ro
 
   dapr-placement:
     image: daprio/placement:1.17.4
@@ -84,6 +153,8 @@ services:
     volumes:
       - ./mounts/dapr-dashboard/components:/components:ro
     depends_on:
+      nats:
+        condition: service_healthy
       redis:
         condition: service_healthy
       dapr-placement:
