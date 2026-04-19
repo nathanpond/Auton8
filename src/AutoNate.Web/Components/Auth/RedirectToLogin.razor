@@ -1,0 +1,14 @@
+@inject NavigationManager NavigationManager
+
+@code {
+    protected override void OnInitialized()
+    {
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        var returnUrl = string.IsNullOrWhiteSpace(relativePath) ? "/home" : $"/{relativePath}";
+        var target = string.IsNullOrWhiteSpace(returnUrl) || returnUrl == "/"
+            ? "/"
+            : $"/?returnUrl={Uri.EscapeDataString(returnUrl)}";
+
+        NavigationManager.NavigateTo(target, forceLoad: true);
+    }
+}

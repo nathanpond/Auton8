@@ -1,9 +1,11 @@
+@using System.Security.Claims
 @inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <div id="top-menu" class="app-top-menu" data-bs-theme="dark">
     <div class="menu">
         <div class="menu-item menu-brand-item">
-            <NavLink class="menu-link menu-brand-link" href="" Match="NavLinkMatch.All" data-enhance-nav="false">
+            <NavLink class="menu-link menu-brand-link" href="home" data-enhance-nav="false">
                 <div class="menu-icon"><i class="fa fa-robot"></i></div>
                 <div class="menu-text"><b>Auto</b> Nate</div>
             </NavLink>
@@ -16,8 +18,8 @@
                 <div class="menu-caret"></div>
             </a>
             <div class="menu-submenu">
-                <div class="@GetMenuItemClass("")">
-                    <NavLink class="menu-link" href="" Match="NavLinkMatch.All" data-enhance-nav="false">
+                <div class="@GetMenuItemClass("home")">
+                    <NavLink class="menu-link" href="home" data-enhance-nav="false">
                         <div class="menu-text">Home</div>
                     </NavLink>
                 </div>
@@ -80,10 +82,54 @@
                 <i class="fa fa-angle-right"></i>
             </a>
         </div>
+
+        <div class="menu-item ms-auto dropdown">
+            <a href="javascript:;" class="menu-link dropdown-toggle d-flex align-items-center" data-bs-toggle="dropdown" aria-expanded="false" title="Settings">
+                <div class="menu-icon">
+                    <i class="fa fa-gear"></i>
+                </div>
+            </a>
+            <div class="dropdown-menu dropdown-menu-end me-1">
+                <NavLink class="dropdown-item" href="manage-users" data-enhance-nav="false">
+                    <i class="fa fa-users me-2"></i>Manage Users
+                </NavLink>
+            </div>
+        </div>
+
+        <div class="menu-item dropdown">
+            <a href="javascript:;" class="menu-link dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" aria-expanded="false">
+                <div class="image image-icon bg-gray-800 text-gray-600">
+                    <i class="fa fa-user"></i>
+                </div>
+                <span>
+                    <span class="d-none d-md-inline">@DisplayName</span>
+                    <b class="caret"></b>
+                </span>
+            </a>
+            <div class="dropdown-menu dropdown-menu-end me-1">
+                <NavLink class="dropdown-item" href="user-profile" data-enhance-nav="false">
+                    <i class="fa fa-user me-2"></i>User Profile
+                </NavLink>
+                <div class="dropdown-divider"></div>
+                <form action="/account/logout" method="post">
+                    <button type="submit" class="dropdown-item">
+                        <i class="fa fa-right-from-bracket me-2"></i>Logout
+                    </button>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 
 @code {
+    private string DisplayName { get; set; } = "Adam Schwartz";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        DisplayName = GetDisplayName(authenticationState.User);
+    }
+
     private string CurrentPath
     {
         get
@@ -100,11 +146,20 @@
         return isActive ? "menu-item active" : "menu-item";
     }
 
+    private static string GetDisplayName(ClaimsPrincipal user)
+    {
+        var firstName = user.FindFirstValue(ClaimTypes.GivenName);
+        var lastName = user.FindFirstValue(ClaimTypes.Surname);
+        var fullName = $"{firstName} {lastName}".Trim();
+
+        return string.IsNullOrWhiteSpace(fullName) ? "Adam Schwartz" : fullName;
+    }
+
     private string GetGroupClass(string group)
     {
         var isActive = group switch
         {
-            "dashboard" => string.IsNullOrEmpty(CurrentPath),
+            "dashboard" => string.Equals(CurrentPath, "home", StringComparison.OrdinalIgnoreCase),
             "workflows" => string.Equals(CurrentPath, "workflow", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(CurrentPath, "workflow-executions", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(CurrentPath, "bus-watcher", StringComparison.OrdinalIgnoreCase),
