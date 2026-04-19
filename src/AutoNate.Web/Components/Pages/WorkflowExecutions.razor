@@ -6,9 +6,12 @@
 
 <PageTitle>Workflow Executions</PageTitle>
 
-<h1>Workflow Executions</h1>
-
-<p class="workflow-executions-copy">View every execution in the system, with the newest runs first and live step details for anything still in progress.</p>
+<div class="page-head">
+    <div>
+        <h1 class="page-header mb-1">Workflow Executions</h1>
+        <p class="page-head-copy workflow-executions-copy">View every execution in the system, with the newest runs first and live step details for anything still in progress.</p>
+    </div>
+</div>
 
 @if (!string.IsNullOrWhiteSpace(_errorMessage))
 {

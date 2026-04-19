@@ -3,12 +3,13 @@
 
 <head>
     <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
     <base href="/"/>
     <ResourcePreloader/>
-    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]"/>
-    <link rel="stylesheet" href="@Assets["app.css"]"/>
+    <link rel="stylesheet" href="@Assets["assets/css/vendor.min.css"]"/>
+    <link rel="stylesheet" href="@Assets["assets/css/default/app.min.css"]"/>
     <link rel="stylesheet" href="@Assets["AutoNate.Web.styles.css"]"/>
+    <link rel="stylesheet" href="@Assets["app.css"]"/>
     <link rel="stylesheet" href="@Assets["vendor/bpmn-js/diagram-js.css"]"/>
     <link rel="stylesheet" href="@Assets["vendor/bpmn-js/bpmn-js.css"]"/>
     <link rel="stylesheet" href="@Assets["vendor/bpmn-js/bpmn-font/css/bpmn-embedded.css"]"/>
@@ -20,6 +21,8 @@
 <body>
 <Routes/>
 <ReconnectModal/>
+<script src="@Assets["assets/js/vendor.min.js"]"></script>
+<script src="@Assets["assets/js/app.min.js"]"></script>
 <script src="@Assets["vendor/bpmn-js/bpmn-modeler.development.js"]"></script>
 <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>

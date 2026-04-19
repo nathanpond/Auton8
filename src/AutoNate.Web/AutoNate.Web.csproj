@@ -5,10 +5,7 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+        <DefaultItemExcludes>$(DefaultItemExcludes);ColorAdmin\**</DefaultItemExcludes>
     </PropertyGroup>
-
-    <ItemGroup>
-      <Folder Include="ColorAdmin\" />
-    </ItemGroup>
 
 </Project>

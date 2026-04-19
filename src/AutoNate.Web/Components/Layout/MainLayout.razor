@@ -1,19 +1,19 @@
 ﻿@inherits LayoutComponentBase
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu/>
+<div id="app" class="app app-without-header app-without-sidebar app-with-top-menu">
+    <div id="loader" class="app-loader">
+        <span class="spinner"></span>
     </div>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+    <NavMenu/>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
+    <div id="content" class="app-content">
+        @Body
+    </div>
+
+    <a href="javascript:;" class="btn btn-icon btn-circle btn-success btn-scroll-to-top" data-toggle="scroll-to-top">
+        <i class="fa fa-angle-up"></i>
+    </a>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
