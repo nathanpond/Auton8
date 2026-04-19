@@ -16,6 +16,8 @@ public interface IFlowableClient
 
     Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
+    Task DeleteWorkflowExecutionAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
     Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);

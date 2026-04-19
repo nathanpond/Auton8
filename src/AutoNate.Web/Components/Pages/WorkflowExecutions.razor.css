@@ -49,6 +49,25 @@
     font-size: 0.92rem;
 }
 
+.workflow-executions-actions-header,
+.workflow-executions-actions-cell {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.workflow-execution-delete-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.workflow-execution-delete-icon {
+    width: 0.95rem;
+    height: 0.95rem;
+    fill: currentColor;
+    flex: 0 0 auto;
+}
+
 .workflow-executions-empty {
     margin: 0;
     padding: 1.25rem;

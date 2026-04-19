@@ -1,5 +1,6 @@
 using AutoNate.Web.Components;
 using AutoNate.Web.Configuration;
+using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.Options;
@@ -34,6 +35,7 @@ builder.Services.AddOptions<FlowableOptions>()
     .BindConfiguration(FlowableOptions.SectionName);
 builder.Services.AddOptions<DaprOptions>()
     .BindConfiguration(DaprOptions.SectionName);
+builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddSingleton<IWorkflowDraftStore, FileWorkflowDraftStore>();
 builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
     .ConfigureHttpClient((serviceProvider, httpClient) =>
@@ -55,7 +57,33 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 
+app.UseWebSockets();
 app.UseAntiforgery();
+
+app.MapGet(
+    "/dapr/subscribe",
+    (IOptions<DaprOptions> options, BusWatcherStreamService busWatcherStreamService) =>
+        Results.Json(busWatcherStreamService.GetSubscriptions(options.Value)));
+app.MapPost(
+        BusWatcherStreamService.SubscriptionRoute,
+        async (HttpContext context, BusWatcherStreamService busWatcherStreamService, CancellationToken cancellationToken) =>
+        {
+            await busWatcherStreamService.PublishAsync(context, cancellationToken);
+            return Results.Ok();
+        })
+    .DisableAntiforgery();
+app.Map(
+    BusWatcherStreamService.WebSocketRoute,
+    async (HttpContext context, BusWatcherStreamService busWatcherStreamService, CancellationToken cancellationToken) =>
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+
+        await busWatcherStreamService.AcceptClientAsync(context, cancellationToken);
+    });
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

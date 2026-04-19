@@ -170,6 +170,22 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             throw new InvalidOperationException($"Execution '{processInstanceId}' does not have a process definition id.");
         }
 
+        using var processDefinitionResponse = await _httpClient.GetAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(processInstance.ProcessDefinitionId)}",
+            cancellationToken);
+        await EnsureSuccessAsync(processDefinitionResponse, "query the process definition");
+
+        var processDefinition = await DeserializeAsync<FlowableProcessDefinitionResponse>(processDefinitionResponse, cancellationToken);
+
+        if (!processDefinition.GraphicalNotationDefined)
+        {
+            var processLabel = FirstNonEmpty(processDefinition.Name, processDefinition.Key, processDefinition.Id, processInstance.ProcessDefinitionId)
+                ?? processInstance.ProcessDefinitionId;
+
+            throw new InvalidOperationException(
+                $"Execution '{processInstanceId}' belongs to process '{processLabel}', which was deployed without BPMN diagram notation. It can run, but Flowable cannot provide a visual diagram for it.");
+        }
+
         using var modelResponse = await _httpClient.GetAsync(
             $"service/repository/process-definitions/{Uri.EscapeDataString(processInstance.ProcessDefinitionId)}/resourcedata",
             cancellationToken);
@@ -181,6 +197,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
 
         var bpmnXml = await modelResponse.Content.ReadAsStringAsync(cancellationToken);
+        EnsureDiagramXmlPresent(bpmnXml, processInstanceId, processDefinition);
         var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
 
         var completedActivityIds = activitiesPayload.Data
@@ -211,6 +228,34 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             CompletedActivityIds = completedActivityIds,
             CurrentActivityIds = currentActivityIds
         };
+    }
+
+    public async Task DeleteWorkflowExecutionAsync(string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        var encodedProcessInstanceId = Uri.EscapeDataString(processInstanceId);
+        var runtimeInstance = await GetProcessInstanceAsync(processInstanceId, cancellationToken);
+
+        if (runtimeInstance is not null)
+        {
+            var deleteReason = Uri.EscapeDataString("Deleted from AutoNate workflow executions page");
+            using var runtimeDeleteResponse = await _httpClient.DeleteAsync(
+                $"service/runtime/process-instances/{encodedProcessInstanceId}?deleteReason={deleteReason}",
+                cancellationToken);
+
+            if (runtimeDeleteResponse.StatusCode != HttpStatusCode.NotFound)
+            {
+                await EnsureSuccessAsync(runtimeDeleteResponse, "delete the running process instance");
+            }
+        }
+
+        using var historyDeleteResponse = await _httpClient.DeleteAsync(
+            $"service/history/historic-process-instances/{encodedProcessInstanceId}",
+            cancellationToken);
+
+        if (historyDeleteResponse.StatusCode != HttpStatusCode.NotFound)
+        {
+            await EnsureSuccessAsync(historyDeleteResponse, "delete the historic process instance");
+        }
     }
 
     public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default)
@@ -261,6 +306,24 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     private static string? FirstNonEmpty(params string?[] values)
     {
         return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static void EnsureDiagramXmlPresent(string bpmnXml, string processInstanceId, FlowableProcessDefinitionResponse processDefinition)
+    {
+        if (string.IsNullOrWhiteSpace(bpmnXml))
+        {
+            throw new InvalidOperationException(
+                $"Flowable returned an empty BPMN resource for execution '{processInstanceId}'.");
+        }
+
+        if (!bpmnXml.Contains("<bpmndi:BPMNDiagram", StringComparison.OrdinalIgnoreCase)
+            && !bpmnXml.Contains(":BPMNDiagram", StringComparison.OrdinalIgnoreCase)
+            && !bpmnXml.Contains("<BPMNDiagram", StringComparison.OrdinalIgnoreCase))
+        {
+            var processLabel = FirstNonEmpty(processDefinition.Name, processDefinition.Key, processDefinition.Id) ?? "unknown";
+            throw new InvalidOperationException(
+                $"Execution '{processInstanceId}' belongs to process '{processLabel}', but its BPMN XML does not contain renderable diagram notation.");
+        }
     }
 
     private async Task EnsureSuccessAsync(HttpResponseMessage response, string operation)
@@ -319,6 +382,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public int Version { get; init; }
 
         public string? DeploymentId { get; init; }
+
+        public bool GraphicalNotationDefined { get; init; }
     }
 
     private sealed class FlowableProcessInstanceResponse
