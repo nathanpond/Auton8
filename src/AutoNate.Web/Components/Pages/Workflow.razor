@@ -262,6 +262,7 @@
             _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/workflow.js");
             _modelerHandle = await _module.InvokeAsync<IJSObjectReference>("createModeler", _canvas, _currentXml, _dotNetReference);
             _modelerReady = true;
+            _errorMessage = null;
             _isDirty = false;
             await InvokeAsync(StateHasChanged);
         }

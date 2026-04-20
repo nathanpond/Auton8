@@ -41,6 +41,8 @@ public sealed record class FlowableTaskSummary
 
     public string Name { get; init; } = string.Empty;
 
+    public string? TaskDefinitionKey { get; init; }
+
     public string? Assignee { get; init; }
 
     public string? ProcessInstanceId { get; init; }

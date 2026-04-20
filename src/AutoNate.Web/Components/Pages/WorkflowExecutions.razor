@@ -3,6 +3,7 @@
 @implements IAsyncDisposable
 @using System.Text.Json
 @using System.Text.Json.Serialization
+@using Microsoft.JSInterop
 @using AutoNate.Web.Services.BusWatcher
 @inject IJSRuntime JS
 @inject IFlowableClient FlowableClient
@@ -111,7 +112,7 @@
             <div class="workflow-execution-modal-header">
                 <div>
                     <h2>Execution @_selectedExecutionId</h2>
-                    <p class="workflow-execution-modal-copy">Read-only execution view with completed, current, and future steps highlighted.</p>
+                    <p class="workflow-execution-modal-copy">Read-only execution view with completed, current, and future steps highlighted. Right-click the active step to complete its task.</p>
                 </div>
 
                 <button class="btn btn-outline-secondary" @onclick="CloseExecutionModalAsync" title="Close">Close</button>
@@ -150,6 +151,7 @@
     {
         PropertyNameCaseInsensitive = true
     };
+    private DotNetObjectReference<WorkflowExecutions>? _dotNetReference;
     private List<WorkflowExecutionSummary> _executions = [];
     private IDisposable? _busSubscription;
     private IJSObjectReference? _viewerModule;
@@ -163,6 +165,7 @@
     private bool _isLoading;
     private bool _isExecutionDetailLoading;
     private bool _isExecutionModalOpen;
+    private bool _isCompletingTask;
     private bool _viewerRefreshPending;
     private string _workflowEventConnectionStatus = "Watching bus";
 
@@ -187,6 +190,7 @@
         try
         {
             _viewerModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/workflow.js");
+            _dotNetReference ??= DotNetObjectReference.Create(this);
 
             if (_viewerHandle is null)
             {
@@ -194,6 +198,11 @@
                     "createReadonlyViewer",
                     _viewerCanvas,
                     _selectedExecutionDetail.BpmnXml);
+
+                await _viewerModule.InvokeVoidAsync(
+                    "enableCurrentStepContextMenu",
+                    _viewerHandle,
+                    _dotNetReference);
             }
             else
             {
@@ -213,6 +222,43 @@
             _modalErrorMessage = $"The execution diagram could not be rendered. {exception.Message}";
             _viewerRefreshPending = false;
             await DisposeViewerAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    [JSInvokable]
+    public async Task CompleteTaskFromContextMenu(string activityId, string? activityName)
+    {
+        if (_isCompletingTask
+            || string.IsNullOrWhiteSpace(_selectedExecutionId)
+            || _selectedExecutionDetail is null
+            || string.IsNullOrWhiteSpace(activityId))
+        {
+            return;
+        }
+
+        _modalErrorMessage = null;
+        _isCompletingTask = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var tasks = await FlowableClient.GetTasksByProcessInstanceAsync(_selectedExecutionId);
+            var task = ResolveTaskForActivity(tasks, activityId, activityName);
+            if (task is null)
+            {
+                throw new InvalidOperationException($"No active runtime task matched workflow step '{FirstNonEmpty(activityName, activityId)}'.");
+            }
+
+            await FlowableClient.CompleteTaskAsync(task.Id);
+        }
+        catch (Exception exception)
+        {
+            _modalErrorMessage = exception.Message;
+        }
+        finally
+        {
+            _isCompletingTask = false;
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -518,6 +564,31 @@
         return _deletingExecutionIds.Contains(executionId);
     }
 
+    private static FlowableTaskSummary? ResolveTaskForActivity(IEnumerable<FlowableTaskSummary> tasks, string activityId, string? activityName)
+    {
+        var taskList = tasks.ToList();
+        var matchingTask = taskList.FirstOrDefault(task =>
+            string.Equals(task.TaskDefinitionKey, activityId, StringComparison.Ordinal));
+
+        if (matchingTask is not null)
+        {
+            return matchingTask;
+        }
+
+        if (!string.IsNullOrWhiteSpace(activityName))
+        {
+            matchingTask = taskList.FirstOrDefault(task =>
+                string.Equals(task.Name, activityName, StringComparison.Ordinal));
+
+            if (matchingTask is not null)
+            {
+                return matchingTask;
+            }
+        }
+
+        return taskList.Count == 1 ? taskList[0] : null;
+    }
+
     private static string GetStatusBadgeClass(string status)
     {
         if (string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase))
@@ -610,6 +681,7 @@
     {
         _isExecutionModalOpen = false;
         _isExecutionDetailLoading = false;
+        _isCompletingTask = false;
         _viewerRefreshPending = false;
         _modalErrorMessage = null;
         _selectedExecutionId = null;
@@ -639,6 +711,8 @@
             {
             }
         }
+
+        _dotNetReference?.Dispose();
     }
 
     private static string ResolveCurrentStep(WorkflowExecutionEventPayload payload)
@@ -777,6 +851,7 @@
             }
         }
     }
+
     private sealed record WorkflowExecutionEventEnvelope(
         string? Topic,
         WorkflowExecutionEventPayload Payload);

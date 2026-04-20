@@ -312,6 +312,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             {
                 Id = task.Id ?? string.Empty,
                 Name = task.Name ?? string.Empty,
+                TaskDefinitionKey = task.TaskDefinitionKey,
                 Assignee = task.Assignee,
                 ProcessInstanceId = task.ProcessInstanceId,
                 CreatedAtUtc = task.CreateTime
@@ -462,6 +463,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? Id { get; init; }
 
         public string? Name { get; init; }
+
+        public string? TaskDefinitionKey { get; init; }
 
         public string? Assignee { get; init; }
 

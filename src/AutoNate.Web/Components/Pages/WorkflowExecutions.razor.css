@@ -158,6 +158,26 @@
     width: 100%;
 }
 
+.workflow-execution-context-menu {
+    position: fixed;
+    z-index: 1080;
+}
+
+.workflow-execution-context-menu__toggle {
+    width: 0;
+    height: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.workflow-execution-context-menu__list {
+    display: block;
+    min-width: 11rem;
+    margin: 0;
+}
+
 .workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > rect,
 .workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > circle,
 .workflow-execution-viewer-shell ::deep .execution-step-completed .djs-visual > ellipse,
