@@ -28,6 +28,19 @@
     </div>
 }
 
+@if (_warningMessages.Count > 0)
+{
+    <div class="alert alert-warning" role="alert">
+        <strong>Compatibility warnings</strong>
+        <ul class="workflow-warning-list">
+            @foreach (var warning in _warningMessages)
+            {
+                <li>@warning</li>
+            }
+        </ul>
+    </div>
+}
+
 <div class="workflow-toolbar">
     <div class="workflow-selector-panel">
         <label class="workflow-field">
@@ -48,6 +61,7 @@
     </div>
 
     <div class="workflow-actions">
+        <button class="btn btn-outline-secondary" @onclick="OpenCreateAnythingAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Add BPMN node">Add BPMN Node</button>
         <button class="btn btn-primary" @onclick="SaveWorkflowAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Save">Save</button>
         <button class="btn btn-outline-primary" @onclick="PublishAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Publish">Publish</button>
         <button class="btn btn-outline-success" @onclick="StartInstanceAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Start instance">Start Instance</button>
@@ -220,6 +234,7 @@
     private string _runtimeStatus = "Not started";
     private string? _errorMessage;
     private string? _statusMessage;
+    private IReadOnlyList<string> _warningMessages = [];
     private string _busyOperation = "workflow";
     private string _newWorkflowName = string.Empty;
     private bool _isBusy;
@@ -381,9 +396,10 @@
     {
         await RunBusyAsync("saving the workflow draft", async () =>
         {
-            var preparedModel = await PrepareModelAsync(clearDeploymentIfChanged: true);
-            _currentModel = await WorkflowModelStore.SaveAsync(preparedModel);
+            var preparedResult = await PrepareModelAsync(clearDeploymentIfChanged: true);
+            _currentModel = await WorkflowModelStore.SaveAsync(preparedResult.Model);
             await RefreshWorkflowListAsync(_currentModel.Id);
+            _warningMessages = preparedResult.Validation.Warnings;
             _statusMessage = $"Saved workflow model '{_currentModel.Name}'.";
             _isDirty = false;
         });
@@ -393,10 +409,12 @@
     {
         await RunBusyAsync("publishing the workflow model", async () =>
         {
-            var savedModel = await WorkflowModelStore.SaveAsync(await PrepareModelAsync(clearDeploymentIfChanged: true));
+            var preparedResult = await PrepareModelAsync(clearDeploymentIfChanged: true);
+            var savedModel = await WorkflowModelStore.SaveAsync(preparedResult.Model);
             var deployment = await FlowableClient.DeployProcessAsync(savedModel);
             _currentModel = await WorkflowModelStore.SaveAsync(savedModel with { LastDeployment = deployment });
             await RefreshWorkflowListAsync(_currentModel.Id);
+            _warningMessages = preparedResult.Validation.Warnings;
             _statusMessage = $"Published '{_currentModel.Name}' to Flowable as version {deployment.ProcessDefinitionVersion}.";
             _isDirty = false;
         });
@@ -421,6 +439,7 @@
                 throw new InvalidOperationException("Publish the workflow model to Flowable before starting an instance.");
             }
 
+            _warningMessages = WorkflowBpmnXml.ValidateProcess(_currentModel.BpmnXml).Warnings;
             var instance = await FlowableClient.StartProcessInstanceAsync(_currentModel.ProcessKey);
             _activeProcessInstanceId = instance.Id;
             _runtimeStatus = "Running";
@@ -429,6 +448,16 @@
             _statusMessage = $"Started process instance {_activeProcessInstanceId}.";
             await RefreshRuntimeStateCoreAsync();
         });
+    }
+
+    private async Task OpenCreateAnythingAsync()
+    {
+        if (!_modelerReady || _module is null || _modelerHandle is null)
+        {
+            return;
+        }
+
+        await _module.InvokeVoidAsync("openCreateAnything", _modelerHandle);
     }
 
     private async Task CompleteTaskAsync(string taskId)
@@ -463,7 +492,7 @@
         _runtimeStatus = _runtimeTasks.Count > 0 ? "Waiting on user task" : "Running";
     }
 
-    private async Task<WorkflowModel> PrepareModelAsync(bool clearDeploymentIfChanged)
+    private async Task<PreparedWorkflowResult> PrepareModelAsync(bool clearDeploymentIfChanged)
     {
         if (_currentModel is null)
         {
@@ -478,11 +507,11 @@
         var exportedXml = await _module.InvokeAsync<string>("saveXml", _modelerHandle);
         var normalizedName = WorkflowBpmnXml.NormalizeWorkflowName(_currentModel.Name);
         var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(exportedXml, _currentModel.ProcessKey, normalizedName);
-        var validationErrors = WorkflowBpmnXml.ValidateExecutableProcess(updatedXml);
+        var validation = WorkflowBpmnXml.ValidateProcess(updatedXml);
 
-        if (validationErrors.Count > 0)
+        if (validation.Errors.Count > 0)
         {
-            throw new InvalidOperationException(string.Join(" ", validationErrors));
+            throw new InvalidOperationException(string.Join(" ", validation.Errors));
         }
 
         var definitionChanged = !string.Equals(_currentModel.BpmnXml, updatedXml, StringComparison.Ordinal);
@@ -511,7 +540,7 @@
             _runtimeTasks.Clear();
         }
 
-        return preparedModel;
+        return new PreparedWorkflowResult(preparedModel, validation);
     }
 
     private async Task RestoreRuntimeStateAsync()
@@ -571,6 +600,7 @@
         _activeProcessInstanceId = model.ActiveProcessInstanceId;
         _isDirty = false;
         _errorMessage = null;
+        _warningMessages = WorkflowBpmnXml.ValidateProcess(model.BpmnXml).Warnings;
     }
 
     private static string FormatTimestamp(DateTimeOffset? timestamp)
@@ -605,6 +635,10 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private sealed record class PreparedWorkflowResult(
+        WorkflowModel Model,
+        WorkflowBpmnValidationResult Validation);
 
     public async ValueTask DisposeAsync()
     {

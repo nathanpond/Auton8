@@ -9,6 +9,38 @@ public static partial class WorkflowBpmnXml
 {
     private static readonly XNamespace BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
     private static readonly XNamespace BpmndiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
+    private static readonly HashSet<string> UnsupportedRuntimeTaskElementNames =
+    [
+        "task",
+        "serviceTask",
+        "scriptTask",
+        "businessRuleTask",
+        "sendTask",
+        "receiveTask",
+        "manualTask"
+    ];
+    private static readonly HashSet<string> UnsupportedRuntimeControlElementNames =
+    [
+        "exclusiveGateway",
+        "inclusiveGateway",
+        "parallelGateway",
+        "eventBasedGateway",
+        "complexGateway",
+        "boundaryEvent",
+        "callActivity",
+        "subProcess",
+        "transaction",
+        "adHocSubProcess",
+        "intermediateCatchEvent",
+        "intermediateThrowEvent"
+    ];
+    private static readonly HashSet<string> UnsupportedRuntimeCollaborationElementNames =
+    [
+        "collaboration",
+        "participant",
+        "lane",
+        "messageFlow"
+    ];
 
     public static string CreateStarterDiagram(string processKey, string workflowName)
     {
@@ -117,7 +149,7 @@ public static partial class WorkflowBpmnXml
         return declaration + document.ToString(SaveOptions.DisableFormatting);
     }
 
-    public static IReadOnlyList<string> ValidateExecutableProcess(string xml)
+    public static WorkflowBpmnValidationResult ValidateProcess(string xml)
     {
         try
         {
@@ -125,27 +157,34 @@ public static partial class WorkflowBpmnXml
             var processElement = document.Descendants(BpmnNamespace + "process").FirstOrDefault();
             if (processElement is null)
             {
-                return ["The BPMN XML must contain a <process> element."];
+                return WorkflowBpmnValidationResult.WithError("The BPMN XML must contain a <process> element.");
             }
 
             var processKey = processElement.Attribute("id")?.Value;
             if (string.IsNullOrWhiteSpace(processKey))
             {
-                return ["The BPMN process must have a non-empty process key."];
+                return WorkflowBpmnValidationResult.WithError("The BPMN process must have a non-empty process key.");
             }
 
             var executable = processElement.Attribute("isExecutable")?.Value;
             if (!string.Equals(executable, "true", StringComparison.OrdinalIgnoreCase))
             {
-                return ["The BPMN process must be marked as executable before deployment."];
+                return WorkflowBpmnValidationResult.WithError("The BPMN process must be marked as executable before deployment.");
             }
 
-            return [];
+            return new WorkflowBpmnValidationResult(
+                [],
+                BuildUnsupportedRuntimeWarnings(document));
         }
         catch (Exception exception)
         {
-            return [$"The BPMN XML is invalid: {exception.Message}"];
+            return WorkflowBpmnValidationResult.WithError($"The BPMN XML is invalid: {exception.Message}");
         }
+    }
+
+    public static IReadOnlyList<string> ValidateExecutableProcess(string xml)
+    {
+        return ValidateProcess(xml).Errors;
     }
 
     public static string ExtractProcessKey(string xml)
@@ -212,4 +251,124 @@ public static partial class WorkflowBpmnXml
 
     [GeneratedRegex("[^A-Za-z0-9_-]+", RegexOptions.Compiled)]
     private static partial Regex UnsafeProcessKeyCharactersRegex();
+
+    private static IReadOnlyList<string> BuildUnsupportedRuntimeWarnings(XDocument document)
+    {
+        var taskElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var controlElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var collaborationElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var eventDrivenBehaviors = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace)
+            {
+                continue;
+            }
+
+            var localName = element.Name.LocalName;
+
+            if (UnsupportedRuntimeTaskElementNames.Contains(localName))
+            {
+                taskElements.Add(ToFriendlyElementName(localName));
+            }
+
+            if (UnsupportedRuntimeControlElementNames.Contains(localName))
+            {
+                if (localName.Equals("subProcess", StringComparison.Ordinal) &&
+                    string.Equals(element.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    eventDrivenBehaviors.Add("event subprocesses");
+                    continue;
+                }
+
+                controlElements.Add(ToFriendlyElementName(localName));
+            }
+
+            if (UnsupportedRuntimeCollaborationElementNames.Contains(localName))
+            {
+                collaborationElements.Add(ToFriendlyElementName(localName));
+            }
+
+            if (localName.EndsWith("EventDefinition", StringComparison.Ordinal) &&
+                !localName.Equals("TerminateEventDefinition", StringComparison.Ordinal))
+            {
+                eventDrivenBehaviors.Add(ToFriendlyElementName(localName));
+            }
+        }
+
+        var warnings = new List<string>();
+
+        if (taskElements.Count > 0)
+        {
+            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these non-user task elements in Workflow Studio/runtime yet: {string.Join(", ", taskElements)}.");
+        }
+
+        if (controlElements.Count > 0)
+        {
+            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these orchestration/control constructs in Workflow Studio/runtime yet: {string.Join(", ", controlElements)}.");
+        }
+
+        if (eventDrivenBehaviors.Count > 0)
+        {
+            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these event-driven behaviors in Workflow Studio/runtime yet: {string.Join(", ", eventDrivenBehaviors)}.");
+        }
+
+        if (collaborationElements.Count > 0)
+        {
+            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these pool/lane/collaboration constructs in Workflow Studio/runtime yet: {string.Join(", ", collaborationElements)}.");
+        }
+
+        return warnings;
+    }
+
+    private static string ToFriendlyElementName(string localName)
+    {
+        return localName switch
+        {
+            "task" => "generic tasks",
+            "serviceTask" => "service tasks",
+            "scriptTask" => "script tasks",
+            "businessRuleTask" => "business rule tasks",
+            "sendTask" => "send tasks",
+            "receiveTask" => "receive tasks",
+            "manualTask" => "manual tasks",
+            "exclusiveGateway" => "exclusive gateways",
+            "inclusiveGateway" => "inclusive gateways",
+            "parallelGateway" => "parallel gateways",
+            "eventBasedGateway" => "event-based gateways",
+            "complexGateway" => "complex gateways",
+            "boundaryEvent" => "boundary events",
+            "callActivity" => "call activities",
+            "subProcess" => "sub-processes",
+            "transaction" => "transactions",
+            "adHocSubProcess" => "ad-hoc sub-processes",
+            "intermediateCatchEvent" => "intermediate catch events",
+            "intermediateThrowEvent" => "intermediate throw events",
+            "collaboration" => "collaborations",
+            "participant" => "participants",
+            "lane" => "lanes",
+            "messageFlow" => "message flows",
+            "MessageEventDefinition" => "message events",
+            "TimerEventDefinition" => "timer events",
+            "ConditionalEventDefinition" => "conditional events",
+            "SignalEventDefinition" => "signal events",
+            "EscalationEventDefinition" => "escalation events",
+            "ErrorEventDefinition" => "error events",
+            "CancelEventDefinition" => "cancel events",
+            "CompensateEventDefinition" => "compensation events",
+            "LinkEventDefinition" => "link events",
+            _ => localName
+        };
+    }
+}
+
+public sealed record class WorkflowBpmnValidationResult(
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<string> Warnings)
+{
+    public static WorkflowBpmnValidationResult WithError(string error)
+    {
+        return new WorkflowBpmnValidationResult([error], []);
+    }
 }
