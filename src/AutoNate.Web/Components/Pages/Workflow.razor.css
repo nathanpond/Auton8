@@ -13,7 +13,9 @@
 }
 
 .workflow-selector-panel {
-    flex: 1 1 26rem;
+    flex: 0 1 max(400px, 25%);
+    width: min(100%, max(400px, 25%));
+    max-width: 100%;
 }
 
 .workflow-selector-inputs {

@@ -61,7 +61,6 @@
     </div>
 
     <div class="workflow-actions">
-        <button class="btn btn-outline-secondary" @onclick="OpenCreateAnythingAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Add BPMN node">Add BPMN Node</button>
         <button class="btn btn-primary" @onclick="SaveWorkflowAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Save">Save</button>
         <button class="btn btn-outline-primary" @onclick="PublishAsync" disabled="@(!CanPublish)" title="Publish">Publish</button>
         <button class="btn btn-outline-success" @onclick="StartInstanceAsync" disabled="@(!CanStartInstance)" title="Start instance">Start Instance</button>
@@ -481,16 +480,6 @@
             _statusMessage = $"Started process instance {_activeProcessInstanceId}.";
             await RefreshRuntimeStateCoreAsync();
         });
-    }
-
-    private async Task OpenCreateAnythingAsync()
-    {
-        if (!_modelerReady || _module is null || _modelerHandle is null)
-        {
-            return;
-        }
-
-        await _module.InvokeVoidAsync("openCreateAnything", _modelerHandle);
     }
 
     private async Task CompleteTaskAsync(string taskId)
