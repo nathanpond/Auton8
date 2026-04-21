@@ -234,7 +234,7 @@
 }
 
 @code {
-    private const string WorkflowModulePath = "./js/workflow.js?v=20260420_6";
+    private const string WorkflowModulePath = "./js/workflow.js?v=20260420_15";
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private IJSObjectReference? _modelerHandle;
@@ -299,18 +299,26 @@
             return;
         }
 
-        if (!_pendingEditorReload && _modelerReady && _loadedEditorWorkflowId == _currentModel.Id)
-        {
-            return;
-        }
-
         try
         {
             _dotNetReference ??= DotNetObjectReference.Create(this);
             _module ??= await JS.InvokeAsync<IJSObjectReference>("import", WorkflowModulePath);
-            if (_modelerHandle is not null)
+
+            if (_modelerHandle is null)
             {
-                await DisposeModelerHandleAsync();
+                _modelerHandle = await _module.InvokeAsync<IJSObjectReference>("createModeler", _canvas, _currentXml, _dotNetReference);
+                _modelerReady = true;
+                _loadedEditorWorkflowId = _currentModel.Id;
+                _pendingEditorReload = false;
+                _errorMessage = null;
+                _isDirty = false;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            if (!_pendingEditorReload && _modelerReady && _loadedEditorWorkflowId == _currentModel.Id)
+            {
+                return;
             }
 
             _modelerHandle = await _module.InvokeAsync<IJSObjectReference>("createModeler", _canvas, _currentXml, _dotNetReference);
@@ -321,9 +329,9 @@
             _isDirty = false;
             await InvokeAsync(StateHasChanged);
         }
-        catch (JSException)
+        catch (JSException exception)
         {
-            _errorMessage = "The BPMN modeler could not be loaded. Check that the bpmn.io assets are reachable and refresh the page.";
+            _errorMessage = $"The BPMN modeler could not load the selected XML. {exception.Message}";
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -363,9 +371,11 @@
             var model = await WorkflowModelStore.GetAsync(workflowId)
                 ?? throw new InvalidOperationException("The selected workflow model could not be loaded.");
 
+            await DisposeModelerHandleAsync();
             ResetEditorState(model);
             await RestoreRuntimeStateAsync();
             await InvokeAsync(StateHasChanged);
+            _statusMessage = await BuildLoadDebugMessageAsync(model);
         });
     }
 
@@ -432,7 +442,7 @@
             _currentModel = await WorkflowModelStore.SaveAsync(preparedResult.Model);
             await RefreshWorkflowListAsync(_currentModel.Id);
             _warningMessages = preparedResult.Validation.Warnings;
-            _statusMessage = $"Saved workflow model '{_currentModel.Name}'.";
+            _statusMessage = $"Saved workflow model '{_currentModel.Name}'. {preparedResult.DebugSummary}";
             _isDirty = false;
         });
     }
@@ -447,7 +457,7 @@
             _currentModel = await WorkflowModelStore.PublishAsync(savedModel, deployment);
             await RefreshWorkflowListAsync(_currentModel.Id);
             _warningMessages = preparedResult.Validation.Warnings;
-            _statusMessage = $"Published '{_currentModel.Name}' draft v{_currentModel.DraftVersionNumber} to Flowable as definition version {deployment.ProcessDefinitionVersion}.";
+            _statusMessage = $"Published '{_currentModel.Name}' draft v{_currentModel.DraftVersionNumber} to Flowable as definition version {deployment.ProcessDefinitionVersion}. {preparedResult.DebugSummary}";
             _isDirty = false;
         });
     }
@@ -527,6 +537,7 @@
         }
 
         var exportedXml = await _module.InvokeAsync<string>("saveXml", _modelerHandle);
+        var debugInfo = await _module.InvokeAsync<WorkflowSaveDebugInfo>("getSaveDebugInfo", _modelerHandle);
         if (!LooksLikeBpmnXml(exportedXml))
         {
             var preview = exportedXml.Length > 200 ? exportedXml[..200] : exportedXml;
@@ -538,8 +549,7 @@
         var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
             exportedXml,
             _currentModel.ProcessKey,
-            normalizedName,
-            elementSnapshots);
+            normalizedName);
         var validation = WorkflowBpmnXml.ValidateProcess(updatedXml);
 
         if (validation.Errors.Count > 0)
@@ -548,11 +558,6 @@
         }
 
         var definitionChanged = !string.Equals(_currentModel.BpmnXml, updatedXml, StringComparison.Ordinal);
-        if (_isDirty && !definitionChanged)
-        {
-            throw new InvalidOperationException(BuildUnchangedExportMessage(exportedXml, elementSnapshots));
-        }
-
         var activeProcessInstanceId = definitionChanged
             ? null
             : _currentModel.ActiveProcessInstanceId;
@@ -565,7 +570,6 @@
         };
 
         _currentXml = updatedXml;
-        await LoadXmlIntoModelerAsync(updatedXml);
 
         if (definitionChanged)
         {
@@ -574,7 +578,7 @@
             _runtimeTasks.Clear();
         }
 
-        return new PreparedWorkflowResult(preparedModel, validation);
+        return new PreparedWorkflowResult(preparedModel, validation, BuildDebugSummary(debugInfo));
     }
 
     private async Task RestoreRuntimeStateAsync()
@@ -608,18 +612,27 @@
 
     private async Task LoadXmlIntoModelerAsync(string xml)
     {
+        var normalizedXml = NormalizeEditorXml(xml);
+
         if (_module is null || _modelerHandle is null)
         {
-            _currentXml = xml;
+            _currentXml = normalizedXml;
             return;
         }
 
         _suppressDirtyNotifications = true;
         try
         {
-            await _module.InvokeVoidAsync("loadXml", _modelerHandle, xml);
-            _currentXml = xml;
+            await _module.InvokeVoidAsync("loadXml", _modelerHandle, normalizedXml);
+            _currentXml = normalizedXml;
             _isDirty = false;
+        }
+        catch (JSException exception)
+        {
+            var preview = normalizedXml.Length > 220 ? normalizedXml[..220] : normalizedXml;
+            throw new InvalidOperationException(
+                $"bpmn.io failed to import the workflow XML. {exception.Message} XML preview: {preview}",
+                exception);
         }
         finally
         {
@@ -630,13 +643,13 @@
     private void ResetEditorState(WorkflowModel model)
     {
         _currentModel = model;
-        _currentXml = model.BpmnXml;
+        _currentXml = NormalizeEditorXml(model.BpmnXml);
         _activeProcessInstanceId = model.ActiveProcessInstanceId;
         _isDirty = false;
         _pendingEditorReload = true;
         _editorCanvasKey++;
         _errorMessage = null;
-        _warningMessages = WorkflowBpmnXml.ValidateProcess(model.BpmnXml).Warnings;
+        _warningMessages = WorkflowBpmnXml.ValidateProcess(_currentXml).Warnings;
     }
 
     private static string FormatTimestamp(DateTimeOffset? timestamp)
@@ -656,25 +669,46 @@
                xml.Contains("<bpmn:definitions", StringComparison.Ordinal);
     }
 
-    private static string BuildUnchangedExportMessage(string exportedXml, IReadOnlyList<WorkflowElementSnapshot> elementSnapshots)
+    private static string NormalizeEditorXml(string? xml)
     {
-        var preview = exportedXml.Length > 220 ? exportedXml[..220] : exportedXml;
-        var finalApprovalSnapshot = elementSnapshots
-            .LastOrDefault(snapshot => string.Equals(snapshot.Name, "Final Approval", StringComparison.Ordinal));
-        var taskSummary = string.Join(
-            "; ",
-            elementSnapshots
-                .Where(snapshot =>
-                    snapshot.Type.Contains("Task", StringComparison.Ordinal) ||
-                    snapshot.Type.Contains("Event", StringComparison.Ordinal) ||
-                    snapshot.Type.Contains("Gateway", StringComparison.Ordinal))
-                .Select(snapshot => $"{snapshot.Id}:{snapshot.Type}:{snapshot.Name ?? "<no-name>"}"));
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return string.Empty;
+        }
 
-        return $"Workflow Studio detected unsaved edits in the browser, but the BPMN export was unchanged. " +
-               $"Snapshot count: {elementSnapshots.Count}. " +
-               $"Final Approval snapshot type: {finalApprovalSnapshot?.Type ?? "<not found>"}. " +
-               $"Task snapshot summary: {taskSummary}. " +
-               $"Export preview: {preview}";
+        var trimmed = xml.Trim();
+        var declarationIndex = trimmed.IndexOf("<?xml", StringComparison.Ordinal);
+        return declarationIndex > 0
+            ? trimmed[declarationIndex..]
+            : trimmed;
+    }
+
+    private static string BuildDebugSummary(WorkflowSaveDebugInfo debugInfo)
+    {
+        return $"Debug: js={debugInfo.Version}, elements={debugInfo.ElementCount}, domElements={debugInfo.DomElementCount}, domShapes={debugInfo.DomShapeCount}, domContainers={debugInfo.DomContainerCount}, save={debugInfo.SaveXmlScore}, defs={debugInfo.DefinitionsScore}, registry={debugInfo.RegistryScore}, manual={debugInfo.ManualRegistryScore}.";
+    }
+
+    private async Task<string?> BuildLoadDebugMessageAsync(WorkflowModel model)
+    {
+        if (_module is null || _modelerHandle is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var debugInfo = await _module.InvokeAsync<WorkflowLoadDebugInfo>("getLoadDebugInfo", _modelerHandle);
+            if (debugInfo is null)
+            {
+                return null;
+            }
+
+            return $"Loaded '{model.Name}'. Debug: js={debugInfo.Version}, warnings={debugInfo.WarningCount}, elements={debugInfo.ElementCount}, domElements={debugInfo.DomElementCount}, domShapes={debugInfo.DomShapeCount}.";
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task RunBusyAsync(string operation, Func<Task> action)
@@ -707,7 +741,28 @@
 
     private sealed record class PreparedWorkflowResult(
         WorkflowModel Model,
-        WorkflowBpmnValidationResult Validation);
+        WorkflowBpmnValidationResult Validation,
+        string DebugSummary);
+
+    private sealed record class WorkflowSaveDebugInfo(
+        string Version,
+        int ElementCount,
+        string[] DistinctTypes,
+        int DomElementCount,
+        int DomShapeCount,
+        int DomContainerCount,
+        int SaveXmlScore,
+        int DefinitionsScore,
+        int RegistryScore,
+        int ManualRegistryScore);
+
+    private sealed record class WorkflowLoadDebugInfo(
+        string Version,
+        int WarningCount,
+        int ElementCount,
+        string[] DistinctTypes,
+        int DomElementCount,
+        int DomShapeCount);
 
     private async Task DisposeModelerHandleAsync()
     {

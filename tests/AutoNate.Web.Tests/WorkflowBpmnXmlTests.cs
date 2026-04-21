@@ -70,4 +70,5 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Empty(process.Elements());
         Assert.Empty(plane.Elements());
     }
+
 }
