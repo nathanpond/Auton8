@@ -20,10 +20,16 @@ public sealed class EfCoreWorkflowModelStoreTests
 
         Assert.NotEqual(Guid.Empty, saved.Id);
         Assert.True(saved.CreatedAtUtc <= saved.UpdatedAtUtc);
+        Assert.True(saved.IsDraft);
+        Assert.Equal(1, saved.DraftVersionNumber);
+        Assert.Null(saved.PublishedVersionNumber);
 
         var loaded = await store.GetAsync(saved.Id);
         Assert.NotNull(loaded);
         Assert.Equal("Approval Flow", loaded.Name);
+        Assert.True(loaded.IsDraft);
+        Assert.Equal(1, loaded.DraftVersionNumber);
+        Assert.Null(loaded.PublishedVersionNumber);
     }
 
     [Fact]
@@ -85,7 +91,7 @@ public sealed class EfCoreWorkflowModelStoreTests
     }
 
     [Fact]
-    public async Task SaveAsync_UpdatePreservesDeploymentMetadata()
+    public async Task PublishAsync_CreatesPublishedVersionSnapshot()
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         var store = database.CreateWorkflowStore();
@@ -97,23 +103,149 @@ public sealed class EfCoreWorkflowModelStoreTests
         });
 
         var deploymentTime = DateTimeOffset.UtcNow;
-        var updated = await store.SaveAsync(original with
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "deployment_flow",
+            ProcessDefinitionVersion = 4,
+            DeployedAtUtc = deploymentTime
+        });
+
+        Assert.NotNull(published.LastDeployment);
+        Assert.Equal("deployment-1", published.LastDeployment.DeploymentId);
+        Assert.Equal(4, published.LastDeployment.ProcessDefinitionVersion);
+        Assert.False(published.IsDraft);
+        Assert.Equal(1, published.DraftVersionNumber);
+        Assert.Equal(1, published.PublishedVersionNumber);
+
+        var versions = await store.ListVersionsAsync(published.Id);
+
+        Assert.Collection(
+            versions,
+            version =>
+            {
+                Assert.Equal(1, version.VersionNumber);
+                Assert.Equal(published.Id, version.WorkflowModelId);
+                Assert.Equal("<xml />", version.BpmnXml);
+                Assert.Equal("deployment-1", version.Deployment.DeploymentId);
+            });
+    }
+
+    [Fact]
+    public async Task SaveAsync_AfterPublishCreatesNextDraftVersion()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Draft Flow",
+            ProcessKey = "draft_flow",
+            BpmnXml = "<xml />"
+        });
+
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "draft_flow",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        var draft = await store.SaveAsync(published with
         {
             BpmnXml = "<xml>updated</xml>",
-            LastDeployment = new WorkflowDeploymentInfo
-            {
-                DeploymentId = "deployment-1",
-                ProcessDefinitionId = "definition-1",
-                ProcessDefinitionKey = "deployment_flow",
-                ProcessDefinitionVersion = 4,
-                DeployedAtUtc = deploymentTime
-            },
             ActiveProcessInstanceId = "process-instance-42"
         });
 
-        Assert.NotNull(updated.LastDeployment);
-        Assert.Equal("deployment-1", updated.LastDeployment.DeploymentId);
-        Assert.Equal(4, updated.LastDeployment.ProcessDefinitionVersion);
-        Assert.Equal("process-instance-42", updated.ActiveProcessInstanceId);
+        Assert.True(draft.IsDraft);
+        Assert.Equal(2, draft.DraftVersionNumber);
+        Assert.Equal(1, draft.PublishedVersionNumber);
+        Assert.NotNull(draft.LastDeployment);
+        Assert.Equal("deployment-1", draft.LastDeployment.DeploymentId);
+        Assert.Equal("process-instance-42", draft.ActiveProcessInstanceId);
+
+        var versions = await store.ListVersionsAsync(draft.Id);
+        Assert.Single(versions);
+        Assert.Equal(1, versions[0].VersionNumber);
+    }
+
+    [Fact]
+    public async Task PublishAsync_FromDraftPromotesDraftVersionAndRetainsHistory()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Versioned Flow",
+            ProcessKey = "versioned_flow",
+            BpmnXml = "<xml />"
+        });
+
+        var publishedV1 = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "versioned_flow",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5)
+        });
+
+        var draftV2 = await store.SaveAsync(publishedV1 with
+        {
+            BpmnXml = "<xml>v2</xml>"
+        });
+
+        var publishedV2 = await store.PublishAsync(draftV2, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-2",
+            ProcessDefinitionId = "definition-2",
+            ProcessDefinitionKey = "versioned_flow",
+            ProcessDefinitionVersion = 2,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        Assert.False(publishedV2.IsDraft);
+        Assert.Equal(2, publishedV2.DraftVersionNumber);
+        Assert.Equal(2, publishedV2.PublishedVersionNumber);
+
+        var versions = await store.ListVersionsAsync(publishedV2.Id);
+
+        Assert.Collection(
+            versions,
+            version => Assert.Equal(2, version.VersionNumber),
+            version => Assert.Equal(1, version.VersionNumber));
+    }
+
+    [Fact]
+    public async Task SaveAsync_RuntimeOnlyUpdateDoesNotMarkPublishedWorkflowAsDraft()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateWorkflowStore();
+
+        var original = await store.SaveAsync(new WorkflowModel
+        {
+            Name = "Runtime Flow",
+            ProcessKey = "runtime_flow",
+            BpmnXml = "<xml />"
+        });
+
+        var published = await store.PublishAsync(original, new WorkflowDeploymentInfo
+        {
+            DeploymentId = "deployment-1",
+            ProcessDefinitionId = "definition-1",
+            ProcessDefinitionKey = "runtime_flow",
+            ProcessDefinitionVersion = 1,
+            DeployedAtUtc = DateTimeOffset.UtcNow
+        });
+
+        var runtimeUpdated = await store.SaveAsync(published with
+        {
+            ActiveProcessInstanceId = "process-instance-42"
+        });
+
+        Assert.False(runtimeUpdated.IsDraft);
+        Assert.Equal("process-instance-42", runtimeUpdated.ActiveProcessInstanceId);
     }
 }

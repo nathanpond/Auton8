@@ -16,6 +16,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<WorkflowModel> WorkflowModels { get; set; }
 
+    public virtual DbSet<WorkflowModelVersion> WorkflowModelVersions { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -63,6 +65,8 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.ActiveProcessInstanceId).HasColumnName("active_process_instance_id");
             entity.Property(e => e.BpmnXml).HasColumnName("bpmn_xml");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.DraftVersionNumber).HasColumnName("draft_version_number");
+            entity.Property(e => e.IsDraft).HasColumnName("is_draft");
             entity.Property(e => e.LastDeployedAtUtc).HasColumnName("last_deployed_at_utc");
             entity.Property(e => e.LastDeploymentId).HasColumnName("last_deployment_id");
             entity.Property(e => e.LastProcessDefinitionId).HasColumnName("last_process_definition_id");
@@ -70,7 +74,34 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.LastProcessDefinitionVersion).HasColumnName("last_process_definition_version");
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.ProcessKey).HasColumnName("process_key");
+            entity.Property(e => e.PublishedVersionNumber).HasColumnName("published_version_number");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<WorkflowModelVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("workflow_model_versions_pkey");
+
+            entity.ToTable("workflow_model_versions");
+
+            entity.HasIndex(e => new { e.WorkflowModelId, e.VersionNumber }, "workflow_model_versions_workflow_model_id_version_number_key")
+                .IsUnique();
+
+            entity.HasIndex(e => e.WorkflowModelId, "ix_workflow_model_versions_workflow_model_id");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.BpmnXml).HasColumnName("bpmn_xml");
+            entity.Property(e => e.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.ProcessDefinitionId).HasColumnName("process_definition_id");
+            entity.Property(e => e.ProcessDefinitionKey).HasColumnName("process_definition_key");
+            entity.Property(e => e.ProcessDefinitionVersion).HasColumnName("process_definition_version");
+            entity.Property(e => e.ProcessKey).HasColumnName("process_key");
+            entity.Property(e => e.PublishedAtUtc).HasColumnName("published_at_utc");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.WorkflowModelId).HasColumnName("workflow_model_id");
         });
 
         OnModelCreatingPartial(modelBuilder);

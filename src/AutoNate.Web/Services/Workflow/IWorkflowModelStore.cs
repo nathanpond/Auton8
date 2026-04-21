@@ -11,4 +11,13 @@ public interface IWorkflowModelStore
     Task<WorkflowModel?> GetMostRecentAsync(CancellationToken cancellationToken = default);
 
     Task<WorkflowModel> SaveAsync(WorkflowModel model, CancellationToken cancellationToken = default);
+
+    Task<WorkflowModel> PublishAsync(
+        WorkflowModel model,
+        WorkflowDeploymentInfo deployment,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<WorkflowModelVersion>> ListVersionsAsync(
+        Guid workflowModelId,
+        CancellationToken cancellationToken = default);
 }

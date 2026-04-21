@@ -9,6 +9,17 @@ public static partial class WorkflowBpmnXml
 {
     private static readonly XNamespace BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
     private static readonly XNamespace BpmndiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
+    private static readonly HashSet<string> ReplaceableTaskElementNames =
+    [
+        "task",
+        "userTask",
+        "serviceTask",
+        "scriptTask",
+        "businessRuleTask",
+        "sendTask",
+        "receiveTask",
+        "manualTask"
+    ];
     private static readonly HashSet<string> UnsupportedRuntimeTaskElementNames =
     [
         "task",
@@ -122,8 +133,25 @@ public static partial class WorkflowBpmnXml
     public static string ApplyProcessMetadata(string xml, string processKey, string workflowName)
     {
         var document = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
+        ApplyElementSnapshots(document, []);
+        return ApplyProcessMetadata(document, processKey, workflowName);
+    }
+
+    public static string ApplyProcessMetadata(
+        string xml,
+        string processKey,
+        string workflowName,
+        IReadOnlyCollection<WorkflowElementSnapshot> elementSnapshots)
+    {
+        var document = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
+        ApplyElementSnapshots(document, elementSnapshots);
+        return ApplyProcessMetadata(document, processKey, workflowName);
+    }
+
+    private static string ApplyProcessMetadata(XDocument document, string processKey, string workflowName)
+    {
         var processElement = document.Descendants(BpmnNamespace + "process").FirstOrDefault()
-            ?? throw new InvalidOperationException("The BPMN XML does not contain a process definition.");
+            ?? throw new InvalidOperationException(BuildMissingProcessDefinitionMessage(document));
 
         var oldProcessKey = processElement.Attribute("id")?.Value;
         var normalizedProcessKey = NormalizeProcessKey(processKey);
@@ -251,6 +279,101 @@ public static partial class WorkflowBpmnXml
 
     [GeneratedRegex("[^A-Za-z0-9_-]+", RegexOptions.Compiled)]
     private static partial Regex UnsafeProcessKeyCharactersRegex();
+
+    private static void ApplyElementSnapshots(XDocument document, IReadOnlyCollection<WorkflowElementSnapshot> elementSnapshots)
+    {
+        if (elementSnapshots.Count == 0)
+        {
+            return;
+        }
+
+        var snapshotsById = elementSnapshots
+            .Where(snapshot => !string.IsNullOrWhiteSpace(snapshot.Id))
+            .GroupBy(snapshot => snapshot.Id, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Last(),
+                StringComparer.Ordinal);
+
+        var snapshotsByUniqueTaskName = elementSnapshots
+            .Where(snapshot =>
+                !string.IsNullOrWhiteSpace(snapshot.Name) &&
+                ReplaceableTaskElementNames.Contains(ToBpmnLocalName(snapshot.Type) ?? string.Empty))
+            .GroupBy(snapshot => snapshot.Name!, StringComparer.Ordinal)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Last(),
+                StringComparer.Ordinal);
+
+        foreach (var element in document.Descendants().Where(element => element.Name.Namespace == BpmnNamespace))
+        {
+            var id = element.Attribute("id")?.Value;
+            var snapshot = default(WorkflowElementSnapshot);
+
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                snapshotsById.TryGetValue(id, out snapshot);
+            }
+
+            if (snapshot is null &&
+                ReplaceableTaskElementNames.Contains(element.Name.LocalName) &&
+                !string.IsNullOrWhiteSpace(element.Attribute("name")?.Value))
+            {
+                snapshotsByUniqueTaskName.TryGetValue(element.Attribute("name")!.Value, out snapshot);
+            }
+
+            if (snapshot is null)
+            {
+                continue;
+            }
+
+            var targetLocalName = ToBpmnLocalName(snapshot.Type);
+            if (!string.IsNullOrWhiteSpace(targetLocalName) &&
+                ReplaceableTaskElementNames.Contains(element.Name.LocalName) &&
+                ReplaceableTaskElementNames.Contains(targetLocalName) &&
+                !string.Equals(element.Name.LocalName, targetLocalName, StringComparison.Ordinal))
+            {
+                element.Name = BpmnNamespace + targetLocalName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(snapshot.Name))
+            {
+                element.SetAttributeValue("name", snapshot.Name);
+            }
+        }
+    }
+
+    private static string? ToBpmnLocalName(string? bpmnType)
+    {
+        if (string.IsNullOrWhiteSpace(bpmnType))
+        {
+            return null;
+        }
+
+        var separatorIndex = bpmnType.IndexOf(':', StringComparison.Ordinal);
+        return separatorIndex >= 0
+            ? bpmnType[(separatorIndex + 1)..]
+            : bpmnType;
+    }
+
+    private static string BuildMissingProcessDefinitionMessage(XDocument document)
+    {
+        var root = document.Root;
+        var rootName = root is null
+            ? "<no-root>"
+            : root.Name.NamespaceName.Length > 0
+                ? $"{{{root.Name.NamespaceName}}}{root.Name.LocalName}"
+                : root.Name.LocalName;
+
+        var preview = document.ToString(SaveOptions.DisableFormatting);
+        if (preview.Length > 300)
+        {
+            preview = preview[..300];
+        }
+
+        return $"The BPMN XML does not contain a process definition. Root element: {rootName}. Payload preview: {preview}";
+    }
 
     private static IReadOnlyList<string> BuildUnsupportedRuntimeWarnings(XDocument document)
     {

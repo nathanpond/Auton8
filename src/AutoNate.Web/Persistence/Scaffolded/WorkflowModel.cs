@@ -13,6 +13,12 @@ public partial class WorkflowModel
 
     public string BpmnXml { get; set; } = null!;
 
+    public bool IsDraft { get; set; }
+
+    public int DraftVersionNumber { get; set; }
+
+    public int? PublishedVersionNumber { get; set; }
+
     public string? ActiveProcessInstanceId { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }

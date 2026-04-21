@@ -63,8 +63,8 @@
     <div class="workflow-actions">
         <button class="btn btn-outline-secondary" @onclick="OpenCreateAnythingAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Add BPMN node">Add BPMN Node</button>
         <button class="btn btn-primary" @onclick="SaveWorkflowAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Save">Save</button>
-        <button class="btn btn-outline-primary" @onclick="PublishAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Publish">Publish</button>
-        <button class="btn btn-outline-success" @onclick="StartInstanceAsync" disabled="@(!_modelerReady || _isBusy || _currentModel is null)" title="Start instance">Start Instance</button>
+        <button class="btn btn-outline-primary" @onclick="PublishAsync" disabled="@(!CanPublish)" title="Publish">Publish</button>
+        <button class="btn btn-outline-success" @onclick="StartInstanceAsync" disabled="@(!CanStartInstance)" title="Start instance">Start Instance</button>
     </div>
 </div>
 
@@ -89,7 +89,7 @@
         else
         {
             <div class="workflow-shell">
-                <div @ref="_canvas" class="workflow-canvas" aria-label="BPMN modeler"></div>
+                <div @key="_editorCanvasKey" @ref="_canvas" class="workflow-canvas" aria-label="BPMN modeler"></div>
             </div>
         }
     </section>
@@ -115,7 +115,15 @@
                     </div>
                     <div>
                         <dt>Draft Status</dt>
-                        <dd>@(_isDirty ? "Unsaved changes" : "Saved")</dd>
+                        <dd>@DraftStatusLabel</dd>
+                    </div>
+                    <div>
+                        <dt>Draft Version</dt>
+                        <dd>v@(_currentModel.DraftVersionNumber)</dd>
+                    </div>
+                    <div>
+                        <dt>Published Version</dt>
+                        <dd>@(_currentModel.PublishedVersionNumber is null ? "Not published" : $"v{_currentModel.PublishedVersionNumber}")</dd>
                     </div>
                     <div>
                         <dt>Updated</dt>
@@ -130,10 +138,15 @@
 
             @if (_currentModel?.LastDeployment is null)
             {
-                <p class="workflow-muted">This workflow model has not been published yet, or the current draft changed since the last publish.</p>
+                <p class="workflow-muted">This workflow model has not been published to Flowable yet.</p>
             }
             else
             {
+                @if (HasPersistedDraft || _isDirty)
+                {
+                    <p class="workflow-muted">The current workflow is in draft state. Publish it to deploy this version to Flowable.</p>
+                }
+
                 <dl class="workflow-meta">
                     <div>
                         <dt>Definition ID</dt>
@@ -222,6 +235,7 @@
 }
 
 @code {
+    private const string WorkflowModulePath = "./js/workflow.js?v=20260420_5";
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private IJSObjectReference? _modelerHandle;
@@ -243,8 +257,23 @@
     private bool _isCreatingWorkflow;
     private bool _showCreateWorkflowModal;
     private bool _suppressDirtyNotifications;
+    private bool _pendingEditorReload;
+    private int _editorCanvasKey;
+    private Guid? _loadedEditorWorkflowId;
 
     private string SelectedWorkflowId => _currentModel?.Id.ToString() ?? string.Empty;
+    private bool HasPersistedDraft => _currentModel?.IsDraft == true;
+    private bool HasPublishedDeployment => _currentModel?.LastDeployment is not null && _currentModel.PublishedVersionNumber is not null;
+    private bool IsPublishedCurrentVersion => HasPublishedDeployment && !HasPersistedDraft && !_isDirty;
+    private bool CanPublish => _modelerReady && !_isBusy && _currentModel is not null && (_isDirty || HasPersistedDraft || _currentModel.LastDeployment is null);
+    private bool CanStartInstance => _modelerReady && !_isBusy && _currentModel is not null && IsPublishedCurrentVersion;
+    private string DraftStatusLabel => _currentModel is null
+        ? "No model"
+        : _isDirty
+            ? $"Unsaved changes for v{_currentModel.DraftVersionNumber}"
+            : HasPersistedDraft
+                ? $"Draft v{_currentModel.DraftVersionNumber}"
+                : $"Published v{_currentModel.DraftVersionNumber}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -266,7 +295,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_currentModel is null || _modelerReady)
+        if (_currentModel is null)
+        {
+            return;
+        }
+
+        if (!_pendingEditorReload && _modelerReady && _loadedEditorWorkflowId == _currentModel.Id)
         {
             return;
         }
@@ -274,9 +308,16 @@
         try
         {
             _dotNetReference ??= DotNetObjectReference.Create(this);
-            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/workflow.js");
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", WorkflowModulePath);
+            if (_modelerHandle is not null)
+            {
+                await DisposeModelerHandleAsync();
+            }
+
             _modelerHandle = await _module.InvokeAsync<IJSObjectReference>("createModeler", _canvas, _currentXml, _dotNetReference);
             _modelerReady = true;
+            _loadedEditorWorkflowId = _currentModel.Id;
+            _pendingEditorReload = false;
             _errorMessage = null;
             _isDirty = false;
             await InvokeAsync(StateHasChanged);
@@ -325,11 +366,7 @@
 
             ResetEditorState(model);
             await RestoreRuntimeStateAsync();
-
-            if (_modelerReady)
-            {
-                await LoadXmlIntoModelerAsync(_currentXml);
-            }
+            await InvokeAsync(StateHasChanged);
         });
     }
 
@@ -384,11 +421,7 @@
             _showCreateWorkflowModal = false;
             _newWorkflowName = string.Empty;
             _statusMessage = $"Created workflow model '{model.Name}'.";
-
-            if (_modelerReady)
-            {
-                await LoadXmlIntoModelerAsync(model.BpmnXml);
-            }
+            await InvokeAsync(StateHasChanged);
         });
     }
 
@@ -396,7 +429,7 @@
     {
         await RunBusyAsync("saving the workflow draft", async () =>
         {
-            var preparedResult = await PrepareModelAsync(clearDeploymentIfChanged: true);
+            var preparedResult = await PrepareModelAsync();
             _currentModel = await WorkflowModelStore.SaveAsync(preparedResult.Model);
             await RefreshWorkflowListAsync(_currentModel.Id);
             _warningMessages = preparedResult.Validation.Warnings;
@@ -409,13 +442,13 @@
     {
         await RunBusyAsync("publishing the workflow model", async () =>
         {
-            var preparedResult = await PrepareModelAsync(clearDeploymentIfChanged: true);
+            var preparedResult = await PrepareModelAsync();
             var savedModel = await WorkflowModelStore.SaveAsync(preparedResult.Model);
             var deployment = await FlowableClient.DeployProcessAsync(savedModel);
-            _currentModel = await WorkflowModelStore.SaveAsync(savedModel with { LastDeployment = deployment });
+            _currentModel = await WorkflowModelStore.PublishAsync(savedModel, deployment);
             await RefreshWorkflowListAsync(_currentModel.Id);
             _warningMessages = preparedResult.Validation.Warnings;
-            _statusMessage = $"Published '{_currentModel.Name}' to Flowable as version {deployment.ProcessDefinitionVersion}.";
+            _statusMessage = $"Published '{_currentModel.Name}' draft v{_currentModel.DraftVersionNumber} to Flowable as definition version {deployment.ProcessDefinitionVersion}.";
             _isDirty = false;
         });
     }
@@ -429,12 +462,12 @@
                 throw new InvalidOperationException("Select a workflow model before starting an instance.");
             }
 
-            if (_isDirty)
+            if (_isDirty || _currentModel.IsDraft)
             {
-                throw new InvalidOperationException("Save and publish the workflow model before starting a new instance.");
+                throw new InvalidOperationException("Publish the current workflow draft to Flowable before starting a new instance.");
             }
 
-            if (_currentModel.LastDeployment is null)
+            if (_currentModel.LastDeployment is null || _currentModel.PublishedVersionNumber is null)
             {
                 throw new InvalidOperationException("Publish the workflow model to Flowable before starting an instance.");
             }
@@ -492,7 +525,7 @@
         _runtimeStatus = _runtimeTasks.Count > 0 ? "Waiting on user task" : "Running";
     }
 
-    private async Task<PreparedWorkflowResult> PrepareModelAsync(bool clearDeploymentIfChanged)
+    private async Task<PreparedWorkflowResult> PrepareModelAsync()
     {
         if (_currentModel is null)
         {
@@ -505,8 +538,19 @@
         }
 
         var exportedXml = await _module.InvokeAsync<string>("saveXml", _modelerHandle);
+        if (!LooksLikeBpmnXml(exportedXml))
+        {
+            var preview = exportedXml.Length > 200 ? exportedXml[..200] : exportedXml;
+            throw new InvalidOperationException($"Workflow Studio did not receive BPMN XML from the browser save path. Payload preview: {preview}");
+        }
+
+        var elementSnapshots = await _module.InvokeAsync<WorkflowElementSnapshot[]>("getElementSnapshots", _modelerHandle);
         var normalizedName = WorkflowBpmnXml.NormalizeWorkflowName(_currentModel.Name);
-        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(exportedXml, _currentModel.ProcessKey, normalizedName);
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            exportedXml,
+            _currentModel.ProcessKey,
+            normalizedName,
+            elementSnapshots);
         var validation = WorkflowBpmnXml.ValidateProcess(updatedXml);
 
         if (validation.Errors.Count > 0)
@@ -515,10 +559,12 @@
         }
 
         var definitionChanged = !string.Equals(_currentModel.BpmnXml, updatedXml, StringComparison.Ordinal);
-        var lastDeployment = clearDeploymentIfChanged && definitionChanged
-            ? null
-            : _currentModel.LastDeployment;
-        var activeProcessInstanceId = clearDeploymentIfChanged && definitionChanged
+        if (_isDirty && !definitionChanged)
+        {
+            throw new InvalidOperationException(BuildUnchangedExportMessage(exportedXml, elementSnapshots));
+        }
+
+        var activeProcessInstanceId = definitionChanged
             ? null
             : _currentModel.ActiveProcessInstanceId;
 
@@ -526,14 +572,13 @@
         {
             Name = normalizedName,
             BpmnXml = updatedXml,
-            LastDeployment = lastDeployment,
             ActiveProcessInstanceId = activeProcessInstanceId
         };
 
         _currentXml = updatedXml;
         await LoadXmlIntoModelerAsync(updatedXml);
 
-        if (definitionChanged && clearDeploymentIfChanged)
+        if (definitionChanged)
         {
             _activeProcessInstanceId = null;
             _runtimeStatus = "Not started";
@@ -599,6 +644,8 @@
         _currentXml = model.BpmnXml;
         _activeProcessInstanceId = model.ActiveProcessInstanceId;
         _isDirty = false;
+        _pendingEditorReload = true;
+        _editorCanvasKey++;
         _errorMessage = null;
         _warningMessages = WorkflowBpmnXml.ValidateProcess(model.BpmnXml).Warnings;
     }
@@ -606,6 +653,39 @@
     private static string FormatTimestamp(DateTimeOffset? timestamp)
     {
         return timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "Not available";
+    }
+
+    private static bool LooksLikeBpmnXml(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return false;
+        }
+
+        return xml.Contains("<bpmn:process", StringComparison.Ordinal) ||
+               xml.Contains("<process", StringComparison.Ordinal) ||
+               xml.Contains("<bpmn:definitions", StringComparison.Ordinal);
+    }
+
+    private static string BuildUnchangedExportMessage(string exportedXml, IReadOnlyList<WorkflowElementSnapshot> elementSnapshots)
+    {
+        var preview = exportedXml.Length > 220 ? exportedXml[..220] : exportedXml;
+        var finalApprovalSnapshot = elementSnapshots
+            .LastOrDefault(snapshot => string.Equals(snapshot.Name, "Final Approval", StringComparison.Ordinal));
+        var taskSummary = string.Join(
+            "; ",
+            elementSnapshots
+                .Where(snapshot =>
+                    snapshot.Type.Contains("Task", StringComparison.Ordinal) ||
+                    snapshot.Type.Contains("Event", StringComparison.Ordinal) ||
+                    snapshot.Type.Contains("Gateway", StringComparison.Ordinal))
+                .Select(snapshot => $"{snapshot.Id}:{snapshot.Type}:{snapshot.Name ?? "<no-name>"}"));
+
+        return $"Workflow Studio detected unsaved edits in the browser, but the BPMN export was unchanged. " +
+               $"Snapshot count: {elementSnapshots.Count}. " +
+               $"Final Approval snapshot type: {finalApprovalSnapshot?.Type ?? "<not found>"}. " +
+               $"Task snapshot summary: {taskSummary}. " +
+               $"Export preview: {preview}";
     }
 
     private async Task RunBusyAsync(string operation, Func<Task> action)
@@ -640,7 +720,7 @@
         WorkflowModel Model,
         WorkflowBpmnValidationResult Validation);
 
-    public async ValueTask DisposeAsync()
+    private async Task DisposeModelerHandleAsync()
     {
         if (_module is not null && _modelerHandle is not null)
         {
@@ -663,6 +743,15 @@
             {
             }
         }
+
+        _modelerHandle = null;
+        _modelerReady = false;
+        _loadedEditorWorkflowId = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeModelerHandleAsync();
 
         if (_module is not null)
         {

@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS workflow_models (
     name TEXT NOT NULL,
     process_key TEXT NOT NULL UNIQUE,
     bpmn_xml TEXT NOT NULL,
+    is_draft BOOLEAN NOT NULL DEFAULT TRUE,
+    draft_version_number INTEGER NOT NULL DEFAULT 1,
+    published_version_number INTEGER NULL,
     active_process_instance_id TEXT NULL,
     created_at_utc TIMESTAMPTZ NOT NULL,
     updated_at_utc TIMESTAMPTZ NOT NULL,
@@ -32,6 +35,35 @@ CREATE TABLE IF NOT EXISTS workflow_models (
 
 CREATE INDEX IF NOT EXISTS ix_workflow_models_updated_at_utc
     ON workflow_models (updated_at_utc DESC);
+
+ALTER TABLE workflow_models
+    ADD COLUMN IF NOT EXISTS is_draft BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE workflow_models
+    ADD COLUMN IF NOT EXISTS draft_version_number INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE workflow_models
+    ADD COLUMN IF NOT EXISTS published_version_number INTEGER NULL;
+
+CREATE TABLE IF NOT EXISTS workflow_model_versions (
+    id UUID PRIMARY KEY,
+    workflow_model_id UUID NOT NULL REFERENCES workflow_models (id) ON DELETE CASCADE,
+    version_number INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    process_key TEXT NOT NULL,
+    bpmn_xml TEXT NOT NULL,
+    deployment_id TEXT NOT NULL,
+    process_definition_id TEXT NOT NULL,
+    process_definition_key TEXT NOT NULL,
+    process_definition_version INTEGER NOT NULL,
+    published_at_utc TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS workflow_model_versions_workflow_model_id_version_number_key
+    ON workflow_model_versions (workflow_model_id, version_number);
+
+CREATE INDEX IF NOT EXISTS ix_workflow_model_versions_workflow_model_id
+    ON workflow_model_versions (workflow_model_id);
 
 INSERT INTO local_users (
     username,

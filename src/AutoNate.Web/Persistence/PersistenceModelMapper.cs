@@ -1,6 +1,7 @@
 using AutoNate.Web.Models;
 using LocalUserEntity = AutoNate.Web.Persistence.Scaffolded.LocalUser;
 using WorkflowModelEntity = AutoNate.Web.Persistence.Scaffolded.WorkflowModel;
+using WorkflowModelVersionEntity = AutoNate.Web.Persistence.Scaffolded.WorkflowModelVersion;
 
 namespace AutoNate.Web.Persistence;
 
@@ -34,6 +35,9 @@ internal static class PersistenceModelMapper
             Name = entity.Name,
             ProcessKey = entity.ProcessKey,
             BpmnXml = entity.BpmnXml,
+            IsDraft = entity.IsDraft,
+            DraftVersionNumber = entity.DraftVersionNumber,
+            PublishedVersionNumber = entity.PublishedVersionNumber,
             ActiveProcessInstanceId = entity.ActiveProcessInstanceId,
             CreatedAtUtc = ToDateTimeOffset(entity.CreatedAtUtc),
             UpdatedAtUtc = ToDateTimeOffset(entity.UpdatedAtUtc),
@@ -61,6 +65,9 @@ internal static class PersistenceModelMapper
         entity.Name = model.Name;
         entity.ProcessKey = model.ProcessKey;
         entity.BpmnXml = model.BpmnXml;
+        entity.IsDraft = model.IsDraft;
+        entity.DraftVersionNumber = model.DraftVersionNumber;
+        entity.PublishedVersionNumber = model.PublishedVersionNumber;
         entity.ActiveProcessInstanceId = model.ActiveProcessInstanceId;
         entity.CreatedAtUtc = model.CreatedAtUtc.UtcDateTime;
         entity.UpdatedAtUtc = model.UpdatedAtUtc.UtcDateTime;
@@ -69,6 +76,30 @@ internal static class PersistenceModelMapper
         entity.LastProcessDefinitionKey = model.LastDeployment?.ProcessDefinitionKey;
         entity.LastProcessDefinitionVersion = model.LastDeployment?.ProcessDefinitionVersion;
         entity.LastDeployedAtUtc = model.LastDeployment?.DeployedAtUtc.UtcDateTime;
+    }
+
+    public static WorkflowModelVersion ToModel(this WorkflowModelVersionEntity entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return new WorkflowModelVersion
+        {
+            Id = entity.Id,
+            WorkflowModelId = entity.WorkflowModelId,
+            VersionNumber = entity.VersionNumber,
+            Name = entity.Name,
+            ProcessKey = entity.ProcessKey,
+            BpmnXml = entity.BpmnXml,
+            PublishedAtUtc = ToDateTimeOffset(entity.PublishedAtUtc),
+            Deployment = new WorkflowDeploymentInfo
+            {
+                DeploymentId = entity.DeploymentId,
+                ProcessDefinitionId = entity.ProcessDefinitionId,
+                ProcessDefinitionKey = entity.ProcessDefinitionKey,
+                ProcessDefinitionVersion = entity.ProcessDefinitionVersion,
+                DeployedAtUtc = ToDateTimeOffset(entity.PublishedAtUtc)
+            }
+        };
     }
 
     public static DateTimeOffset ToDateTimeOffset(DateTime value)

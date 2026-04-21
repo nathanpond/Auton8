@@ -78,6 +78,8 @@ builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
 
 var app = builder.Build();
 
+await DatabaseSchemaInitializer.EnsureAsync(app.Services);
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
