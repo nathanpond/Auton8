@@ -1,4 +1,5 @@
 using AutoNate.Web.Services.Workflow;
+using System.Xml.Linq;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -51,5 +52,22 @@ public sealed class WorkflowBpmnXmlTests
 
         Assert.NotEmpty(result.Errors);
         Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
+    public void CreateStarterDiagram_CreatesBlankProcessWithoutSeedTasks()
+    {
+        var xml = WorkflowBpmnXml.CreateStarterDiagram("test_process", "Test Workflow");
+        var document = XDocument.Parse(xml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace bpmndi = "http://www.omg.org/spec/BPMN/20100524/DI";
+
+        var process = document.Descendants(bpmn + "process").Single();
+        var plane = document.Descendants(bpmndi + "BPMNPlane").Single();
+
+        Assert.Equal("test_process", process.Attribute("id")?.Value);
+        Assert.Equal("Test Workflow", process.Attribute("name")?.Value);
+        Assert.Empty(process.Elements());
+        Assert.Empty(plane.Elements());
     }
 }

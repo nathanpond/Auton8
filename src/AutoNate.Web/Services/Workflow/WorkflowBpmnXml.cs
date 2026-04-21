@@ -68,66 +68,13 @@ public static partial class WorkflowBpmnXml
                                    id="Definitions_{{normalizedProcessKey}}"
                                    targetNamespace="http://autonate.dev/workflows">
                  <bpmn:process id="{{normalizedProcessKey}}" name="{{SecurityElement.Escape(normalizedWorkflowName)}}" isExecutable="true">
-                   <bpmn:startEvent id="StartEvent_1" name="Start">
-                     <bpmn:outgoing>Flow_1</bpmn:outgoing>
-                   </bpmn:startEvent>
-                   <bpmn:userTask id="Activity_InitialReview" name="Initial Review">
-                     <bpmn:incoming>Flow_1</bpmn:incoming>
-                     <bpmn:outgoing>Flow_2</bpmn:outgoing>
-                   </bpmn:userTask>
-                   <bpmn:userTask id="Activity_ManagerReview" name="Manager Review">
-                     <bpmn:incoming>Flow_2</bpmn:incoming>
-                     <bpmn:outgoing>Flow_3</bpmn:outgoing>
-                   </bpmn:userTask>
-                   <bpmn:userTask id="Activity_FinalApproval" name="Final Approval">
-                     <bpmn:incoming>Flow_3</bpmn:incoming>
-                     <bpmn:outgoing>Flow_4</bpmn:outgoing>
-                   </bpmn:userTask>
-                   <bpmn:endEvent id="Event_End" name="Done">
-                     <bpmn:incoming>Flow_4</bpmn:incoming>
-                   </bpmn:endEvent>
-                   <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="Activity_InitialReview" />
-                   <bpmn:sequenceFlow id="Flow_2" sourceRef="Activity_InitialReview" targetRef="Activity_ManagerReview" />
-                   <bpmn:sequenceFlow id="Flow_3" sourceRef="Activity_ManagerReview" targetRef="Activity_FinalApproval" />
-                   <bpmn:sequenceFlow id="Flow_4" sourceRef="Activity_FinalApproval" targetRef="Event_End" />
                  </bpmn:process>
                  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
                    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="{{normalizedProcessKey}}">
-                     <bpmndi:BPMNShape id="Shape_StartEvent_1" bpmnElement="StartEvent_1">
-                       <dc:Bounds x="180" y="140" width="36" height="36" />
-                     </bpmndi:BPMNShape>
-                     <bpmndi:BPMNShape id="Shape_Activity_InitialReview" bpmnElement="Activity_InitialReview">
-                       <dc:Bounds x="290" y="118" width="120" height="80" />
-                     </bpmndi:BPMNShape>
-                     <bpmndi:BPMNShape id="Shape_Activity_ManagerReview" bpmnElement="Activity_ManagerReview">
-                       <dc:Bounds x="470" y="118" width="120" height="80" />
-                     </bpmndi:BPMNShape>
-                     <bpmndi:BPMNShape id="Shape_Activity_FinalApproval" bpmnElement="Activity_FinalApproval">
-                       <dc:Bounds x="650" y="118" width="120" height="80" />
-                     </bpmndi:BPMNShape>
-                     <bpmndi:BPMNShape id="Shape_Event_End" bpmnElement="Event_End">
-                       <dc:Bounds x="850" y="140" width="36" height="36" />
-                     </bpmndi:BPMNShape>
-                     <bpmndi:BPMNEdge id="Edge_Flow_1" bpmnElement="Flow_1">
-                       <di:waypoint x="216" y="158" />
-                       <di:waypoint x="290" y="158" />
-                     </bpmndi:BPMNEdge>
-                     <bpmndi:BPMNEdge id="Edge_Flow_2" bpmnElement="Flow_2">
-                       <di:waypoint x="410" y="158" />
-                       <di:waypoint x="470" y="158" />
-                     </bpmndi:BPMNEdge>
-                     <bpmndi:BPMNEdge id="Edge_Flow_3" bpmnElement="Flow_3">
-                       <di:waypoint x="590" y="158" />
-                       <di:waypoint x="650" y="158" />
-                     </bpmndi:BPMNEdge>
-                     <bpmndi:BPMNEdge id="Edge_Flow_4" bpmnElement="Flow_4">
-                       <di:waypoint x="770" y="158" />
-                       <di:waypoint x="850" y="158" />
-                     </bpmndi:BPMNEdge>
                    </bpmndi:BPMNPlane>
                  </bpmndi:BPMNDiagram>
                </bpmn:definitions>
-               """;
+               """.TrimStart();
     }
 
     public static string ApplyProcessMetadata(string xml, string processKey, string workflowName)
