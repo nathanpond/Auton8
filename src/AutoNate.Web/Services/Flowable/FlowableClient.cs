@@ -268,7 +268,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(modelResponse, "load the BPMN model for the execution");
 
         using var activitiesResponse = await _httpClient.GetAsync(
-            $"service/history/historic-activity-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}",
+            $"service/history/historic-activity-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}&size={WorkflowExecutionActivityQuerySize}",
             cancellationToken);
         await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
 
