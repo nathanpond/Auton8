@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
 using Microsoft.Extensions.Options;
@@ -11,6 +12,7 @@ namespace AutoNate.Web.Services.Flowable;
 public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptions> options) : IFlowableClient
 {
     private const int WorkflowExecutionQuerySize = 200;
+    private static readonly XNamespace BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -22,6 +24,11 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
 
     public async Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default)
     {
+        if (ContainsScriptTask(model.BpmnXml))
+        {
+            await EnsureJavaScriptScriptTaskSupportAsync(cancellationToken);
+        }
+
         using var content = new MultipartFormDataContent();
         var fileName = $"{model.ProcessKey}.bpmn20.xml";
         content.Add(new StringContent(model.BpmnXml, Encoding.UTF8, "application/xml"), "file", fileName);
@@ -340,10 +347,87 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         return payload.Id ?? string.Empty;
     }
 
+    private async Task EnsureJavaScriptScriptTaskSupportAsync(CancellationToken cancellationToken)
+    {
+        var probeResult = await TryReadJavaScriptScriptTaskSupportAsync(cancellationToken);
+        if (probeResult is null)
+        {
+            throw new InvalidOperationException(
+                "This Flowable runtime does not expose the AutoNate script task capability probe. " +
+                "Run the infrastructure startup path again so the updated Flowable image is rebuilt and restarted.");
+        }
+
+        if (probeResult.JavaScriptSupported)
+        {
+            return;
+        }
+
+        var engineList = probeResult.EngineNames.Count == 0
+            ? "no installed script engines"
+            : string.Join(", ", probeResult.EngineNames);
+
+        throw new InvalidOperationException(
+            $"Flowable is missing JavaScript script task support. Available script engines: {engineList}. " +
+            "Install a JavaScript JSR-223 engine in the Flowable runtime before publishing BPMN script tasks.");
+    }
+
+    private async Task<FlowableScriptTaskSupportResponse?> TryReadJavaScriptScriptTaskSupportAsync(CancellationToken cancellationToken)
+    {
+        var probeUrls = new[]
+        {
+            "actuator/scriptTaskSupport",
+            "service/autonate/script-task-support"
+        };
+
+        foreach (var probeUrl in probeUrls)
+        {
+            using var response = await _httpClient.GetAsync(probeUrl, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                if (IsMissingProbeEndpoint(response.StatusCode, await response.Content.ReadAsStringAsync(cancellationToken)))
+                {
+                    continue;
+                }
+
+                await EnsureSuccessAsync(response, "verify JavaScript script task runtime support");
+            }
+
+            return await DeserializeAsync<FlowableScriptTaskSupportResponse>(response, cancellationToken);
+        }
+
+        return null;
+    }
+
+    private static bool IsMissingProbeEndpoint(HttpStatusCode statusCode, string? body)
+    {
+        if (statusCode == HttpStatusCode.NotFound)
+        {
+            return true;
+        }
+
+        if (statusCode != HttpStatusCode.InternalServerError || string.IsNullOrWhiteSpace(body))
+        {
+            return false;
+        }
+
+        return body.Contains("No endpoint GET", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static object[] ToFlowableVariables(IReadOnlyDictionary<string, object?>? variables)
     {
         return variables?.Select(variable => new { name = variable.Key, value = variable.Value }).ToArray()
             ?? [];
+    }
+
+    private static bool ContainsScriptTask(string bpmnXml)
+    {
+        if (string.IsNullOrWhiteSpace(bpmnXml))
+        {
+            return false;
+        }
+
+        var document = XDocument.Parse(bpmnXml);
+        return document.Descendants(BpmnNamespace + "scriptTask").Any();
     }
 
     private static string? FirstNonEmpty(params string?[] values)
@@ -471,5 +555,12 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? ProcessInstanceId { get; init; }
 
         public DateTimeOffset? CreateTime { get; init; }
+    }
+
+    private sealed class FlowableScriptTaskSupportResponse
+    {
+        public bool JavaScriptSupported { get; init; }
+
+        public List<string> EngineNames { get; init; } = [];
     }
 }

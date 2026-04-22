@@ -233,8 +233,90 @@
     </div>
 }
 
+@if (_showScriptTaskModal && _scriptTaskEditor is not null)
+{
+    <div class="workflow-modal-backdrop" @onclick="CloseScriptTaskModal">
+        <div class="workflow-modal workflow-script-task-modal" role="dialog" aria-modal="true" aria-labelledby="script-task-title" @onclick:stopPropagation="true">
+            <div class="workflow-modal-header">
+                <div>
+                    <h2 id="script-task-title">Script Task</h2>
+                    <p class="workflow-modal-copy">Edit the selected BPMN script task. AutoNate saves the JavaScript body inline in the BPMN XML and validates it before save or publish.</p>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" title="Close" @onclick="CloseScriptTaskModal"></button>
+            </div>
+
+            <div class="workflow-script-task-meta">
+                <span class="workflow-script-task-pill">@_scriptTaskEditor.Id</span>
+                <span class="workflow-script-task-pill">@_scriptTaskEditor.Type</span>
+            </div>
+
+            <label class="workflow-field">
+                <span>Task Name</span>
+                <input class="form-control" @bind="_scriptTaskEditor.Name" @bind:event="oninput" />
+            </label>
+
+            <label class="workflow-field">
+                <span>Script Format</span>
+                <input class="form-control" value="javascript" readonly />
+            </label>
+
+            <label class="workflow-field">
+                <span>Result Variable</span>
+                <input class="form-control" @bind="_scriptTaskEditor.ResultVariable" @bind:event="oninput" />
+            </label>
+
+            <label class="workflow-field">
+                <span>Script Body</span>
+                <textarea class="form-control workflow-script-task-editor" rows="12" spellcheck="false" @bind="_scriptTaskEditor.Script" @bind:event="oninput"></textarea>
+            </label>
+
+            <div class="workflow-modal-actions">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseScriptTaskModal" disabled="@_isBusy" title="Close">Close</button>
+                <button type="button" class="btn btn-primary" @onclick="ApplyScriptTaskChangesAsync" disabled="@(_isBusy || !_modelerReady || _modelerHandle is null)" title="Apply">Apply</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showSequenceFlowModal && _sequenceFlowEditor is not null)
+{
+    <div class="workflow-modal-backdrop" @onclick="CloseSequenceFlowModal">
+        <div class="workflow-modal workflow-sequence-flow-modal" role="dialog" aria-modal="true" aria-labelledby="sequence-flow-title" @onclick:stopPropagation="true">
+            <div class="workflow-modal-header">
+                <div>
+                    <h2 id="sequence-flow-title">Sequence Flow</h2>
+                    <p class="workflow-modal-copy">Edit the selected path leaving a task or gateway. Use a Flowable expression like <code>${needsApproval}</code> or <code>${riskLevel == 'high'}</code> to route decisions based on process variables.</p>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" title="Close" @onclick="CloseSequenceFlowModal"></button>
+            </div>
+
+            <div class="workflow-script-task-meta">
+                <span class="workflow-script-task-pill">@_sequenceFlowEditor.Id</span>
+                <span class="workflow-script-task-pill">@_sequenceFlowEditor.Type</span>
+            </div>
+
+            <label class="workflow-field">
+                <span>Flow Name</span>
+                <input class="form-control" @bind="_sequenceFlowEditor.Name" @bind:event="oninput" />
+            </label>
+
+            <label class="workflow-field">
+                <span>Condition Expression</span>
+                <textarea class="form-control workflow-expression-editor" rows="6" spellcheck="false" @bind="_sequenceFlowEditor.ConditionExpression" @bind:event="oninput"></textarea>
+            </label>
+
+            <p class="workflow-modal-note">Leave the condition blank for an unconditional path. For exclusive gateways, put the condition on the outgoing branch itself, not on the gateway node.</p>
+
+            <div class="workflow-modal-actions">
+                <button type="button" class="btn btn-outline-secondary" @onclick="CloseSequenceFlowModal" disabled="@_isBusy" title="Close">Close</button>
+                <button type="button" class="btn btn-primary" @onclick="ApplySequenceFlowChangesAsync" disabled="@(_isBusy || !_modelerReady || _modelerHandle is null)" title="Apply">Apply</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
-    private const string WorkflowModulePath = "./js/workflow.js?v=20260420_15";
+    private const string WorkflowModulePath = "./js/workflow.js?v=20260421_02";
     private ElementReference _canvas;
     private IJSObjectReference? _module;
     private IJSObjectReference? _modelerHandle;
@@ -255,10 +337,15 @@
     private bool _isDirty;
     private bool _isCreatingWorkflow;
     private bool _showCreateWorkflowModal;
+    private bool _showScriptTaskModal;
+    private bool _showSequenceFlowModal;
     private bool _suppressDirtyNotifications;
     private bool _pendingEditorReload;
     private int _editorCanvasKey;
     private Guid? _loadedEditorWorkflowId;
+    private WorkflowElementSnapshot? _selectedElement;
+    private ScriptTaskEditorState? _scriptTaskEditor;
+    private SequenceFlowEditorState? _sequenceFlowEditor;
 
     private string SelectedWorkflowId => _currentModel?.Id.ToString() ?? string.Empty;
     private bool HasPersistedDraft => _currentModel?.IsDraft == true;
@@ -345,6 +432,52 @@
         }
 
         _isDirty = true;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task NotifySelectionChanged(WorkflowElementSnapshot? selectedElement)
+    {
+        _selectedElement = selectedElement;
+
+        if (selectedElement is not null &&
+            string.Equals(selectedElement.Type, "bpmn:ScriptTask", StringComparison.Ordinal))
+        {
+            _scriptTaskEditor = new ScriptTaskEditorState
+            {
+                Id = selectedElement.Id,
+                Type = selectedElement.Type,
+                Name = selectedElement.Name ?? string.Empty,
+                ScriptFormat = "javascript",
+                Script = selectedElement.Script ?? string.Empty,
+                ResultVariable = selectedElement.ResultVariable ?? string.Empty
+            };
+            _showScriptTaskModal = true;
+            _showSequenceFlowModal = false;
+            _sequenceFlowEditor = null;
+        }
+        else if (selectedElement is not null &&
+                 string.Equals(selectedElement.Type, "bpmn:SequenceFlow", StringComparison.Ordinal))
+        {
+            _sequenceFlowEditor = new SequenceFlowEditorState
+            {
+                Id = selectedElement.Id,
+                Type = selectedElement.Type,
+                Name = selectedElement.Name ?? string.Empty,
+                ConditionExpression = selectedElement.ConditionExpression ?? string.Empty
+            };
+            _showSequenceFlowModal = true;
+            _showScriptTaskModal = false;
+            _scriptTaskEditor = null;
+        }
+        else
+        {
+            _showScriptTaskModal = false;
+            _scriptTaskEditor = null;
+            _showSequenceFlowModal = false;
+            _sequenceFlowEditor = null;
+        }
+
         return InvokeAsync(StateHasChanged);
     }
 
@@ -444,6 +577,54 @@
             _warningMessages = preparedResult.Validation.Warnings;
             _statusMessage = $"Saved workflow model '{_currentModel.Name}'. {preparedResult.DebugSummary}";
             _isDirty = false;
+        });
+    }
+
+    private void CloseScriptTaskModal()
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        _showScriptTaskModal = false;
+    }
+
+    private void CloseSequenceFlowModal()
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        _showSequenceFlowModal = false;
+    }
+
+    private async Task ApplyScriptTaskChangesAsync()
+    {
+        await RunBusyAsync("applying script task changes", async () =>
+        {
+            if (_module is null || _modelerHandle is null || _scriptTaskEditor is null)
+            {
+                throw new InvalidOperationException("Select a script task before applying script changes.");
+            }
+
+            await _module.InvokeVoidAsync("updateScriptTaskProperties", _modelerHandle, _scriptTaskEditor);
+            _showScriptTaskModal = false;
+        });
+    }
+
+    private async Task ApplySequenceFlowChangesAsync()
+    {
+        await RunBusyAsync("applying sequence flow changes", async () =>
+        {
+            if (_module is null || _modelerHandle is null || _sequenceFlowEditor is null)
+            {
+                throw new InvalidOperationException("Select a sequence flow before applying condition changes.");
+            }
+
+            await _module.InvokeVoidAsync("updateSequenceFlowProperties", _modelerHandle, _sequenceFlowEditor);
+            _showSequenceFlowModal = false;
         });
     }
 
@@ -549,7 +730,8 @@
         var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
             exportedXml,
             _currentModel.ProcessKey,
-            normalizedName);
+            normalizedName,
+            elementSnapshots);
         var validation = WorkflowBpmnXml.ValidateProcess(updatedXml);
 
         if (validation.Errors.Count > 0)
@@ -763,6 +945,32 @@
         string[] DistinctTypes,
         int DomElementCount,
         int DomShapeCount);
+
+    private sealed record class ScriptTaskEditorState
+    {
+        public string Id { get; init; } = string.Empty;
+
+        public string Type { get; init; } = "bpmn:ScriptTask";
+
+        public string Name { get; set; } = string.Empty;
+
+        public string ScriptFormat { get; init; } = "javascript";
+
+        public string Script { get; set; } = string.Empty;
+
+        public string ResultVariable { get; set; } = string.Empty;
+    }
+
+    private sealed record class SequenceFlowEditorState
+    {
+        public string Id { get; init; } = string.Empty;
+
+        public string Type { get; init; } = "bpmn:SequenceFlow";
+
+        public string Name { get; set; } = string.Empty;
+
+        public string ConditionExpression { get; set; } = string.Empty;
+    }
 
     private async Task DisposeModelerHandleAsync()
     {

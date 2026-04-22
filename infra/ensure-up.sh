@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.yml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
+FLOWABLE_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/flowable/.build-input-hash"
 
 POSTGRES_PORT="${AUTONATE_POSTGRES_PORT:-5432}"
 FLOWABLE_PORT="${AUTONATE_FLOWABLE_PORT:-8080}"
@@ -40,6 +41,47 @@ require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     fail "Required command '$1' is not available."
   fi
+}
+
+compute_flowable_build_hash() {
+  local path
+  local hash_input=()
+
+  hash_input+=("$REPO_ROOT/infra/flowable/Dockerfile")
+  hash_input+=("$REPO_ROOT/flowable-extension/pom.xml")
+
+  while IFS= read -r path; do
+    hash_input+=("$path")
+  done < <(find "$REPO_ROOT/flowable-extension/src" -type f | LC_ALL=C sort)
+
+  for path in "${hash_input[@]}"; do
+    printf '%s\n' "$path"
+    shasum "$path"
+  done | shasum | awk '{print $1}'
+}
+
+current_flowable_build_hash() {
+  if [[ -f "$FLOWABLE_BUILD_STAMP_FILE" ]]; then
+    cat "$FLOWABLE_BUILD_STAMP_FILE"
+    return 0
+  fi
+
+  return 1
+}
+
+flowable_build_required() {
+  local desired_hash="$1"
+  local current_hash
+
+  if ! current_hash="$(current_flowable_build_hash)"; then
+    return 0
+  fi
+
+  [[ "$current_hash" != "$desired_hash" ]]
+}
+
+record_flowable_build_hash() {
+  printf '%s\n' "$1" > "$FLOWABLE_BUILD_STAMP_FILE"
 }
 
 compose_service_container_id() {
@@ -181,6 +223,8 @@ main() {
   require_command nc
   require_command mkdir
   require_command cp
+  require_command shasum
+  require_command awk
 
   cd "$REPO_ROOT"
 
@@ -201,13 +245,29 @@ main() {
   sed -i.bak 's|nats://localhost:4222|nats://host.docker.internal:4222|' "$REPO_ROOT/infra/mounts/flowable-dapr/components/pubsub.yaml"
   rm -f "$REPO_ROOT/infra/mounts/flowable-dapr/components/pubsub.yaml.bak"
 
-  if all_services_ready; then
+  local desired_flowable_hash
+  desired_flowable_hash="$(compute_flowable_build_hash)"
+
+  local should_rebuild_flowable=0
+  if flowable_build_required "$desired_flowable_hash"; then
+    should_rebuild_flowable=1
+    log "Flowable build inputs changed. Rebuilding the Flowable image."
+    "${COMPOSE[@]}" build flowable
+    record_flowable_build_hash "$desired_flowable_hash"
+  fi
+
+  if (( should_rebuild_flowable == 0 )) && all_services_ready; then
     log "Required infrastructure is already running and ready."
     exit 0
   fi
 
   if all_services_bootstrapped; then
-    log "Infrastructure containers exist but are not ready yet. Waiting for readiness."
+    if (( should_rebuild_flowable == 1 )); then
+      log "Recreating Flowable services to apply the rebuilt image."
+      "${COMPOSE[@]}" up -d --no-deps --force-recreate flowable flowable-dapr
+    else
+      log "Infrastructure containers exist but are not ready yet. Waiting for readiness."
+    fi
   else
     log "Starting required infrastructure from infra/docker-compose.yml."
     "${COMPOSE[@]}" up -d "${REQUIRED_SERVICES[@]}"

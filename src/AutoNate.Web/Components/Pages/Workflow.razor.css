@@ -93,6 +93,54 @@
     margin-bottom: 0.75rem;
 }
 
+.workflow-script-task-modal {
+    max-width: min(42rem, calc(100vw - 2rem));
+}
+
+.workflow-sequence-flow-modal {
+    max-width: min(38rem, calc(100vw - 2rem));
+}
+
+.workflow-script-task-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+}
+
+.workflow-script-task-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
+    background: #eef5fb;
+    color: #334e68;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.workflow-script-task-editor {
+    min-height: 18rem;
+    font-family: "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    resize: vertical;
+}
+
+.workflow-expression-editor {
+    min-height: 9rem;
+    font-family: "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    resize: vertical;
+}
+
+.workflow-modal-note {
+    margin: 0;
+    color: #627d98;
+    font-size: 0.92rem;
+}
+
 .workflow-meta {
     display: grid;
     gap: 0.75rem;

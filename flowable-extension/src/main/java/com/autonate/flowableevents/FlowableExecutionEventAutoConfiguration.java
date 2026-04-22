@@ -36,6 +36,25 @@ public class FlowableExecutionEventAutoConfiguration {
     }
 
     @Bean
+    FlowableScriptTaskSupportService flowableScriptTaskSupportService() {
+        return new FlowableScriptTaskSupportService();
+    }
+
+    @Bean
+    FlowableScriptTaskSupportController flowableScriptTaskSupportController(
+        FlowableScriptTaskSupportService scriptTaskSupportService
+    ) {
+        return new FlowableScriptTaskSupportController(scriptTaskSupportService);
+    }
+
+    @Bean
+    FlowableScriptTaskSupportEndpoint scriptTaskSupportEndpoint(
+        FlowableScriptTaskSupportService scriptTaskSupportService
+    ) {
+        return new FlowableScriptTaskSupportEndpoint(scriptTaskSupportService);
+    }
+
+    @Bean
     WorkflowExecutionEventListener workflowExecutionEventListener(
         WorkflowExecutionEventMapper eventMapper,
         DaprWorkflowEventPublisher publisher,

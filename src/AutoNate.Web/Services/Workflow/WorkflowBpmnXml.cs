@@ -9,6 +9,7 @@ public static partial class WorkflowBpmnXml
 {
     private static readonly XNamespace BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
     private static readonly XNamespace BpmndiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
+    private static readonly XNamespace XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
     private static readonly HashSet<string> ReplaceableTaskElementNames =
     [
         "task",
@@ -24,7 +25,6 @@ public static partial class WorkflowBpmnXml
     [
         "task",
         "serviceTask",
-        "scriptTask",
         "businessRuleTask",
         "sendTask",
         "receiveTask",
@@ -145,6 +145,14 @@ public static partial class WorkflowBpmnXml
             if (!string.Equals(executable, "true", StringComparison.OrdinalIgnoreCase))
             {
                 return WorkflowBpmnValidationResult.WithError("The BPMN process must be marked as executable before deployment.");
+            }
+
+            var scriptTaskErrors = BuildScriptTaskValidationErrors(document);
+            if (scriptTaskErrors.Count > 0)
+            {
+                return new WorkflowBpmnValidationResult(
+                    scriptTaskErrors,
+                    BuildUnsupportedRuntimeWarnings(document));
             }
 
             return new WorkflowBpmnValidationResult(
@@ -288,6 +296,72 @@ public static partial class WorkflowBpmnXml
             {
                 element.SetAttributeValue("name", snapshot.Name);
             }
+
+            if (string.Equals(targetLocalName, "scriptTask", StringComparison.Ordinal) ||
+                string.Equals(element.Name.LocalName, "scriptTask", StringComparison.Ordinal))
+            {
+                ApplyScriptTaskSnapshot(element, snapshot);
+            }
+
+            if (string.Equals(element.Name.LocalName, "sequenceFlow", StringComparison.Ordinal))
+            {
+                ApplySequenceFlowSnapshot(element, snapshot);
+            }
+        }
+    }
+
+    private static void ApplyScriptTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
+    {
+        if (!string.IsNullOrWhiteSpace(snapshot.ScriptFormat))
+        {
+            element.SetAttributeValue("scriptFormat", snapshot.ScriptFormat);
+        }
+        else
+        {
+            element.SetAttributeValue("scriptFormat", null);
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.ResultVariable))
+        {
+            element.SetAttributeValue("resultVariable", snapshot.ResultVariable);
+        }
+        else
+        {
+            element.SetAttributeValue("resultVariable", null);
+        }
+
+        var scriptElement = element.Element(BpmnNamespace + "script");
+        if (snapshot.Script is null)
+        {
+            scriptElement?.Remove();
+            return;
+        }
+
+        scriptElement ??= new XElement(BpmnNamespace + "script");
+        scriptElement.Value = snapshot.Script;
+
+        if (scriptElement.Parent is null)
+        {
+            element.Add(scriptElement);
+        }
+    }
+
+    private static void ApplySequenceFlowSnapshot(XElement element, WorkflowElementSnapshot snapshot)
+    {
+        var conditionExpressionElement = element.Element(BpmnNamespace + "conditionExpression");
+        if (string.IsNullOrWhiteSpace(snapshot.ConditionExpression))
+        {
+            conditionExpressionElement?.Remove();
+            return;
+        }
+
+        conditionExpressionElement ??= new XElement(BpmnNamespace + "conditionExpression");
+        conditionExpressionElement.SetAttributeValue(XsiNamespace + "type", "bpmn:tFormalExpression");
+        conditionExpressionElement.Value = snapshot.ConditionExpression;
+
+        if (conditionExpressionElement.Parent is null)
+        {
+            element.Add(conditionExpressionElement);
         }
     }
 
@@ -299,9 +373,13 @@ public static partial class WorkflowBpmnXml
         }
 
         var separatorIndex = bpmnType.IndexOf(':', StringComparison.Ordinal);
-        return separatorIndex >= 0
+        var localName = separatorIndex >= 0
             ? bpmnType[(separatorIndex + 1)..]
             : bpmnType;
+
+        return localName.Length == 0
+            ? localName
+            : char.ToLowerInvariant(localName[0]) + localName[1..];
     }
 
     private static string BuildMissingProcessDefinitionMessage(XDocument document)
@@ -320,6 +398,31 @@ public static partial class WorkflowBpmnXml
         }
 
         return $"The BPMN XML does not contain a process definition. Root element: {rootName}. Payload preview: {preview}";
+    }
+
+    private static IReadOnlyList<string> BuildScriptTaskValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var scriptTask in document.Descendants(BpmnNamespace + "scriptTask"))
+        {
+            var taskLabel = scriptTask.Attribute("name")?.Value
+                ?? scriptTask.Attribute("id")?.Value
+                ?? "Unnamed script task";
+            var scriptFormat = scriptTask.Attribute("scriptFormat")?.Value;
+            if (!string.Equals(scriptFormat, "javascript", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add($"Script task '{taskLabel}' must use scriptFormat=\"javascript\".");
+            }
+
+            var scriptBody = scriptTask.Element(BpmnNamespace + "script")?.Value;
+            if (string.IsNullOrWhiteSpace(scriptBody))
+            {
+                errors.Add($"Script task '{taskLabel}' must include a non-empty inline script body.");
+            }
+        }
+
+        return errors;
     }
 
     private static IReadOnlyList<string> BuildUnsupportedRuntimeWarnings(XDocument document)
