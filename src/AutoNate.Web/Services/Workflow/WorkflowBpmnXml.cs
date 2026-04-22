@@ -23,7 +23,6 @@ public static partial class WorkflowBpmnXml
     ];
     private static readonly HashSet<string> UnsupportedRuntimeTaskElementNames =
     [
-        "task",
         "serviceTask",
         "businessRuleTask",
         "sendTask",
@@ -498,7 +497,6 @@ public static partial class WorkflowBpmnXml
     {
         return localName switch
         {
-            "task" => "generic tasks",
             "serviceTask" => "service tasks",
             "scriptTask" => "script tasks",
             "businessRuleTask" => "business rule tasks",
