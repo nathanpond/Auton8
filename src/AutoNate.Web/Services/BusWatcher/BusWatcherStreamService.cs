@@ -12,7 +12,8 @@ public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> log
 {
     public const string SubscriptionRoute = "/bus-watcher/messages";
     public const string WebSocketRoute = "/ws/bus-watcher";
-    public const string TopicName = "workflow.execution";
+    public const string TopicRoot = "workflow.execution";
+    public const string TopicName = "workflow.execution.events";
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {

@@ -35,7 +35,7 @@ port_listening() {
 }
 
 sidecar_metadata() {
-  curl -s "http://127.0.0.1:${DAPR_HTTP_PORT}/v1.0/metadata"
+  curl -fsS "http://127.0.0.1:${DAPR_HTTP_PORT}/v1.0/metadata"
 }
 
 sidecar_healthy() {
@@ -134,6 +134,15 @@ main() {
   cd "$REPO_ROOT"
 
   cleanup_stale_pid_file
+
+  if sidecar_metadata >/dev/null 2>&1; then
+    if sidecar_healthy; then
+      log "Reusing existing Dapr sidecar on port ${DAPR_HTTP_PORT}."
+      exit 0
+    fi
+
+    fail "A Dapr sidecar is reachable on port ${DAPR_HTTP_PORT}, but it is not the '${APP_ID}' sidecar."
+  fi
 
   if sidecar_healthy; then
     log "Reusing existing Dapr sidecar on port ${DAPR_HTTP_PORT}."

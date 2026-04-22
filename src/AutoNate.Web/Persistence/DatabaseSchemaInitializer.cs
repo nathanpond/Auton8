@@ -75,7 +75,13 @@ internal static class DatabaseSchemaInitializer
             published_at_utc
         )
         SELECT
-            wm.id,
+            (
+                substr(backfill_version_id.hash, 1, 8) || '-' ||
+                substr(backfill_version_id.hash, 9, 4) || '-' ||
+                substr(backfill_version_id.hash, 13, 4) || '-' ||
+                substr(backfill_version_id.hash, 17, 4) || '-' ||
+                substr(backfill_version_id.hash, 21, 12)
+            )::uuid,
             wm.id,
             wm.last_process_definition_version,
             wm.name,
@@ -87,6 +93,9 @@ internal static class DatabaseSchemaInitializer
             wm.last_process_definition_version,
             COALESCE(wm.last_deployed_at_utc, wm.updated_at_utc)
         FROM workflow_models wm
+        CROSS JOIN LATERAL (
+            SELECT md5(wm.id::text || ':' || wm.last_process_definition_version::text) AS hash
+        ) AS backfill_version_id
         WHERE wm.last_process_definition_version IS NOT NULL
           AND wm.last_deployment_id IS NOT NULL
           AND NOT EXISTS (
@@ -94,7 +103,8 @@ internal static class DatabaseSchemaInitializer
               FROM workflow_model_versions version
               WHERE version.workflow_model_id = wm.id
                 AND version.version_number = wm.last_process_definition_version
-          );
+          )
+        ON CONFLICT (workflow_model_id, version_number) DO NOTHING;
         """;
 
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)

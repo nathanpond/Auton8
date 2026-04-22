@@ -10,7 +10,7 @@ public class FlowableExecutionEventProperties {
 
     private String pubsubName = "pubsub";
 
-    private String topicRoot = "workflow.execution";
+    private String topicRoot = "workflow.execution.events";
 
     private String sourceAppId = "flowable";
 

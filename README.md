@@ -45,8 +45,8 @@ Run the app directly:
 make app
 ```
 
-`make app` now ensures the required Docker Compose services are up and ready before it launches `AutoNate.Web`.
-It does not start an app-side Dapr sidecar, so pub/sub-driven features such as the Bus Watcher will stay idle in this mode.
+`make app` now ensures the required Docker Compose services are up and ready, then launches `AutoNate.Web` with its Dapr sidecar.
+Use this as the default local app-start path.
 
 For Rider, the repo includes shareable run configurations under `.run/`:
 
@@ -71,7 +71,8 @@ make app-dapr
 ```
 
 `make app-dapr` uses the same infra readiness check before starting the app-scoped Dapr sidecar.
-Use this mode when you need Dapr pub/sub delivery, including the Bus Watcher page.
+It is now equivalent to `make app` for terminal usage.
+Use this mode when you need Dapr pub/sub delivery, including the Bus Watcher page and workflow execution live updates.
 The Rider debugger flow intentionally does not use `make app-dapr`, because Rider needs to own the `dotnet` process directly to support normal breakpoint debugging.
 
 Stop only the app when you are done iterating. Leave infrastructure running until you want to end the session.
@@ -115,6 +116,7 @@ export ConnectionStrings__Default='Host=localhost;Port=5432;Database=AutoNate;Us
 ## Notes
 
 - The Dapr sidecar is intentionally not part of Docker Compose. It is app-scoped and should start and stop with the app process.
+- In Development, `AutoNate.Web` now fails fast when no local Dapr sidecar is reachable. Set `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true` only when you intentionally want to bypass event-driven features.
 - `infra/ensure-up.sh` remains the reusable terminal entrypoint for local workflows outside Rider. It verifies `postgres`, `redis`, `flowable`, `dapr-placement`, and `dapr-scheduler`, starts them if needed, and waits for readiness before returning.
 - `src/AutoNate.Web/Program.cs` also mirrors the `launchSettings.json` local defaults for direct Debug executable launches, so Rider's plain `.NET Project` launcher still uses `Development` and `http://localhost:5108` unless you explicitly override them with environment variables.
 - `infra/docker-compose.yml` now includes a health check for `flowable`, so Docker Compose and Rider can surface when that service is actually ready instead of merely started.

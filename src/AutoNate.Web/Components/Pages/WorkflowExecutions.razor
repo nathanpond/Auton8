@@ -4,10 +4,10 @@
 @using System.Text.Json
 @using System.Text.Json.Serialization
 @using Microsoft.JSInterop
-@using AutoNate.Web.Services.BusWatcher
+@using AutoNate.Web.Services.Dapr
 @inject IJSRuntime JS
 @inject IFlowableClient FlowableClient
-@inject BusWatcherStreamService BusWatcherStreamService
+@inject DaprSidecarProbe DaprSidecarProbe
 @inject ILogger<WorkflowExecutions> Logger
 
 <PageTitle>Workflow Executions</PageTitle>
@@ -33,8 +33,16 @@
     </div>
 }
 
+@if (!string.IsNullOrWhiteSpace(_daprWarningMessage))
+{
+    <div class="alert alert-warning" role="alert">
+        @_daprWarningMessage
+    </div>
+}
+
 <div class="workflow-executions-toolbar">
-    <span class="badge text-bg-light">@_workflowEventConnectionStatus</span>
+    <span class="@GetConnectionBadgeClass(_browserConnectionStatus)">@_browserConnectionStatus</span>
+    <span class="@GetConnectionBadgeClass(_daprIngressStatus)">@_daprIngressStatus</span>
     <button class="btn btn-outline-primary" @onclick="LoadExecutionsAsync" disabled="@_isLoading" title="Refresh executions">Refresh</button>
 
     @if (_isLoading)
@@ -153,12 +161,14 @@
     };
     private DotNetObjectReference<WorkflowExecutions>? _dotNetReference;
     private List<WorkflowExecutionSummary> _executions = [];
-    private IDisposable? _busSubscription;
+    private IJSObjectReference? _eventModule;
+    private IJSObjectReference? _eventConnectionHandle;
     private IJSObjectReference? _viewerModule;
     private IJSObjectReference? _viewerHandle;
     private string? _errorMessage;
     private string? _successMessage;
     private string? _modalErrorMessage;
+    private string? _daprWarningMessage;
     private string? _selectedExecutionId;
     private WorkflowExecutionDiagramDetail? _selectedExecutionDetail;
     private HashSet<string> _deletingExecutionIds = [];
@@ -167,10 +177,12 @@
     private bool _isExecutionModalOpen;
     private bool _isCompletingTask;
     private bool _viewerRefreshPending;
-    private string _workflowEventConnectionStatus = "Watching bus";
+    private string _browserConnectionStatus = "Browser stream connecting...";
+    private string _daprIngressStatus = "Dapr ingress checking...";
 
     protected override async Task OnInitializedAsync()
     {
+        await RefreshDaprIngressStatusAsync();
         await LoadExecutionsAsync();
     }
 
@@ -178,8 +190,12 @@
     {
         if (firstRender)
         {
-            _busSubscription = BusWatcherStreamService.Subscribe(message => InvokeAsync(() => ProcessBusMessageAsync(message)));
-            Logger.LogInformation("WorkflowExecutions subscribed to in-process bus messages.");
+            _dotNetReference ??= DotNetObjectReference.Create(this);
+            _eventModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/bus-watcher.js");
+            _eventConnectionHandle = await _eventModule.InvokeAsync<IJSObjectReference>(
+                "createWorkflowExecutionConnection",
+                _dotNetReference);
+            Logger.LogInformation("WorkflowExecutions subscribed to workflow execution websocket events.");
         }
 
         if (!_isExecutionModalOpen || !_viewerRefreshPending || _selectedExecutionDetail is null)
@@ -190,7 +206,6 @@
         try
         {
             _viewerModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/workflow.js");
-            _dotNetReference ??= DotNetObjectReference.Create(this);
 
             if (_viewerHandle is null)
             {
@@ -224,6 +239,34 @@
             await DisposeViewerAsync();
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    [JSInvokable]
+    public async Task OnWorkflowEventMessage(string messageJson)
+    {
+        try
+        {
+            var message = JsonSerializer.Deserialize<WorkflowEventBusMessage>(messageJson, _serializerOptions);
+            if (message is null)
+            {
+                return;
+            }
+
+            await ProcessBusMessageAsync(message);
+        }
+        catch (JsonException exception)
+        {
+            Logger.LogWarning(exception, "WorkflowExecutions failed to parse workflow event websocket payload: {Payload}", messageJson);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnWorkflowEventConnectionStatusChanged(string status)
+    {
+        _browserConnectionStatus = string.IsNullOrWhiteSpace(status)
+            ? "Browser stream disconnected"
+            : $"Browser stream {status.ToLowerInvariant()}";
+        await InvokeAsync(StateHasChanged);
     }
 
     [JSInvokable]
@@ -263,9 +306,9 @@
         }
     }
 
-    private async Task ProcessBusMessageAsync(BusWatcherStreamService.BusWatcherMessage message)
+    private async Task ProcessBusMessageAsync(WorkflowEventBusMessage message)
     {
-        if (!message.Topic.StartsWith(BusWatcherStreamService.TopicName, StringComparison.OrdinalIgnoreCase)
+        if (!message.Topic.StartsWith(WorkflowExecutionTopicName, StringComparison.OrdinalIgnoreCase)
             || string.IsNullOrWhiteSpace(message.Payload))
         {
             return;
@@ -288,6 +331,9 @@
             payload.EventType,
             payload.ProcessInstanceId);
 
+        _daprIngressStatus = "Dapr ingress connected";
+        _daprWarningMessage = null;
+
         var isNewExecution = !_executions.Any(item => string.Equals(item.Id, payload.ProcessInstanceId, StringComparison.Ordinal));
         if (isNewExecution)
         {
@@ -295,14 +341,11 @@
             await LoadExecutionsAsync();
         }
 
-        var shouldRefreshViewer = ApplyWorkflowExecutionEvent(payload);
-        if (shouldRefreshViewer && _viewerHandle is not null && _viewerModule is not null && _selectedExecutionDetail is not null)
+        ApplyWorkflowExecutionEvent(payload);
+
+        if (string.Equals(_selectedExecutionId, payload.ProcessInstanceId, StringComparison.Ordinal))
         {
-            await _viewerModule.InvokeVoidAsync(
-                "highlightExecutionState",
-                _viewerHandle,
-                _selectedExecutionDetail.CompletedActivityIds,
-                _selectedExecutionDetail.CurrentActivityIds);
+            await RefreshSelectedExecutionDetailAsync(payload.ProcessInstanceId);
         }
 
         await InvokeAsync(StateHasChanged);
@@ -342,6 +385,34 @@
     {
         UpsertExecutionSummary(payload);
         return UpdateSelectedExecutionDetail(payload);
+    }
+
+    private async Task RefreshSelectedExecutionDetailAsync(string executionId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _selectedExecutionDetail = await FlowableClient.GetWorkflowExecutionDiagramDetailAsync(executionId, cancellationToken);
+            _viewerRefreshPending = true;
+        }
+        catch (Exception exception)
+        {
+            Logger.LogWarning(exception, "WorkflowExecutions failed to refresh execution detail for process {ProcessInstanceId}.", executionId);
+            _modalErrorMessage = exception.Message;
+        }
+    }
+
+    private async Task RefreshDaprIngressStatusAsync()
+    {
+        if (await DaprSidecarProbe.IsAvailableAsync())
+        {
+            _daprIngressStatus = "Dapr ingress connected";
+            _daprWarningMessage = null;
+            return;
+        }
+
+        _daprIngressStatus = "Dapr ingress disconnected";
+        _daprWarningMessage =
+            "The browser stream badge only means this page is connected to AutoNate.Web. Workflow execution events arrive through the app's Dapr sidecar, and that sidecar is not reachable right now.";
     }
 
     private WorkflowExecutionEventPayload? TryDeserializeWorkflowExecutionPayload(string payloadJson)
@@ -605,6 +676,15 @@
         return "badge text-bg-success";
     }
 
+    private static string GetConnectionBadgeClass(string status)
+    {
+        return status.Contains("connected", StringComparison.OrdinalIgnoreCase)
+            ? "badge text-bg-success"
+            : status.Contains("checking", StringComparison.OrdinalIgnoreCase) || status.Contains("connecting", StringComparison.OrdinalIgnoreCase)
+                ? "badge text-bg-warning"
+                : "badge text-bg-danger";
+    }
+
     private async Task OpenExecutionAsync(string executionId)
     {
         if (IsDeletingExecution(executionId))
@@ -699,7 +779,30 @@
     {
         await DisposeViewerAsync();
 
-        _busSubscription?.Dispose();
+        if (_eventConnectionHandle is not null)
+        {
+            try
+            {
+                await _eventConnectionHandle.InvokeVoidAsync("dispose");
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+
+        if (_eventConnectionHandle is not null)
+        {
+            try
+            {
+                await _eventConnectionHandle.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (JSException)
+            {
+            }
+        }
 
         if (_viewerModule is not null)
         {
@@ -708,6 +811,20 @@
                 await _viewerModule.DisposeAsync();
             }
             catch (JSDisconnectedException)
+            {
+            }
+        }
+
+        if (_eventModule is not null)
+        {
+            try
+            {
+                await _eventModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (JSException)
             {
             }
         }
@@ -859,6 +976,13 @@
     private sealed record WorkflowExecutionCloudEvent(
         [property: JsonPropertyName("data_base64")] string? DataBase64);
 
+    private sealed record WorkflowEventBusMessage(
+        DateTimeOffset ReceivedAtUtc,
+        string Topic,
+        string? ContentType,
+        Dictionary<string, string> Headers,
+        string Payload);
+
     private sealed record WorkflowExecutionEventPayload(
         string EventId,
         string EventType,
@@ -875,4 +999,6 @@
         string? TenantId,
         string? RawFlowableEventType,
         string? SourceAppId);
+
+    private const string WorkflowExecutionTopicName = "workflow.execution";
 }

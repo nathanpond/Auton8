@@ -53,8 +53,7 @@ infra-logs:
 infra-ps:
 	$(COMPOSE) ps
 
-app: infra-ensure
-	dotnet run --project $(APP_PROJECT) --launch-profile $(APP_PROFILE)
+app: app-dapr
 
 app-dapr: infra-ensure
 	dapr run \

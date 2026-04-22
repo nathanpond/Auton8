@@ -78,6 +78,23 @@ builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
 
 var app = builder.Build();
 
+if (app.Environment.IsDevelopment()
+    && !string.Equals(
+        Environment.GetEnvironmentVariable("AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR"),
+        bool.TrueString,
+        StringComparison.OrdinalIgnoreCase))
+{
+    await using var startupScope = app.Services.CreateAsyncScope();
+    var daprSidecarProbe = startupScope.ServiceProvider.GetRequiredService<DaprSidecarProbe>();
+    if (!await daprSidecarProbe.IsAvailableAsync())
+    {
+        throw new InvalidOperationException(
+            "AutoNate.Web requires a local Dapr sidecar in Development because workflow execution events are delivered through Dapr pub/sub. " +
+            "Start the app with `make app`, `make app-dapr`, or the Rider flow that runs `dapr: AutoNate.Web Sidecar` before `AutoNate.Web: Rider`. " +
+            "Set AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true only if you intentionally want to bypass this requirement.");
+    }
+}
+
 await DatabaseSchemaInitializer.EnsureAsync(app.Services);
 
 // Configure the HTTP request pipeline.
