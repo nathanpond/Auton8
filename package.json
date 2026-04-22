@@ -5,6 +5,10 @@
     "vendor:bpmn": "node scripts/vendor-bpmn.mjs"
   },
   "dependencies": {
-    "bpmn-js": "^18.8.1"
+    "bpmn-js": "^18.8.1",
+    "bpmn-js-create-append-anything": "^1.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
   }
 }
