@@ -32,7 +32,6 @@ public static partial class WorkflowBpmnXml
     ];
     private static readonly HashSet<string> UnsupportedRuntimeControlElementNames =
     [
-        "exclusiveGateway",
         "inclusiveGateway",
         "parallelGateway",
         "eventBasedGateway",
@@ -506,7 +505,6 @@ public static partial class WorkflowBpmnXml
             "sendTask" => "send tasks",
             "receiveTask" => "receive tasks",
             "manualTask" => "manual tasks",
-            "exclusiveGateway" => "exclusive gateways",
             "inclusiveGateway" => "inclusive gateways",
             "parallelGateway" => "parallel gateways",
             "eventBasedGateway" => "event-based gateways",

@@ -72,4 +72,15 @@ public sealed record class WorkflowExecutionDiagramDetail
     public IReadOnlyList<string> CompletedActivityIds { get; init; } = [];
 
     public IReadOnlyList<string> CurrentActivityIds { get; init; } = [];
+
+    public IReadOnlyList<FlowableProcessVariable> Variables { get; init; } = [];
+}
+
+public sealed record class FlowableProcessVariable
+{
+    public string Name { get; init; } = string.Empty;
+
+    public string? Type { get; init; }
+
+    public string? Value { get; init; }
 }

@@ -86,7 +86,7 @@
 }
 
 .workflow-execution-modal {
-    width: min(92vw, 1100px);
+    width: min(96vw, 1500px);
     max-height: 90vh;
     overflow: auto;
     background: #fff;
@@ -144,18 +144,98 @@
     background: #fff;
 }
 
+.workflow-execution-body {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+}
+
 .workflow-execution-viewer-shell {
     min-height: 70vh;
     background: #f8fafc;
     border: 1px solid #dbe3f0;
     border-radius: 0.85rem;
     overflow: hidden;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .workflow-execution-viewer-canvas {
     height: 70vh;
     min-height: 34rem;
     width: 100%;
+}
+
+.workflow-execution-variables-panel {
+    flex: 0 0 20rem;
+    width: 20rem;
+    max-height: 70vh;
+    overflow-y: auto;
+    background: #f8fafc;
+    border: 1px solid #dbe3f0;
+    border-radius: 0.85rem;
+    padding: 1rem;
+}
+
+.workflow-execution-variables-title {
+    margin: 0 0 0.75rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #334155;
+}
+
+.workflow-execution-variables-empty {
+    margin: 0;
+    color: #6b7280;
+    font-size: 0.9rem;
+}
+
+.workflow-execution-variables-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.workflow-execution-variable {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.55rem;
+    padding: 0.55rem 0.7rem;
+}
+
+.workflow-execution-variable-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.workflow-execution-variable-name {
+    font-weight: 600;
+    color: #0f172a;
+    font-size: 0.9rem;
+    word-break: break-word;
+}
+
+.workflow-execution-variable-type {
+    color: #64748b;
+    font-size: 0.75rem;
+    text-transform: lowercase;
+    flex: 0 0 auto;
+}
+
+.workflow-execution-variable-value {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    color: #1e293b;
+    word-break: break-word;
+    white-space: pre-wrap;
 }
 
 .workflow-execution-context-menu {
@@ -185,6 +265,18 @@
 .workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > path:not(text),
 .workflow-execution-viewer-shell ::deep .execution-step-current .djs-visual > polyline {
     fill: #dcfce7 !important;
+}
+
+@media (max-width: 1200px) {
+    .workflow-execution-body {
+        flex-direction: column;
+    }
+
+    .workflow-execution-variables-panel {
+        flex: 0 0 auto;
+        width: 100%;
+        max-height: none;
+    }
 }
 
 @media (max-width: 900px) {

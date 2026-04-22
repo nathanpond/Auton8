@@ -245,9 +245,15 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             cancellationToken);
         await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
 
+        using var variablesResponse = await _httpClient.GetAsync(
+            $"service/history/historic-variable-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}&size={WorkflowExecutionQuerySize}",
+            cancellationToken);
+        await EnsureSuccessAsync(variablesResponse, "query historic process variables");
+
         var bpmnXml = await modelResponse.Content.ReadAsStringAsync(cancellationToken);
         EnsureDiagramXmlPresent(bpmnXml, processInstanceId, processDefinition);
         var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
+        var variablesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricVariableInstanceResponse>>(variablesResponse, cancellationToken);
 
         var completedActivityIds = activitiesPayload.Data
             .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId) && activity.EndTime is not null)
@@ -270,12 +276,45 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             }
         }
 
+        var variables = variablesPayload.Data
+            .Where(entry => entry.Variable is not null && !string.IsNullOrWhiteSpace(entry.Variable.Name))
+            .GroupBy(entry => entry.Variable!.Name!, StringComparer.Ordinal)
+            .Select(group => group
+                .OrderByDescending(entry => entry.LastUpdatedTime ?? entry.CreateTime ?? DateTimeOffset.MinValue)
+                .First())
+            .OrderBy(entry => entry.Variable!.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => new FlowableProcessVariable
+            {
+                Name = entry.Variable!.Name!,
+                Type = entry.Variable.Type,
+                Value = FormatVariableValue(entry.Variable.Value)
+            })
+            .ToArray();
+
         return new WorkflowExecutionDiagramDetail
         {
             ExecutionId = processInstanceId,
             BpmnXml = bpmnXml,
             CompletedActivityIds = completedActivityIds,
-            CurrentActivityIds = currentActivityIds
+            CurrentActivityIds = currentActivityIds,
+            Variables = variables
+        };
+    }
+
+    private static string? FormatVariableValue(JsonElement? value)
+    {
+        if (value is null || value.Value.ValueKind == JsonValueKind.Undefined || value.Value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return value.Value.ValueKind switch
+        {
+            JsonValueKind.String => value.Value.GetString(),
+            JsonValueKind.Number => value.Value.GetRawText(),
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            _ => value.Value.GetRawText()
         };
     }
 
@@ -540,6 +579,24 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? ActivityId { get; init; }
 
         public DateTimeOffset? EndTime { get; init; }
+    }
+
+    private sealed class FlowableHistoricVariableInstanceResponse
+    {
+        public FlowableHistoricVariableResponse? Variable { get; init; }
+
+        public DateTimeOffset? CreateTime { get; init; }
+
+        public DateTimeOffset? LastUpdatedTime { get; init; }
+    }
+
+    private sealed class FlowableHistoricVariableResponse
+    {
+        public string? Name { get; init; }
+
+        public string? Type { get; init; }
+
+        public JsonElement? Value { get; init; }
     }
 
     private sealed class FlowableTaskResponse

@@ -32,7 +32,7 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Empty(result.Errors);
         Assert.NotEmpty(result.Warnings);
         Assert.Contains(result.Warnings, warning => warning.Contains("service tasks", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result.Warnings, warning => warning.Contains("exclusive gateways", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("exclusive gateways", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Warnings, warning => warning.Contains("event subprocesses", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Warnings, warning => warning.Contains("participants", StringComparison.OrdinalIgnoreCase));
     }

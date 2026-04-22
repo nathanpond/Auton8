@@ -145,8 +145,37 @@
                     <span><span class="workflow-execution-swatch workflow-execution-swatch-future"></span> Future</span>
                 </div>
 
-                <div class="workflow-execution-viewer-shell">
-                    <div @ref="_viewerCanvas" class="workflow-execution-viewer-canvas" aria-label="Read-only BPMN execution diagram"></div>
+                <div class="workflow-execution-body">
+                    <div class="workflow-execution-viewer-shell">
+                        <div @ref="_viewerCanvas" class="workflow-execution-viewer-canvas" aria-label="Read-only BPMN execution diagram"></div>
+                    </div>
+
+                    <aside class="workflow-execution-variables-panel" aria-label="Process variables">
+                        <h3 class="workflow-execution-variables-title">Process Variables</h3>
+
+                        @if (_selectedExecutionDetail.Variables.Count == 0)
+                        {
+                            <p class="workflow-execution-variables-empty">No variables have been set on this execution.</p>
+                        }
+                        else
+                        {
+                            <ul class="workflow-execution-variables-list">
+                                @foreach (var variable in _selectedExecutionDetail.Variables)
+                                {
+                                    <li class="workflow-execution-variable">
+                                        <div class="workflow-execution-variable-header">
+                                            <span class="workflow-execution-variable-name">@variable.Name</span>
+                                            @if (!string.IsNullOrWhiteSpace(variable.Type))
+                                            {
+                                                <span class="workflow-execution-variable-type">@variable.Type</span>
+                                            }
+                                        </div>
+                                        <div class="workflow-execution-variable-value">@(variable.Value ?? "null")</div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </aside>
                 </div>
             }
         </div>
