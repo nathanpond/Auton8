@@ -12,6 +12,7 @@ namespace AutoNate.Web.Services.Flowable;
 public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptions> options) : IFlowableClient
 {
     private const int WorkflowExecutionQuerySize = 200;
+    private const int WorkflowExecutionActivityQuerySize = 2000;
     private static readonly XNamespace BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -130,10 +131,28 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             cancellationToken);
         await EnsureSuccessAsync(tasksResponse, "query runtime tasks");
 
+        using var activitiesResponse = await _httpClient.GetAsync(
+            $"service/history/historic-activity-instances?sort=startTime&order=desc&size={WorkflowExecutionActivityQuerySize}",
+            cancellationToken);
+        await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
+
         var historicPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(historicResponse, cancellationToken);
         var runtimePayload = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(runtimeResponse, cancellationToken);
         var tasksPayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(tasksResponse, cancellationToken);
+        var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
         var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(historicPayload.Data, cancellationToken);
+
+        var lastActivityByProcessInstanceId = activitiesPayload.Data
+            .Where(activity => !string.IsNullOrWhiteSpace(activity.ProcessInstanceId))
+            .GroupBy(activity => activity.ProcessInstanceId!, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(activity => MaxTimestamp(activity.EndTime, activity.StartTime))
+                    .Where(value => value.HasValue)
+                    .DefaultIfEmpty()
+                    .Max(),
+                StringComparer.Ordinal);
 
         var runtimeById = runtimePayload.Data
             .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
@@ -163,11 +182,19 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                     ? FirstNonEmpty(currentTask?.Name, runtimeInstance?.ActivityId)
                     : null;
 
+                lastActivityByProcessInstanceId.TryGetValue(instance.Id!, out var lastActivityAtUtc);
+                var lastActivityAt = MaxTimestamp(
+                    lastActivityAtUtc,
+                    instance.EndTime,
+                    currentTask?.CreateTime,
+                    instance.StartTime);
+
                 return new WorkflowExecutionSummary
                 {
                     Id = instance.Id!,
                     WorkflowModelName = workflowModelName,
                     StartedAtUtc = instance.StartTime,
+                    LastActivityAtUtc = lastActivityAt,
                     Status = isRunning ? "Running" : "Complete",
                     CurrentStep = currentStep
                 };
@@ -474,6 +501,20 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     }
 
+    private static DateTimeOffset? MaxTimestamp(params DateTimeOffset?[] values)
+    {
+        DateTimeOffset? max = null;
+        foreach (var value in values)
+        {
+            if (value.HasValue && (!max.HasValue || value.Value > max.Value))
+            {
+                max = value;
+            }
+        }
+
+        return max;
+    }
+
     private static void EnsureDiagramXmlPresent(string bpmnXml, string processInstanceId, FlowableProcessDefinitionResponse processDefinition)
     {
         if (string.IsNullOrWhiteSpace(bpmnXml))
@@ -577,6 +618,10 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     private sealed class FlowableHistoricActivityInstanceResponse
     {
         public string? ActivityId { get; init; }
+
+        public string? ProcessInstanceId { get; init; }
+
+        public DateTimeOffset? StartTime { get; init; }
 
         public DateTimeOffset? EndTime { get; init; }
     }

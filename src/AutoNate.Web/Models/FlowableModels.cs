@@ -58,6 +58,8 @@ public sealed record class WorkflowExecutionSummary
 
     public DateTimeOffset? StartedAtUtc { get; set; }
 
+    public DateTimeOffset? LastActivityAtUtc { get; set; }
+
     public string Status { get; set; } = string.Empty;
 
     public string? CurrentStep { get; set; }

@@ -352,7 +352,7 @@
     private bool HasPublishedDeployment => _currentModel?.LastDeployment is not null && _currentModel.PublishedVersionNumber is not null;
     private bool IsPublishedCurrentVersion => HasPublishedDeployment && !HasPersistedDraft && !_isDirty;
     private bool CanPublish => _modelerReady && !_isBusy && _currentModel is not null && (_isDirty || HasPersistedDraft || _currentModel.LastDeployment is null);
-    private bool CanStartInstance => _modelerReady && !_isBusy && _currentModel is not null && IsPublishedCurrentVersion;
+    private bool CanStartInstance => !_isBusy && _currentModel is not null && HasPublishedDeployment;
     private string DraftStatusLabel => _currentModel is null
         ? "No model"
         : _isDirty
@@ -652,11 +652,6 @@
                 throw new InvalidOperationException("Select a workflow model before starting an instance.");
             }
 
-            if (_isDirty || _currentModel.IsDraft)
-            {
-                throw new InvalidOperationException("Publish the current workflow draft to Flowable before starting a new instance.");
-            }
-
             if (_currentModel.LastDeployment is null || _currentModel.PublishedVersionNumber is null)
             {
                 throw new InvalidOperationException("Publish the workflow model to Flowable before starting an instance.");
@@ -668,7 +663,12 @@
             _runtimeStatus = "Running";
             _currentModel = await WorkflowModelStore.SaveAsync(_currentModel with { ActiveProcessInstanceId = instance.Id });
             await RefreshWorkflowListAsync(_currentModel.Id);
-            _statusMessage = $"Started process instance {_activeProcessInstanceId}.";
+
+            var startedFromPublished = _currentModel.PublishedVersionNumber;
+            var hasUnpublishedChanges = _isDirty || _currentModel.IsDraft;
+            _statusMessage = hasUnpublishedChanges
+                ? $"Started process instance {_activeProcessInstanceId} from published v{startedFromPublished}. Local draft v{_currentModel.DraftVersionNumber} has unpublished changes; publish to run them."
+                : $"Started process instance {_activeProcessInstanceId}.";
             await RefreshRuntimeStateCoreAsync();
         });
     }
