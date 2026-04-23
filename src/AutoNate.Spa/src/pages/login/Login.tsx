@@ -1,0 +1,110 @@
+import { useForm } from "react-hook-form";
+import { useSearchParams, Navigate } from "react-router-dom";
+import { submitLoginForm } from "@/api/auth";
+import { useMe } from "@/hooks/useMe";
+
+type FormValues = {
+  username: string;
+  password: string;
+};
+
+export default function Login() {
+  const [searchParams] = useSearchParams();
+  const { data: me, isLoading: meLoading } = useMe();
+
+  const error = searchParams.get("error");
+  const prefilledUsername = searchParams.get("username") ?? "";
+  // When the SPA drives the login, default the post-login redirect to /spa/home so the
+  // server's GetSafeReturnUrl lands us inside the React app rather than the Blazor /home.
+  const returnUrl = searchParams.get("returnUrl") ?? "/spa/home";
+
+  const { register, handleSubmit, formState: { isSubmitting } } = useForm<FormValues>({
+    defaultValues: { username: prefilledUsername, password: "" }
+  });
+
+  if (!meLoading && me?.authenticated) {
+    return <Navigate to="/home" replace />;
+  }
+
+  const onSubmit = (values: FormValues) => {
+    submitLoginForm({ ...values, returnUrl });
+  };
+
+  return (
+    <>
+      {error === "invalid" && (
+        <div
+          className="position-fixed top-0 start-50 translate-middle-x mt-4 z-3"
+          style={{ width: "min(100%, 420px)" }}
+        >
+          <div className="alert alert-danger mb-0" role="alert">
+            Invalid username or password.
+          </div>
+        </div>
+      )}
+
+      <div className="login login-v2 fw-bold">
+        <div className="login-cover">
+          <div
+            className="login-cover-img"
+            style={{ backgroundImage: "url('/spa/assets/img/login-bg/login-bg-17.jpg')" }}
+            data-id="login-cover-image"
+          ></div>
+          <div className="login-cover-bg"></div>
+        </div>
+
+        <div className="login-container">
+          <div className="login-header">
+            <div className="brand">
+              <div className="d-flex align-items-center">
+                <span className="logo"></span> <b>Auto</b> Nate
+              </div>
+              <small>Sign in to continue to the automation dashboard</small>
+            </div>
+            <div className="icon">
+              <i className="fa fa-lock"></i>
+            </div>
+          </div>
+
+          <div className="login-content">
+            <form onSubmit={handleSubmit(onSubmit)}>
+              <div className="form-floating mb-20px">
+                <input
+                  type="text"
+                  className="form-control fs-13px h-45px border-0"
+                  placeholder="Username"
+                  id="username"
+                  {...register("username", { required: true })}
+                />
+                <label htmlFor="username" className="d-flex align-items-center text-gray-600 fs-13px">
+                  Username
+                </label>
+              </div>
+              <div className="form-floating mb-20px">
+                <input
+                  type="password"
+                  className="form-control fs-13px h-45px border-0"
+                  placeholder="Password"
+                  id="password"
+                  {...register("password", { required: true })}
+                />
+                <label htmlFor="password" className="d-flex align-items-center text-gray-600 fs-13px">
+                  Password
+                </label>
+              </div>
+              <div className="mb-20px">
+                <button
+                  type="submit"
+                  className="btn btn-theme d-block w-100 h-45px btn-lg"
+                  disabled={isSubmitting}
+                >
+                  Sign me in
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

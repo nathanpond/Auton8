@@ -1,0 +1,925 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useBpmnModeler } from "@/hooks/useBpmnModeler";
+import {
+  EXECUTIONS_QUERY_KEY,
+  useCompleteTask,
+  useExecutionTasks,
+  useExecutions
+} from "@/hooks/useExecutions";
+import {
+  usePublishWorkflow,
+  useSaveWorkflow,
+  useStartInstance,
+  useWorkflows,
+  workflowQueryKey,
+  WORKFLOW_LATEST_QUERY_KEY,
+  WORKFLOWS_QUERY_KEY
+} from "@/hooks/useWorkflows";
+import {
+  PrepareWorkflowResponse,
+  WorkflowElementSnapshot,
+  prepareWorkflow,
+  saveWorkflow
+} from "@/api/workflows";
+import { WorkflowModel } from "@/types/flowable";
+import * as workflow from "@/lib/bpmn/workflow.js";
+import "./Workflow.css";
+
+type ScriptTaskEditor = {
+  id: string;
+  type: string;
+  name: string;
+  scriptFormat: string;
+  script: string;
+  resultVariable: string;
+};
+
+type SequenceFlowEditor = {
+  id: string;
+  type: string;
+  name: string;
+  conditionExpression: string;
+};
+
+type ElementSelection = {
+  id: string;
+  type: string;
+  name?: string | null;
+  scriptFormat?: string | null;
+  script?: string | null;
+  resultVariable?: string | null;
+  conditionExpression?: string | null;
+} | null;
+
+export default function WorkflowStudio() {
+  const qc = useQueryClient();
+  const { data: workflows = [], isSuccess: workflowsLoaded } = useWorkflows();
+  const [currentModel, setCurrentModel] = useState<WorkflowModel | null>(null);
+  const [loadedXml, setLoadedXml] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [scriptTaskEditor, setScriptTaskEditor] = useState<ScriptTaskEditor | null>(null);
+  const [sequenceFlowEditor, setSequenceFlowEditor] = useState<SequenceFlowEditor | null>(null);
+
+  // Seed currentModel from the first workflow once the list query resolves. Gating on
+  // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
+  useEffect(() => {
+    if (!workflowsLoaded || currentModel) {
+      return;
+    }
+    if (workflows.length > 0) {
+      selectWorkflow(workflows[0]);
+    } else {
+      setShowCreateModal(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflowsLoaded, workflows]);
+
+  const onDiagramChanged = useCallback(() => {
+    setDirty(true);
+  }, []);
+
+  const onSelectionChanged = useCallback((raw: unknown) => {
+    const selection = raw as ElementSelection;
+    if (selection && selection.type === "bpmn:ScriptTask") {
+      setScriptTaskEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        scriptFormat: "javascript",
+        script: selection.script ?? "",
+        resultVariable: selection.resultVariable ?? ""
+      });
+      setSequenceFlowEditor(null);
+    } else if (selection && selection.type === "bpmn:SequenceFlow") {
+      setSequenceFlowEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        conditionExpression: selection.conditionExpression ?? ""
+      });
+      setScriptTaskEditor(null);
+    } else {
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+    }
+  }, []);
+
+  const callbacks = useMemo(
+    () => ({
+      NotifyDiagramChanged: onDiagramChanged,
+      NotifySelectionChanged: onSelectionChanged
+    }),
+    [onDiagramChanged, onSelectionChanged]
+  );
+
+  const { containerRef, handle, loading: modelerLoading, error: modelerError } = useBpmnModeler({
+    xml: loadedXml,
+    callbacks
+  });
+
+  const saveMutation = useSaveWorkflow();
+  const publishMutation = usePublishWorkflow();
+  const startMutation = useStartInstance();
+
+  const selectWorkflow = (model: WorkflowModel) => {
+    setCurrentModel(model);
+    setLoadedXml(model.bpmnXml);
+    setDirty(false);
+    setWarnings([]);
+    setStatus(null);
+    setError(null);
+    setScriptTaskEditor(null);
+    setSequenceFlowEditor(null);
+  };
+
+  const onSelectionChange = async (id: string) => {
+    const target = workflows.find((w) => w.id === id);
+    if (!target || target.id === currentModel?.id) return;
+    if (dirty && !window.confirm("Discard unsaved changes to the current workflow?")) {
+      return;
+    }
+    selectWorkflow(target);
+  };
+
+  const getModelerSnapshot = async (): Promise<{
+    xml: string;
+    snapshots: WorkflowElementSnapshot[];
+  } | null> => {
+    if (!handle) {
+      setError("The BPMN modeler is not ready yet.");
+      return null;
+    }
+
+    try {
+      const xml: string = await workflow.saveXml(handle);
+      const snapshots: WorkflowElementSnapshot[] = await workflow.getElementSnapshots(handle);
+      return { xml, snapshots };
+    } catch (err) {
+      setError(describeError(err));
+      return null;
+    }
+  };
+
+  const runBusy = async <T,>(operation: string, task: () => Promise<T>): Promise<T | null> => {
+    if (busy) return null;
+    setBusy(operation);
+    setError(null);
+    setStatus(null);
+    try {
+      const result = await task();
+      return result;
+    } catch (err) {
+      setError(describeError(err));
+      return null;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const prepareAndStore = async (): Promise<{
+    prepared: WorkflowModel;
+    response: PrepareWorkflowResponse;
+  } | null> => {
+    if (!currentModel) {
+      setError("Select or create a workflow model before saving.");
+      return null;
+    }
+    const snap = await getModelerSnapshot();
+    if (!snap) return null;
+
+    const response = await prepareWorkflow({
+      model: { ...currentModel, bpmnXml: snap.xml },
+      elementSnapshots: snap.snapshots
+    });
+    setWarnings(response.warnings);
+    if (response.errors.length > 0) {
+      setError(response.errors.join(" "));
+      return null;
+    }
+    return { prepared: response.model, response };
+  };
+
+  const onSave = () =>
+    runBusy("saving the workflow draft", async () => {
+      const prep = await prepareAndStore();
+      if (!prep) return;
+      const saved = await saveWorkflow(prep.prepared);
+      qc.setQueryData(workflowQueryKey(saved.id), saved);
+      qc.invalidateQueries({ queryKey: WORKFLOWS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: WORKFLOW_LATEST_QUERY_KEY });
+      setCurrentModel(saved);
+      setLoadedXml(saved.bpmnXml);
+      setDirty(false);
+      setStatus(`Saved workflow model '${saved.name}'.`);
+    });
+
+  const onPublish = () =>
+    runBusy("publishing the workflow model", async () => {
+      const prep = await prepareAndStore();
+      if (!prep) return;
+      const result = await publishMutation.mutateAsync(prep.prepared);
+      setCurrentModel(result.model);
+      setLoadedXml(result.model.bpmnXml);
+      setDirty(false);
+      setStatus(
+        `Published '${result.model.name}' draft v${result.model.draftVersionNumber} to Flowable as definition version ${result.deployment.processDefinitionVersion}.`
+      );
+    });
+
+  const onStartInstance = () =>
+    runBusy("starting the workflow instance", async () => {
+      if (!currentModel || !currentModel.publishedVersionNumber) {
+        throw new Error("Publish the workflow model to Flowable before starting an instance.");
+      }
+      const instance = await startMutation.mutateAsync({ processKey: currentModel.processKey });
+      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
+
+      const nextModel = { ...currentModel, activeProcessInstanceId: instance.id };
+      setCurrentModel(nextModel);
+
+      const hasUnpublishedChanges = dirty || currentModel.isDraft;
+      const prefix = `Started process instance ${instance.id}`;
+      setStatus(
+        hasUnpublishedChanges
+          ? `${prefix} from published v${currentModel.publishedVersionNumber}. Local draft v${currentModel.draftVersionNumber} has unpublished changes; publish to run them.`
+          : `${prefix}.`
+      );
+    });
+
+  const applyScriptTask = () =>
+    runBusy("applying script task changes", async () => {
+      if (!handle || !scriptTaskEditor) {
+        throw new Error("Select a script task before applying script changes.");
+      }
+      await workflow.updateScriptTaskProperties(handle, scriptTaskEditor);
+      setScriptTaskEditor(null);
+    });
+
+  const applySequenceFlow = () =>
+    runBusy("applying sequence flow changes", async () => {
+      if (!handle || !sequenceFlowEditor) {
+        throw new Error("Select a sequence flow before applying condition changes.");
+      }
+      await workflow.updateSequenceFlowProperties(handle, sequenceFlowEditor);
+      setSequenceFlowEditor(null);
+    });
+
+  const canPublish =
+    !busy && !!currentModel && (dirty || currentModel.isDraft || currentModel.lastDeployment === null);
+  const canStart =
+    !busy && !!currentModel && !!currentModel.lastDeployment && currentModel.publishedVersionNumber !== null;
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1 className="page-header mb-1">Workflow Studio</h1>
+          <p className="page-head-copy workflow-copy">
+            Select a saved workflow model, edit it in the browser, save drafts to AutoNate, publish
+            to Flowable, and start new executions from the current model.
+          </p>
+        </div>
+      </div>
+
+      {error && <div className="alert alert-danger">{error}</div>}
+      {status && <div className="alert alert-success">{status}</div>}
+      {warnings.length > 0 && (
+        <div className="alert alert-warning" role="alert">
+          <strong>Compatibility warnings</strong>
+          <ul className="workflow-warning-list">
+            {warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="workflow-toolbar">
+        <div className="workflow-selector-panel">
+          <label className="workflow-field">
+            <span>Workflow Model</span>
+            <div className="workflow-selector-inputs">
+              <select
+                className="form-select"
+                value={currentModel?.id ?? ""}
+                onChange={(e) => onSelectionChange(e.target.value)}
+                disabled={!!busy}
+              >
+                <option value="">
+                  {workflows.length === 0 ? "No workflow models yet" : "Select a workflow model"}
+                </option>
+                {workflows.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-outline-secondary workflow-add-button"
+                onClick={() => setShowCreateModal(true)}
+                disabled={!!busy}
+                aria-label="Create workflow model"
+                title="Create workflow model"
+              >
+                <i className="bi bi-plus-lg" aria-hidden="true"></i>
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div className="workflow-actions">
+          <button
+            className="btn btn-primary"
+            onClick={onSave}
+            disabled={!handle || !!busy || !currentModel}
+            title="Save"
+          >
+            Save
+          </button>
+          <button
+            className="btn btn-outline-primary"
+            onClick={onPublish}
+            disabled={!canPublish}
+            title="Publish"
+          >
+            Publish
+          </button>
+          <button
+            className="btn btn-outline-success"
+            onClick={onStartInstance}
+            disabled={!canStart}
+            title="Start instance"
+          >
+            Start Instance
+          </button>
+        </div>
+      </div>
+
+      {busy && <p className="workflow-busy">Working on {busy}...</p>}
+
+      <div className="workflow-layout">
+        <section className="workflow-main">
+          {!currentModel ? (
+            <div className="workflow-empty-state">
+              <div className="workflow-empty-icon">
+                <i className="bi bi-diagram-3" aria-hidden="true"></i>
+              </div>
+              <h2>Create Your First Workflow</h2>
+              <p>
+                Workflow models live in the application database and are loaded into the modeler
+                from there. Create one to start modeling.
+              </p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowCreateModal(true)}
+                title="Create workflow model"
+              >
+                Create Workflow Model
+              </button>
+            </div>
+          ) : (
+            <div className="workflow-shell">
+              <div
+                ref={containerRef}
+                className="workflow-canvas"
+                aria-label="BPMN modeler"
+              ></div>
+              {modelerLoading && (
+                <p className="workflow-muted px-3 py-2">Loading BPMN modeler...</p>
+              )}
+              {modelerError && (
+                <p className="text-danger px-3 py-2">{modelerError.message}</p>
+              )}
+            </div>
+          )}
+        </section>
+
+        <WorkflowSidebar currentModel={currentModel} dirty={dirty} />
+      </div>
+
+      {showCreateModal && (
+        <CreateWorkflowModal
+          onClose={() => {
+            if (busy) return;
+            setShowCreateModal(false);
+          }}
+          onCreated={(model) => {
+            qc.invalidateQueries({ queryKey: WORKFLOWS_QUERY_KEY });
+            qc.invalidateQueries({ queryKey: WORKFLOW_LATEST_QUERY_KEY });
+            setShowCreateModal(false);
+            selectWorkflow(model);
+            setStatus(`Created workflow model '${model.name}'.`);
+          }}
+          onError={(msg) => setError(msg)}
+        />
+      )}
+
+      {scriptTaskEditor && (
+        <ScriptTaskModal
+          editor={scriptTaskEditor}
+          onChange={setScriptTaskEditor}
+          onClose={() => {
+            if (busy) return;
+            setScriptTaskEditor(null);
+          }}
+          onApply={applyScriptTask}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {sequenceFlowEditor && (
+        <SequenceFlowModal
+          editor={sequenceFlowEditor}
+          onChange={setSequenceFlowEditor}
+          onClose={() => {
+            if (busy) return;
+            setSequenceFlowEditor(null);
+          }}
+          onApply={applySequenceFlow}
+          disabled={!!busy || !handle}
+        />
+      )}
+    </>
+  );
+}
+
+function WorkflowSidebar({
+  currentModel,
+  dirty
+}: {
+  currentModel: WorkflowModel | null;
+  dirty: boolean;
+}) {
+  const { data: executions = [] } = useExecutions();
+  const { data: runtimeTasks = [] } = useExecutionTasks(currentModel?.activeProcessInstanceId ?? null);
+  const completeTask = useCompleteTask();
+  const [completing, setCompleting] = useState<string | null>(null);
+
+  const activeExecution = currentModel?.activeProcessInstanceId
+    ? executions.find((e) => e.id === currentModel.activeProcessInstanceId)
+    : null;
+
+  const runtimeStatus = useMemo(() => {
+    if (!currentModel) return "No workflow model selected";
+    if (!currentModel.activeProcessInstanceId) return "Not started";
+    if (activeExecution) {
+      if (activeExecution.status === "Running" && runtimeTasks.length > 0) {
+        return "Waiting on user task";
+      }
+      return activeExecution.status;
+    }
+    return runtimeTasks.length > 0 ? "Waiting on user task" : "Completed";
+  }, [currentModel, activeExecution, runtimeTasks]);
+
+  const onComplete = async (taskId: string) => {
+    setCompleting(taskId);
+    try {
+      await completeTask.mutateAsync({ taskId });
+    } finally {
+      setCompleting(null);
+    }
+  };
+
+  const draftStatusLabel = !currentModel
+    ? "No model"
+    : dirty
+      ? `Unsaved changes for v${currentModel.draftVersionNumber}`
+      : currentModel.isDraft
+        ? `Draft v${currentModel.draftVersionNumber}`
+        : `Published v${currentModel.draftVersionNumber}`;
+
+  return (
+    <aside className="workflow-sidebar">
+      <section className="workflow-card">
+        <h2>Model</h2>
+        {!currentModel ? (
+          <p className="workflow-muted">No workflow model is selected.</p>
+        ) : (
+          <dl className="workflow-meta">
+            <div>
+              <dt>Model ID</dt>
+              <dd>{currentModel.id}</dd>
+            </div>
+            <div>
+              <dt>Name</dt>
+              <dd>{currentModel.name}</dd>
+            </div>
+            <div>
+              <dt>Draft Status</dt>
+              <dd>{draftStatusLabel}</dd>
+            </div>
+            <div>
+              <dt>Draft Version</dt>
+              <dd>v{currentModel.draftVersionNumber}</dd>
+            </div>
+            <div>
+              <dt>Published Version</dt>
+              <dd>
+                {currentModel.publishedVersionNumber === null
+                  ? "Not published"
+                  : `v${currentModel.publishedVersionNumber}`}
+              </dd>
+            </div>
+            <div>
+              <dt>Updated</dt>
+              <dd>{formatTimestamp(currentModel.updatedAtUtc)}</dd>
+            </div>
+          </dl>
+        )}
+      </section>
+
+      <section className="workflow-card">
+        <h2>Deployment</h2>
+        {!currentModel?.lastDeployment ? (
+          <p className="workflow-muted">This workflow model has not been published to Flowable yet.</p>
+        ) : (
+          <>
+            {(currentModel.isDraft || dirty) && (
+              <p className="workflow-muted">
+                The current workflow is in draft state. Publish it to deploy this version to
+                Flowable.
+              </p>
+            )}
+            <dl className="workflow-meta">
+              <div>
+                <dt>Definition ID</dt>
+                <dd>{currentModel.lastDeployment.processDefinitionId}</dd>
+              </div>
+              <div>
+                <dt>Version</dt>
+                <dd>{currentModel.lastDeployment.processDefinitionVersion}</dd>
+              </div>
+              <div>
+                <dt>Deployment ID</dt>
+                <dd>{currentModel.lastDeployment.deploymentId}</dd>
+              </div>
+              <div>
+                <dt>Published</dt>
+                <dd>{formatTimestamp(currentModel.lastDeployment.deployedAtUtc)}</dd>
+              </div>
+            </dl>
+          </>
+        )}
+      </section>
+
+      <section className="workflow-card">
+        <h2>Runtime</h2>
+        <dl className="workflow-meta">
+          <div>
+            <dt>Instance</dt>
+            <dd>{currentModel?.activeProcessInstanceId ?? "Not started"}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>{runtimeStatus}</dd>
+          </div>
+          <div>
+            <dt>Active Tasks</dt>
+            <dd>{runtimeTasks.length}</dd>
+          </div>
+        </dl>
+
+        {runtimeTasks.length > 0 ? (
+          <div className="workflow-task-list">
+            {runtimeTasks.map((task) => (
+              <div key={task.id} className="workflow-task">
+                <div>
+                  <strong>{task.name}</strong>
+                  <div className="workflow-task-meta">Task ID: {task.id}</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-success"
+                  onClick={() => onComplete(task.id)}
+                  disabled={completing === task.id}
+                  title={`Complete ${task.name}`}
+                >
+                  Complete {task.name}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : currentModel?.activeProcessInstanceId ? (
+          <p className="workflow-muted">
+            No active tasks are currently available for the selected workflow instance.
+          </p>
+        ) : null}
+      </section>
+    </aside>
+  );
+}
+
+function CreateWorkflowModal({
+  onClose,
+  onCreated,
+  onError
+}: {
+  onClose: () => void;
+  onCreated: (model: WorkflowModel) => void;
+  onError: (message: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const onCreate = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      // Server-side prepare + save: build a prepared model from a blank BPMN starter.
+      // We submit a model with just the name and an empty XML placeholder; the server
+      // generates the starter via prepareWorkflow + saveWorkflow.
+      const prepared = await prepareWorkflow({
+        model: {
+          id: crypto.randomUUID(),
+          name: name.trim(),
+          processKey: "",
+          bpmnXml: STARTER_DIAGRAM_PLACEHOLDER,
+          isDraft: true,
+          draftVersionNumber: 1,
+          publishedVersionNumber: null,
+          lastDeployment: null,
+          activeProcessInstanceId: null,
+          createdAtUtc: new Date().toISOString(),
+          updatedAtUtc: new Date().toISOString()
+        },
+        elementSnapshots: []
+      });
+
+      if (prepared.errors.length > 0) {
+        onError(prepared.errors.join(" "));
+        return;
+      }
+
+      const saved = await saveWorkflow(prepared.model);
+      onCreated(saved);
+    } catch (err) {
+      onError(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Create Workflow Model</h2>
+            <p className="workflow-modal-copy">
+              Name the new workflow model. AutoNate will create a blank draft in the database and
+              load it into the modeler.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <label className="workflow-field">
+          <span>Workflow Name</span>
+          <input
+            ref={inputRef}
+            className="form-control"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                onCreate();
+              }
+            }}
+          />
+        </label>
+
+        <div className="workflow-modal-actions">
+          <button
+            type="button"
+            className="btn btn-outline-secondary"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onCreate}
+            disabled={busy || !name.trim()}
+          >
+            Create
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScriptTaskModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: ScriptTaskEditor;
+  onChange: (next: ScriptTaskEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal workflow-script-task-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Script Task</h2>
+            <p className="workflow-modal-copy">
+              Edit the selected BPMN script task. AutoNate saves the JavaScript body inline in the
+              BPMN XML and validates it before save or publish.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        <label className="workflow-field">
+          <span>Task Name</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Script Format</span>
+          <input className="form-control" value="javascript" readOnly />
+        </label>
+
+        <label className="workflow-field">
+          <span>Result Variable</span>
+          <input
+            className="form-control"
+            value={editor.resultVariable}
+            onChange={(e) => onChange({ ...editor, resultVariable: e.target.value })}
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Script Body</span>
+          <textarea
+            className="form-control workflow-script-task-editor"
+            rows={12}
+            spellCheck={false}
+            value={editor.script}
+            onChange={(e) => onChange({ ...editor, script: e.target.value })}
+          />
+        </label>
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SequenceFlowModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: SequenceFlowEditor;
+  onChange: (next: SequenceFlowEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal workflow-sequence-flow-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Sequence Flow</h2>
+            <p className="workflow-modal-copy">
+              Edit the selected path leaving a task or gateway. Use a Flowable expression like{" "}
+              <code>${"{needsApproval}"}</code> or <code>${"{riskLevel == 'high'}"}</code> to route
+              decisions based on process variables.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        <label className="workflow-field">
+          <span>Flow Name</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Condition Expression</span>
+          <textarea
+            className="form-control workflow-expression-editor"
+            rows={6}
+            spellCheck={false}
+            value={editor.conditionExpression}
+            onChange={(e) => onChange({ ...editor, conditionExpression: e.target.value })}
+          />
+        </label>
+
+        <p className="workflow-modal-note">
+          Leave the condition blank for an unconditional path. For exclusive gateways, put the
+          condition on the outgoing branch itself, not on the gateway node.
+        </p>
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatTimestamp(iso: string | null | undefined): string {
+  if (!iso) return "Not available";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    const response = (error as { response?: { data?: { message?: string } } }).response;
+    return response?.data?.message ?? error.message;
+  }
+  return String(error);
+}
+
+// Minimal BPMN starter diagram that the server-side prepare endpoint will patch up with the
+// correct process key and name via WorkflowBpmnXml.ApplyProcessMetadata.
+const STARTER_DIAGRAM_PLACEHOLDER = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_1"
+                  targetNamespace="http://autonate.dev/workflows">
+  <bpmn:process id="workflow" name="Workflow" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="workflow">
+      <bpmndi:BPMNShape id="_BPMNShape_StartEvent_1" bpmnElement="StartEvent_1">
+        <dc:Bounds x="173" y="102" width="36" height="36" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;

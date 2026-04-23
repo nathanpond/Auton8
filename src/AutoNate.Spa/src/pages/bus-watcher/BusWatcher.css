@@ -1,0 +1,112 @@
+.bus-watcher-copy {
+    max-width: 64rem;
+    color: #4b5563;
+}
+
+.bus-watcher-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.bus-watcher-warning {
+    margin-bottom: 1rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 0.75rem;
+    background: rgba(254, 243, 199, 0.7);
+    color: #92400e;
+}
+
+.bus-watcher-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.45rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.bus-watcher-status-connected {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.bus-watcher-status-connecting {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.bus-watcher-shell {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 1rem;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+    overflow: hidden;
+}
+
+.bus-watcher-empty {
+    margin: 0;
+    padding: 1.5rem;
+    color: #cbd5e1;
+}
+
+.bus-watcher-log {
+    max-height: 70vh;
+    overflow: auto;
+    padding: 1rem;
+}
+
+.bus-watcher-entry + .bus-watcher-entry {
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.bus-watcher-entry-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    color: #93c5fd;
+    font-size: 0.88rem;
+}
+
+.bus-watcher-entry-time {
+    color: #cbd5e1;
+}
+
+.bus-watcher-entry-topic {
+    font-weight: 700;
+}
+
+.bus-watcher-entry-headers,
+.bus-watcher-entry-payload {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9rem;
+}
+
+.bus-watcher-entry-headers {
+    margin-bottom: 0.65rem;
+    color: #fcd34d;
+}
+
+.bus-watcher-entry-payload {
+    color: #e2e8f0;
+}
+
+@media (max-width: 640px) {
+    .bus-watcher-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .bus-watcher-log {
+        max-height: 62vh;
+        padding: 0.85rem;
+    }
+}
