@@ -7,8 +7,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 const bpmnJsDist = path.join(repoRoot, "node_modules", "bpmn-js", "dist");
-const targetRoot = path.join(repoRoot, "src", "AutoNate.Web", "wwwroot", "vendor", "bpmn-js");
 const entry = path.join(__dirname, "bpmn-entry.mjs");
+const targetRoot = path.join(repoRoot, "src", "AutoNate.Spa", "public", "vendor", "bpmn-js");
 
 await rm(targetRoot, { recursive: true, force: true });
 await mkdir(path.join(targetRoot, "bpmn-font"), { recursive: true });

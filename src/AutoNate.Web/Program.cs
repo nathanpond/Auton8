@@ -1,5 +1,5 @@
-using AutoNate.Web.Components;
 using AutoNate.Web.Configuration;
+using AutoNate.Web.Endpoints;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
@@ -43,18 +43,16 @@ if (builder.Environment.IsDevelopment())
 }
 
 // Add services to the container.
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.LoginPath = "/";
-        options.AccessDeniedPath = "/";
+        options.LoginPath = "/spa/";
+        options.AccessDeniedPath = "/spa/";
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
     });
 builder.Services.AddAuthorization();
+builder.Services.AddAntiforgery();
 builder.Services.AddOptions<DevelopmentAutoLoginOptions>()
     .BindConfiguration(DevelopmentAutoLoginOptions.SectionName);
 builder.Services.AddOptions<FlowableOptions>()
@@ -100,13 +98,10 @@ await DatabaseSchemaInitializer.EnsureAsync(app.Services);
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
     app.UseHttpsRedirection();
 }
-
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 
 app.UseWebSockets();
 app.UseAuthentication();
@@ -303,9 +298,21 @@ app.MapPost(
         })
     .DisableAntiforgery();
 
+app.MapAuthEndpoints();
+app.MapHealthEndpoints();
+app.MapUserEndpoints();
+app.MapWorkflowEndpoints();
+app.MapExecutionEndpoints();
+
 app.MapStaticAssets();
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+
+// React SPA is the only UI now. Root URL redirects into /spa/ so users hitting the bare
+// domain land on the SPA. Any /spa/* route that isn't a physical file falls back to the
+// SPA index so react-router can pick it up client-side.
+app.MapGet("/", () => Results.Redirect("/spa/"));
+app.MapFallbackToFile(
+    "/spa/{*path:nonfile}",
+    "spa/index.html");
 
 app.Run();
 
@@ -327,21 +334,21 @@ static string BuildLoginRedirect(string? returnUrl, string error, string? userna
     }
 
     var queryString = QueryString.Create(query).ToUriComponent();
-    return string.IsNullOrEmpty(queryString) ? "/" : $"/{queryString}";
+    return string.IsNullOrEmpty(queryString) ? "/spa/" : $"/spa/{queryString}";
 }
 
 static string GetSafeReturnUrl(string? returnUrl)
 {
     if (string.IsNullOrWhiteSpace(returnUrl))
     {
-        return "/home";
+        return "/spa/home";
     }
 
     return returnUrl.StartsWith("/", StringComparison.Ordinal) &&
            !returnUrl.StartsWith("//", StringComparison.Ordinal) &&
            !returnUrl.StartsWith("/\\", StringComparison.Ordinal)
         ? returnUrl
-        : "/home";
+        : "/spa/home";
 }
 
 static ClaimsPrincipal BuildPrincipal(LocalUser user, string authenticationSource)

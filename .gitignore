@@ -11,3 +11,7 @@ infra/mounts/**
 !infra/mounts/
 !infra/mounts/*/
 
+
+# React SPA build output (produced by MSBuild BuildReactSpa target)
+src/AutoNate.Spa/dist/
+src/AutoNate.Web/wwwroot/spa/
