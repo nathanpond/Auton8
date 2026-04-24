@@ -6,7 +6,7 @@ const backendTarget = process.env.ASPNETCORE_URL ?? "http://localhost:5108";
 const wsBackendTarget = backendTarget.replace(/^http/, "ws");
 
 export default defineConfig({
-  base: "/spa/",
+  base: "/",
   plugins: [react()],
   resolve: {
     alias: {

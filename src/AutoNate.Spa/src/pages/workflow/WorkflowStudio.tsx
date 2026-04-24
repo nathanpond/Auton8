@@ -63,6 +63,7 @@ export default function WorkflowStudio() {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showBpmnTypesModal, setShowBpmnTypesModal] = useState(false);
   const [scriptTaskEditor, setScriptTaskEditor] = useState<ScriptTaskEditor | null>(null);
   const [sequenceFlowEditor, setSequenceFlowEditor] = useState<SequenceFlowEditor | null>(null);
 
@@ -285,6 +286,16 @@ export default function WorkflowStudio() {
             to Flowable, and start new executions from the current model.
           </p>
         </div>
+        <button
+          type="button"
+          className="workflow-bpmn-support-badge"
+          onClick={() => setShowBpmnTypesModal(true)}
+          title="View supported BPMN node types"
+        >
+          <i className="bi bi-diagram-3-fill" aria-hidden="true"></i>
+          <span>Supported BPMN Types</span>
+          <i className="bi bi-arrow-right-short" aria-hidden="true"></i>
+        </button>
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -446,6 +457,10 @@ export default function WorkflowStudio() {
           onApply={applySequenceFlow}
           disabled={!!busy || !handle}
         />
+      )}
+
+      {showBpmnTypesModal && (
+        <BpmnTypesModal onClose={() => setShowBpmnTypesModal(false)} />
       )}
     </>
   );
@@ -882,6 +897,200 @@ function SequenceFlowModal({
           </button>
           <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
             Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type BpmnTypeGroup = {
+  category: string;
+  items: string[];
+};
+
+const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
+  {
+    category: "Events",
+    items: ["Start Event (None)", "End Event (None)", "End Event (Terminate)"]
+  },
+  {
+    category: "Tasks",
+    items: ["Task (Generic)", "User Task", "Script Task"]
+  },
+  {
+    category: "Gateways",
+    items: ["Exclusive Gateway (XOR)"]
+  },
+  {
+    category: "Flows",
+    items: ["Sequence Flow"]
+  }
+];
+
+const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
+  {
+    category: "Start Events",
+    items: [
+      "Message Start Event",
+      "Timer Start Event",
+      "Signal Start Event",
+      "Conditional Start Event",
+      "Error Start Event",
+      "Escalation Start Event",
+      "Compensation Start Event"
+    ]
+  },
+  {
+    category: "Intermediate Events",
+    items: [
+      "Intermediate Throw (None)",
+      "Intermediate Throw (Message)",
+      "Intermediate Throw (Signal)",
+      "Intermediate Throw (Escalation)",
+      "Intermediate Throw (Link)",
+      "Intermediate Throw (Compensation)",
+      "Intermediate Catch (Message)",
+      "Intermediate Catch (Timer)",
+      "Intermediate Catch (Signal)",
+      "Intermediate Catch (Conditional)",
+      "Intermediate Catch (Link)"
+    ]
+  },
+  {
+    category: "Boundary Events",
+    items: [
+      "Message Boundary",
+      "Timer Boundary",
+      "Signal Boundary",
+      "Conditional Boundary",
+      "Error Boundary",
+      "Escalation Boundary",
+      "Cancel Boundary",
+      "Compensation Boundary"
+    ]
+  },
+  {
+    category: "End Events",
+    items: [
+      "Message End",
+      "Signal End",
+      "Error End",
+      "Escalation End",
+      "Cancel End",
+      "Compensation End"
+    ]
+  },
+  {
+    category: "Tasks",
+    items: [
+      "Service Task",
+      "Send Task",
+      "Receive Task",
+      "Manual Task",
+      "Business Rule Task",
+      "Call Activity"
+    ]
+  },
+  {
+    category: "Sub-Processes",
+    items: ["Sub-Process (Embedded)", "Event Sub-Process", "Transaction", "Ad-Hoc Sub-Process"]
+  },
+  {
+    category: "Gateways",
+    items: [
+      "Parallel Gateway (AND)",
+      "Inclusive Gateway (OR)",
+      "Event-Based Gateway",
+      "Complex Gateway"
+    ]
+  },
+  {
+    category: "Activity Markers",
+    items: ["Loop Marker", "Multi-Instance (Parallel)", "Multi-Instance (Sequential)", "Compensation Marker"]
+  },
+  {
+    category: "Collaboration",
+    items: ["Pool / Participant", "Lane", "Message Flow"]
+  },
+  {
+    category: "Data",
+    items: ["Data Object Reference", "Data Store Reference", "Data Input", "Data Output"]
+  },
+  {
+    category: "Artifacts",
+    items: ["Text Annotation", "Group", "Association"]
+  }
+];
+
+function BpmnTypesModal({ onClose }: { onClose: () => void }) {
+  const supportedCount = SUPPORTED_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
+  const comingSoonCount = COMING_SOON_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
+
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal workflow-bpmn-types-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Supported BPMN Types</h2>
+            <p className="workflow-modal-copy">
+              The full set of BPMN 2.0 node types the AutoNate workflow studio can model and execute
+              today, alongside what is on the roadmap.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-bpmn-types-grid">
+          <section className="workflow-bpmn-types-column workflow-bpmn-types-column-supported">
+            <header className="workflow-bpmn-types-column-header">
+              <h3>
+                <i className="bi bi-check-circle-fill" aria-hidden="true"></i>
+                Supported
+              </h3>
+              <span className="workflow-bpmn-types-count">{supportedCount}</span>
+            </header>
+            {SUPPORTED_BPMN_TYPES.map((group) => (
+              <div key={group.category} className="workflow-bpmn-types-group">
+                <h4>{group.category}</h4>
+                <ul>
+                  {group.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </section>
+
+          <section className="workflow-bpmn-types-column workflow-bpmn-types-column-coming">
+            <header className="workflow-bpmn-types-column-header">
+              <h3>
+                <i className="bi bi-hourglass-split" aria-hidden="true"></i>
+                Coming Soon
+              </h3>
+              <span className="workflow-bpmn-types-count">{comingSoonCount}</span>
+            </header>
+            {COMING_SOON_BPMN_TYPES.map((group) => (
+              <div key={group.category} className="workflow-bpmn-types-group">
+                <h4>{group.category}</h4>
+                <ul>
+                  {group.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </section>
+        </div>
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-primary" onClick={onClose}>
+            Close
           </button>
         </div>
       </div>

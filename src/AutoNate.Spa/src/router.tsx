@@ -6,8 +6,6 @@ import ProtectedRoute from "./shell/ProtectedRoute";
 
 import Login from "./pages/login/Login";
 import Home from "./pages/home/Home";
-import Counter from "./pages/counter/Counter";
-import Weather from "./pages/weather/Weather";
 import UserProfile from "./pages/user-profile/UserProfile";
 import BusWatcher from "./pages/bus-watcher/BusWatcher";
 import ManageUsers from "./pages/manage-users/ManageUsers";
@@ -28,22 +26,6 @@ export default function Router() {
           element={
             <ProtectedRoute>
               <Home />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="counter"
-          element={
-            <ProtectedRoute>
-              <Counter />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="weather"
-          element={
-            <ProtectedRoute>
-              <Weather />
             </ProtectedRoute>
           }
         />

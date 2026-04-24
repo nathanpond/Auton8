@@ -6,7 +6,6 @@ export default function NavMenu() {
   const location = useLocation();
   const { data: me } = useMe();
 
-  // The router's basename is /spa, so location.pathname is the post-basename path.
   const currentPath = useMemo(
     () => location.pathname.split("?")[0].replace(/^\/+|\/+$/g, ""),
     [location.pathname]
@@ -79,28 +78,6 @@ export default function NavMenu() {
             <div className={menuItemClass("bus-watcher")}>
               <NavLink to="/bus-watcher" className="menu-link">
                 <div className="menu-text">Bus Watcher</div>
-              </NavLink>
-            </div>
-          </div>
-        </div>
-
-        <div className={groupClass("counter", "weather")}>
-          <a href="#" className="menu-link" onClick={preventDefault}>
-            <div className="menu-icon">
-              <i className="fa fa-flask"></i>
-            </div>
-            <div className="menu-text">Samples</div>
-            <div className="menu-caret"></div>
-          </a>
-          <div className="menu-submenu">
-            <div className={menuItemClass("counter")}>
-              <NavLink to="/counter" className="menu-link">
-                <div className="menu-text">Counter</div>
-              </NavLink>
-            </div>
-            <div className={menuItemClass("weather")}>
-              <NavLink to="/weather" className="menu-link">
-                <div className="menu-text">Weather</div>
               </NavLink>
             </div>
           </div>

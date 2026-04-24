@@ -8,15 +8,23 @@
 
         <SpaRoot>..\AutoNate.Spa\</SpaRoot>
         <SpaDist>$(SpaRoot)dist\</SpaDist>
-        <SpaPublishDir>wwwroot\spa\</SpaPublishDir>
+        <!-- Vite's dist/ is copied to wwwroot/ so the SPA is served at the site root. -->
+        <SpaPublishDir>wwwroot\</SpaPublishDir>
         <!-- SPA is built on every dotnet build so wwwroot/spa stays current.
              Skip for fast backend-only iteration with /p:BuildSpa=false. -->
         <BuildSpa Condition="'$(BuildSpa)' == ''">true</BuildSpa>
+
+        <!-- SpaProxy auto-launches `npm run dev` (Vite) when the .NET app starts in
+             Development and redirects the browser from the kestrel URL to the Vite URL.
+             Activated by ASPNETCORE_HOSTINGSTARTUPASSEMBLIES in launchSettings.json. -->
+        <SpaProxyServerUrl>http://localhost:5173/</SpaProxyServerUrl>
+        <SpaProxyLaunchCommand>npm run dev</SpaProxyLaunchCommand>
     </PropertyGroup>
 
     <ItemGroup>
       <PackageReference Include="Dapr.AspNetCore" Version="1.17.9" />
       <PackageReference Include="Dapr.Client" Version="1.17.9" />
+      <PackageReference Include="Microsoft.AspNetCore.SpaProxy" Version="10.0.7" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
         <PrivateAssets>all</PrivateAssets>
         <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -54,15 +62,27 @@
                  caches ensures the next ResolveStaticWebAssetsInputs discovers only the files
                  Vite just produced, not yesterday's hashed filenames. -->
             <SpaStaleCache Include="$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\staticwebassets*.*" />
+            <SpaStaleCache Include="$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\staticwebassets\**\*" />
+            <SpaStaleCache Include="$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\*.dswa.cache.json" />
+            <SpaStaleCache Include="$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\swae*.cache" />
             <SpaStaleCache Include="$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\scopedcss\**\*" />
+            <!-- Also wipe the bin manifests. The .NET incremental build will reuse these
+                 when present, even if their referenced hashed asset names no longer exist
+                 in wwwroot/spa, producing "No file exists for the asset" errors. -->
+            <SpaStaleCache Include="$(OutputPath)$(MSBuildProjectName).staticwebassets.*.json" />
         </ItemGroup>
-        <RemoveDir Directories="$(SpaPublishDir)" Condition="Exists('$(SpaPublishDir)')" />
+        <!-- SpaPublishDir is wwwroot itself, so wipe only the subpaths Vite emits
+             (assets/, vendor/, index.html). Anything else in wwwroot — favicon.png,
+             ad-hoc files — is preserved. -->
+        <RemoveDir Directories="$(SpaPublishDir)assets;$(SpaPublishDir)vendor" />
+        <Delete Files="$(SpaPublishDir)index.html" ContinueOnError="true" />
         <Delete Files="@(SpaStaleCache)" ContinueOnError="true" />
         <Copy SourceFiles="@(SpaDistFiles)" DestinationFolder="$(SpaPublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" />
     </Target>
 
     <Target Name="CleanSpaOutput" BeforeTargets="Clean">
-        <RemoveDir Directories="$(SpaDist);$(SpaPublishDir)" />
+        <RemoveDir Directories="$(SpaDist);$(SpaPublishDir)assets;$(SpaPublishDir)vendor" />
+        <Delete Files="$(SpaPublishDir)index.html" ContinueOnError="true" />
     </Target>
 
 </Project>

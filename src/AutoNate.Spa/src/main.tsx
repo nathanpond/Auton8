@@ -34,7 +34,7 @@ if (!container) {
 createRoot(container).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename="/spa">
+      <BrowserRouter>
         <ReactNotifications />
         <Router />
       </BrowserRouter>

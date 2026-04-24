@@ -46,8 +46,8 @@ if (builder.Environment.IsDevelopment())
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.LoginPath = "/spa/";
-        options.AccessDeniedPath = "/spa/";
+        options.LoginPath = "/";
+        options.AccessDeniedPath = "/";
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
     });
@@ -306,13 +306,10 @@ app.MapExecutionEndpoints();
 
 app.MapStaticAssets();
 
-// React SPA is the only UI now. Root URL redirects into /spa/ so users hitting the bare
-// domain land on the SPA. Any /spa/* route that isn't a physical file falls back to the
-// SPA index so react-router can pick it up client-side.
-app.MapGet("/", () => Results.Redirect("/spa/"));
-app.MapFallbackToFile(
-    "/spa/{*path:nonfile}",
-    "spa/index.html");
+// React SPA is the only UI now and is mounted at the site root. Any URL that isn't a
+// physical file or an explicitly-mapped endpoint falls back to the SPA index so
+// react-router can pick it up client-side.
+app.MapFallbackToFile("{*path:nonfile}", "index.html");
 
 app.Run();
 
@@ -334,21 +331,21 @@ static string BuildLoginRedirect(string? returnUrl, string error, string? userna
     }
 
     var queryString = QueryString.Create(query).ToUriComponent();
-    return string.IsNullOrEmpty(queryString) ? "/spa/" : $"/spa/{queryString}";
+    return string.IsNullOrEmpty(queryString) ? "/" : $"/{queryString}";
 }
 
 static string GetSafeReturnUrl(string? returnUrl)
 {
     if (string.IsNullOrWhiteSpace(returnUrl))
     {
-        return "/spa/home";
+        return "/home";
     }
 
     return returnUrl.StartsWith("/", StringComparison.Ordinal) &&
            !returnUrl.StartsWith("//", StringComparison.Ordinal) &&
            !returnUrl.StartsWith("/\\", StringComparison.Ordinal)
         ? returnUrl
-        : "/spa/home";
+        : "/home";
 }
 
 static ClaimsPrincipal BuildPrincipal(LocalUser user, string authenticationSource)

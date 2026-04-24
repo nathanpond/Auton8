@@ -101,6 +101,180 @@
     max-width: min(38rem, calc(100vw - 2rem));
 }
 
+.workflow-bpmn-support-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.95rem 0.5rem 0.85rem;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #2680c2 0%, #0f609b 100%);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(38, 128, 194, 0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease;
+}
+
+.workflow-bpmn-support-badge:hover,
+.workflow-bpmn-support-badge:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(38, 128, 194, 0.45);
+    background: linear-gradient(135deg, #2f8fd1 0%, #155a93 100%);
+    outline: none;
+}
+
+.workflow-bpmn-support-badge:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 12px rgba(38, 128, 194, 0.35);
+}
+
+.workflow-bpmn-support-badge i.bi-diagram-3-fill {
+    font-size: 1rem;
+}
+
+.workflow-bpmn-support-badge i.bi-arrow-right-short {
+    font-size: 1.15rem;
+    margin-right: -0.25rem;
+}
+
+.workflow-bpmn-types-modal {
+    width: min(58rem, calc(100vw - 2rem));
+    max-width: min(58rem, calc(100vw - 2rem));
+}
+
+.workflow-bpmn-types-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+}
+
+.workflow-bpmn-types-column {
+    background: #f8fbfd;
+    border: 1px solid #d9e2ec;
+    border-radius: 0.85rem;
+    padding: 1rem 1.05rem 1.1rem;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.workflow-bpmn-types-column-supported {
+    background: linear-gradient(180deg, #ecf7ef 0%, #f6fbf7 100%);
+    border-color: #c4e3cd;
+}
+
+.workflow-bpmn-types-column-coming {
+    background: linear-gradient(180deg, #fff6e8 0%, #fffaf2 100%);
+    border-color: #f0d9b0;
+}
+
+.workflow-bpmn-types-column-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 0.6rem;
+    margin-bottom: 0.85rem;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.workflow-bpmn-types-column-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.workflow-bpmn-types-column-supported .workflow-bpmn-types-column-header h3 {
+    color: #1f6f3a;
+}
+
+.workflow-bpmn-types-column-coming .workflow-bpmn-types-column-header h3 {
+    color: #8a5a14;
+}
+
+.workflow-bpmn-types-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.65rem;
+    height: 1.5rem;
+    padding: 0 0.5rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.85);
+    color: inherit;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.workflow-bpmn-types-column-supported .workflow-bpmn-types-count {
+    color: #1f6f3a;
+}
+
+.workflow-bpmn-types-column-coming .workflow-bpmn-types-count {
+    color: #8a5a14;
+}
+
+.workflow-bpmn-types-group + .workflow-bpmn-types-group {
+    margin-top: 0.85rem;
+}
+
+.workflow-bpmn-types-group h4 {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #52606d;
+    margin: 0 0 0.4rem;
+}
+
+.workflow-bpmn-types-group ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.workflow-bpmn-types-group li {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.28rem 0.6rem;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid #d8e2e8;
+    color: #334e68;
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.workflow-bpmn-types-column-supported .workflow-bpmn-types-group li {
+    border-color: #c4e3cd;
+    color: #1f6f3a;
+}
+
+.workflow-bpmn-types-column-coming .workflow-bpmn-types-group li {
+    border-color: #f0d9b0;
+    color: #8a5a14;
+}
+
+@media (max-width: 760px) {
+    .workflow-bpmn-types-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .workflow-bpmn-types-column {
+        max-height: none;
+    }
+}
+
 .workflow-script-task-meta {
     display: flex;
     flex-wrap: wrap;
