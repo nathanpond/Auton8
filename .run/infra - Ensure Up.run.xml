@@ -1,8 +1,0 @@
-<component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="infra: Ensure Up" type="ShConfigurationType" factoryName="Shell Script">
-    <option name="SCRIPT_TEXT" value="make infra-ensure" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-    <option name="EXECUTE_IN_TERMINAL" value="false" />
-    <method v="2" />
-  </configuration>
-</component>
