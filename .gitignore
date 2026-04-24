@@ -1,7 +1,6 @@
 bin/
 obj/
 src/AutoNate.Web/App_Data/*
-src/AutoNate.Web/wwwRoot/vendor/*
 /packages/
 node_modules/
 riderModule.iml
@@ -12,6 +11,10 @@ infra/mounts/**
 !infra/mounts/*/
 
 
-# React SPA build output (produced by MSBuild BuildReactSpa target)
+# React SPA build output (produced by MSBuild BuildReactSpa target).
+# The SPA is now mounted at the site root, so Vite emits directly into wwwroot/.
+# favicon.png and any other hand-maintained files in wwwroot/ stay tracked.
 src/AutoNate.Spa/dist/
-src/AutoNate.Web/wwwroot/spa/
+src/AutoNate.Web/wwwroot/assets/
+src/AutoNate.Web/wwwroot/vendor/
+src/AutoNate.Web/wwwroot/index.html

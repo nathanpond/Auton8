@@ -10,9 +10,13 @@
         <SpaDist>$(SpaRoot)dist\</SpaDist>
         <!-- Vite's dist/ is copied to wwwroot/ so the SPA is served at the site root. -->
         <SpaPublishDir>wwwroot\</SpaPublishDir>
-        <!-- SPA is built on every dotnet build so wwwroot/spa stays current.
-             Skip for fast backend-only iteration with /p:BuildSpa=false. -->
-        <BuildSpa Condition="'$(BuildSpa)' == ''">true</BuildSpa>
+        <!-- In Debug we serve the SPA via Vite's dev server (SpaProxy spawns `npm run
+             dev` from launchSettings), so `npm run build` would just produce wwwroot
+             files nothing reads. Default BuildSpa to true only for Release/publish, where
+             the bundled wwwroot is what gets shipped. Override either way with
+             /p:BuildSpa=true|false. -->
+        <BuildSpa Condition="'$(BuildSpa)' == '' AND '$(Configuration)' == 'Release'">true</BuildSpa>
+        <BuildSpa Condition="'$(BuildSpa)' == ''">false</BuildSpa>
 
         <!-- SpaProxy auto-launches `npm run dev` (Vite) when the .NET app starts in
              Development and redirects the browser from the kestrel URL to the Vite URL.
