@@ -75,18 +75,15 @@
                  in wwwroot/spa, producing "No file exists for the asset" errors. -->
             <SpaStaleCache Include="$(OutputPath)$(MSBuildProjectName).staticwebassets.*.json" />
         </ItemGroup>
-        <!-- SpaPublishDir is wwwroot itself, so wipe only the subpaths Vite emits
-             (assets/, vendor/, index.html). Anything else in wwwroot — favicon.png,
-             ad-hoc files — is preserved. -->
-        <RemoveDir Directories="$(SpaPublishDir)assets;$(SpaPublishDir)vendor" />
-        <Delete Files="$(SpaPublishDir)index.html" ContinueOnError="true" />
+        <!-- wwwroot/ is 100% Vite output (favicon and other source assets live in
+             the SPA's public/ folder), so wipe the whole dir and replace from dist/. -->
+        <RemoveDir Directories="$(SpaPublishDir)" Condition="Exists('$(SpaPublishDir)')" />
         <Delete Files="@(SpaStaleCache)" ContinueOnError="true" />
         <Copy SourceFiles="@(SpaDistFiles)" DestinationFolder="$(SpaPublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" />
     </Target>
 
     <Target Name="CleanSpaOutput" BeforeTargets="Clean">
-        <RemoveDir Directories="$(SpaDist);$(SpaPublishDir)assets;$(SpaPublishDir)vendor" />
-        <Delete Files="$(SpaPublishDir)index.html" ContinueOnError="true" />
+        <RemoveDir Directories="$(SpaDist);$(SpaPublishDir)" />
     </Target>
 
 </Project>

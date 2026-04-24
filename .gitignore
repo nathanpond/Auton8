@@ -20,9 +20,8 @@ __pycache__/
 
 
 # React SPA build output (produced by MSBuild BuildReactSpa target).
-# The SPA is now mounted at the site root, so Vite emits directly into wwwroot/.
-# favicon.png and any other hand-maintained files in wwwroot/ stay tracked.
+# The SPA is mounted at the site root and Vite emits directly into wwwroot/,
+# so nothing in wwwroot/ is hand-maintained. Source assets like favicon.png
+# live in src/AutoNate.Spa/public/ and Vite copies them into wwwroot/ at build.
 src/AutoNate.Spa/dist/
-src/AutoNate.Web/wwwroot/assets/
-src/AutoNate.Web/wwwroot/vendor/
-src/AutoNate.Web/wwwroot/index.html
+src/AutoNate.Web/wwwroot/
