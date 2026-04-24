@@ -25,3 +25,4 @@ __pycache__/
 # live in src/AutoNate.Spa/public/ and Vite copies them into wwwroot/ at build.
 src/AutoNate.Spa/dist/
 src/AutoNate.Web/wwwroot/
+.idea/**/workspace.xml
