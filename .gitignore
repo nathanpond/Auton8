@@ -3,6 +3,7 @@ obj/
 target/
 tmpflowable/
 src/AutoNate.Web/App_Data/*
+src/AutoNate.Web/ColorAdmin/
 /packages/
 node_modules/
 riderModule.iml
