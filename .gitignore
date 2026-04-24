@@ -10,6 +10,14 @@ infra/mounts/**
 !infra/mounts/
 !infra/mounts/*/
 
+# macOS Finder metadata
+.DS_Store
+
+# Python bytecode (some tooling here lives in Python projects)
+__pycache__/
+*.pyc
+*.pyo
+
 
 # React SPA build output (produced by MSBuild BuildReactSpa target).
 # The SPA is now mounted at the site root, so Vite emits directly into wwwroot/.
