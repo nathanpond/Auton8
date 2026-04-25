@@ -9,11 +9,15 @@ import { buildDefaultValues, buildRecordZodSchema, getRenderer } from "./fields/
 type Props = {
   fields: RecordTypeField[];
   initialName?: string;
+  initialStatus?: string | null;
+  initialDueDate?: string | null;
   initialValues?: Record<string, unknown>;
   initialAssigneeIds?: string[];
   submitLabel: string;
   onSubmit: (input: {
     name: string;
+    status: string | null;
+    dueDate: string | null;
     values: Record<string, unknown>;
     assigneeIds: string[];
   }) => Promise<void> | void;
@@ -22,11 +26,18 @@ type Props = {
   topLevelError?: string | null;
 };
 
-type FormShape = { __name: string; __assigneeIds: string[] } & Record<string, unknown>;
+type FormShape = {
+  __name: string;
+  __status: string;
+  __dueDate: string;
+  __assigneeIds: string[];
+} & Record<string, unknown>;
 
 export default function RecordForm({
   fields,
   initialName,
+  initialStatus,
+  initialDueDate,
   initialValues,
   initialAssigneeIds,
   submitLabel,
@@ -43,6 +54,8 @@ export default function RecordForm({
       z
         .object({
           __name: z.string().min(1, "Name is required"),
+          __status: z.string(),
+          __dueDate: z.string(),
           __assigneeIds: z.array(z.string())
         })
         .merge(valueSchema),
@@ -52,11 +65,13 @@ export default function RecordForm({
   const defaults = useMemo<FormShape>(
     () => ({
       __name: initialName ?? "",
+      __status: initialStatus ?? "",
+      __dueDate: initialDueDate ?? "",
       __assigneeIds: initialAssigneeIds ?? [],
       ...buildDefaultValues(visibleFields),
       ...(initialValues ?? {})
     }) as FormShape,
-    [visibleFields, initialName, initialValues, initialAssigneeIds]
+    [visibleFields, initialName, initialStatus, initialDueDate, initialValues, initialAssigneeIds]
   );
 
   const {
@@ -70,8 +85,15 @@ export default function RecordForm({
   });
 
   const submit = handleSubmit(async (values) => {
-    const { __name, __assigneeIds, ...rest } = values;
-    await onSubmit({ name: __name, values: rest, assigneeIds: __assigneeIds });
+    const { __name, __status, __dueDate, __assigneeIds, ...rest } = values;
+    const trimmedStatus = __status.trim();
+    await onSubmit({
+      name: __name,
+      status: trimmedStatus.length === 0 ? null : trimmedStatus,
+      dueDate: __dueDate.length === 0 ? null : __dueDate,
+      values: rest,
+      assigneeIds: __assigneeIds
+    });
   });
 
   return (
@@ -87,6 +109,26 @@ export default function RecordForm({
         {errors.__name && (
           <div className="invalid-feedback">{(errors.__name as { message?: string }).message}</div>
         )}
+      </div>
+
+      <div className="row g-3 mb-3">
+        <div className="col-md-6">
+          <label className="form-label">Status</label>
+          <input
+            type="text"
+            className={`form-control ${errors.__status ? "is-invalid" : ""}`}
+            placeholder="e.g. Open, In progress"
+            {...register("__status")}
+          />
+        </div>
+        <div className="col-md-6">
+          <label className="form-label">Due Date</label>
+          <input
+            type="date"
+            className={`form-control ${errors.__dueDate ? "is-invalid" : ""}`}
+            {...register("__dueDate")}
+          />
+        </div>
       </div>
 
       <div className="mb-3">

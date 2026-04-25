@@ -223,6 +223,10 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.AssigneeIds)
                 .HasColumnName("assignee_ids")
                 .HasColumnType("uuid[]");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.DueDate)
+                .HasColumnName("due_date")
+                .HasColumnType("date");
             entity.Property(e => e.Values)
                 .HasColumnName("values")
                 .HasColumnType("jsonb");

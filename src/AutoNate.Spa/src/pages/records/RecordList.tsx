@@ -109,6 +109,10 @@ export default function RecordList() {
                   <option value="key_desc">Key descending</option>
                   <option value="name_asc">Name A-Z</option>
                   <option value="name_desc">Name Z-A</option>
+                  <option value="status_asc">Status A-Z</option>
+                  <option value="status_desc">Status Z-A</option>
+                  <option value="due_date_asc">Due date (earliest)</option>
+                  <option value="due_date_desc">Due date (latest)</option>
                 </select>
               </label>
               <div className="form-check form-switch mb-0">
@@ -157,24 +161,26 @@ export default function RecordList() {
                 <tr>
                   <th style={{ width: "8rem" }}>Key</th>
                   <th>Name</th>
+                  <th style={{ width: "10rem" }}>Status</th>
+                  <th style={{ width: "8rem" }}>Due Date</th>
                   {visibleFields.map((f) => (
                     <th key={f.id}>{f.displayName}</th>
                   ))}
                   <th style={{ width: "11rem" }}>Updated</th>
-                  <th style={{ width: "6rem" }}>Status</th>
+                  <th style={{ width: "6rem" }}>Archive</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingRecords && (
                   <tr>
-                    <td colSpan={4 + visibleFields.length} className="text-center text-body text-opacity-50 p-4">
+                    <td colSpan={6 + visibleFields.length} className="text-center text-body text-opacity-50 p-4">
                       Loading...
                     </td>
                   </tr>
                 )}
                 {!loadingRecords && (searchPage?.items.length ?? 0) === 0 && (
                   <tr>
-                    <td colSpan={4 + visibleFields.length} className="text-center text-body text-opacity-50 p-4">
+                    <td colSpan={6 + visibleFields.length} className="text-center text-body text-opacity-50 p-4">
                       {filtersActive ? (
                         <>
                           No records match your filters.{" "}
@@ -213,6 +219,12 @@ export default function RecordList() {
                       </Link>
                     </td>
                     <td>{rec.name}</td>
+                    <td>
+                      {rec.status ?? <span className="text-body text-opacity-50">—</span>}
+                    </td>
+                    <td>
+                      {rec.dueDate ? formatDate(rec.dueDate) : <span className="text-body text-opacity-50">—</span>}
+                    </td>
                     {visibleFields.map((f) => {
                       const renderer = getRenderer(f.dataType);
                       const formatted = renderer
@@ -295,4 +307,13 @@ export default function RecordList() {
 function formatWhen(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+// `YYYY-MM-DD` is parsed as UTC by `new Date()`, which would shift the rendered
+// day in negative-offset timezones. Build the date locally instead.
+function formatDate(yyyyMmDd: string): string {
+  const [y, m, d] = yyyyMmDd.split("-").map((s) => Number(s));
+  if (!y || !m || !d) return yyyyMmDd;
+  const date = new Date(y, m - 1, d);
+  return Number.isNaN(date.getTime()) ? yyyyMmDd : date.toLocaleDateString();
 }

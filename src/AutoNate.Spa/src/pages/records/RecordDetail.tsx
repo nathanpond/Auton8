@@ -143,13 +143,15 @@ export default function RecordDetail() {
             <RecordForm
               fields={fields}
               initialName={record.name}
+              initialStatus={record.status}
+              initialDueDate={record.dueDate}
               initialValues={record.values}
               initialAssigneeIds={record.assigneeIds}
               submitLabel="Save"
               onCancel={() => navigate(`/records/${code}`)}
-              onSubmit={async ({ name, values, assigneeIds }) => {
+              onSubmit={async ({ name, status, dueDate, values, assigneeIds }) => {
                 try {
-                  await update.mutateAsync({ name, values, assigneeIds });
+                  await update.mutateAsync({ name, status, dueDate, values, assigneeIds });
                   setFlash({ kind: "success", message: "Saved." });
                 } catch (err) {
                   setFlash({ kind: "error", message: describeError(err) });

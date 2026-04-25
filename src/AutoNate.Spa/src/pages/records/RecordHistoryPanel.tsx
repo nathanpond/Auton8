@@ -103,6 +103,24 @@ function ChangeLine({
           {formatAssigneeArray(entry.newValue)}
         </span>
       );
+    case "status_changed":
+      return (
+        <span>
+          <span className="badge bg-info text-dark me-2">Status</span>
+          {formatRaw(entry.oldValue)}
+          <span className="text-body text-opacity-75 mx-2">→</span>
+          {formatRaw(entry.newValue)}
+        </span>
+      );
+    case "due_date_changed":
+      return (
+        <span>
+          <span className="badge bg-info text-dark me-2">Due Date</span>
+          {formatRaw(entry.oldValue)}
+          <span className="text-body text-opacity-75 mx-2">→</span>
+          {formatRaw(entry.newValue)}
+        </span>
+      );
     case "archived":
       return <span className="badge bg-warning text-dark">Archived</span>;
     case "unarchived":
@@ -165,6 +183,8 @@ function groupByChangeSet(entries: RecordHistoryEntry[]): ChangeGroup[] {
   const order: Record<string, number> = {
     created: 0,
     name_changed: 1,
+    status_changed: 1,
+    due_date_changed: 1,
     archived: 2,
     unarchived: 2,
     assignees_changed: 3,

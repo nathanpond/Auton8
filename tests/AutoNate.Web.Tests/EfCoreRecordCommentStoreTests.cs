@@ -21,7 +21,7 @@ public sealed class EfCoreRecordCommentStoreTests
         var typeStore = db.CreateRecordTypeStore();
         var recordStore = db.CreateRecordStore();
         var type = await typeStore.CreateAsync(new CreateRecordTypeInput(code, $"{code} type", null, null, null), Alice);
-        return await recordStore.CreateAsync(new CreateRecordInput(type.Id, "Test", Empty(), null), Alice);
+        return await recordStore.CreateAsync(new CreateRecordInput(type.Id, "Test", null, null, Empty(), null), Alice);
     }
 
     [Fact]

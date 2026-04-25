@@ -9,13 +9,14 @@ namespace AutoNate.Web.Endpoints;
 public sealed record CreateRecordRequest(
     Guid RecordTypeId,
     string Name,
+    string? Status,
+    DateOnly? DueDate,
     JsonElement Values,
     Guid[]? AssigneeIds);
 
-public sealed record UpdateRecordRequest(
-    string? Name,
-    JsonElement? Values,
-    Guid[]? AssigneeIds);
+// Note: PATCH /api/records/{id} binds the raw JSON body as a JsonElement so
+// `null` (clear) and absence (don't touch) can be told apart for nullable
+// fields like status and dueDate. There's no typed UpdateRecordRequest record.
 
 public sealed record SearchRecordsRequest(
     Guid RecordTypeId,
@@ -34,6 +35,8 @@ public sealed record RecordDto(
     string Key,
     long KeyNumber,
     string Name,
+    string? Status,
+    DateOnly? DueDate,
     Guid[] AssigneeIds,
     JsonElement Values,
     bool IsArchived,
@@ -143,6 +146,8 @@ public static class RecordEndpoints
                     new CreateRecordInput(
                         request.RecordTypeId,
                         request.Name,
+                        request.Status,
+                        request.DueDate,
                         request.Values,
                         request.AssigneeIds),
                     GetActorId(http),
@@ -157,18 +162,15 @@ public static class RecordEndpoints
 
         group.MapPatch("/{id:guid}", async (
             Guid id,
-            UpdateRecordRequest request,
+            JsonElement body,
             HttpContext http,
             IRecordStore store,
             CancellationToken cancellationToken) =>
         {
             try
             {
-                var updated = await store.UpdateAsync(
-                    id,
-                    new UpdateRecordInput(request.Name, request.Values, request.AssigneeIds),
-                    GetActorId(http),
-                    cancellationToken);
+                var input = ParseUpdateInput(body);
+                var updated = await store.UpdateAsync(id, input, GetActorId(http), cancellationToken);
                 return Results.Ok(ToDto(updated));
             }
             catch (RecordNotFoundException)
@@ -226,7 +228,12 @@ public static class RecordEndpoints
             {
                 var updated = await store.UpdateAsync(
                     id,
-                    new UpdateRecordInput(Name: null, Values: null, AssigneeIds: assigneeIds),
+                    new UpdateRecordInput(
+                        Name: null,
+                        Status: Optional<string?>.None,
+                        DueDate: Optional<DateOnly?>.None,
+                        Values: null,
+                        AssigneeIds: assigneeIds),
                     GetActorId(http),
                     cancellationToken);
                 return Results.Ok(ToDto(updated));
@@ -307,6 +314,8 @@ public static class RecordEndpoints
         model.Key,
         model.KeyNumber,
         model.Name,
+        model.Status,
+        model.DueDate,
         model.AssigneeIds.ToArray(),
         model.Values,
         model.IsArchived,
@@ -314,6 +323,97 @@ public static class RecordEndpoints
         model.CreatedBy,
         model.UpdatedAtUtc,
         model.UpdatedBy);
+
+    // Manual binder for PATCH so we can tell "field absent" (don't touch) from
+    // "field is null" (clear) — System.Text.Json record binding collapses both
+    // to the default value of the property.
+    private static UpdateRecordInput ParseUpdateInput(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object)
+        {
+            throw new RecordValidationException("Request body must be a JSON object.");
+        }
+
+        string? name = null;
+        if (TryGetCaseInsensitive(body, "name", out var nameProp) &&
+            nameProp.ValueKind == JsonValueKind.String)
+        {
+            name = nameProp.GetString();
+        }
+
+        JsonElement? values = null;
+        if (TryGetCaseInsensitive(body, "values", out var valuesProp) &&
+            valuesProp.ValueKind != JsonValueKind.Null &&
+            valuesProp.ValueKind != JsonValueKind.Undefined)
+        {
+            values = valuesProp;
+        }
+
+        Guid[]? assigneeIds = null;
+        if (TryGetCaseInsensitive(body, "assigneeIds", out var assigneeProp) &&
+            assigneeProp.ValueKind == JsonValueKind.Array)
+        {
+            assigneeIds = assigneeProp.EnumerateArray().Select(e => e.GetGuid()).ToArray();
+        }
+
+        var status = Optional<string?>.None;
+        if (TryGetCaseInsensitive(body, "status", out var statusProp))
+        {
+            status = statusProp.ValueKind switch
+            {
+                JsonValueKind.Null => Optional<string?>.Some(null),
+                JsonValueKind.String => Optional<string?>.Some(statusProp.GetString()),
+                _ => throw new RecordValidationException("status must be a string or null.")
+            };
+        }
+
+        var dueDate = Optional<DateOnly?>.None;
+        if (TryGetCaseInsensitive(body, "dueDate", out var dueDateProp))
+        {
+            dueDate = dueDateProp.ValueKind switch
+            {
+                JsonValueKind.Null => Optional<DateOnly?>.Some(null),
+                JsonValueKind.String => Optional<DateOnly?>.Some(ParseDateOnly(dueDateProp.GetString()!)),
+                _ => throw new RecordValidationException("dueDate must be a date string (YYYY-MM-DD) or null.")
+            };
+        }
+
+        return new UpdateRecordInput(name, status, dueDate, values, assigneeIds);
+    }
+
+    private static bool TryGetCaseInsensitive(JsonElement obj, string name, out JsonElement value)
+    {
+        if (obj.TryGetProperty(name, out value))
+        {
+            return true;
+        }
+
+        foreach (var prop in obj.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = prop.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static DateOnly ParseDateOnly(string raw)
+    {
+        if (DateOnly.TryParseExact(raw, "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d) ||
+            DateOnly.TryParse(raw,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out d))
+        {
+            return d;
+        }
+        throw new RecordValidationException($"Invalid date '{raw}'. Use YYYY-MM-DD.");
+    }
 
     private static RecordPageDto ToPageDto(RecordListPage page) => new(
         page.Records.Select(ToDto).ToArray(),

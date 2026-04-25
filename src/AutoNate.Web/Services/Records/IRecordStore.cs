@@ -4,14 +4,35 @@ using AutoNate.Web.Services.Records.Fields;
 
 namespace AutoNate.Web.Services.Records;
 
+// "Did the caller want to change this field?" wrapper. Plain `T?` can't tell a
+// PATCH body of `{ "status": null }` (clear) from `{}` (don't touch).
+public readonly struct Optional<T>
+{
+    public bool HasValue { get; }
+    public T Value { get; }
+
+    private Optional(bool hasValue, T value)
+    {
+        HasValue = hasValue;
+        Value = value;
+    }
+
+    public static Optional<T> Some(T value) => new(true, value);
+    public static Optional<T> None => default;
+}
+
 public sealed record class CreateRecordInput(
     Guid RecordTypeId,
     string Name,
+    string? Status,
+    DateOnly? DueDate,
     JsonElement Values,
     IReadOnlyList<Guid>? AssigneeIds);
 
 public sealed record class UpdateRecordInput(
     string? Name,
+    Optional<string?> Status,
+    Optional<DateOnly?> DueDate,
     JsonElement? Values,
     IReadOnlyList<Guid>? AssigneeIds);
 

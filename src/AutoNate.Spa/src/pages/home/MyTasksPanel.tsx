@@ -3,15 +3,34 @@ import { Link } from "react-router-dom";
 import { useMyAssignedRecords } from "@/hooks/useRecords";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { useCompleteTask, useMyAssignedTasks } from "@/hooks/useExecutions";
+import { RecordModel, RecordType } from "@/types/records";
+import { FlowableTaskSummary } from "@/types/flowable";
+import { findIcon, preferredStyle, stripFaPrefix } from "@/lib/faIcons";
 
 const PAGE_SIZE = 10;
+
+type TaskRow =
+  | {
+      kind: "record";
+      id: string;
+      sortKey: number;
+      record: RecordModel;
+      type: RecordType | null;
+    }
+  | {
+      kind: "workflow";
+      id: string;
+      sortKey: number;
+      task: FlowableTaskSummary;
+    };
 
 export default function MyTasksPanel() {
   const params = useMemo(
     () => ({ page: 0, pageSize: PAGE_SIZE, sort: "updated_desc" as const, includeArchived: false }),
     []
   );
-  const { data, isLoading, isError } = useMyAssignedRecords(params);
+  const { data: recordPage, isLoading: recordsLoading, isError: recordsError } =
+    useMyAssignedRecords(params);
   const { data: types = [] } = useRecordTypes(true);
   const {
     data: workflowTasks = [],
@@ -21,15 +40,6 @@ export default function MyTasksPanel() {
   const completeTask = useCompleteTask();
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
 
-  const typesById = useMemo(() => {
-    const map = new Map<string, { shortCode: string; name: string }>();
-    for (const t of types) map.set(t.id, { shortCode: t.shortCode, name: t.name });
-    return map;
-  }, [types]);
-
-  const items = data?.items ?? [];
-  const totalCount = data?.totalCount ?? 0;
-
   const onCompleteTask = async (taskId: string) => {
     setCompletingTaskId(taskId);
     try {
@@ -38,6 +48,36 @@ export default function MyTasksPanel() {
       setCompletingTaskId(null);
     }
   };
+
+  const typesById = useMemo(() => {
+    const map = new Map<string, RecordType>();
+    for (const t of types) map.set(t.id, t);
+    return map;
+  }, [types]);
+
+  const recordItems = recordPage?.items ?? [];
+  const totalRecordCount = recordPage?.totalCount ?? 0;
+
+  const rows = useMemo<TaskRow[]>(() => {
+    const recordRows: TaskRow[] = recordItems.map((rec) => ({
+      kind: "record",
+      id: `record:${rec.id}`,
+      sortKey: parseTime(rec.updatedAtUtc),
+      record: rec,
+      type: typesById.get(rec.recordTypeId) ?? null
+    }));
+    const workflowRows: TaskRow[] = workflowTasks.map((task) => ({
+      kind: "workflow",
+      id: `workflow:${task.id}`,
+      sortKey: parseTime(task.createdAtUtc),
+      task
+    }));
+    return [...recordRows, ...workflowRows].sort((a, b) => b.sortKey - a.sortKey);
+  }, [recordItems, workflowTasks, typesById]);
+
+  const isLoading = recordsLoading || tasksLoading;
+  const hasError = recordsError || tasksError;
+  const empty = !isLoading && !hasError && rows.length === 0;
 
   return (
     <div className="panel panel-inverse">
@@ -51,148 +91,190 @@ export default function MyTasksPanel() {
           <table className="table table-striped table-bordered align-middle mb-0">
             <thead>
               <tr>
-                <th style={{ width: "8rem" }}>Key</th>
-                <th style={{ width: "10rem" }}>Type</th>
                 <th>Name</th>
-                <th style={{ width: "12rem" }}>Updated</th>
+                <th style={{ width: "10rem" }}>Status</th>
+                <th style={{ width: "14rem" }}>Type</th>
+                <th>Description</th>
+                <th style={{ width: "8rem" }}>Due Date</th>
+                <th style={{ width: "12rem" }}>Last Updated</th>
+                <th style={{ width: "8rem" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={4} className="text-center text-body text-opacity-50 p-4">
+                  <td colSpan={7} className="text-center text-body text-opacity-50 p-4">
                     Loading...
                   </td>
                 </tr>
               )}
-              {!isLoading && isError && (
+              {!isLoading && hasError && (
                 <tr>
-                  <td colSpan={4} className="text-center text-danger p-4">
+                  <td colSpan={7} className="text-center text-danger p-4">
                     Failed to load tasks.
                   </td>
                 </tr>
               )}
-              {!isLoading && !isError && items.length === 0 && (
+              {empty && (
                 <tr>
-                  <td colSpan={4} className="text-center text-body text-opacity-50 p-4">
+                  <td colSpan={7} className="text-center text-body text-opacity-50 p-4">
                     Nothing is assigned to you right now.
                   </td>
                 </tr>
               )}
-              {items.map((rec) => {
-                const type = typesById.get(rec.recordTypeId);
-                return (
-                  <tr key={rec.id}>
-                    <td>
-                      <Link to={`/record/${rec.key}`}>
-                        <code>{rec.key}</code>
-                      </Link>
-                    </td>
-                    <td>
-                      {type ? (
-                        <Link to={`/records/${type.shortCode}`} className="text-decoration-none">
-                          <span className="badge bg-secondary me-1">{type.shortCode}</span>
-                          <span className="small">{type.name}</span>
-                        </Link>
-                      ) : (
-                        <span className="text-body text-opacity-50 small">Unknown</span>
-                      )}
-                    </td>
-                    <td>
-                      <Link to={`/record/${rec.key}`} className="text-decoration-none">
-                        {rec.name}
-                      </Link>
-                    </td>
-                    <td>{formatWhen(rec.updatedAtUtc)}</td>
-                  </tr>
-                );
-              })}
+              {!isLoading && !hasError && rows.map((row) =>
+                row.kind === "record" ? (
+                  <RecordRow key={row.id} record={row.record} type={row.type} />
+                ) : (
+                  <WorkflowRow
+                    key={row.id}
+                    task={row.task}
+                    onComplete={onCompleteTask}
+                    isCompleting={completingTaskId === row.task.id}
+                  />
+                )
+              )}
             </tbody>
           </table>
         </div>
-        {totalCount > items.length && (
+        {totalRecordCount > recordItems.length && (
           <div className="text-body text-opacity-75 small mt-3">
-            Showing {items.length} of {totalCount} assigned records.
+            Showing {recordItems.length} of {totalRecordCount} assigned records.
           </div>
         )}
-
-        <h5 className="mt-4 mb-2">
-          <i className="fa fa-diagram-project me-2"></i>Workflow tasks
-        </h5>
-        <div className="table-responsive">
-          <table className="table table-striped table-bordered align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Task</th>
-                <th style={{ width: "16rem" }}>Workflow</th>
-                <th style={{ width: "12rem" }}>Created</th>
-                <th style={{ width: "8rem" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasksLoading && (
-                <tr>
-                  <td colSpan={4} className="text-center text-body text-opacity-50 p-4">
-                    Loading...
-                  </td>
-                </tr>
-              )}
-              {!tasksLoading && tasksError && (
-                <tr>
-                  <td colSpan={4} className="text-center text-danger p-4">
-                    Failed to load workflow tasks.
-                  </td>
-                </tr>
-              )}
-              {!tasksLoading && !tasksError && workflowTasks.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="text-center text-body text-opacity-50 p-4">
-                    No workflow tasks are waiting for you.
-                  </td>
-                </tr>
-              )}
-              {workflowTasks.map((task) => (
-                <tr key={task.id}>
-                  <td>
-                    {task.processInstanceId ? (
-                      <Link
-                        to={`/executions/${task.processInstanceId}`}
-                        className="text-decoration-none"
-                      >
-                        {task.name || task.id}
-                      </Link>
-                    ) : (
-                      <span>{task.name || task.id}</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className="small">
-                      {task.processDefinitionName ?? task.processDefinitionId ?? "—"}
-                    </span>
-                  </td>
-                  <td>{formatWhen(task.createdAtUtc)}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-success"
-                      onClick={() => onCompleteTask(task.id)}
-                      disabled={completingTaskId === task.id}
-                    >
-                      Complete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
   );
+}
+
+function RecordRow({ record, type }: { record: RecordModel; type: RecordType | null }) {
+  const description = readDescription(record.values);
+  return (
+    <tr>
+      <td>
+        <Link to={`/record/${record.key}`} className="text-decoration-none">
+          <code className="me-2">{record.key}</code>
+          {record.name}
+        </Link>
+      </td>
+      <td>{record.status ?? <span className="text-body text-opacity-50">—</span>}</td>
+      <td>
+        {type ? (
+          <>
+            {type.icon ? (
+              <i
+                className={`${resolveIconClass(type.icon)} me-2`}
+                style={type.color ? { color: type.color } : undefined}
+                aria-hidden="true"
+              ></i>
+            ) : null}
+            <span>{type.name}</span>
+          </>
+        ) : (
+          <span className="text-body text-opacity-50 small">Unknown</span>
+        )}
+      </td>
+      <td>
+        {description ? (
+          <span className="small">{description}</span>
+        ) : (
+          <span className="text-body text-opacity-50">—</span>
+        )}
+      </td>
+      <td>
+        {record.dueDate ? (
+          formatDate(record.dueDate)
+        ) : (
+          <span className="text-body text-opacity-50">—</span>
+        )}
+      </td>
+      <td>{formatWhen(record.updatedAtUtc)}</td>
+      <td></td>
+    </tr>
+  );
+}
+
+function WorkflowRow({
+  task,
+  onComplete,
+  isCompleting
+}: {
+  task: FlowableTaskSummary;
+  onComplete: (taskId: string) => void;
+  isCompleting: boolean;
+}) {
+  const workflowName = task.processDefinitionName ?? task.processDefinitionId ?? task.name ?? task.id;
+  const activeNode = task.name?.trim() ? task.name : task.taskDefinitionKey ?? null;
+  return (
+    <tr>
+      <td>
+        {task.processInstanceId ? (
+          <Link to={`/executions/${task.processInstanceId}`} className="text-decoration-none">
+            {workflowName}
+          </Link>
+        ) : (
+          <span>{workflowName}</span>
+        )}
+      </td>
+      <td>
+        {activeNode ?? <span className="text-body text-opacity-50">—</span>}
+      </td>
+      <td>
+        <i className="fa fa-diagram-project me-2"></i>
+        <span>{task.processDefinitionName ?? task.processDefinitionId ?? "Workflow"}</span>
+      </td>
+      <td>
+        <span className="text-body text-opacity-50">—</span>
+      </td>
+      <td>
+        <span className="text-body text-opacity-50">—</span>
+      </td>
+      <td>{formatWhen(task.createdAtUtc)}</td>
+      <td>
+        <button
+          type="button"
+          className="btn btn-sm btn-success"
+          onClick={() => onComplete(task.id)}
+          disabled={isCompleting}
+        >
+          Complete
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function resolveIconClass(icon: string): string {
+  const found = findIcon(icon);
+  if (found) return `${preferredStyle(found)} fa-${found.name}`;
+  const name = stripFaPrefix(icon);
+  return `fa-solid fa-${name}`;
+}
+
+function readDescription(values: Record<string, unknown>): string | null {
+  const raw = values?.description ?? values?.Description;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+function parseTime(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? 0 : t;
 }
 
 function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+// `YYYY-MM-DD` is parsed as UTC by `new Date()`, which would shift the rendered
+// day in negative-offset timezones. Build the date locally instead.
+function formatDate(yyyyMmDd: string): string {
+  const [y, m, d] = yyyyMmDd.split("-").map((s) => Number(s));
+  if (!y || !m || !d) return yyyyMmDd;
+  const date = new Date(y, m - 1, d);
+  return Number.isNaN(date.getTime()) ? yyyyMmDd : date.toLocaleDateString();
 }

@@ -105,6 +105,9 @@ export type RecordModel = {
   key: string;
   keyNumber: number;
   name: string;
+  status: string | null;
+  // ISO-8601 calendar date, no time component, e.g. "2026-06-15".
+  dueDate: string | null;
   assigneeIds: string[];
   values: Record<string, unknown>;
   isArchived: boolean;
@@ -124,12 +127,19 @@ export type RecordPage = {
 export type CreateRecordRequest = {
   recordTypeId: string;
   name: string;
+  status: string | null;
+  dueDate: string | null;
   values: Record<string, unknown>;
   assigneeIds: string[] | null;
 };
 
+// PATCH semantics: omit a key to leave it untouched; pass `null` to clear it.
+// JSON.stringify drops `undefined` keys so `status: undefined` becomes "absent"
+// on the wire, which the backend treats as "don't touch".
 export type UpdateRecordRequest = {
   name?: string;
+  status?: string | null;
+  dueDate?: string | null;
   values?: Record<string, unknown>;
   assigneeIds?: string[];
 };

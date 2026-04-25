@@ -29,8 +29,8 @@ public sealed class EfCoreRecordEdgeStoreTests
 
         var accountType = await SeedTypeAsync(typeStore, "ACC");
         var contactType = await SeedTypeAsync(typeStore, "CON");
-        var account = await recordStore.CreateAsync(new CreateRecordInput(accountType.Id, "Acme", Json("{}"), null), Actor);
-        var contact = await recordStore.CreateAsync(new CreateRecordInput(contactType.Id, "Alice", Json("{}"), null), Actor);
+        var account = await recordStore.CreateAsync(new CreateRecordInput(accountType.Id, "Acme", null, null, Json("{}"), null), Actor);
+        var contact = await recordStore.CreateAsync(new CreateRecordInput(contactType.Id, "Alice", null, null, Json("{}"), null), Actor);
 
         var edgeType = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "HAS",
@@ -63,8 +63,8 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "REL", "rel", null, true, false, RecordEdgeCardinality.ManyToMany, null, null));
@@ -85,8 +85,8 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "USR");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "FRI", "friend of", null,
@@ -112,7 +112,7 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "REF", "refers to", null, true, AllowSelfReference: false,
             RecordEdgeCardinality.ManyToMany, null, null));
@@ -131,9 +131,9 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
-        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
+        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "MGR", "manages", null, true, false,
@@ -160,9 +160,9 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
-        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
+        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "BEL", "belongs to", null, true, false,
@@ -191,9 +191,9 @@ public sealed class EfCoreRecordEdgeStoreTests
         var conType = await SeedTypeAsync(typeStore, "CON");
         var docType = await SeedTypeAsync(typeStore, "DOC");
 
-        var account = await recordStore.CreateAsync(new CreateRecordInput(accType.Id, "Acme", Json("{}"), null), Actor);
-        var contact = await recordStore.CreateAsync(new CreateRecordInput(conType.Id, "Alice", Json("{}"), null), Actor);
-        var doc = await recordStore.CreateAsync(new CreateRecordInput(docType.Id, "Doc", Json("{}"), null), Actor);
+        var account = await recordStore.CreateAsync(new CreateRecordInput(accType.Id, "Acme", null, null, Json("{}"), null), Actor);
+        var contact = await recordStore.CreateAsync(new CreateRecordInput(conType.Id, "Alice", null, null, Json("{}"), null), Actor);
+        var doc = await recordStore.CreateAsync(new CreateRecordInput(docType.Id, "Doc", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "HAS", "has", null, true, false,
@@ -223,9 +223,9 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
-        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
+        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "REL", "rel", null, true, false, RecordEdgeCardinality.ManyToMany, null, null));
@@ -255,10 +255,10 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
-        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", Json("{}"), null), Actor);
-        var d = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "D", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
+        var c = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "C", null, null, Json("{}"), null), Actor);
+        var d = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "D", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "REL", "rel", null, true, false, RecordEdgeCardinality.ManyToMany, null, null));
@@ -291,8 +291,8 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "REL", "rel", null, true, false, RecordEdgeCardinality.ManyToMany, null, null));
 
@@ -314,8 +314,8 @@ public sealed class EfCoreRecordEdgeStoreTests
         var edgeStore = database.CreateRecordEdgeStore();
 
         var t = await SeedTypeAsync(typeStore, "ACC");
-        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", Json("{}"), null), Actor);
-        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", Json("{}"), null), Actor);
+        var a = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "A", null, null, Json("{}"), null), Actor);
+        var b = await recordStore.CreateAsync(new CreateRecordInput(t.Id, "B", null, null, Json("{}"), null), Actor);
 
         var et = await edgeTypeStore.CreateAsync(new CreateRecordEdgeTypeInput(
             "WGT", "weighted", null, true, false, RecordEdgeCardinality.ManyToMany, null, null));

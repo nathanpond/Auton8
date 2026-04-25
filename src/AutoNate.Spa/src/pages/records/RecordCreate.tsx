@@ -51,12 +51,14 @@ export default function RecordCreate() {
             submitLabel="Create"
             topLevelError={error}
             onCancel={() => navigate(`/records/${code}`)}
-            onSubmit={async ({ name, values, assigneeIds }) => {
+            onSubmit={async ({ name, status, dueDate, values, assigneeIds }) => {
               try {
                 setError(null);
                 const created = await create.mutateAsync({
                   recordTypeId: type.id,
                   name,
+                  status,
+                  dueDate,
                   values,
                   assigneeIds: assigneeIds.length > 0 ? assigneeIds : null
                 });

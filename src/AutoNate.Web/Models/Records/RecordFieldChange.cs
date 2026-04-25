@@ -29,6 +29,8 @@ public static class RecordChangeKinds
     public const string ValueChanged = "value_changed";
     public const string NameChanged = "name_changed";
     public const string AssigneesChanged = "assignees_changed";
+    public const string StatusChanged = "status_changed";
+    public const string DueDateChanged = "due_date_changed";
     public const string Archived = "archived";
     public const string Unarchived = "unarchived";
 }

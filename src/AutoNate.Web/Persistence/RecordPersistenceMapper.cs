@@ -139,6 +139,8 @@ internal static class RecordPersistenceMapper
             KeyNumber = entity.KeyNumber,
             Name = entity.Name,
             AssigneeIds = entity.AssigneeIds.ToList(),
+            Status = entity.Status,
+            DueDate = entity.DueDate,
             Values = ParseJson(entity.Values),
             IsArchived = entity.IsArchived,
             CreatedAtUtc = PersistenceModelMapper.ToDateTimeOffset(entity.CreatedAtUtc),

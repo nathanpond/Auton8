@@ -85,6 +85,8 @@ public sealed class EfCoreRecordStore(
         pageSqlBuilder.Append("key_number AS \"KeyNumber\", ");
         pageSqlBuilder.Append("name AS \"Name\", ");
         pageSqlBuilder.Append("assignee_ids AS \"AssigneeIds\", ");
+        pageSqlBuilder.Append("status AS \"Status\", ");
+        pageSqlBuilder.Append("due_date AS \"DueDate\", ");
         pageSqlBuilder.Append("values::text AS \"Values\", ");
         pageSqlBuilder.Append("is_archived AS \"IsArchived\", ");
         pageSqlBuilder.Append("created_at_utc AS \"CreatedAtUtc\", ");
@@ -134,6 +136,8 @@ public sealed class EfCoreRecordStore(
         pageSql.Append("key_number AS \"KeyNumber\", ");
         pageSql.Append("name AS \"Name\", ");
         pageSql.Append("assignee_ids AS \"AssigneeIds\", ");
+        pageSql.Append("status AS \"Status\", ");
+        pageSql.Append("due_date AS \"DueDate\", ");
         pageSql.Append("values::text AS \"Values\", ");
         pageSql.Append("is_archived AS \"IsArchived\", ");
         pageSql.Append("created_at_utc AS \"CreatedAtUtc\", ");
@@ -196,6 +200,7 @@ public sealed class EfCoreRecordStore(
         var assigneeIds = (input.AssigneeIds ?? Array.Empty<Guid>()).Distinct().ToArray();
         var valuesJson = validation.NormalizedValues.GetRawText();
 
+        var status = string.IsNullOrWhiteSpace(input.Status) ? null : input.Status.Trim();
         var entity = new RecordEntity
         {
             Id = recordId,
@@ -204,6 +209,8 @@ public sealed class EfCoreRecordStore(
             KeyNumber = allocatedKeyNumber,
             Name = name,
             AssigneeIds = assigneeIds,
+            Status = status,
+            DueDate = input.DueDate,
             Values = valuesJson,
             IsArchived = false,
             CreatedAtUtc = now.UtcDateTime,
@@ -220,7 +227,7 @@ public sealed class EfCoreRecordStore(
         dbContext.RecordFieldChanges.Add(BuildHistory(
             recordId, changeSetId, RecordChangeKinds.Created, fieldKey: null,
             oldValue: null,
-            newValue: SerializeCreatedSnapshot(name, assigneeIds, validation.NormalizedValues),
+            newValue: SerializeCreatedSnapshot(name, assigneeIds, status, input.DueDate, validation.NormalizedValues),
             actorId, now));
 
         foreach (var field in fields)
@@ -292,6 +299,37 @@ public sealed class EfCoreRecordStore(
                     newValue: JsonSerializer.Serialize(newAssignees),
                     actorId, now));
                 entity.AssigneeIds = newAssignees;
+                changed = true;
+            }
+        }
+
+        if (input.Status.HasValue)
+        {
+            var raw = input.Status.Value;
+            var newStatus = string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+            if (!string.Equals(entity.Status, newStatus, StringComparison.Ordinal))
+            {
+                historyRows.Add(BuildHistory(
+                    entity.Id, changeSetId, RecordChangeKinds.StatusChanged, fieldKey: null,
+                    oldValue: JsonSerializer.Serialize(entity.Status),
+                    newValue: JsonSerializer.Serialize(newStatus),
+                    actorId, now));
+                entity.Status = newStatus;
+                changed = true;
+            }
+        }
+
+        if (input.DueDate.HasValue)
+        {
+            var newDueDate = input.DueDate.Value;
+            if (entity.DueDate != newDueDate)
+            {
+                historyRows.Add(BuildHistory(
+                    entity.Id, changeSetId, RecordChangeKinds.DueDateChanged, fieldKey: null,
+                    oldValue: JsonSerializer.Serialize(entity.DueDate?.ToString("yyyy-MM-dd")),
+                    newValue: JsonSerializer.Serialize(newDueDate?.ToString("yyyy-MM-dd")),
+                    actorId, now));
+                entity.DueDate = newDueDate;
                 changed = true;
             }
         }
@@ -417,6 +455,10 @@ public sealed class EfCoreRecordStore(
         "key_desc" => "key_number DESC",
         "name_asc" => "name ASC",
         "name_desc" => "name DESC",
+        "status_asc" => "status ASC NULLS LAST",
+        "status_desc" => "status DESC NULLS LAST",
+        "due_date_asc" => "due_date ASC NULLS LAST",
+        "due_date_desc" => "due_date DESC NULLS LAST",
         "created_desc" => "created_at_utc DESC",
         _ => "updated_at_utc DESC"
     };
@@ -591,12 +633,19 @@ public sealed class EfCoreRecordStore(
     private static string JsonEscape(string raw) =>
         raw.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
-    private static string SerializeCreatedSnapshot(string name, Guid[] assigneeIds, JsonElement values)
+    private static string SerializeCreatedSnapshot(
+        string name,
+        Guid[] assigneeIds,
+        string? status,
+        DateOnly? dueDate,
+        JsonElement values)
     {
         return JsonSerializer.Serialize(new
         {
             name,
             assignee_ids = assigneeIds,
+            status,
+            due_date = dueDate?.ToString("yyyy-MM-dd"),
             values = JsonSerializer.Deserialize<JsonElement>(values.GetRawText())
         });
     }
@@ -634,6 +683,8 @@ public sealed class EfCoreRecordStore(
         public long KeyNumber { get; set; }
         public string Name { get; set; } = null!;
         public Guid[] AssigneeIds { get; set; } = Array.Empty<Guid>();
+        public string? Status { get; set; }
+        public DateOnly? DueDate { get; set; }
         public string Values { get; set; } = "{}";
         public bool IsArchived { get; set; }
         public DateTime CreatedAtUtc { get; set; }
@@ -649,6 +700,8 @@ public sealed class EfCoreRecordStore(
             KeyNumber = KeyNumber,
             Name = Name,
             AssigneeIds = AssigneeIds.ToList(),
+            Status = Status,
+            DueDate = DueDate,
             Values = RecordPersistenceMapper.ParseJson(Values),
             IsArchived = IsArchived,
             CreatedAtUtc = PersistenceModelMapper.ToDateTimeOffset(CreatedAtUtc),

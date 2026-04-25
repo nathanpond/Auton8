@@ -16,6 +16,10 @@ public partial class Record
 
     public Guid[] AssigneeIds { get; set; } = Array.Empty<Guid>();
 
+    public string? Status { get; set; }
+
+    public DateOnly? DueDate { get; set; }
+
     // JSONB serialized as text; parsed/serialized at the domain boundary.
     public string Values { get; set; } = "{}";
 

@@ -51,13 +51,13 @@ public sealed class EfCoreRecordStoreTests
             ("priority", "Priority", "number", "{\"variant\":\"integer\"}", Required: false));
 
         var first = await store.CreateAsync(
-            new CreateRecordInput(type.Id, "Acme Corp", Json("{\"status\":\"open\",\"priority\":1}"), null),
+            new CreateRecordInput(type.Id, "Acme Corp", null, null, Json("{\"status\":\"open\",\"priority\":1}"), null),
             Actor);
         Assert.Equal("ACC-1", first.Key);
         Assert.Equal(1, first.KeyNumber);
 
         var second = await store.CreateAsync(
-            new CreateRecordInput(type.Id, "Globex", Json("{\"status\":\"closed\"}"), null),
+            new CreateRecordInput(type.Id, "Globex", null, null, Json("{\"status\":\"closed\"}"), null),
             Actor);
         Assert.Equal("ACC-2", second.Key);
 
@@ -84,7 +84,7 @@ public sealed class EfCoreRecordStoreTests
             ("priority", "Priority", "text", "{}", Required: true));
 
         await Assert.ThrowsAsync<RecordValidationException>(() =>
-            store.CreateAsync(new CreateRecordInput(type.Id, "No priority", Json("{}"), null), Actor));
+            store.CreateAsync(new CreateRecordInput(type.Id, "No priority", null, null, Json("{}"), null), Actor));
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class EfCoreRecordStoreTests
             ("name_field", "Name Field", "text", "{}", Required: false));
 
         await Assert.ThrowsAsync<RecordValidationException>(() =>
-            store.CreateAsync(new CreateRecordInput(type.Id, "Bad", Json("{\"surprise\":\"x\"}"), null), Actor));
+            store.CreateAsync(new CreateRecordInput(type.Id, "Bad", null, null, Json("{\"surprise\":\"x\"}"), null), Actor));
     }
 
     [Fact]
@@ -116,12 +116,17 @@ public sealed class EfCoreRecordStoreTests
             ("priority", "Priority", "number", "{\"variant\":\"integer\"}", Required: false));
 
         var record = await store.CreateAsync(
-            new CreateRecordInput(type.Id, "Acme", Json("{\"status\":\"open\",\"priority\":1}"), null),
+            new CreateRecordInput(type.Id, "Acme", null, null, Json("{\"status\":\"open\",\"priority\":1}"), null),
             Actor);
 
         // Patch only status; priority should be untouched and not produce a row.
         var updated = await store.UpdateAsync(record.Id,
-            new UpdateRecordInput(Name: null, Values: Json("{\"status\":\"closed\"}"), AssigneeIds: null),
+            new UpdateRecordInput(
+                Name: null,
+                Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.None,
+                Values: Json("{\"status\":\"closed\"}"),
+                AssigneeIds: null),
             Actor);
 
         Assert.Equal("closed", updated.Values.GetProperty("status").GetString());
@@ -135,7 +140,12 @@ public sealed class EfCoreRecordStoreTests
 
         // No-op patch: same value as current state writes no history rows.
         await store.UpdateAsync(record.Id,
-            new UpdateRecordInput(Name: null, Values: Json("{\"status\":\"closed\"}"), AssigneeIds: null),
+            new UpdateRecordInput(
+                Name: null,
+                Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.None,
+                Values: Json("{\"status\":\"closed\"}"),
+                AssigneeIds: null),
             Actor);
         var statusHistoryAfter = await history.ListAsync(record.Id, fieldKey: "status", take: 100);
         Assert.Equal(2, statusHistoryAfter.Count);
@@ -156,12 +166,15 @@ public sealed class EfCoreRecordStoreTests
             ("priority", "Priority", "number", "{\"variant\":\"integer\"}", Required: false));
 
         var record = await store.CreateAsync(
-            new CreateRecordInput(type.Id, "Acme", Json("{\"status\":\"open\",\"priority\":1}"), null),
+            new CreateRecordInput(type.Id, "Acme", null, null, Json("{\"status\":\"open\",\"priority\":1}"), null),
             Actor);
 
         // Single PATCH that touches name + 2 fields = should yield rows that share one change_set_id.
         await store.UpdateAsync(record.Id,
-            new UpdateRecordInput(Name: "Acme Renamed",
+            new UpdateRecordInput(
+                Name: "Acme Renamed",
+                Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.None,
                 Values: Json("{\"status\":\"closed\",\"priority\":5}"),
                 AssigneeIds: null),
             Actor);
@@ -195,11 +208,16 @@ public sealed class EfCoreRecordStoreTests
 
         var type = await SeedTypeWithFieldsAsync(typeStore, "ACC");
         var record = await store.CreateAsync(
-            new CreateRecordInput(type.Id, "Old", Json("{}"), null),
+            new CreateRecordInput(type.Id, "Old", null, null, Json("{}"), null),
             Actor);
 
         await store.UpdateAsync(record.Id,
-            new UpdateRecordInput(Name: "New", Values: null, AssigneeIds: null),
+            new UpdateRecordInput(
+                Name: "New",
+                Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.None,
+                Values: null,
+                AssigneeIds: null),
             Actor);
 
         var entries = await history.ListAsync(record.Id, fieldKey: null, take: 100);
@@ -216,7 +234,7 @@ public sealed class EfCoreRecordStoreTests
 
         var type = await SeedTypeWithFieldsAsync(typeStore, "ACC");
         var record = await store.CreateAsync(
-            new CreateRecordInput(type.Id, "X", Json("{}"), null),
+            new CreateRecordInput(type.Id, "X", null, null, Json("{}"), null),
             Actor);
 
         await store.SetArchivedAsync(record.Id, archived: true, Actor);
@@ -243,13 +261,13 @@ public sealed class EfCoreRecordStoreTests
         for (var i = 0; i < 5; i++)
         {
             await store.CreateAsync(
-                new CreateRecordInput(type.Id, $"Open {i}", Json("{\"status\":\"open\",\"priority\":" + i + "}"), null),
+                new CreateRecordInput(type.Id, $"Open {i}", null, null, Json("{\"status\":\"open\",\"priority\":" + i + "}"), null),
                 Actor);
         }
         for (var i = 0; i < 3; i++)
         {
             await store.CreateAsync(
-                new CreateRecordInput(type.Id, $"Closed {i}", Json("{\"status\":\"closed\",\"priority\":" + i + "}"), null),
+                new CreateRecordInput(type.Id, $"Closed {i}", null, null, Json("{\"status\":\"closed\",\"priority\":" + i + "}"), null),
                 Actor);
         }
 
@@ -302,9 +320,9 @@ public sealed class EfCoreRecordStoreTests
         var alice = Guid.NewGuid();
         var bob = Guid.NewGuid();
 
-        await store.CreateAsync(new CreateRecordInput(type.Id, "Alice's", Json("{}"), new[] { alice }), Actor);
-        await store.CreateAsync(new CreateRecordInput(type.Id, "Bob's", Json("{}"), new[] { bob }), Actor);
-        await store.CreateAsync(new CreateRecordInput(type.Id, "Both", Json("{}"), new[] { alice, bob }), Actor);
+        await store.CreateAsync(new CreateRecordInput(type.Id, "Alice's", null, null, Json("{}"), new[] { alice }), Actor);
+        await store.CreateAsync(new CreateRecordInput(type.Id, "Bob's", null, null, Json("{}"), new[] { bob }), Actor);
+        await store.CreateAsync(new CreateRecordInput(type.Id, "Both", null, null, Json("{}"), new[] { alice, bob }), Actor);
 
         var aliceList = await store.SearchAsync(new RecordSearchInput(
             type.Id, null, AssigneeId: alice, false, 0, 50, null));
@@ -322,7 +340,7 @@ public sealed class EfCoreRecordStoreTests
         var type = await SeedTypeWithFieldsAsync(typeStore, "CON");
 
         var tasks = Enumerable.Range(0, 20)
-            .Select(_ => store.CreateAsync(new CreateRecordInput(type.Id, "Conc", Json("{}"), null), Actor))
+            .Select(_ => store.CreateAsync(new CreateRecordInput(type.Id, "Conc", null, null, Json("{}"), null), Actor))
             .ToArray();
         var results = await Task.WhenAll(tasks);
 
@@ -344,7 +362,7 @@ public sealed class EfCoreRecordStoreTests
             ("note", "Note", "text", "{}", Required: false));
 
         var record = await store.CreateAsync(
-            new CreateRecordInput(type.Id, "X", Json("{\"note\":\"hello\"}"), null), Actor);
+            new CreateRecordInput(type.Id, "X", null, null, Json("{\"note\":\"hello\"}"), null), Actor);
 
         var fields = await typeStore.ListFieldsAsync(type.Id, includeArchived: false);
         var noteField = fields.Single();
@@ -352,6 +370,151 @@ public sealed class EfCoreRecordStoreTests
 
         await Assert.ThrowsAsync<RecordValidationException>(() =>
             store.UpdateAsync(record.Id,
-                new UpdateRecordInput(null, Json("{\"note\":\"world\"}"), null), Actor));
+                new UpdateRecordInput(
+                    Name: null,
+                    Status: Optional<string?>.None,
+                    DueDate: Optional<DateOnly?>.None,
+                    Values: Json("{\"note\":\"world\"}"),
+                    AssigneeIds: null), Actor));
+    }
+
+    [Fact]
+    public async Task CreateAsync_PersistsStatusAndDueDate()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var typeStore = database.CreateRecordTypeStore();
+        var store = database.CreateRecordStore();
+
+        var type = await SeedTypeWithFieldsAsync(typeStore, "TSK");
+        var due = new DateOnly(2026, 6, 15);
+        var record = await store.CreateAsync(
+            new CreateRecordInput(type.Id, "Plan", "open", due, Json("{}"), null),
+            Actor);
+
+        Assert.Equal("open", record.Status);
+        Assert.Equal(due, record.DueDate);
+
+        // Round-trip via GetAsync to confirm persistence.
+        var roundTripped = await store.GetAsync(record.Id);
+        Assert.NotNull(roundTripped);
+        Assert.Equal("open", roundTripped!.Status);
+        Assert.Equal(due, roundTripped.DueDate);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_StatusChangeWritesStatusChangedHistory()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var typeStore = database.CreateRecordTypeStore();
+        var store = database.CreateRecordStore();
+        var history = database.CreateRecordHistoryStore();
+
+        var type = await SeedTypeWithFieldsAsync(typeStore, "TSK");
+        var record = await store.CreateAsync(
+            new CreateRecordInput(type.Id, "Plan", "open", null, Json("{}"), null),
+            Actor);
+
+        await store.UpdateAsync(record.Id,
+            new UpdateRecordInput(
+                Name: null,
+                Status: Optional<string?>.Some("closed"),
+                DueDate: Optional<DateOnly?>.None,
+                Values: null,
+                AssigneeIds: null),
+            Actor);
+
+        var entries = await history.ListAsync(record.Id, fieldKey: null, take: 100);
+        var statusRow = Assert.Single(entries, e => e.ChangeKind == RecordChangeKinds.StatusChanged);
+        Assert.Equal("\"open\"", statusRow.OldValue!.Value.GetRawText());
+        Assert.Equal("\"closed\"", statusRow.NewValue!.Value.GetRawText());
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ClearsStatusToNullWithHistory()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var typeStore = database.CreateRecordTypeStore();
+        var store = database.CreateRecordStore();
+        var history = database.CreateRecordHistoryStore();
+
+        var type = await SeedTypeWithFieldsAsync(typeStore, "TSK");
+        var record = await store.CreateAsync(
+            new CreateRecordInput(type.Id, "Plan", "open", null, Json("{}"), null),
+            Actor);
+
+        var cleared = await store.UpdateAsync(record.Id,
+            new UpdateRecordInput(
+                Name: null,
+                Status: Optional<string?>.Some(null),
+                DueDate: Optional<DateOnly?>.None,
+                Values: null,
+                AssigneeIds: null),
+            Actor);
+
+        Assert.Null(cleared.Status);
+
+        var entries = await history.ListAsync(record.Id, fieldKey: null, take: 100);
+        var statusRow = Assert.Single(entries, e => e.ChangeKind == RecordChangeKinds.StatusChanged);
+        Assert.Equal("\"open\"", statusRow.OldValue!.Value.GetRawText());
+        Assert.Equal("null", statusRow.NewValue!.Value.GetRawText());
+    }
+
+    [Fact]
+    public async Task UpdateAsync_NoopWhenStatusUntouched()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var typeStore = database.CreateRecordTypeStore();
+        var store = database.CreateRecordStore();
+        var history = database.CreateRecordHistoryStore();
+
+        var type = await SeedTypeWithFieldsAsync(typeStore, "TSK");
+        var record = await store.CreateAsync(
+            new CreateRecordInput(type.Id, "Plan", "open", null, Json("{}"), null),
+            Actor);
+
+        // Optional<string?>.None ⇒ "don't touch": status must remain "open" and no history written.
+        await store.UpdateAsync(record.Id,
+            new UpdateRecordInput(
+                Name: null,
+                Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.None,
+                Values: null,
+                AssigneeIds: null),
+            Actor);
+
+        var refreshed = await store.GetAsync(record.Id);
+        Assert.Equal("open", refreshed!.Status);
+
+        var entries = await history.ListAsync(record.Id, fieldKey: null, take: 100);
+        Assert.DoesNotContain(entries, e => e.ChangeKind == RecordChangeKinds.StatusChanged);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_DueDateChangeWritesDueDateChangedHistory()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var typeStore = database.CreateRecordTypeStore();
+        var store = database.CreateRecordStore();
+        var history = database.CreateRecordHistoryStore();
+
+        var type = await SeedTypeWithFieldsAsync(typeStore, "TSK");
+        var record = await store.CreateAsync(
+            new CreateRecordInput(type.Id, "Plan", null, new DateOnly(2026, 6, 15), Json("{}"), null),
+            Actor);
+
+        var newDue = new DateOnly(2026, 7, 1);
+        await store.UpdateAsync(record.Id,
+            new UpdateRecordInput(
+                Name: null,
+                Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.Some(newDue),
+                Values: null,
+                AssigneeIds: null),
+            Actor);
+
+        var entries = await history.ListAsync(record.Id, fieldKey: null, take: 100);
+        var dueRow = Assert.Single(entries, e => e.ChangeKind == RecordChangeKinds.DueDateChanged);
+        Assert.Equal("\"2026-06-15\"", dueRow.OldValue!.Value.GetRawText());
+        Assert.Equal("\"2026-07-01\"", dueRow.NewValue!.Value.GetRawText());
     }
 }

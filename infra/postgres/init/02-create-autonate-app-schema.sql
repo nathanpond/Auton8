@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS records (
     key_number BIGINT NOT NULL,
     name TEXT NOT NULL,
     assignee_ids UUID[] NOT NULL DEFAULT '{}',
+    status TEXT NULL,
+    due_date DATE NULL,
     values JSONB NOT NULL DEFAULT '{}'::jsonb,
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
     created_at_utc TIMESTAMPTZ NOT NULL,

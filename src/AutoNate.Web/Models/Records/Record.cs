@@ -16,6 +16,10 @@ public sealed record class Record
 
     public IReadOnlyList<Guid> AssigneeIds { get; init; } = Array.Empty<Guid>();
 
+    public string? Status { get; init; }
+
+    public DateOnly? DueDate { get; init; }
+
     public JsonElement Values { get; init; }
 
     public bool IsArchived { get; init; }
