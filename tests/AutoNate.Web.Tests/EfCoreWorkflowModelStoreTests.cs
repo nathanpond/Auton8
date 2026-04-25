@@ -3,6 +3,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class EfCoreWorkflowModelStoreTests
 {
     [Fact]

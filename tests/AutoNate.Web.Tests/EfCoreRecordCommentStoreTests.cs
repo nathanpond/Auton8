@@ -5,6 +5,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class EfCoreRecordCommentStoreTests
 {
     private static readonly Guid Alice = Guid.Parse("11111111-1111-1111-1111-111111111111");

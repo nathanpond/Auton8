@@ -5,6 +5,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class EfCoreRecordTypeStoreTests
 {
     private static readonly Guid Actor = Guid.Parse("11111111-1111-1111-1111-111111111111");

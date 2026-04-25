@@ -8,6 +8,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoNate.Web.Tests", "tests\AutoNate.Web.Tests\AutoNate.Web.Tests.csproj", "{2F2B86FC-7FFA-4B21-A57A-A012BF63C233}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoNate.E2E.Tests", "tests\AutoNate.E2E.Tests\AutoNate.E2E.Tests.csproj", "{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -42,6 +44,18 @@ Global
 		{2F2B86FC-7FFA-4B21-A57A-A012BF63C233}.Release|x64.Build.0 = Release|Any CPU
 		{2F2B86FC-7FFA-4B21-A57A-A012BF63C233}.Release|x86.ActiveCfg = Release|Any CPU
 		{2F2B86FC-7FFA-4B21-A57A-A012BF63C233}.Release|x86.Build.0 = Release|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Debug|x64.Build.0 = Debug|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Debug|x86.Build.0 = Debug|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Release|x64.ActiveCfg = Release|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Release|x64.Build.0 = Release|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Release|x86.ActiveCfg = Release|Any CPU
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -49,5 +63,6 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{60B43578-6250-4165-95B3-187CE3ED467A} = {AEE4E483-52D2-46F4-808A-8F277FB893DD}
 		{2F2B86FC-7FFA-4B21-A57A-A012BF63C233} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{750D75A4-AC7D-4FFF-93A7-050A6C5D6FC0} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
