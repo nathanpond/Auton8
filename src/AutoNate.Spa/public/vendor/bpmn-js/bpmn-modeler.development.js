@@ -16127,7 +16127,7 @@ var __AutoNateBpmnJS__ = (() => {
   var t2 = /* @__PURE__ */ new Map();
   function htm_module_default(s3) {
     var r4 = t2.get(this);
-    return r4 || (r4 = /* @__PURE__ */ new Map(), t2.set(this, r4)), (r4 = n2(this, r4.get(s3) || (r4.set(s3, r4 = function(n3) {
+    return r4 || (r4 = /* @__PURE__ */ new Map(), t2.set(this, r4)), (r4 = n2(this, r4.get(s3) || (r4.set(s3, r4 = (function(n3) {
       for (var t4, s4, r5 = 1, e5 = "", u3 = "", h3 = [0], p3 = function(n4) {
         1 === r5 && (n4 || (e5 = e5.replace(/^\s*\n\s*|\s*\n\s*$/g, ""))) ? h3.push(0, n4, e5) : 3 === r5 && (n4 || e5) ? (h3.push(3, n4, e5), r5 = 2) : 2 === r5 && "..." === e5 && n4 ? h3.push(4, n4, 0) : 2 === r5 && e5 && !n4 ? h3.push(5, 0, true, e5) : r5 >= 5 && ((e5 || !n4 && 5 === r5) && (h3.push(r5, 0, e5, s4), r5 = 6), n4 && (h3.push(r5, n4, 0, s4), r5 = 6)), e5 = "";
       }, a3 = 0; a3 < n3.length; a3++) {
@@ -16135,7 +16135,7 @@ var __AutoNateBpmnJS__ = (() => {
         for (var l3 = 0; l3 < n3[a3].length; l3++) t4 = n3[a3][l3], 1 === r5 ? "<" === t4 ? (p3(), h3 = [h3], r5 = 3) : e5 += t4 : 4 === r5 ? "--" === e5 && ">" === t4 ? (r5 = 1, e5 = "") : e5 = t4 + e5[0] : u3 ? t4 === u3 ? u3 = "" : e5 += t4 : '"' === t4 || "'" === t4 ? u3 = t4 : ">" === t4 ? (p3(), r5 = 1) : r5 && ("=" === t4 ? (r5 = 5, s4 = e5, e5 = "") : "/" === t4 && (r5 < 5 || ">" === n3[a3][l3 + 1]) ? (p3(), 3 === r5 && (h3 = h3[0]), r5 = h3, (h3 = h3[0]).push(2, 0, r5), r5 = 0) : " " === t4 || "	" === t4 || "\n" === t4 || "\r" === t4 ? (p3(), r5 = 2) : e5 += t4), 3 === r5 && "!--" === e5 && (r5 = 4, h3 = h3[0]);
       }
       return p3(), h3;
-    }(s3)), r4), arguments, [])).length > 1 ? r4 : r4[0];
+    })(s3)), r4), arguments, [])).length > 1 ? r4 : r4[0];
   }
 
   // node_modules/htm/preact/index.module.js
