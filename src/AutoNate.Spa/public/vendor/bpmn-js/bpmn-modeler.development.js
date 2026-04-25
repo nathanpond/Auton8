@@ -20348,6 +20348,58 @@ var __AutoNateBpmnJS__ = (() => {
     "eventBus"
   ];
 
+  // node_modules/bpmn-js/lib/features/modeling/behavior/ArtifactBehavior.js
+  var HIGH_PRIORITY4 = 1500;
+  function ArtifactBehavior(injector, eventBus, canvas, modeling) {
+    injector.invoke(CommandInterceptor, this);
+    this.preExecute("elements.delete", HIGH_PRIORITY4, function(event2) {
+      var context = event2.context, elements = context.elements;
+      var enclosedArtifacts = getEnclosedArtifacts(elements);
+      if (enclosedArtifacts.length) {
+        modeling.removeElements(enclosedArtifacts);
+      }
+    });
+    eventBus.on("shape.move.start", function(event2) {
+      var shapes = event2.context.shapes;
+      var enclosedArtifacts = getEnclosedArtifacts(shapes);
+      if (enclosedArtifacts.length) {
+        event2.context.shapes = shapes.concat(enclosedArtifacts);
+      }
+    });
+    function getEnclosedArtifacts(elements) {
+      var containerElements = filter(
+        elements,
+        (e5) => is2(e5, "bpmn:Participant") || is2(e5, "bpmn:SubProcess")
+      );
+      if (!containerElements.length) {
+        return [];
+      }
+      var canvasRoot = canvas.getRootElement();
+      var remainingArtifacts = new Set(canvasRoot.children.filter(
+        (child) => is2(child, "bpmn:Artifact")
+      ));
+      var enclosedArtifacts = /* @__PURE__ */ new Set();
+      forEach(containerElements, (containerElement) => {
+        const newEnclosedArtifacts = new Set(values(
+          getEnclosedElements(
+            Array.from(remainingArtifacts),
+            getBBox(containerElement)
+          )
+        ));
+        enclosedArtifacts = enclosedArtifacts.union(newEnclosedArtifacts);
+        remainingArtifacts = remainingArtifacts.difference(newEnclosedArtifacts);
+      });
+      return Array.from(enclosedArtifacts);
+    }
+  }
+  e(ArtifactBehavior, CommandInterceptor);
+  ArtifactBehavior.$inject = [
+    "injector",
+    "eventBus",
+    "canvas",
+    "modeling"
+  ];
+
   // node_modules/bpmn-js/lib/features/modeling/behavior/AssociationBehavior.js
   function AssociationBehavior(injector, modeling) {
     injector.invoke(CommandInterceptor, this);
@@ -20624,13 +20676,13 @@ var __AutoNateBpmnJS__ = (() => {
   var HORIZONTAL_PARTICIPANT_PADDING = 20;
   var VERTICAL_PARTICIPANT_PADDING = 20;
   var PARTICIPANT_BORDER_WIDTH = 30;
-  var HIGH_PRIORITY4 = 2e3;
+  var HIGH_PRIORITY5 = 2e3;
   function CreateParticipantBehavior(canvas, eventBus, modeling) {
     CommandInterceptor.call(this, eventBus);
     eventBus.on([
       "create.start",
       "shape.move.start"
-    ], HIGH_PRIORITY4, function(event2) {
+    ], HIGH_PRIORITY5, function(event2) {
       var context = event2.context, shape = context.shape, rootElement = canvas.getRootElement();
       if (!is2(shape, "bpmn:Participant") || !is2(rootElement, "bpmn:Process") || !rootElement.children.length) {
         return;
@@ -20646,14 +20698,14 @@ var __AutoNateBpmnJS__ = (() => {
       assign(shape, participantBounds);
       context.createConstraints = getParticipantCreateConstraints(shape, childrenBBox);
     });
-    eventBus.on("create.start", HIGH_PRIORITY4, function(event2) {
+    eventBus.on("create.start", HIGH_PRIORITY5, function(event2) {
       var context = event2.context, shape = context.shape, rootElement = canvas.getRootElement(), rootElementGfx = canvas.getGraphics(rootElement);
       function ensureHoveringProcess(event3) {
         event3.element = rootElement;
         event3.gfx = rootElementGfx;
       }
       if (is2(shape, "bpmn:Participant") && is2(rootElement, "bpmn:Process")) {
-        eventBus.on("element.hover", HIGH_PRIORITY4, ensureHoveringProcess);
+        eventBus.on("element.hover", HIGH_PRIORITY5, ensureHoveringProcess);
         eventBus.once("create.cleanup", function() {
           eventBus.off("element.hover", ensureHoveringProcess);
         });
@@ -20666,7 +20718,7 @@ var __AutoNateBpmnJS__ = (() => {
       }
       return modeling.makeCollaboration();
     }
-    this.preExecute("elements.create", HIGH_PRIORITY4, function(context) {
+    this.preExecute("elements.create", HIGH_PRIORITY5, function(context) {
       var elements = context.elements, parent = context.parent, participant = findParticipant(elements), hints;
       if (participant && is2(parent, "bpmn:Process")) {
         context.parent = getOrCreateCollaboration();
@@ -21508,7 +21560,7 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/FixHoverBehavior.js
-  var HIGH_PRIORITY5 = 1500;
+  var HIGH_PRIORITY6 = 1500;
   var HIGHEST_PRIORITY = 2e3;
   function FixHoverBehavior(elementRegistry, eventBus, canvas) {
     eventBus.on([
@@ -21520,7 +21572,7 @@ var __AutoNateBpmnJS__ = (() => {
       "shape.move.move",
       "shape.move.out",
       "shape.move.end"
-    ], HIGH_PRIORITY5, function(event2) {
+    ], HIGH_PRIORITY6, function(event2) {
       var context = event2.context, shape = context.shape || event2.shape, hover = event2.hover;
       if (is2(hover, "bpmn:Lane") && !isAny(shape, ["bpmn:Lane", "bpmn:Participant"])) {
         event2.hover = getLanesRoot(hover);
@@ -21541,7 +21593,7 @@ var __AutoNateBpmnJS__ = (() => {
       "global-connect.out",
       "global-connect.end",
       "global-connect.cleanup"
-    ], HIGH_PRIORITY5, function(event2) {
+    ], HIGH_PRIORITY6, function(event2) {
       var hover = event2.hover;
       if (is2(hover, "bpmn:Lane")) {
         event2.hover = getLanesRoot(hover) || hover;
@@ -21550,7 +21602,7 @@ var __AutoNateBpmnJS__ = (() => {
     });
     eventBus.on([
       "bendpoint.move.hover"
-    ], HIGH_PRIORITY5, function(event2) {
+    ], HIGH_PRIORITY6, function(event2) {
       var context = event2.context, hover = event2.hover, type = context.type;
       if (is2(hover, "bpmn:Lane") && /reconnect/.test(type)) {
         event2.hover = getLanesRoot(hover) || hover;
@@ -21559,7 +21611,7 @@ var __AutoNateBpmnJS__ = (() => {
     });
     eventBus.on([
       "connect.start"
-    ], HIGH_PRIORITY5, function(event2) {
+    ], HIGH_PRIORITY6, function(event2) {
       var context = event2.context, start = context.start;
       if (is2(start, "bpmn:Lane")) {
         context.start = getLanesRoot(start) || start;
@@ -22800,7 +22852,7 @@ var __AutoNateBpmnJS__ = (() => {
   ];
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/ResizeBehavior.js
-  var HIGH_PRIORITY6 = 1500;
+  var HIGH_PRIORITY7 = 1500;
   var GROUP_MIN_DIMENSIONS = { width: 140, height: 120 };
   var LANE_MIN_DIMENSIONS = { width: 300, height: 60 };
   var VERTICAL_LANE_MIN_DIMENSIONS = { width: 60, height: 300 };
@@ -22809,7 +22861,7 @@ var __AutoNateBpmnJS__ = (() => {
   var SUB_PROCESS_MIN_DIMENSIONS = { width: 140, height: 120 };
   var TEXT_ANNOTATION_MIN_DIMENSIONS = { width: 50, height: 30 };
   function ResizeBehavior(eventBus) {
-    eventBus.on("resize.start", HIGH_PRIORITY6, function(event2) {
+    eventBus.on("resize.start", HIGH_PRIORITY7, function(event2) {
       var context = event2.context, shape = context.shape, direction = context.direction, balanced = context.balanced;
       if (is2(shape, "bpmn:Lane") || is2(shape, "bpmn:Participant")) {
         context.resizeConstraints = getParticipantResizeConstraints(shape, direction, balanced);
@@ -23191,7 +23243,7 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/SubProcessPlaneBehavior.js
   var LOW_PRIORITY12 = 400;
-  var HIGH_PRIORITY7 = 600;
+  var HIGH_PRIORITY8 = 600;
   var DEFAULT_POSITION2 = {
     x: 180,
     y: 160
@@ -23381,7 +23433,7 @@ var __AutoNateBpmnJS__ = (() => {
         removeRoot(context);
       }
     }, true);
-    this.postExecuted("shape.toggleCollapse", HIGH_PRIORITY7, function(context) {
+    this.postExecuted("shape.toggleCollapse", HIGH_PRIORITY8, function(context) {
       var shape = context.shape;
       if (!is2(shape, "bpmn:SubProcess")) {
         return;
@@ -23787,7 +23839,7 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/UpdateFlowNodeRefsBehavior.js
   var LOW_PRIORITY14 = 500;
-  var HIGH_PRIORITY8 = 5e3;
+  var HIGH_PRIORITY9 = 5e3;
   function UpdateFlowNodeRefsBehavior(eventBus, modeling) {
     CommandInterceptor.call(this, eventBus);
     var context;
@@ -23826,7 +23878,7 @@ var __AutoNateBpmnJS__ = (() => {
       "shape.move",
       "shape.resize"
     ];
-    this.preExecute(laneRefUpdateEvents, HIGH_PRIORITY8, function(event2) {
+    this.preExecute(laneRefUpdateEvents, HIGH_PRIORITY9, function(event2) {
       initContext();
     });
     this.postExecuted(laneRefUpdateEvents, LOW_PRIORITY14, function(event2) {
@@ -23914,6 +23966,7 @@ var __AutoNateBpmnJS__ = (() => {
     __init__: [
       "adaptiveLabelPositioningBehavior",
       "appendBehavior",
+      "artifactBehavior",
       "associationBehavior",
       "attachEventBehavior",
       "boundaryEventBehavior",
@@ -23958,6 +24011,7 @@ var __AutoNateBpmnJS__ = (() => {
     appendBehavior: ["type", AppendBehavior],
     associationBehavior: ["type", AssociationBehavior],
     attachEventBehavior: ["type", AttachEventBehavior],
+    artifactBehavior: ["type", ArtifactBehavior],
     boundaryEventBehavior: ["type", BoundaryEventBehavior],
     compensateBoundaryEventBehaviour: ["type", CompensateBoundaryEventBehavior],
     createBehavior: ["type", CreateBehavior],
@@ -24525,9 +24579,9 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/di-ordering/BpmnDiOrdering.js
-  var HIGH_PRIORITY9 = 2e3;
+  var HIGH_PRIORITY10 = 2e3;
   function BpmnDiOrdering(eventBus, canvas) {
-    eventBus.on("saveXML.start", HIGH_PRIORITY9, orderDi);
+    eventBus.on("saveXML.start", HIGH_PRIORITY10, orderDi);
     function orderDi() {
       var rootElements = canvas.getRootElements();
       forEach(rootElements, function(root) {
@@ -24746,7 +24800,7 @@ var __AutoNateBpmnJS__ = (() => {
   var MARKER_ATTACH = "attach-ok";
   var MARKER_NEW_PARENT = "new-parent";
   var PREFIX = "create";
-  var HIGH_PRIORITY10 = 2e3;
+  var HIGH_PRIORITY11 = 2e3;
   function Create(canvas, dragging, eventBus, modeling, rules) {
     function canCreate2(elements, target, position, source, hints) {
       if (!target) {
@@ -24883,7 +24937,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
     eventBus.on("create.init", function() {
       eventBus.on("elements.changed", cancel);
-      eventBus.once(["create.cancel", "create.end"], HIGH_PRIORITY10, function() {
+      eventBus.once(["create.cancel", "create.end"], HIGH_PRIORITY11, function() {
         eventBus.off("elements.changed", cancel);
       });
     });
@@ -25091,7 +25145,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/copy-paste/CopyPaste.js
-  var HIGH_PRIORITY11 = 2e3;
+  var HIGH_PRIORITY12 = 2e3;
   function CopyPaste(canvas, create3, clipboard, elementFactory, eventBus, modeling, mouse, rules) {
     this._canvas = canvas;
     this._create = create3;
@@ -25132,12 +25186,12 @@ var __AutoNateBpmnJS__ = (() => {
       descriptor.hidden = element.hidden;
       descriptor.collapsed = element.collapsed;
     });
-    eventBus.on("copyPaste.elementsCopied", HIGH_PRIORITY11, function(context) {
+    eventBus.on("copyPaste.elementsCopied", HIGH_PRIORITY12, function(context) {
       if (context.hints?.clip !== false) {
         clipboard.set(context.tree);
       }
     });
-    eventBus.on("copyPaste.pasteElements", HIGH_PRIORITY11, function(context) {
+    eventBus.on("copyPaste.pasteElements", HIGH_PRIORITY12, function(context) {
       if (!context.tree) {
         context.tree = clipboard.get();
       }
@@ -26149,7 +26203,7 @@ var __AutoNateBpmnJS__ = (() => {
     s: "bottom",
     e: "right"
   };
-  var HIGH_PRIORITY12 = 1500;
+  var HIGH_PRIORITY13 = 1500;
   var DIRECTION_TO_OPPOSITE = {
     n: "s",
     w: "e",
@@ -26175,7 +26229,7 @@ var __AutoNateBpmnJS__ = (() => {
         self2.activateMakeSpace(event2.originalEvent);
       });
     });
-    eventBus.on("spaceTool.move", HIGH_PRIORITY12, function(event2) {
+    eventBus.on("spaceTool.move", HIGH_PRIORITY13, function(event2) {
       var context = event2.context, initialized = context.initialized;
       if (!initialized) {
         initialized = context.initialized = self2.init(event2, context);
@@ -26975,11 +27029,11 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/diagram-js/lib/features/label-support/LabelSupport.js
   var LOW_PRIORITY19 = 250;
-  var HIGH_PRIORITY13 = 1400;
+  var HIGH_PRIORITY14 = 1400;
   function LabelSupport(injector, eventBus, modeling) {
     CommandInterceptor.call(this, eventBus);
     var movePreview = injector.get("movePreview", false);
-    eventBus.on("shape.move.start", HIGH_PRIORITY13, function(e5) {
+    eventBus.on("shape.move.start", HIGH_PRIORITY14, function(e5) {
       var context = e5.context, shapes = context.shapes, validatedShapes = context.validatedShapes;
       context.shapes = removeLabels(shapes);
       context.validatedShapes = removeLabels(validatedShapes);
@@ -27001,7 +27055,7 @@ var __AutoNateBpmnJS__ = (() => {
         movePreview.makeDraggable(context, label, true);
       });
     });
-    this.preExecuted("elements.move", HIGH_PRIORITY13, function(e5) {
+    this.preExecuted("elements.move", HIGH_PRIORITY14, function(e5) {
       var context = e5.context, closure = context.closure, enclosedElements = closure.enclosedElements;
       var enclosedLabels = [];
       forEach(enclosedElements, function(element) {
@@ -27058,12 +27112,12 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/diagram-js/lib/features/attach-support/AttachSupport.js
   var LOW_PRIORITY20 = 251;
-  var HIGH_PRIORITY14 = 1401;
+  var HIGH_PRIORITY15 = 1401;
   var MARKER_ATTACH2 = "attach-ok";
   function AttachSupport(injector, eventBus, canvas, rules, modeling) {
     CommandInterceptor.call(this, eventBus);
     var movePreview = injector.get("movePreview", false);
-    eventBus.on("shape.move.start", HIGH_PRIORITY14, function(e5) {
+    eventBus.on("shape.move.start", HIGH_PRIORITY15, function(e5) {
       var context = e5.context, shapes = context.shapes, validatedShapes = context.validatedShapes;
       context.shapes = addAttached(shapes);
       context.validatedShapes = removeAttached(validatedShapes);
@@ -27094,7 +27148,7 @@ var __AutoNateBpmnJS__ = (() => {
         });
       }
     });
-    this.preExecuted("elements.move", HIGH_PRIORITY14, function(e5) {
+    this.preExecuted("elements.move", HIGH_PRIORITY15, function(e5) {
       var context = e5.context, closure = context.closure, shapes = context.shapes, attachers = getAttachers(shapes);
       forEach(attachers, function(attacher) {
         closure.add(attacher, closure.topLevel[attacher.host.id]);
@@ -29896,6 +29950,9 @@ var __AutoNateBpmnJS__ = (() => {
       var assignedDi = isConnection(element) ? pick(di, ["border-color"]) : di, elementDi = getDi(element);
       ensureLegacySupport(assignedDi);
       if (isLabel(element)) {
+        if (!elementDi || !is2(elementDi.label, "bpmndi:BPMNLabel")) {
+          return;
+        }
         self2._commandStack.execute("element.updateModdleProperties", {
           element,
           moddleElement: elementDi.label,
@@ -34065,12 +34122,12 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/grid-snapping/behavior/SpaceToolBehavior.js
-  var HIGH_PRIORITY15 = 2e3;
+  var HIGH_PRIORITY16 = 2e3;
   function SpaceToolBehavior2(eventBus, gridSnapping) {
     eventBus.on([
       "spaceTool.move",
       "spaceTool.end"
-    ], HIGH_PRIORITY15, function(event2) {
+    ], HIGH_PRIORITY16, function(event2) {
       var context = event2.context;
       if (!context.initialized) {
         return;
@@ -34111,9 +34168,9 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/grid-snapping/behavior/GridSnappingAutoPlaceBehavior.js
-  var HIGH_PRIORITY16 = 2e3;
+  var HIGH_PRIORITY17 = 2e3;
   function GridSnappingAutoPlaceBehavior(eventBus, gridSnapping, elementRegistry) {
-    eventBus.on("autoPlace", HIGH_PRIORITY16, function(context) {
+    eventBus.on("autoPlace", HIGH_PRIORITY17, function(context) {
       var source = context.source, sourceMid = getMid(source), shape = context.shape;
       var position = getNewShapePosition2(source, shape, elementRegistry);
       ["x", "y"].forEach(function(axis) {
@@ -34173,7 +34230,7 @@ var __AutoNateBpmnJS__ = (() => {
   ];
 
   // node_modules/bpmn-js/lib/features/grid-snapping/behavior/GridSnappingLayoutConnectionBehavior.js
-  var HIGH_PRIORITY17 = 3e3;
+  var HIGH_PRIORITY18 = 3e3;
   function GridSnappingLayoutConnectionBehavior(eventBus, gridSnapping, modeling) {
     CommandInterceptor.call(this, eventBus);
     this._gridSnapping = gridSnapping;
@@ -34181,7 +34238,7 @@ var __AutoNateBpmnJS__ = (() => {
     this.postExecuted([
       "connection.create",
       "connection.layout"
-    ], HIGH_PRIORITY17, function(event2) {
+    ], HIGH_PRIORITY18, function(event2) {
       var context = event2.context, connection = context.connection, hints = context.hints || {}, waypoints = connection.waypoints;
       if (hints.connectionStart || hints.connectionEnd || hints.createElementsBehavior === false) {
         return;
@@ -34829,7 +34886,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/label-editing/LabelEditingProvider.js
-  var HIGH_PRIORITY18 = 2e3;
+  var HIGH_PRIORITY19 = 2e3;
   function LabelEditingProvider(eventBus, bpmnFactory, canvas, directEditing, modeling, resizeHandles, textRenderer) {
     this._bpmnFactory = bpmnFactory;
     this._canvas = canvas;
@@ -34855,7 +34912,7 @@ var __AutoNateBpmnJS__ = (() => {
     eventBus.on([
       "shape.remove",
       "connection.remove"
-    ], HIGH_PRIORITY18, function(event2) {
+    ], HIGH_PRIORITY19, function(event2) {
       if (directEditing.isActive(event2.element)) {
         directEditing.cancel();
       }
@@ -34885,7 +34942,7 @@ var __AutoNateBpmnJS__ = (() => {
       activateDirectEdit(event2.shape);
     });
     function activateDirectEdit(element, force) {
-      if (force || isAny(element, ["bpmn:Task", "bpmn:TextAnnotation", "bpmn:Participant"]) || isCollapsedSubProcess(element)) {
+      if (force || isAny(element, ["bpmn:Activity", "bpmn:Event", "bpmn:TextAnnotation", "bpmn:Participant"])) {
         directEditing.activate(element);
       }
     }
@@ -35723,7 +35780,7 @@ var __AutoNateBpmnJS__ = (() => {
   // node_modules/diagram-js/lib/features/move/Move.js
   var LOW_PRIORITY25 = 500;
   var MEDIUM_PRIORITY = 1250;
-  var HIGH_PRIORITY19 = 1500;
+  var HIGH_PRIORITY20 = 1500;
   var round13 = Math.round;
   function mid3(element) {
     return {
@@ -35740,7 +35797,7 @@ var __AutoNateBpmnJS__ = (() => {
         target
       });
     }
-    eventBus.on("shape.move.start", HIGH_PRIORITY19, function(event2) {
+    eventBus.on("shape.move.start", HIGH_PRIORITY20, function(event2) {
       var context = event2.context, shape = event2.shape, shapes = selection.get().slice();
       if (shapes.indexOf(shape) === -1) {
         shapes = [shape];
@@ -36228,15 +36285,20 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/diagram-js/lib/features/lasso-tool/LassoTool.js
   var LASSO_TOOL_CURSOR = "crosshair";
+  var MARKER_SELECTED2 = "selected";
+  var LASSO_ACTIVE_CLS = "djs-dragging-active-lasso";
   function LassoTool(eventBus, canvas, dragging, elementRegistry, selection, toolManager, mouse) {
     this._selection = selection;
     this._dragging = dragging;
     this._mouse = mouse;
     var self2 = this;
     var visuals = {
+      /**
+       * @param {LassoContext} context
+       */
       create: function(context) {
-        var container = canvas.getActiveLayer(), frame;
-        frame = context.frame = create("rect");
+        var container = canvas.getActiveLayer();
+        var frame = context.frame = create("rect");
         attr2(frame, {
           class: "djs-lasso-overlay",
           width: 1,
@@ -36245,22 +36307,56 @@ var __AutoNateBpmnJS__ = (() => {
           y: 0
         });
         append(container, frame);
+        toggleLassoMarkerClass(true);
+        this.update(context);
       },
+      /**
+       * @param {LassoContext} context
+       */
       update: function(context) {
         var frame = context.frame, bbox = context.bbox;
-        attr2(frame, {
-          x: bbox.x,
-          y: bbox.y,
-          width: bbox.width,
-          height: bbox.height
-        });
+        if (frame && bbox) {
+          attr2(frame, {
+            x: bbox.x,
+            y: bbox.y,
+            width: bbox.width,
+            height: bbox.height
+          });
+        }
+        var currentlyMarked = context.marked, lastMarked = context.lastMarked;
+        if (currentlyMarked && lastMarked) {
+          for (const e5 of lastMarked) {
+            if (!currentlyMarked.has(e5)) {
+              canvas.removeMarker(e5, MARKER_SELECTED2);
+            }
+          }
+          for (const e5 of currentlyMarked) {
+            if (!lastMarked.has(e5)) {
+              canvas.addMarker(e5, MARKER_SELECTED2);
+            }
+          }
+        }
       },
+      /**
+       * @param {LassoContext} context
+       */
       remove: function(context) {
+        this.update(context);
         if (context.frame) {
           remove2(context.frame);
         }
+        toggleLassoMarkerClass(false);
       }
     };
+    function toggleLassoMarkerClass(enabled) {
+      classes2(canvas.getContainer()).toggle(LASSO_ACTIVE_CLS, enabled);
+    }
+    function getAllEnclosedElements(bbox) {
+      var allElements = elementRegistry.getAll();
+      return new Set(
+        values(getEnclosedElements(allElements, bbox))
+      );
+    }
     toolManager.registerTool("lasso", {
       tool: "lasso.selection",
       dragging: "lasso"
@@ -36276,27 +36372,35 @@ var __AutoNateBpmnJS__ = (() => {
     });
     eventBus.on("lasso.end", 0, function(event2) {
       var context = event2.context;
-      var bbox = toBBox(event2);
-      var elements = elementRegistry.filter(function(element) {
-        return element;
-      });
-      var add3 = hasSecondaryModifier(event2);
-      self2.select(elements, bbox, add3 ? context.selection : []);
+      self2._select(Array.from(context.marked));
     });
     eventBus.on("lasso.start", function(event2) {
       var context = event2.context;
       context.bbox = toBBox(event2);
+      context.add = hasSecondaryModifier(event2);
+      context.lastMarked = new Set(selection.get());
+      if (context.add) {
+        context.marked = context.lastMarked;
+      } else {
+        context.marked = /* @__PURE__ */ new Set();
+      }
+      context.initialMarked = context.marked;
       visuals.create(context);
-      context.selection = selection.get();
     });
     eventBus.on("lasso.move", function(event2) {
       var context = event2.context;
-      context.bbox = toBBox(event2);
+      var bbox = context.bbox = toBBox(event2);
+      var enclosedElements = getAllEnclosedElements(bbox);
+      var marked = context.initialMarked.union(enclosedElements);
+      context.lastMarked = context.marked;
+      context.marked = marked;
       visuals.update(context);
     });
     eventBus.on("lasso.cleanup", function(event2) {
       var context = event2.context;
-      visuals.remove(context);
+      context.lastMarked = context.marked;
+      context.marked = new Set(selection.get());
+      visuals.remove(event2.context);
     });
     eventBus.on("element.mousedown", 1500, function(event2) {
       if (!hasSecondaryModifier(event2)) {
@@ -36321,7 +36425,8 @@ var __AutoNateBpmnJS__ = (() => {
       cursor: LASSO_TOOL_CURSOR,
       data: {
         context: {}
-      }
+      },
+      keepSelection: true
     });
   };
   LassoTool.prototype.activateSelection = function(event2, autoActivate) {
@@ -36335,11 +36440,14 @@ var __AutoNateBpmnJS__ = (() => {
       keepSelection: true
     });
   };
+  LassoTool.prototype._select = function(elements) {
+    this._selection.select(elements);
+  };
   LassoTool.prototype.select = function(elements, bbox, previousSelection = []) {
-    var selectedElements = getEnclosedElements(elements, bbox);
-    this._selection.select([
+    var selectedElements = values(getEnclosedElements(elements, bbox));
+    this._select([
       ...previousSelection,
-      ...values(selectedElements)
+      ...selectedElements
     ]);
   };
   LassoTool.prototype.toggle = function() {
@@ -36413,7 +36521,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/hand-tool/HandTool.js
-  var HIGH_PRIORITY20 = 1500;
+  var HIGH_PRIORITY21 = 1500;
   var HAND_CURSOR = "grab";
   function HandTool(eventBus, canvas, dragging, injector, toolManager, mouse) {
     this._dragging = dragging;
@@ -36423,21 +36531,21 @@ var __AutoNateBpmnJS__ = (() => {
       tool: "hand",
       dragging: "hand.move"
     });
-    eventBus.on("element.mousedown", HIGH_PRIORITY20, function(event2) {
+    eventBus.on("element.mousedown", HIGH_PRIORITY21, function(event2) {
       if (!hasPrimaryModifier(event2)) {
         return;
       }
       self2.activateMove(event2.originalEvent, true);
       return false;
     });
-    keyboard && keyboard.addListener(HIGH_PRIORITY20, function(e5) {
+    keyboard && keyboard.addListener(HIGH_PRIORITY21, function(e5) {
       if (!isSpace(e5.keyEvent) || self2.isActive()) {
         return;
       }
       var mouseEvent = self2._mouse.getLastMoveEvent();
       self2.activateMove(mouseEvent, !!mouseEvent);
     }, "keyboard.keydown");
-    keyboard && keyboard.addListener(HIGH_PRIORITY20, function(e5) {
+    keyboard && keyboard.addListener(HIGH_PRIORITY21, function(e5) {
       if (!isSpace(e5.keyEvent) || !self2.isActive()) {
         return;
       }
@@ -37193,16 +37301,16 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/bpmn-js/lib/features/snapping/BpmnCreateMoveSnapping.js
-  var HIGH_PRIORITY21 = 1500;
+  var HIGH_PRIORITY22 = 1500;
   function BpmnCreateMoveSnapping(eventBus, injector) {
     injector.invoke(CreateMoveSnapping, this);
-    eventBus.on(["create.move", "create.end"], HIGH_PRIORITY21, setSnappedIfConstrained);
+    eventBus.on(["create.move", "create.end"], HIGH_PRIORITY22, setSnappedIfConstrained);
     eventBus.on([
       "create.move",
       "create.end",
       "shape.move.move",
       "shape.move.end"
-    ], HIGH_PRIORITY21, function(event2) {
+    ], HIGH_PRIORITY22, function(event2) {
       var context = event2.context, canExecute = context.canExecute, target = context.target;
       var canAttach2 = canExecute && (canExecute === "attach" || canExecute.attach);
       if (canAttach2 && !isSnapped(event2)) {
