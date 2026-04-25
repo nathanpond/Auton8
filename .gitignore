@@ -29,3 +29,5 @@ __pycache__/
 src/AutoNate.Spa/dist/
 src/AutoNate.Web/wwwroot/
 .idea/
+Test Results/
+
