@@ -2,6 +2,7 @@ package com.autonate.flowableevents;
 
 import java.util.ArrayList;
 import org.flowable.common.engine.api.delegate.event.FlowableEventListener;
+import org.flowable.engine.HistoryService;
 import org.flowable.spring.SpringProcessEngineConfiguration;
 import org.flowable.spring.boot.EngineConfigurationConfigurer;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -38,6 +39,11 @@ public class FlowableExecutionEventAutoConfiguration {
     @Bean
     FlowableScriptTaskSupportService flowableScriptTaskSupportService() {
         return new FlowableScriptTaskSupportService();
+    }
+
+    @Bean(name = "dueDateHelper")
+    DueDateHelper dueDateHelper(HistoryService historyService) {
+        return new DueDateHelper(historyService);
     }
 
     @Bean

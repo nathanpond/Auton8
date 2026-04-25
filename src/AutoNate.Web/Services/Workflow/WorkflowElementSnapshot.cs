@@ -10,4 +10,5 @@ public sealed record class WorkflowElementSnapshot(
     string? ConditionExpression = null,
     string? Assignee = null,
     IReadOnlyList<string>? CandidateUsers = null,
-    IReadOnlyList<string>? CandidateGroups = null);
+    IReadOnlyList<string>? CandidateGroups = null,
+    string? DueDate = null);

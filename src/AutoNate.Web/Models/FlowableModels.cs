@@ -52,6 +52,8 @@ public sealed record class FlowableTaskSummary
     public string? ProcessDefinitionName { get; init; }
 
     public DateTimeOffset? CreatedAtUtc { get; init; }
+
+    public DateTimeOffset? DueDate { get; init; }
 }
 
 public sealed record class WorkflowExecutionSummary

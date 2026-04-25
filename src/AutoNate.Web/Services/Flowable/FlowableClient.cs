@@ -389,7 +389,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                 Assignee = task.Assignee,
                 ProcessInstanceId = task.ProcessInstanceId,
                 ProcessDefinitionId = task.ProcessDefinitionId,
-                CreatedAtUtc = task.CreateTime
+                CreatedAtUtc = task.CreateTime,
+                DueDate = task.DueDate
             })
             .ToArray();
     }
@@ -439,7 +440,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                     ProcessInstanceId = task.ProcessInstanceId,
                     ProcessDefinitionId = task.ProcessDefinitionId,
                     ProcessDefinitionName = definitionName,
-                    CreatedAtUtc = task.CreateTime
+                    CreatedAtUtc = task.CreateTime,
+                    DueDate = task.DueDate
                 };
             })
             .OrderByDescending(task => task.CreatedAtUtc ?? DateTimeOffset.MinValue)
@@ -744,6 +746,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? ProcessDefinitionId { get; init; }
 
         public DateTimeOffset? CreateTime { get; init; }
+
+        public DateTimeOffset? DueDate { get; init; }
     }
 
     private sealed class FlowableScriptTaskSupportResponse

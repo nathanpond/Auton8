@@ -216,6 +216,62 @@ public sealed class WorkflowBpmnXmlTests
     }
 
     [Fact]
+    public void ApplyProcessMetadata_RoundTripsFlowableUserTaskDueDate()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                                             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                                             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="due_flow" name="Due Flow" isExecutable="true">
+                               <bpmn:userTask id="Task_Activation" name="Review" />
+                               <bpmn:userTask id="Task_FromStart" name="Approve" />
+                               <bpmn:userTask id="Task_Cleared" name="Cleanup" flowable:dueDate="P7D" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "due_flow",
+            "Due Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "Task_Activation",
+                    "bpmn:UserTask",
+                    "Review",
+                    DueDate: "P3D"),
+                new WorkflowElementSnapshot(
+                    "Task_FromStart",
+                    "bpmn:UserTask",
+                    "Approve",
+                    DueDate: "${dueDateHelper.fromProcessStart(execution, 5)}"),
+                new WorkflowElementSnapshot(
+                    "Task_Cleared",
+                    "bpmn:UserTask",
+                    "Cleanup",
+                    DueDate: null)
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var activationTask = document.Descendants(bpmn + "userTask").Single(t => t.Attribute("id")!.Value == "Task_Activation");
+        Assert.Equal("P3D", activationTask.Attribute(flowable + "dueDate")?.Value);
+
+        var fromStartTask = document.Descendants(bpmn + "userTask").Single(t => t.Attribute("id")!.Value == "Task_FromStart");
+        Assert.Equal("${dueDateHelper.fromProcessStart(execution, 5)}", fromStartTask.Attribute(flowable + "dueDate")?.Value);
+
+        var clearedTask = document.Descendants(bpmn + "userTask").Single(t => t.Attribute("id")!.Value == "Task_Cleared");
+        Assert.Null(clearedTask.Attribute(flowable + "dueDate"));
+    }
+
+    [Fact]
     public void ApplyProcessMetadata_PreservesSequenceFlowConditionExpressionFromElementSnapshots()
     {
         const string xml = """

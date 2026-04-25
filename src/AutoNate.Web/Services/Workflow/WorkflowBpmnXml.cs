@@ -358,6 +358,7 @@ public static partial class WorkflowBpmnXml
         SetOrRemoveFlowableAttribute(element, "assignee", snapshot.Assignee);
         SetOrRemoveFlowableAttribute(element, "candidateUsers", SerializeFlowableList(snapshot.CandidateUsers));
         SetOrRemoveFlowableAttribute(element, "candidateGroups", SerializeFlowableList(snapshot.CandidateGroups));
+        SetOrRemoveFlowableAttribute(element, "dueDate", snapshot.DueDate);
     }
 
     private static void SetOrRemoveFlowableAttribute(XElement element, string localName, string? value)

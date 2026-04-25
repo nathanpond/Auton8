@@ -227,7 +227,11 @@ function WorkflowRow({
         <span className="text-body text-opacity-50">—</span>
       </td>
       <td>
-        <span className="text-body text-opacity-50">—</span>
+        {task.dueDate ? (
+          formatDateTime(task.dueDate)
+        ) : (
+          <span className="text-body text-opacity-50">—</span>
+        )}
       </td>
       <td>{formatWhen(task.createdAtUtc)}</td>
       <td>
@@ -277,4 +281,9 @@ function formatDate(yyyyMmDd: string): string {
   if (!y || !m || !d) return yyyyMmDd;
   const date = new Date(y, m - 1, d);
   return Number.isNaN(date.getTime()) ? yyyyMmDd : date.toLocaleDateString();
+}
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 }

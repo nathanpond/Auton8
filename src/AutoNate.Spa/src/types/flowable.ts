@@ -35,6 +35,7 @@ export type FlowableTaskSummary = {
   processDefinitionId: string | null;
   processDefinitionName: string | null;
   createdAtUtc: string | null;
+  dueDate: string | null;
 };
 
 export type FlowableProcessInstanceSummary = {

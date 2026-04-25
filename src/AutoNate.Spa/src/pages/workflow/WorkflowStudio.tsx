@@ -47,6 +47,8 @@ type SequenceFlowEditor = {
 
 type AssignmentMode = "picker" | "expression";
 
+type DueDateMode = "none" | "afterActivation" | "afterProcessStart" | "expression";
+
 type UserTaskEditor = {
   id: string;
   type: string;
@@ -58,6 +60,9 @@ type UserTaskEditor = {
   candidateUserIds: string[];
   candidateUsersExpression: string;
   candidateGroupsRaw: string;
+  dueDateMode: DueDateMode;
+  dueDateDays: string;
+  dueDateExpression: string;
 };
 
 type ElementSelection = {
@@ -71,10 +76,67 @@ type ElementSelection = {
   assignee?: string | null;
   candidateUsers?: string[] | null;
   candidateGroups?: string[] | null;
+  dueDate?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
   return !!value && value.trim().startsWith("${");
+}
+
+const DUE_DATE_FROM_START_PATTERN =
+  /^\$\{dueDateHelper\.fromProcessStart\(execution,\s*(.+?)\)\}$/;
+const DUE_DATE_AFTER_ACTIVATION_LITERAL_PATTERN = /^P(\d+)D$/;
+const DUE_DATE_AFTER_ACTIVATION_EXPRESSION_PATTERN = /^P(\$\{.+\})D$/;
+
+function parseDueDate(raw: string | null | undefined): {
+  mode: DueDateMode;
+  days: string;
+  expression: string;
+} {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) {
+    return { mode: "none", days: "", expression: "" };
+  }
+
+  const literal = trimmed.match(DUE_DATE_AFTER_ACTIVATION_LITERAL_PATTERN);
+  if (literal) {
+    return { mode: "afterActivation", days: literal[1], expression: "" };
+  }
+
+  const activationExpr = trimmed.match(DUE_DATE_AFTER_ACTIVATION_EXPRESSION_PATTERN);
+  if (activationExpr) {
+    return { mode: "afterActivation", days: activationExpr[1], expression: "" };
+  }
+
+  const fromStart = trimmed.match(DUE_DATE_FROM_START_PATTERN);
+  if (fromStart) {
+    return { mode: "afterProcessStart", days: fromStart[1].trim(), expression: "" };
+  }
+
+  return { mode: "expression", days: "", expression: trimmed };
+}
+
+function buildDueDate(editor: UserTaskEditor): string | null {
+  switch (editor.dueDateMode) {
+    case "none":
+      return null;
+    case "afterActivation": {
+      const value = editor.dueDateDays.trim();
+      if (!value) return null;
+      return `P${value}D`;
+    }
+    case "afterProcessStart": {
+      const value = editor.dueDateDays.trim();
+      if (!value) return null;
+      return `\${dueDateHelper.fromProcessStart(execution, ${value})}`;
+    }
+    case "expression": {
+      const value = editor.dueDateExpression.trim();
+      return value || null;
+    }
+    default:
+      return null;
+  }
 }
 
 export default function WorkflowStudio() {
@@ -141,6 +203,7 @@ export default function WorkflowStudio() {
       const candidateUsersFirst = candidateUsers[0] ?? "";
       const candidateUsersIsExpression =
         candidateUsers.length === 1 && looksLikeExpression(candidateUsersFirst);
+      const dueDate = parseDueDate(selection.dueDate);
       setUserTaskEditor({
         id: selection.id,
         type: selection.type,
@@ -151,7 +214,10 @@ export default function WorkflowStudio() {
         candidateUsersMode: candidateUsersIsExpression ? "expression" : "picker",
         candidateUserIds: candidateUsersIsExpression ? [] : candidateUsers,
         candidateUsersExpression: candidateUsersIsExpression ? candidateUsersFirst : "",
-        candidateGroupsRaw: candidateGroups.join(", ")
+        candidateGroupsRaw: candidateGroups.join(", "),
+        dueDateMode: dueDate.mode,
+        dueDateDays: dueDate.days,
+        dueDateExpression: dueDate.expression
       });
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
@@ -347,12 +413,15 @@ export default function WorkflowStudio() {
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0);
 
+      const dueDate = buildDueDate(userTaskEditor);
+
       await workflow.updateUserTaskProperties(handle, {
         id: userTaskEditor.id,
         name: userTaskEditor.name,
         assignee,
         candidateUsers,
-        candidateGroups
+        candidateGroups,
+        dueDate
       });
       setUserTaskEditor(null);
     });
@@ -1199,6 +1268,92 @@ function UserTaskModal({
             free text.
           </p>
         </label>
+
+        <fieldset className="workflow-field">
+          <legend>Due Date</legend>
+          <div className="form-check">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-dueDate-mode-none"
+              checked={editor.dueDateMode === "none"}
+              onChange={() => onChange({ ...editor, dueDateMode: "none" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-dueDate-mode-none">
+              No due date
+            </label>
+          </div>
+          <div className="form-check">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-dueDate-mode-activation"
+              checked={editor.dueDateMode === "afterActivation"}
+              onChange={() => onChange({ ...editor, dueDateMode: "afterActivation" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-dueDate-mode-activation">
+              Days after task activation
+            </label>
+          </div>
+          <div className="form-check">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-dueDate-mode-start"
+              checked={editor.dueDateMode === "afterProcessStart"}
+              onChange={() => onChange({ ...editor, dueDateMode: "afterProcessStart" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-dueDate-mode-start">
+              Days after process start
+            </label>
+          </div>
+          <div className="form-check">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-dueDate-mode-expression"
+              checked={editor.dueDateMode === "expression"}
+              onChange={() => onChange({ ...editor, dueDateMode: "expression" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-dueDate-mode-expression">
+              Expression
+            </label>
+          </div>
+
+          {(editor.dueDateMode === "afterActivation" ||
+            editor.dueDateMode === "afterProcessStart") && (
+            <div className="mt-2">
+              <input
+                className="form-control"
+                placeholder="3 or ${slaDays}"
+                value={editor.dueDateDays}
+                onChange={(e) => onChange({ ...editor, dueDateDays: e.target.value })}
+              />
+              <p className="workflow-modal-note">
+                Enter a whole number of days, or a Flowable expression like{" "}
+                <code>${"{slaDays}"}</code> set by an upstream script task. The due date is
+                resolved when the task is created.
+              </p>
+            </div>
+          )}
+
+          {editor.dueDateMode === "expression" && (
+            <div className="mt-2">
+              <textarea
+                className="form-control"
+                rows={2}
+                placeholder="${customDueDate}"
+                value={editor.dueDateExpression}
+                onChange={(e) => onChange({ ...editor, dueDateExpression: e.target.value })}
+              />
+              <p className="workflow-modal-note">
+                Any value Flowable accepts in <code>flowable:dueDate</code>: an ISO duration like{" "}
+                <code>P3D</code>, an absolute timestamp, or an expression resolving to either. Set
+                the variable from a script task to drive due dates dynamically.
+              </p>
+            </div>
+          )}
+        </fieldset>
 
         <div className="workflow-modal-actions">
           <button type="button" className="btn btn-outline-secondary" onClick={onClose}>

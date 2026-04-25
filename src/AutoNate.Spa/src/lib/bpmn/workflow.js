@@ -473,7 +473,7 @@ const MENU_GROUP_ORDER = [
   "Boundary Events"
 ];
 
-const WORKFLOW_JS_VERSION = "20260421_02";
+const WORKFLOW_JS_VERSION = "20260425_01";
 
 export async function createModeler(container, xml, dotNetRef) {
   if (typeof window.BpmnJS === "undefined") {
@@ -978,7 +978,8 @@ function describeBusinessObject(businessObject) {
     conditionExpression: typeof conditionExpression?.body === "string" ? conditionExpression.body : null,
     assignee: readFlowableString(businessObject, "assignee"),
     candidateUsers: readFlowableList(businessObject, "candidateUsers"),
-    candidateGroups: readFlowableList(businessObject, "candidateGroups")
+    candidateGroups: readFlowableList(businessObject, "candidateGroups"),
+    dueDate: readFlowableString(businessObject, "dueDate")
   };
 }
 
@@ -1103,10 +1104,12 @@ export function updateUserTaskProperties(modelerHandle, task) {
   const assignee = normalizeOptionalString(task.assignee);
   const candidateUsers = serializeFlowableList(task.candidateUsers);
   const candidateGroups = serializeFlowableList(task.candidateGroups);
+  const dueDate = normalizeOptionalString(task.dueDate);
 
   writeFlowableAttribute(businessObject, "assignee", assignee);
   writeFlowableAttribute(businessObject, "candidateUsers", candidateUsers);
   writeFlowableAttribute(businessObject, "candidateGroups", candidateGroups);
+  writeFlowableAttribute(businessObject, "dueDate", dueDate);
 
   modeling.updateProperties(element, {
     name: normalizeOptionalString(task.name)

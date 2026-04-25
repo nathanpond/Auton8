@@ -62,6 +62,7 @@ export type WorkflowElementSnapshot = {
   assignee?: string | null;
   candidateUsers?: string[] | null;
   candidateGroups?: string[] | null;
+  dueDate?: string | null;
 };
 
 export type PrepareWorkflowRequest = {
