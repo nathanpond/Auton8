@@ -13,6 +13,8 @@ import {
   useUpdateRecordType
 } from "@/hooks/useRecordTypes";
 import { FieldDataType, RecordTypeField } from "@/types/records";
+import IconPicker from "@/components/IconPicker";
+import ColorPicker from "@/components/ColorPicker";
 import FieldConfigPanel from "./FieldConfigPanel";
 import SchemaAuditPanel from "./SchemaAuditPanel";
 import { defaultFieldConfig, humanDataType } from "./fieldTypeDefaults";
@@ -158,21 +160,11 @@ export default function RecordTypeEditor() {
             </div>
             <div className="col-md-3">
               <label className="form-label">Icon</label>
-              <input
-                className="form-control"
-                placeholder="fa-building"
-                value={iconDraft}
-                onChange={(e) => setIconDraft(e.target.value)}
-              />
+              <IconPicker value={iconDraft} onChange={setIconDraft} />
             </div>
             <div className="col-md-3">
               <label className="form-label">Color</label>
-              <input
-                className="form-control"
-                placeholder="#336699"
-                value={colorDraft}
-                onChange={(e) => setColorDraft(e.target.value)}
-              />
+              <ColorPicker value={colorDraft} onChange={setColorDraft} />
             </div>
             <div className="col-12">
               <label className="form-label">Description</label>

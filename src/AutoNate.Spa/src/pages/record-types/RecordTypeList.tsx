@@ -6,6 +6,8 @@ import {
   useRestoreRecordType
 } from "@/hooks/useRecordTypes";
 import { CreateRecordTypeRequest, RecordType } from "@/types/records";
+import IconPicker from "@/components/IconPicker";
+import ColorPicker from "@/components/ColorPicker";
 
 export default function RecordTypeList() {
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -231,21 +233,17 @@ function CreateModal({
                 </div>
                 <div className="row g-2">
                   <div className="col">
-                    <label className="form-label">Icon (FontAwesome class)</label>
-                    <input
-                      className="form-control"
-                      placeholder="fa-building"
+                    <label className="form-label">Icon (FontAwesome)</label>
+                    <IconPicker
                       value={values.icon ?? ""}
-                      onChange={(e) => setValues({ ...values, icon: e.target.value })}
+                      onChange={(v) => setValues({ ...values, icon: v })}
                     />
                   </div>
                   <div className="col">
                     <label className="form-label">Color</label>
-                    <input
-                      className="form-control"
-                      placeholder="#336699"
+                    <ColorPicker
                       value={values.color ?? ""}
-                      onChange={(e) => setValues({ ...values, color: e.target.value })}
+                      onChange={(v) => setValues({ ...values, color: v })}
                     />
                   </div>
                 </div>
