@@ -1,5 +1,7 @@
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Records;
+using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -28,6 +30,36 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     public EfCoreLocalUserStore CreateLocalUserStore() => new(CreateDbContextFactory());
 
     public EfCoreWorkflowModelStore CreateWorkflowStore() => new(CreateDbContextFactory());
+
+    public EfCoreRecordTypeStore CreateRecordTypeStore() =>
+        new(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry());
+
+    public EfCoreRecordStore CreateRecordStore() =>
+        new(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry());
+
+    public EfCoreRecordHistoryStore CreateRecordHistoryStore() =>
+        new(CreateDbContextFactory());
+
+    public EfCoreRecordEdgeTypeStore CreateRecordEdgeTypeStore() =>
+        new(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry());
+
+    public EfCoreRecordEdgeStore CreateRecordEdgeStore() =>
+        new(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry());
+
+    public EfCoreRecordCommentStore CreateRecordCommentStore() =>
+        new(CreateDbContextFactory());
+
+    public static IFieldTypeRegistry BuildDefaultFieldTypeRegistry() =>
+        new FieldTypeRegistry(new IFieldType[]
+        {
+            new TextFieldType(),
+            new NumberFieldType(),
+            new DateFieldType(),
+            new PhoneFieldType(),
+            new EmailFieldType(),
+            new OptionFieldType(),
+            new BooleanFieldType()
+        });
 
     public AutoNateDbContext CreateDbContext() => CreateDbContextFactory().CreateDbContext();
 

@@ -6,6 +6,8 @@ using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Records;
+using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication;
@@ -67,6 +69,20 @@ builder.Services.AddDbContextFactory<AutoNateDbContext>(options =>
         ?? throw new InvalidOperationException("Connection string 'Default' is required.")));
 builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();
 builder.Services.AddScoped<IWorkflowModelStore, EfCoreWorkflowModelStore>();
+builder.Services.AddSingleton<IFieldType, TextFieldType>();
+builder.Services.AddSingleton<IFieldType, NumberFieldType>();
+builder.Services.AddSingleton<IFieldType, DateFieldType>();
+builder.Services.AddSingleton<IFieldType, PhoneFieldType>();
+builder.Services.AddSingleton<IFieldType, EmailFieldType>();
+builder.Services.AddSingleton<IFieldType, OptionFieldType>();
+builder.Services.AddSingleton<IFieldType, BooleanFieldType>();
+builder.Services.AddSingleton<IFieldTypeRegistry, FieldTypeRegistry>();
+builder.Services.AddScoped<IRecordTypeStore, EfCoreRecordTypeStore>();
+builder.Services.AddScoped<IRecordStore, EfCoreRecordStore>();
+builder.Services.AddScoped<IRecordHistoryStore, EfCoreRecordHistoryStore>();
+builder.Services.AddScoped<IRecordEdgeTypeStore, EfCoreRecordEdgeTypeStore>();
+builder.Services.AddScoped<IRecordEdgeStore, EfCoreRecordEdgeStore>();
+builder.Services.AddScoped<IRecordCommentStore, EfCoreRecordCommentStore>();
 builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
     .ConfigureHttpClient((serviceProvider, httpClient) =>
     {
@@ -303,6 +319,10 @@ app.MapHealthEndpoints();
 app.MapUserEndpoints();
 app.MapWorkflowEndpoints();
 app.MapExecutionEndpoints();
+app.MapRecordTypeEndpoints();
+app.MapRecordEndpoints();
+app.MapRecordEdgeEndpoints();
+app.MapRecordCommentEndpoints();
 
 app.MapStaticAssets();
 

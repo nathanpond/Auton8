@@ -11,6 +11,13 @@ import BusWatcher from "./pages/bus-watcher/BusWatcher";
 import ManageUsers from "./pages/manage-users/ManageUsers";
 import WorkflowExecutions from "./pages/workflow-executions/WorkflowExecutions";
 import WorkflowStudio from "./pages/workflow/WorkflowStudio";
+import RecordTypeList from "./pages/record-types/RecordTypeList";
+import RecordTypeEditor from "./pages/record-types/RecordTypeEditor";
+import RecordList from "./pages/records/RecordList";
+import RecordCreate from "./pages/records/RecordCreate";
+import RecordDetail from "./pages/records/RecordDetail";
+import EdgeTypeList from "./pages/edge-types/EdgeTypeList";
+import EdgeTypeEditor from "./pages/edge-types/EdgeTypeEditor";
 import NotFound from "./pages/not-found/NotFound";
 
 export default function Router() {
@@ -66,6 +73,70 @@ export default function Router() {
           element={
             <ProtectedRoute>
               <WorkflowStudio />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="record-types"
+          element={
+            <ProtectedRoute>
+              <RecordTypeList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="record-types/:id"
+          element={
+            <ProtectedRoute>
+              <RecordTypeEditor />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="records/:typeShortCode/new"
+          element={
+            <ProtectedRoute>
+              <RecordCreate />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="records/:typeShortCode/:key"
+          element={
+            <ProtectedRoute>
+              <RecordDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="record/:key"
+          element={
+            <ProtectedRoute>
+              <RecordDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="records/:typeShortCode"
+          element={
+            <ProtectedRoute>
+              <RecordList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="record-edge-types"
+          element={
+            <ProtectedRoute>
+              <EdgeTypeList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="record-edge-types/:id"
+          element={
+            <ProtectedRoute>
+              <EdgeTypeEditor />
             </ProtectedRoute>
           }
         />

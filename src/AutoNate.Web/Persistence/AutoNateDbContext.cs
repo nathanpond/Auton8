@@ -18,6 +18,26 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<WorkflowModelVersion> WorkflowModelVersions { get; set; }
 
+    public virtual DbSet<RecordType> RecordTypes { get; set; }
+
+    public virtual DbSet<RecordTypeField> RecordTypeFields { get; set; }
+
+    public virtual DbSet<RecordTypeAuditEntry> RecordTypeAuditLog { get; set; }
+
+    public virtual DbSet<Record> Records { get; set; }
+
+    public virtual DbSet<RecordFieldChange> RecordFieldChanges { get; set; }
+
+    public virtual DbSet<RecordEdgeType> RecordEdgeTypes { get; set; }
+
+    public virtual DbSet<RecordEdgeTypeField> RecordEdgeTypeFields { get; set; }
+
+    public virtual DbSet<RecordEdge> RecordEdges { get; set; }
+
+    public virtual DbSet<RecordComment> RecordComments { get; set; }
+
+    public virtual DbSet<RecordCommentRevision> RecordCommentRevisions { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -102,6 +122,262 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.PublishedAtUtc).HasColumnName("published_at_utc");
             entity.Property(e => e.VersionNumber).HasColumnName("version_number");
             entity.Property(e => e.WorkflowModelId).HasColumnName("workflow_model_id");
+        });
+
+        modelBuilder.Entity<RecordType>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_types_pkey");
+
+            entity.ToTable("record_types");
+
+            entity.HasIndex(e => e.ShortCode, "record_types_short_code_key").IsUnique();
+
+            entity.HasIndex(e => e.UpdatedAtUtc, "ix_record_types_updated_at_utc").IsDescending();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.ShortCode).HasColumnName("short_code");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Icon).HasColumnName("icon");
+            entity.Property(e => e.Color).HasColumnName("color");
+            entity.Property(e => e.IsSystem).HasColumnName("is_system");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.NextKeyNumber).HasColumnName("next_key_number");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<RecordTypeField>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_type_fields_pkey");
+
+            entity.ToTable("record_type_fields");
+
+            entity.HasIndex(e => new { e.RecordTypeId, e.FieldKey },
+                "record_type_fields_record_type_id_field_key_key").IsUnique();
+
+            entity.HasIndex(e => new { e.RecordTypeId, e.SortOrder },
+                "ix_record_type_fields_record_type_id");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.RecordTypeId).HasColumnName("record_type_id");
+            entity.Property(e => e.FieldKey).HasColumnName("field_key");
+            entity.Property(e => e.DisplayName).HasColumnName("display_name");
+            entity.Property(e => e.DataType).HasColumnName("data_type");
+            entity.Property(e => e.Config)
+                .HasColumnName("config")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.IsRequired).HasColumnName("is_required");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<RecordTypeAuditEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_type_audit_log_pkey");
+
+            entity.ToTable("record_type_audit_log");
+
+            entity.HasIndex(e => new { e.RecordTypeId, e.ChangedAtUtc },
+                "ix_record_type_audit_log_record_type_id").IsDescending(false, true);
+
+            entity.Property(e => e.Id)
+                .UseIdentityAlwaysColumn()
+                .HasColumnName("id");
+            entity.Property(e => e.RecordTypeId).HasColumnName("record_type_id");
+            entity.Property(e => e.ChangeKind).HasColumnName("change_kind");
+            entity.Property(e => e.Before)
+                .HasColumnName("before")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.After)
+                .HasColumnName("after")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
+            entity.Property(e => e.ChangedAtUtc).HasColumnName("changed_at_utc");
+        });
+
+        modelBuilder.Entity<Record>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("records_pkey");
+
+            entity.ToTable("records");
+
+            entity.HasIndex(e => e.Key, "records_key_key").IsUnique();
+            entity.HasIndex(e => e.RecordTypeId, "ix_records_record_type_id");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.RecordTypeId).HasColumnName("record_type_id");
+            entity.Property(e => e.Key).HasColumnName("key");
+            entity.Property(e => e.KeyNumber).HasColumnName("key_number");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.AssigneeIds)
+                .HasColumnName("assignee_ids")
+                .HasColumnType("uuid[]");
+            entity.Property(e => e.Values)
+                .HasColumnName("values")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<RecordFieldChange>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_field_changes_pkey");
+
+            entity.ToTable("record_field_changes");
+
+            entity.HasIndex(e => new { e.RecordId, e.ChangedAtUtc },
+                "ix_record_field_changes_record").IsDescending(false, true);
+            entity.HasIndex(e => new { e.RecordId, e.FieldKey, e.ChangedAtUtc },
+                "ix_record_field_changes_record_field").IsDescending(false, false, true);
+
+            entity.Property(e => e.Id)
+                .UseIdentityAlwaysColumn()
+                .HasColumnName("id");
+            entity.Property(e => e.RecordId).HasColumnName("record_id");
+            entity.Property(e => e.ChangeSetId).HasColumnName("change_set_id");
+            entity.Property(e => e.ChangeKind).HasColumnName("change_kind");
+            entity.Property(e => e.FieldKey).HasColumnName("field_key");
+            entity.Property(e => e.OldValue)
+                .HasColumnName("old_value")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.NewValue)
+                .HasColumnName("new_value")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
+            entity.Property(e => e.ChangedAtUtc).HasColumnName("changed_at_utc");
+            entity.HasIndex(e => e.ChangeSetId, "ix_record_field_changes_change_set");
+        });
+
+        modelBuilder.Entity<RecordEdgeType>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_edge_types_pkey");
+
+            entity.ToTable("record_edge_types");
+
+            entity.HasIndex(e => e.ShortCode, "record_edge_types_short_code_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.ShortCode).HasColumnName("short_code");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.InverseName).HasColumnName("inverse_name");
+            entity.Property(e => e.IsDirected).HasColumnName("is_directed");
+            entity.Property(e => e.AllowSelfReference).HasColumnName("allow_self_reference");
+            entity.Property(e => e.Cardinality).HasColumnName("cardinality");
+            entity.Property(e => e.FromRecordTypeIds)
+                .HasColumnName("from_record_type_ids")
+                .HasColumnType("uuid[]");
+            entity.Property(e => e.ToRecordTypeIds)
+                .HasColumnName("to_record_type_ids")
+                .HasColumnType("uuid[]");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<RecordEdgeTypeField>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_edge_type_fields_pkey");
+
+            entity.ToTable("record_edge_type_fields");
+
+            entity.HasIndex(e => new { e.EdgeTypeId, e.FieldKey },
+                "record_edge_type_fields_edge_type_id_field_key_key").IsUnique();
+            entity.HasIndex(e => new { e.EdgeTypeId, e.SortOrder },
+                "ix_record_edge_type_fields_edge_type");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.EdgeTypeId).HasColumnName("edge_type_id");
+            entity.Property(e => e.FieldKey).HasColumnName("field_key");
+            entity.Property(e => e.DisplayName).HasColumnName("display_name");
+            entity.Property(e => e.DataType).HasColumnName("data_type");
+            entity.Property(e => e.Config)
+                .HasColumnName("config")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.IsRequired).HasColumnName("is_required");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+        });
+
+        modelBuilder.Entity<RecordEdge>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_edges_pkey");
+
+            entity.ToTable("record_edges");
+
+            entity.HasIndex(e => new { e.FromRecordId, e.EdgeTypeId }, "ix_record_edges_from");
+            entity.HasIndex(e => new { e.ToRecordId, e.EdgeTypeId }, "ix_record_edges_to");
+            entity.HasIndex(e => e.EdgeTypeId, "ix_record_edges_type");
+            entity.HasIndex(e => new { e.EdgeTypeId, e.FromRecordId, e.ToRecordId },
+                "uq_record_edges_triple").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.EdgeTypeId).HasColumnName("edge_type_id");
+            entity.Property(e => e.FromRecordId).HasColumnName("from_record_id");
+            entity.Property(e => e.ToRecordId).HasColumnName("to_record_id");
+            entity.Property(e => e.Data)
+                .HasColumnName("data")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<RecordComment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_comments_pkey");
+
+            entity.ToTable("record_comments");
+
+            entity.HasIndex(e => new { e.RecordId, e.CreatedAtUtc }, "ix_record_comments_record_all")
+                .IsDescending(false, true);
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.RecordId).HasColumnName("record_id");
+            entity.Property(e => e.AuthorId).HasColumnName("author_id");
+            entity.Property(e => e.Body).HasColumnName("body");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.BodyUpdatedAtUtc).HasColumnName("body_updated_at_utc");
+            entity.Property(e => e.IsDeleted).HasColumnName("is_deleted");
+            entity.Property(e => e.DeletedAtUtc).HasColumnName("deleted_at_utc");
+            entity.Property(e => e.DeletedBy).HasColumnName("deleted_by");
+        });
+
+        modelBuilder.Entity<RecordCommentRevision>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("record_comment_revisions_pkey");
+
+            entity.ToTable("record_comment_revisions");
+
+            entity.HasIndex(e => new { e.CommentId, e.ReplacedAtUtc }, "ix_record_comment_revisions_comment")
+                .IsDescending(false, true);
+
+            entity.Property(e => e.Id)
+                .UseIdentityAlwaysColumn()
+                .HasColumnName("id");
+            entity.Property(e => e.CommentId).HasColumnName("comment_id");
+            entity.Property(e => e.Body).HasColumnName("body");
+            entity.Property(e => e.ReplacedAtUtc).HasColumnName("replaced_at_utc");
+            entity.Property(e => e.ReplacedBy).HasColumnName("replaced_by");
         });
 
         OnModelCreatingPartial(modelBuilder);

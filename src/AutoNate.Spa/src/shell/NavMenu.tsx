@@ -1,15 +1,20 @@
 import { useMemo } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useMe } from "@/hooks/useMe";
+import { useRecordTypes } from "@/hooks/useRecordTypes";
 
 export default function NavMenu() {
   const location = useLocation();
   const { data: me } = useMe();
+  const { data: recordTypes = [] } = useRecordTypes(false);
+  const activeTypes = recordTypes.filter((t) => !t.isArchived);
 
   const currentPath = useMemo(
     () => location.pathname.split("?")[0].replace(/^\/+|\/+$/g, ""),
     [location.pathname]
   );
+
+  const currentTopPath = currentPath.split("/")[0] ?? "";
 
   const displayName = useMemo(() => {
     if (!me || me.authenticated !== true) return "Adam Schwartz";
@@ -53,6 +58,46 @@ export default function NavMenu() {
                 <div className="menu-text">Home</div>
               </NavLink>
             </div>
+          </div>
+        </div>
+
+        <div
+          className={
+            currentTopPath === "record-types" ||
+            currentTopPath === "records" ||
+            currentTopPath === "record-edge-types"
+              ? "menu-item has-sub active expand"
+              : "menu-item has-sub"
+          }
+        >
+          <a href="#" className="menu-link" onClick={preventDefault}>
+            <div className="menu-icon">
+              <i className="fa fa-database"></i>
+            </div>
+            <div className="menu-text">Records</div>
+            <div className="menu-caret"></div>
+          </a>
+          <div className="menu-submenu">
+            <div className={currentTopPath === "record-types" ? "menu-item active" : "menu-item"}>
+              <NavLink to="/record-types" className="menu-link">
+                <div className="menu-text">Record Types</div>
+              </NavLink>
+            </div>
+            <div className={currentTopPath === "record-edge-types" ? "menu-item active" : "menu-item"}>
+              <NavLink to="/record-edge-types" className="menu-link">
+                <div className="menu-text">Edge Types</div>
+              </NavLink>
+            </div>
+            {activeTypes.map((t) => (
+              <div key={t.id} className="menu-item">
+                <NavLink to={`/records/${t.shortCode}`} className="menu-link">
+                  <div className="menu-text">
+                    <code className="me-2">{t.shortCode}</code>
+                    {t.name}
+                  </div>
+                </NavLink>
+              </div>
+            ))}
           </div>
         </div>
 
