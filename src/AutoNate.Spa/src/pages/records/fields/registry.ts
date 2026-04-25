@@ -35,7 +35,7 @@ export function getRenderer(dataType: FieldDataType): FieldRenderer | null {
 }
 
 export function buildRecordZodSchema(fields: RecordTypeField[]): z.ZodObject<z.ZodRawShape> {
-  const shape: z.ZodRawShape = {};
+  const shape: Record<string, z.ZodTypeAny> = {};
   for (const field of fields) {
     if (field.isArchived) continue;
     const renderer = getRenderer(field.dataType);

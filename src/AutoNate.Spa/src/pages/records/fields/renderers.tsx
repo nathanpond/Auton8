@@ -232,8 +232,8 @@ const emailRenderer: FieldRenderer = {
   ),
   Display: ({ value }) => <span>{(value as string | null) ?? ""}</span>,
   zodSchema: (field) => {
-    let s: z.ZodTypeAny = z.string().email("Invalid email").or(z.literal(""));
-    if (field.isRequired) s = z.string().email("Invalid email").min(1, "Required");
+    let s: z.ZodTypeAny = z.email("Invalid email").or(z.literal(""));
+    if (field.isRequired) s = z.email("Invalid email").min(1, "Required");
     return field.isRequired ? s : s.optional().nullable();
   },
   defaultValue: () => "",

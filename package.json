@@ -2,7 +2,8 @@
   "name": "autonate",
   "private": true,
   "scripts": {
-    "vendor:bpmn": "node scripts/vendor-bpmn.mjs"
+    "vendor:bpmn": "node scripts/vendor-bpmn.mjs",
+    "regen:fa-icons": "node scripts/regen-fa-icons.mjs"
   },
   "dependencies": {
     "bpmn-js": "^18.15.0",
