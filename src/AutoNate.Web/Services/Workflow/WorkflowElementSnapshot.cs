@@ -7,4 +7,7 @@ public sealed record class WorkflowElementSnapshot(
     string? ScriptFormat = null,
     string? Script = null,
     string? ResultVariable = null,
-    string? ConditionExpression = null);
+    string? ConditionExpression = null,
+    string? Assignee = null,
+    IReadOnlyList<string>? CandidateUsers = null,
+    IReadOnlyList<string>? CandidateGroups = null);

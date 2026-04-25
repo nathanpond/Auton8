@@ -10,6 +10,7 @@ public static partial class WorkflowBpmnXml
     private static readonly XNamespace BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
     private static readonly XNamespace BpmndiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
     private static readonly XNamespace XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
+    private static readonly XNamespace FlowableNamespace = "http://flowable.org/bpmn";
     private static readonly HashSet<string> ReplaceableTaskElementNames =
     [
         "task",
@@ -63,6 +64,7 @@ public static partial class WorkflowBpmnXml
                                    xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
                                    xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                                    xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                                   xmlns:flowable="http://flowable.org/bpmn"
                                    id="Definitions_{{normalizedProcessKey}}"
                                    targetNamespace="http://autonate.dev/workflows">
                  <bpmn:process id="{{normalizedProcessKey}}" name="{{SecurityElement.Escape(normalizedWorkflowName)}}" isExecutable="true">
@@ -97,6 +99,8 @@ public static partial class WorkflowBpmnXml
     {
         var processElement = document.Descendants(BpmnNamespace + "process").FirstOrDefault()
             ?? throw new InvalidOperationException(BuildMissingProcessDefinitionMessage(document));
+
+        EnsureFlowableNamespaceDeclared(document);
 
         var oldProcessKey = processElement.Attribute("id")?.Value;
         var normalizedProcessKey = NormalizeProcessKey(processKey);
@@ -301,6 +305,11 @@ public static partial class WorkflowBpmnXml
                 ApplyScriptTaskSnapshot(element, snapshot);
             }
 
+            if (string.Equals(element.Name.LocalName, "userTask", StringComparison.Ordinal))
+            {
+                ApplyUserTaskSnapshot(element, snapshot);
+            }
+
             if (string.Equals(element.Name.LocalName, "sequenceFlow", StringComparison.Ordinal))
             {
                 ApplySequenceFlowSnapshot(element, snapshot);
@@ -342,6 +351,66 @@ public static partial class WorkflowBpmnXml
         {
             element.Add(scriptElement);
         }
+    }
+
+    private static void ApplyUserTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
+    {
+        SetOrRemoveFlowableAttribute(element, "assignee", snapshot.Assignee);
+        SetOrRemoveFlowableAttribute(element, "candidateUsers", SerializeFlowableList(snapshot.CandidateUsers));
+        SetOrRemoveFlowableAttribute(element, "candidateGroups", SerializeFlowableList(snapshot.CandidateGroups));
+    }
+
+    private static void SetOrRemoveFlowableAttribute(XElement element, string localName, string? value)
+    {
+        var attributeName = FlowableNamespace + localName;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            element.SetAttributeValue(attributeName, null);
+            return;
+        }
+
+        element.SetAttributeValue(attributeName, value);
+    }
+
+    private static string? SerializeFlowableList(IReadOnlyList<string>? values)
+    {
+        if (values is null || values.Count == 0)
+        {
+            return null;
+        }
+
+        var trimmed = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .ToArray();
+
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        if (trimmed.Length == 1 && trimmed[0].StartsWith("${", StringComparison.Ordinal))
+        {
+            return trimmed[0];
+        }
+
+        return string.Join(",", trimmed);
+    }
+
+    private static void EnsureFlowableNamespaceDeclared(XDocument document)
+    {
+        var root = document.Root;
+        if (root is null)
+        {
+            return;
+        }
+
+        if (root.GetNamespaceOfPrefix("flowable") is not null)
+        {
+            return;
+        }
+
+        root.SetAttributeValue(XNamespace.Xmlns + "flowable", FlowableNamespace.NamespaceName);
     }
 
     private static void ApplySequenceFlowSnapshot(XElement element, WorkflowElementSnapshot snapshot)

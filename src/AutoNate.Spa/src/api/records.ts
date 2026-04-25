@@ -37,6 +37,29 @@ export async function listRecords(
   return data;
 }
 
+export type ListAssignedToMeParams = {
+  page?: number;
+  pageSize?: number;
+  includeArchived?: boolean;
+  sort?: string;
+};
+
+export async function listAssignedToMe(
+  params: ListAssignedToMeParams = {},
+  signal?: AbortSignal
+): Promise<RecordPage> {
+  const { data } = await api.get<RecordPage>(`${BASE}/assigned-to-me`, {
+    params: {
+      page: params.page ?? 0,
+      pageSize: params.pageSize ?? 25,
+      includeArchived: params.includeArchived ?? false,
+      sort: params.sort
+    },
+    signal
+  });
+  return data;
+}
+
 export async function searchRecords(
   request: SearchRecordsRequest,
   signal?: AbortSignal

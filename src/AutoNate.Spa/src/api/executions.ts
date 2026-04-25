@@ -44,3 +44,8 @@ export async function completeTask(
     variables: variables ?? null
   });
 }
+
+export async function listMyAssignedTasks(signal?: AbortSignal): Promise<FlowableTaskSummary[]> {
+  const { data } = await api.get<FlowableTaskSummary[]>("/api/tasks/assigned-to-me", { signal });
+  return data;
+}

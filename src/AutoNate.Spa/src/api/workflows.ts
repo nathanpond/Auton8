@@ -59,6 +59,9 @@ export type WorkflowElementSnapshot = {
   script?: string | null;
   resultVariable?: string | null;
   conditionExpression?: string | null;
+  assignee?: string | null;
+  candidateUsers?: string[] | null;
+  candidateGroups?: string[] | null;
 };
 
 export type PrepareWorkflowRequest = {

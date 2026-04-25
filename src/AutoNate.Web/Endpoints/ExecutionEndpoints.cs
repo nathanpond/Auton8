@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using AutoNate.Web.Services.Flowable;
 
 namespace AutoNate.Web.Endpoints;
@@ -44,6 +45,21 @@ public static class ExecutionEndpoints
 
         var tasks = app.MapGroup("/api/tasks")
             .RequireAuthorization();
+
+        tasks.MapGet("/assigned-to-me", async (
+            HttpContext http,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrWhiteSpace(actorId))
+            {
+                return Results.Unauthorized();
+            }
+
+            var list = await flowable.GetTasksAssignedToUserAsync(actorId, cancellationToken);
+            return Results.Ok(list);
+        });
 
         tasks.MapPost("/{taskId}/complete", async (
             string taskId,

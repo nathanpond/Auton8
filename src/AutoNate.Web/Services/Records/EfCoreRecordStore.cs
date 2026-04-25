@@ -104,6 +104,54 @@ public sealed class EfCoreRecordStore(
         return new RecordListPage(records, (int)totalCount, page, pageSize);
     }
 
+    public async Task<RecordListPage> SearchAssignedAsync(
+        Guid assigneeId,
+        int page,
+        int pageSize,
+        bool includeArchived,
+        string? sort,
+        CancellationToken cancellationToken = default)
+    {
+        var safePage = Math.Max(0, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 200);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var parameters = new object?[] { assigneeId, includeArchived };
+        var where = "{0}::uuid = ANY(assignee_ids) AND (is_archived = FALSE OR {1} = TRUE)";
+        var orderBy = ResolveOrderBy(sort);
+
+        var countSql = $"SELECT COUNT(*) AS \"Value\" FROM records WHERE {where}";
+        var totalCount = await dbContext.Database
+            .SqlQueryRaw<long>(countSql, parameters!)
+            .SingleAsync(cancellationToken);
+
+        var pageSql = new StringBuilder();
+        pageSql.Append("SELECT ");
+        pageSql.Append("id AS \"Id\", ");
+        pageSql.Append("record_type_id AS \"RecordTypeId\", ");
+        pageSql.Append("key AS \"Key\", ");
+        pageSql.Append("key_number AS \"KeyNumber\", ");
+        pageSql.Append("name AS \"Name\", ");
+        pageSql.Append("assignee_ids AS \"AssigneeIds\", ");
+        pageSql.Append("values::text AS \"Values\", ");
+        pageSql.Append("is_archived AS \"IsArchived\", ");
+        pageSql.Append("created_at_utc AS \"CreatedAtUtc\", ");
+        pageSql.Append("created_by AS \"CreatedBy\", ");
+        pageSql.Append("updated_at_utc AS \"UpdatedAtUtc\", ");
+        pageSql.Append("updated_by AS \"UpdatedBy\" ");
+        pageSql.Append("FROM records WHERE ").Append(where);
+        pageSql.Append(" ORDER BY ").Append(orderBy);
+        pageSql.Append(" LIMIT ").Append(safePageSize).Append(" OFFSET ").Append(safePage * safePageSize);
+
+        var rows = await dbContext.Database
+            .SqlQueryRaw<RecordRow>(pageSql.ToString(), parameters!)
+            .ToListAsync(cancellationToken);
+
+        var records = rows.Select(r => r.ToModel()).ToList();
+        return new RecordListPage(records, (int)totalCount, safePage, safePageSize);
+    }
+
     public async Task<Record> CreateAsync(CreateRecordInput input, Guid actorId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);

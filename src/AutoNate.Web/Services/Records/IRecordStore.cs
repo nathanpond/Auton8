@@ -52,6 +52,14 @@ public interface IRecordStore
 {
     Task<RecordListPage> SearchAsync(RecordSearchInput input, CancellationToken cancellationToken = default);
 
+    Task<RecordListPage> SearchAssignedAsync(
+        Guid assigneeId,
+        int page,
+        int pageSize,
+        bool includeArchived,
+        string? sort,
+        CancellationToken cancellationToken = default);
+
     Task<Record?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task<Record?> GetByKeyAsync(string key, CancellationToken cancellationToken = default);

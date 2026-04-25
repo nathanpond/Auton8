@@ -160,6 +160,62 @@ public sealed class WorkflowBpmnXmlTests
     }
 
     [Fact]
+    public void ApplyProcessMetadata_EmitsFlowableUserTaskAssignmentAttributes()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                                             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                                             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="assign_flow" name="Assign Flow" isExecutable="true">
+                               <bpmn:userTask id="Task_Literal" name="Review" />
+                               <bpmn:userTask id="Task_Expr" name="Approve" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "assign_flow",
+            "Assign Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "Task_Literal",
+                    "bpmn:UserTask",
+                    "Review",
+                    Assignee: "11111111-1111-1111-1111-111111111111",
+                    CandidateUsers: ["aaaa", "bbbb"],
+                    CandidateGroups: ["reviewers", "approvers"]),
+                new WorkflowElementSnapshot(
+                    "Task_Expr",
+                    "bpmn:UserTask",
+                    "Approve",
+                    Assignee: "${initiator}",
+                    CandidateUsers: ["${currentRecord.assignees}"],
+                    CandidateGroups: [])
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        Assert.Equal("http://flowable.org/bpmn", document.Root!.GetNamespaceOfPrefix("flowable")?.NamespaceName);
+
+        var literalTask = document.Descendants(bpmn + "userTask").Single(t => t.Attribute("id")!.Value == "Task_Literal");
+        Assert.Equal("11111111-1111-1111-1111-111111111111", literalTask.Attribute(flowable + "assignee")?.Value);
+        Assert.Equal("aaaa,bbbb", literalTask.Attribute(flowable + "candidateUsers")?.Value);
+        Assert.Equal("reviewers,approvers", literalTask.Attribute(flowable + "candidateGroups")?.Value);
+
+        var expressionTask = document.Descendants(bpmn + "userTask").Single(t => t.Attribute("id")!.Value == "Task_Expr");
+        Assert.Equal("${initiator}", expressionTask.Attribute(flowable + "assignee")?.Value);
+        Assert.Equal("${currentRecord.assignees}", expressionTask.Attribute(flowable + "candidateUsers")?.Value);
+        Assert.Null(expressionTask.Attribute(flowable + "candidateGroups"));
+    }
+
+    [Fact]
     public void ApplyProcessMetadata_PreservesSequenceFlowConditionExpressionFromElementSnapshots()
     {
         const string xml = """

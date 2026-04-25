@@ -32,6 +32,8 @@ export type FlowableTaskSummary = {
   taskDefinitionKey: string | null;
   assignee: string | null;
   processInstanceId: string | null;
+  processDefinitionId: string | null;
+  processDefinitionName: string | null;
   createdAtUtc: string | null;
 };
 

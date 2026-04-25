@@ -47,6 +47,10 @@ public sealed record class FlowableTaskSummary
 
     public string? ProcessInstanceId { get; init; }
 
+    public string? ProcessDefinitionId { get; init; }
+
+    public string? ProcessDefinitionName { get; init; }
+
     public DateTimeOffset? CreatedAtUtc { get; init; }
 }
 

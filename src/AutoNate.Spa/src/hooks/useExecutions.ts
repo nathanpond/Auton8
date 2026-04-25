@@ -4,7 +4,8 @@ import {
   deleteExecution,
   getExecutionDiagram,
   getExecutionTasks,
-  listExecutions
+  listExecutions,
+  listMyAssignedTasks
 } from "@/api/executions";
 import {
   FlowableTaskSummary,
@@ -15,6 +16,7 @@ import {
 export const EXECUTIONS_QUERY_KEY = ["executions"] as const;
 export const executionDiagramQueryKey = (id: string) => ["executions", "diagram", id] as const;
 export const executionTasksQueryKey = (id: string) => ["executions", "tasks", id] as const;
+export const ASSIGNED_TASKS_QUERY_KEY = ["tasks", "assigned-to-me"] as const;
 
 export function useExecutions() {
   return useQuery<WorkflowExecutionSummary[]>({
@@ -53,6 +55,16 @@ export function useCompleteTask() {
   return useMutation({
     mutationFn: ({ taskId, variables }: { taskId: string; variables?: Record<string, unknown> }) =>
       completeTask(taskId, variables),
-    onSuccess: () => qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY })
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+    }
+  });
+}
+
+export function useMyAssignedTasks() {
+  return useQuery<FlowableTaskSummary[]>({
+    queryKey: ASSIGNED_TASKS_QUERY_KEY,
+    queryFn: ({ signal }) => listMyAssignedTasks(signal)
   });
 }

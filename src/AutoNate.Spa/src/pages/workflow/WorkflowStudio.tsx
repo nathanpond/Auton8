@@ -24,6 +24,9 @@ import {
 } from "@/api/workflows";
 import { WorkflowModel } from "@/types/flowable";
 import * as workflow from "@/lib/bpmn/workflow.js";
+import AssigneePicker from "@/components/AssigneePicker";
+import { useUsers } from "@/hooks/useUsers";
+import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
 import "./Workflow.css";
 
 type ScriptTaskEditor = {
@@ -42,6 +45,21 @@ type SequenceFlowEditor = {
   conditionExpression: string;
 };
 
+type AssignmentMode = "picker" | "expression";
+
+type UserTaskEditor = {
+  id: string;
+  type: string;
+  name: string;
+  assigneeMode: AssignmentMode;
+  assigneeUserId: string;
+  assigneeExpression: string;
+  candidateUsersMode: AssignmentMode;
+  candidateUserIds: string[];
+  candidateUsersExpression: string;
+  candidateGroupsRaw: string;
+};
+
 type ElementSelection = {
   id: string;
   type: string;
@@ -50,7 +68,14 @@ type ElementSelection = {
   script?: string | null;
   resultVariable?: string | null;
   conditionExpression?: string | null;
+  assignee?: string | null;
+  candidateUsers?: string[] | null;
+  candidateGroups?: string[] | null;
 } | null;
+
+function looksLikeExpression(value: string | null | undefined): boolean {
+  return !!value && value.trim().startsWith("${");
+}
 
 export default function WorkflowStudio() {
   const qc = useQueryClient();
@@ -66,6 +91,7 @@ export default function WorkflowStudio() {
   const [showBpmnTypesModal, setShowBpmnTypesModal] = useState(false);
   const [scriptTaskEditor, setScriptTaskEditor] = useState<ScriptTaskEditor | null>(null);
   const [sequenceFlowEditor, setSequenceFlowEditor] = useState<SequenceFlowEditor | null>(null);
+  const [userTaskEditor, setUserTaskEditor] = useState<UserTaskEditor | null>(null);
 
   // Seed currentModel from the first workflow once the list query resolves. Gating on
   // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
@@ -97,6 +123,7 @@ export default function WorkflowStudio() {
         resultVariable: selection.resultVariable ?? ""
       });
       setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -105,9 +132,33 @@ export default function WorkflowStudio() {
         conditionExpression: selection.conditionExpression ?? ""
       });
       setScriptTaskEditor(null);
+      setUserTaskEditor(null);
+    } else if (selection && selection.type === "bpmn:UserTask") {
+      const assignee = selection.assignee ?? "";
+      const candidateUsers = selection.candidateUsers ?? [];
+      const candidateGroups = selection.candidateGroups ?? [];
+      const assigneeIsExpression = looksLikeExpression(assignee);
+      const candidateUsersFirst = candidateUsers[0] ?? "";
+      const candidateUsersIsExpression =
+        candidateUsers.length === 1 && looksLikeExpression(candidateUsersFirst);
+      setUserTaskEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        assigneeMode: assigneeIsExpression ? "expression" : "picker",
+        assigneeUserId: assigneeIsExpression ? "" : assignee,
+        assigneeExpression: assigneeIsExpression ? assignee : "",
+        candidateUsersMode: candidateUsersIsExpression ? "expression" : "picker",
+        candidateUserIds: candidateUsersIsExpression ? [] : candidateUsers,
+        candidateUsersExpression: candidateUsersIsExpression ? candidateUsersFirst : "",
+        candidateGroupsRaw: candidateGroups.join(", ")
+      });
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
     } else {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
     }
   }, []);
 
@@ -137,6 +188,7 @@ export default function WorkflowStudio() {
     setError(null);
     setScriptTaskEditor(null);
     setSequenceFlowEditor(null);
+    setUserTaskEditor(null);
   };
 
   const onSelectionChange = async (id: string) => {
@@ -269,6 +321,40 @@ export default function WorkflowStudio() {
       }
       await workflow.updateSequenceFlowProperties(handle, sequenceFlowEditor);
       setSequenceFlowEditor(null);
+    });
+
+  const applyUserTask = () =>
+    runBusy("applying user task changes", async () => {
+      if (!handle || !userTaskEditor) {
+        throw new Error("Select a user task before applying assignment changes.");
+      }
+
+      const assignee =
+        userTaskEditor.assigneeMode === "expression"
+          ? userTaskEditor.assigneeExpression.trim() || null
+          : userTaskEditor.assigneeUserId.trim() || null;
+
+      const candidateUsers =
+        userTaskEditor.candidateUsersMode === "expression"
+          ? (() => {
+              const expr = userTaskEditor.candidateUsersExpression.trim();
+              return expr ? [expr] : [];
+            })()
+          : userTaskEditor.candidateUserIds;
+
+      const candidateGroups = userTaskEditor.candidateGroupsRaw
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+
+      await workflow.updateUserTaskProperties(handle, {
+        id: userTaskEditor.id,
+        name: userTaskEditor.name,
+        assignee,
+        candidateUsers,
+        candidateGroups
+      });
+      setUserTaskEditor(null);
     });
 
   const canPublish =
@@ -455,6 +541,19 @@ export default function WorkflowStudio() {
             setSequenceFlowEditor(null);
           }}
           onApply={applySequenceFlow}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {userTaskEditor && (
+        <UserTaskModal
+          editor={userTaskEditor}
+          onChange={setUserTaskEditor}
+          onClose={() => {
+            if (busy) return;
+            setUserTaskEditor(null);
+          }}
+          onApply={applyUserTask}
           disabled={!!busy || !handle}
         />
       )}
@@ -890,6 +989,216 @@ function SequenceFlowModal({
           Leave the condition blank for an unconditional path. For exclusive gateways, put the
           condition on the outgoing branch itself, not on the gateway node.
         </p>
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UserTaskModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: UserTaskEditor;
+  onChange: (next: UserTaskEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const { data: users = [] } = useUsers();
+  const directory = useUserDirectory();
+
+  const sortedUsers = useMemo(
+    () =>
+      [...users].sort((a, b) => {
+        const an = userDisplayName(a) ?? a.username;
+        const bn = userDisplayName(b) ?? b.username;
+        return an.localeCompare(bn);
+      }),
+    [users]
+  );
+
+  const assigneeName = (() => {
+    if (!editor.assigneeUserId) return null;
+    const user = directory.get(editor.assigneeUserId);
+    return userDisplayName(user) ?? editor.assigneeUserId;
+  })();
+
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal workflow-user-task-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>User Task</h2>
+            <p className="workflow-modal-copy">
+              Edit the selected user task. Pick assignees from the directory or supply a Flowable
+              expression like <code>${"{initiator}"}</code> that resolves at runtime.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        <label className="workflow-field">
+          <span>Task Name</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          />
+        </label>
+
+        <fieldset className="workflow-field">
+          <legend>Assignee</legend>
+          <div className="form-check form-check-inline">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-assignee-mode-picker"
+              checked={editor.assigneeMode === "picker"}
+              onChange={() => onChange({ ...editor, assigneeMode: "picker" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-assignee-mode-picker">
+              Pick user
+            </label>
+          </div>
+          <div className="form-check form-check-inline">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-assignee-mode-expression"
+              checked={editor.assigneeMode === "expression"}
+              onChange={() => onChange({ ...editor, assigneeMode: "expression" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-assignee-mode-expression">
+              Expression
+            </label>
+          </div>
+
+          {editor.assigneeMode === "picker" ? (
+            <div className="d-flex flex-column gap-2 mt-2">
+              {editor.assigneeUserId ? (
+                <div className="d-flex align-items-center gap-2">
+                  <span className="badge bg-secondary">{assigneeName}</span>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={() => onChange({ ...editor, assigneeUserId: "" })}
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : (
+                <span className="text-body text-opacity-50 small">No assignee selected</span>
+              )}
+              <select
+                className="form-select"
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (id) onChange({ ...editor, assigneeUserId: id });
+                }}
+              >
+                <option value="">Select user…</option>
+                {sortedUsers.map((u) => (
+                  <option key={u.userId} value={u.userId}>
+                    {userDisplayName(u) ?? u.username}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <input
+              className="form-control mt-2"
+              placeholder="${initiator}"
+              value={editor.assigneeExpression}
+              onChange={(e) => onChange({ ...editor, assigneeExpression: e.target.value })}
+            />
+          )}
+        </fieldset>
+
+        <fieldset className="workflow-field">
+          <legend>Candidate Users</legend>
+          <div className="form-check form-check-inline">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-candidate-mode-picker"
+              checked={editor.candidateUsersMode === "picker"}
+              onChange={() => onChange({ ...editor, candidateUsersMode: "picker" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-candidate-mode-picker">
+              Pick users
+            </label>
+          </div>
+          <div className="form-check form-check-inline">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="userTask-candidate-mode-expression"
+              checked={editor.candidateUsersMode === "expression"}
+              onChange={() => onChange({ ...editor, candidateUsersMode: "expression" })}
+            />
+            <label className="form-check-label" htmlFor="userTask-candidate-mode-expression">
+              Expression
+            </label>
+          </div>
+
+          {editor.candidateUsersMode === "picker" ? (
+            <div className="mt-2">
+              <AssigneePicker
+                value={editor.candidateUserIds}
+                onChange={(ids) => onChange({ ...editor, candidateUserIds: ids })}
+              />
+            </div>
+          ) : (
+            <textarea
+              className="form-control mt-2"
+              rows={2}
+              placeholder="${candidateUsers}"
+              value={editor.candidateUsersExpression}
+              onChange={(e) =>
+                onChange({ ...editor, candidateUsersExpression: e.target.value })
+              }
+            />
+          )}
+        </fieldset>
+
+        <label className="workflow-field">
+          <span>Candidate Groups</span>
+          <textarea
+            className="form-control"
+            rows={2}
+            placeholder="reviewers, approvers"
+            value={editor.candidateGroupsRaw}
+            onChange={(e) => onChange({ ...editor, candidateGroupsRaw: e.target.value })}
+          />
+          <p className="workflow-modal-note">
+            Comma-separated group keys, or a single Flowable expression like{" "}
+            <code>${"{currentRecord.groups}"}</code>. There is no group directory yet, so groups are
+            free text.
+          </p>
+        </label>
 
         <div className="workflow-modal-actions">
           <button type="button" className="btn btn-outline-secondary" onClick={onClose}>

@@ -125,11 +125,17 @@ app.UseAuthentication();
 if (app.Environment.IsDevelopment())
 {
     var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DevelopmentAutoLogin");
-    var autoLoginOptions = app.Services.GetRequiredService<IOptions<DevelopmentAutoLoginOptions>>().Value;
+    var autoLoginMonitor = app.Services.GetRequiredService<IOptionsMonitor<DevelopmentAutoLoginOptions>>();
 
-    if (autoLoginOptions.Enabled)
+    void LogAutoLoginState(DevelopmentAutoLoginOptions current)
     {
-        if (string.IsNullOrWhiteSpace(autoLoginOptions.Username))
+        if (!current.Enabled)
+        {
+            logger.LogInformation("Development auto-login is disabled.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(current.Username))
         {
             logger.LogWarning(
                 "Development auto-login is enabled, but no username is configured in {Section}.",
@@ -139,9 +145,12 @@ if (app.Environment.IsDevelopment())
         {
             logger.LogInformation(
                 "Development auto-login is active for username '{Username}'.",
-                autoLoginOptions.Username);
+                current.Username);
         }
     }
+
+    LogAutoLoginState(autoLoginMonitor.CurrentValue);
+    autoLoginMonitor.OnChange(LogAutoLoginState);
 
     app.Use(async (context, next) =>
     {
@@ -152,7 +161,7 @@ if (app.Environment.IsDevelopment())
             return;
         }
 
-        var options = context.RequestServices.GetRequiredService<IOptions<DevelopmentAutoLoginOptions>>().Value;
+        var options = context.RequestServices.GetRequiredService<IOptionsMonitor<DevelopmentAutoLoginOptions>>().CurrentValue;
         var isAuthenticated = context.User.Identity?.IsAuthenticated == true;
         var isDevelopmentAutoLoginIdentity =
             context.User.FindFirstValue(DevelopmentAutoLoginClaimType) == "true";

@@ -975,8 +975,76 @@ function describeBusinessObject(businessObject) {
     scriptFormat: typeof businessObject.scriptFormat === "string" ? businessObject.scriptFormat : null,
     script: typeof businessObject.script === "string" ? businessObject.script : null,
     resultVariable: typeof businessObject.resultVariable === "string" ? businessObject.resultVariable : null,
-    conditionExpression: typeof conditionExpression?.body === "string" ? conditionExpression.body : null
+    conditionExpression: typeof conditionExpression?.body === "string" ? conditionExpression.body : null,
+    assignee: readFlowableString(businessObject, "assignee"),
+    candidateUsers: readFlowableList(businessObject, "candidateUsers"),
+    candidateGroups: readFlowableList(businessObject, "candidateGroups")
   };
+}
+
+function readFlowableString(businessObject, name) {
+  const direct = businessObject[name];
+  if (typeof direct === "string" && direct.trim()) {
+    return direct;
+  }
+
+  const fromAttrs = businessObject.$attrs?.[`flowable:${name}`];
+  if (typeof fromAttrs === "string" && fromAttrs.trim()) {
+    return fromAttrs;
+  }
+
+  return null;
+}
+
+function readFlowableList(businessObject, name) {
+  const raw = readFlowableString(businessObject, name);
+  if (!raw) {
+    return [];
+  }
+
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("${")) {
+    return [trimmed];
+  }
+
+  return trimmed
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function writeFlowableAttribute(businessObject, name, value) {
+  if (!businessObject) {
+    return;
+  }
+
+  const attrs = businessObject.$attrs ?? (businessObject.$attrs = {});
+  const key = `flowable:${name}`;
+  if (typeof value === "string" && value.trim()) {
+    attrs[key] = value;
+  } else {
+    delete attrs[key];
+  }
+}
+
+function serializeFlowableList(values) {
+  if (!Array.isArray(values)) {
+    return null;
+  }
+
+  const trimmed = values
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  if (trimmed.length === 1 && trimmed[0].startsWith("${")) {
+    return trimmed[0];
+  }
+
+  return trimmed.join(",");
 }
 
 function normalizeOptionalString(value) {
@@ -1015,6 +1083,33 @@ export function updateScriptTaskProperties(modelerHandle, task) {
     scriptFormat: "javascript",
     script: typeof task.script === "string" ? task.script : "",
     resultVariable: normalizeOptionalString(task.resultVariable)
+  });
+}
+
+export function updateUserTaskProperties(modelerHandle, task) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling || !task?.id) {
+    throw new Error("The BPMN modeler is not ready to update the user task.");
+  }
+
+  const element = elementRegistry.get(task.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:UserTask") {
+    throw new Error(`User task '${task.id}' is no longer available in the diagram.`);
+  }
+
+  const businessObject = element.businessObject;
+  const assignee = normalizeOptionalString(task.assignee);
+  const candidateUsers = serializeFlowableList(task.candidateUsers);
+  const candidateGroups = serializeFlowableList(task.candidateGroups);
+
+  writeFlowableAttribute(businessObject, "assignee", assignee);
+  writeFlowableAttribute(businessObject, "candidateUsers", candidateUsers);
+  writeFlowableAttribute(businessObject, "candidateGroups", candidateGroups);
+
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(task.name)
   });
 }
 

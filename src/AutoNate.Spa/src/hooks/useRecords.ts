@@ -4,6 +4,8 @@ import {
   createRecord,
   getRecord,
   getRecordByKey,
+  listAssignedToMe,
+  ListAssignedToMeParams,
   listRecordHistory,
   ListRecordsParams,
   listRecords,
@@ -22,6 +24,8 @@ import {
 
 export const recordsListKey = (params: ListRecordsParams) =>
   ["records", "list", params] as const;
+export const recordsAssignedToMeKey = (params: ListAssignedToMeParams) =>
+  ["records", "assigned-to-me", params] as const;
 export const recordsSearchKey = (request: SearchRecordsRequest) =>
   ["records", "search", request] as const;
 export const recordKey = (id: string) => ["records", "detail", id] as const;
@@ -34,6 +38,14 @@ export function useRecords(params: ListRecordsParams, enabled = true) {
     queryKey: recordsListKey(params),
     queryFn: ({ signal }) => listRecords(params, signal),
     enabled: enabled && Boolean(params.recordTypeId)
+  });
+}
+
+export function useMyAssignedRecords(params: ListAssignedToMeParams = {}, enabled = true) {
+  return useQuery<RecordPage>({
+    queryKey: recordsAssignedToMeKey(params),
+    queryFn: ({ signal }) => listAssignedToMe(params, signal),
+    enabled
   });
 }
 

@@ -388,9 +388,94 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                 TaskDefinitionKey = task.TaskDefinitionKey,
                 Assignee = task.Assignee,
                 ProcessInstanceId = task.ProcessInstanceId,
+                ProcessDefinitionId = task.ProcessDefinitionId,
                 CreatedAtUtc = task.CreateTime
             })
             .ToArray();
+    }
+
+    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default)
+    {
+        var encodedUserId = Uri.EscapeDataString(userId);
+        var assigneeUrl = $"service/runtime/tasks?assignee={encodedUserId}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}";
+        var candidateUrl = $"service/runtime/tasks?candidateUser={encodedUserId}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}";
+
+        var assigneeTask = _httpClient.GetAsync(assigneeUrl, cancellationToken);
+        var candidateTask = _httpClient.GetAsync(candidateUrl, cancellationToken);
+        await Task.WhenAll(assigneeTask, candidateTask);
+
+        using var assigneeResponse = assigneeTask.Result;
+        using var candidateResponse = candidateTask.Result;
+
+        await EnsureSuccessAsync(assigneeResponse, "query tasks assigned to user");
+        await EnsureSuccessAsync(candidateResponse, "query tasks where user is a candidate");
+
+        var assigneePayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(assigneeResponse, cancellationToken);
+        var candidatePayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(candidateResponse, cancellationToken);
+
+        var mergedById = new Dictionary<string, FlowableTaskResponse>(StringComparer.Ordinal);
+        foreach (var task in assigneePayload.Data.Concat(candidatePayload.Data))
+        {
+            if (string.IsNullOrWhiteSpace(task.Id))
+            {
+                continue;
+            }
+
+            mergedById.TryAdd(task.Id, task);
+        }
+
+        var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(mergedById.Values, cancellationToken);
+
+        return mergedById.Values
+            .Select(task =>
+            {
+                processDefinitionNames.TryGetValue(task.ProcessDefinitionId ?? string.Empty, out var definitionName);
+                return new FlowableTaskSummary
+                {
+                    Id = task.Id ?? string.Empty,
+                    Name = task.Name ?? string.Empty,
+                    TaskDefinitionKey = task.TaskDefinitionKey,
+                    Assignee = task.Assignee,
+                    ProcessInstanceId = task.ProcessInstanceId,
+                    ProcessDefinitionId = task.ProcessDefinitionId,
+                    ProcessDefinitionName = definitionName,
+                    CreatedAtUtc = task.CreateTime
+                };
+            })
+            .OrderByDescending(task => task.CreatedAtUtc ?? DateTimeOffset.MinValue)
+            .ThenBy(task => task.Id, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private async Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
+        IEnumerable<FlowableTaskResponse> tasks,
+        CancellationToken cancellationToken)
+    {
+        var processDefinitionIds = tasks
+            .Select(task => task.ProcessDefinitionId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var namesById = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var processDefinitionId in processDefinitionIds)
+        {
+            using var processDefinitionResponse = await _httpClient.GetAsync(
+                $"service/repository/process-definitions/{Uri.EscapeDataString(processDefinitionId!)}",
+                cancellationToken);
+            await EnsureSuccessAsync(processDefinitionResponse, $"query process definition '{processDefinitionId}'");
+
+            var processDefinition = await DeserializeAsync<FlowableProcessDefinitionResponse>(processDefinitionResponse, cancellationToken);
+            var resolvedName = FirstNonEmpty(processDefinition.Name, processDefinition.Key, processDefinition.Id);
+
+            if (!string.IsNullOrWhiteSpace(resolvedName))
+            {
+                namesById[processDefinitionId!] = resolvedName;
+            }
+        }
+
+        return namesById;
     }
 
     public async Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default)
@@ -655,6 +740,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? Assignee { get; init; }
 
         public string? ProcessInstanceId { get; init; }
+
+        public string? ProcessDefinitionId { get; init; }
 
         public DateTimeOffset? CreateTime { get; init; }
     }

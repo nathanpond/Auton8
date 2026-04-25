@@ -1,27 +1,34 @@
 import { useMemo } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { RecordTypeField } from "@/types/records";
+import AssigneePicker from "@/components/AssigneePicker";
 import { buildDefaultValues, buildRecordZodSchema, getRenderer } from "./fields/registry";
 
 type Props = {
   fields: RecordTypeField[];
   initialName?: string;
   initialValues?: Record<string, unknown>;
+  initialAssigneeIds?: string[];
   submitLabel: string;
-  onSubmit: (input: { name: string; values: Record<string, unknown> }) => Promise<void> | void;
+  onSubmit: (input: {
+    name: string;
+    values: Record<string, unknown>;
+    assigneeIds: string[];
+  }) => Promise<void> | void;
   onCancel?: () => void;
   busy?: boolean;
   topLevelError?: string | null;
 };
 
-type FormShape = { __name: string } & Record<string, unknown>;
+type FormShape = { __name: string; __assigneeIds: string[] } & Record<string, unknown>;
 
 export default function RecordForm({
   fields,
   initialName,
   initialValues,
+  initialAssigneeIds,
   submitLabel,
   onSubmit,
   onCancel,
@@ -32,17 +39,24 @@ export default function RecordForm({
 
   const valueSchema = useMemo(() => buildRecordZodSchema(visibleFields), [visibleFields]);
   const fullSchema = useMemo(
-    () => z.object({ __name: z.string().min(1, "Name is required") }).merge(valueSchema),
+    () =>
+      z
+        .object({
+          __name: z.string().min(1, "Name is required"),
+          __assigneeIds: z.array(z.string())
+        })
+        .merge(valueSchema),
     [valueSchema]
   );
 
   const defaults = useMemo<FormShape>(
     () => ({
       __name: initialName ?? "",
+      __assigneeIds: initialAssigneeIds ?? [],
       ...buildDefaultValues(visibleFields),
       ...(initialValues ?? {})
     }) as FormShape,
-    [visibleFields, initialName, initialValues]
+    [visibleFields, initialName, initialValues, initialAssigneeIds]
   );
 
   const {
@@ -56,8 +70,8 @@ export default function RecordForm({
   });
 
   const submit = handleSubmit(async (values) => {
-    const { __name, ...rest } = values;
-    await onSubmit({ name: __name, values: rest });
+    const { __name, __assigneeIds, ...rest } = values;
+    await onSubmit({ name: __name, values: rest, assigneeIds: __assigneeIds });
   });
 
   return (
@@ -73,6 +87,21 @@ export default function RecordForm({
         {errors.__name && (
           <div className="invalid-feedback">{(errors.__name as { message?: string }).message}</div>
         )}
+      </div>
+
+      <div className="mb-3">
+        <label className="form-label">Assignees</label>
+        <Controller
+          name="__assigneeIds"
+          control={control}
+          render={({ field: f }) => (
+            <AssigneePicker
+              value={(f.value as string[] | undefined) ?? []}
+              onChange={f.onChange}
+              disabled={busy}
+            />
+          )}
+        />
       </div>
 
       <div className="row g-3">

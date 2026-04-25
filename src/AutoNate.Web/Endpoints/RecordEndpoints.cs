@@ -94,6 +94,31 @@ public static class RecordEndpoints
             }
         });
 
+        group.MapGet("/assigned-to-me", async (
+            int? page,
+            int? pageSize,
+            bool? includeArchived,
+            string? sort,
+            HttpContext http,
+            IRecordStore store,
+            CancellationToken cancellationToken) =>
+        {
+            var actorId = GetActorId(http);
+            if (actorId == Guid.Empty)
+            {
+                return Results.Unauthorized();
+            }
+
+            var result = await store.SearchAssignedAsync(
+                actorId,
+                page ?? 0,
+                pageSize ?? 25,
+                includeArchived ?? false,
+                sort,
+                cancellationToken);
+            return Results.Ok(ToPageDto(result));
+        });
+
         group.MapGet("/{id:guid}", async (Guid id, IRecordStore store, CancellationToken cancellationToken) =>
         {
             var record = await store.GetAsync(id, cancellationToken);

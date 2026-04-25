@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import MyTasksPanel from "./MyTasksPanel";
 
 export default function Home() {
   return (
@@ -44,7 +45,7 @@ export default function Home() {
         />
       </div>
 
-      <div className="row g-3">
+      <div className="row g-3 mb-4">
         <QuickLink to="/workflow" icon="fa-diagram-project text-primary" title="Open Workflow Studio">
           Create new process drafts, iterate on BPMN diagrams, and deploy directly to Flowable.
         </QuickLink>
@@ -54,6 +55,12 @@ export default function Home() {
         <QuickLink to="/bus-watcher" icon="fa-tower-broadcast text-warning" title="Monitor Bus Traffic">
           Watch the app's workflow event stream and validate published payloads as they arrive.
         </QuickLink>
+      </div>
+
+      <div className="row g-3">
+        <div className="col-12">
+          <MyTasksPanel />
+        </div>
       </div>
     </>
   );
