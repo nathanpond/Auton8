@@ -89,7 +89,7 @@ export default function NavMenu() {
               </NavLink>
             </div>
             {activeTypes.map((t) => (
-              <div key={t.id} className="menu-item">
+              <div key={t.id} className={menuItemClass(`records/${t.shortCode}`)}>
                 <NavLink to={`/records/${t.shortCode}`} className="menu-link">
                   <div className="menu-text">
                     <code className="me-2">{t.shortCode}</code>
