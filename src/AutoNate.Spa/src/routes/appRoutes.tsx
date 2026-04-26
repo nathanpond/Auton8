@@ -25,6 +25,7 @@ import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
 import StatusAppearance from "@/pages/admin/config/StatusAppearance";
 import SiteAppearancePage from "@/pages/admin/config/SiteAppearance";
+import Events from "@/pages/admin/config/Events";
 import {
   ConfigIndex,
   SecurityManageGroups,
@@ -82,6 +83,8 @@ export const APP_ROUTES: AppRoute[] = [
       { path: "status-appearance", element: <StatusAppearance /> },
       { path: "external-connections", element: <SitewideExternalConnections /> },
       { path: "pages-menus", element: <PagesMenus /> },
+      { path: "bus-watcher", element: <BusWatcher /> },
+      { path: "events", element: <Events /> },
       { path: "users", element: <SecurityManageUsers /> },
       { path: "groups", element: <SecurityManageGroups /> },
       { path: "roles", element: <SecurityManageRoles /> },

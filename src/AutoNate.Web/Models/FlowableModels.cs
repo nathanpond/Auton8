@@ -85,6 +85,11 @@ public sealed record class WorkflowExecutionDiagramDetail
 
     public IReadOnlyList<string> CurrentActivityIds { get; init; } = [];
 
+    // Activities that were in flight when the process was cancelled. Always
+    // empty for non-cancelled executions. Rendered with their own highlight
+    // so the diagram doesn't pretend they finished normally.
+    public IReadOnlyList<string> CancelledActivityIds { get; init; } = [];
+
     public IReadOnlyList<FlowableProcessVariable> Variables { get; init; } = [];
 }
 

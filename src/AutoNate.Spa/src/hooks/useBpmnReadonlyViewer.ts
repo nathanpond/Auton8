@@ -33,6 +33,9 @@ export type UseBpmnReadonlyViewerOptions = {
   xml: string | null;
   completedActivityIds: readonly string[];
   currentActivityIds: readonly string[];
+  // Activities that were halted in flight when the execution was cancelled.
+  // Optional — empty/undefined means no cancellation overlay is drawn.
+  cancelledActivityIds?: readonly string[];
   callbacks?: Pick<
     WorkflowCallbacks,
     "CompleteTaskFromContextMenu" | "CompleteAllTasksFromContextMenu"
@@ -50,7 +53,15 @@ export type UseBpmnReadonlyViewerReturn = {
 export function useBpmnReadonlyViewer(
   options: UseBpmnReadonlyViewerOptions
 ): UseBpmnReadonlyViewerReturn {
-  const { xml, completedActivityIds, currentActivityIds, callbacks, enableContextMenu, contextMenu } = options;
+  const {
+    xml,
+    completedActivityIds,
+    currentActivityIds,
+    cancelledActivityIds,
+    callbacks,
+    enableContextMenu,
+    contextMenu
+  } = options;
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -106,7 +117,8 @@ export function useBpmnReadonlyViewer(
         workflow.highlightExecutionState(
           viewerRef.current,
           completedActivityIds,
-          currentActivityIds
+          currentActivityIds,
+          cancelledActivityIds ?? []
         );
       } catch (err) {
         if (!cancelled) {
@@ -136,12 +148,13 @@ export function useBpmnReadonlyViewer(
       workflow.highlightExecutionState(
         viewerRef.current,
         completedActivityIds,
-        currentActivityIds
+        currentActivityIds,
+        cancelledActivityIds ?? []
       );
     } catch {
       // Re-highlight can fail if called after dispose; not fatal.
     }
-  }, [completedActivityIds, currentActivityIds]);
+  }, [completedActivityIds, currentActivityIds, cancelledActivityIds]);
 
   // Dispose on unmount.
   useEffect(() => {

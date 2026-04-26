@@ -18,6 +18,11 @@ public interface IFlowableClient
 
     Task DeleteWorkflowExecutionAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
+    // Stops a running process instance and leaves the historic record in
+    // place so the executions list can show it as "Cancelled". No-op if the
+    // instance has already finished.
+    Task CancelWorkflowExecutionAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default);

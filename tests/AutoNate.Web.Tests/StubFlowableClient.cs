@@ -77,6 +77,13 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    public Task CancelWorkflowExecutionAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"CancelExecution:{processInstanceId}");
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {

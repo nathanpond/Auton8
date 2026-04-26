@@ -73,6 +73,16 @@ public static class ExecutionEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
 
+        executions.MapPost("/{processInstanceId}/cancel", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            await flowable.CancelWorkflowExecutionAsync(processInstanceId, cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Cancel, "processInstanceId");
+
         executions.MapDelete("/{processInstanceId}", async (
             string processInstanceId,
             IFlowableClient flowable,

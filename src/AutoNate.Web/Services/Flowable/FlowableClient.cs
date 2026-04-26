@@ -192,13 +192,24 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                     currentTask?.CreateTime,
                     instance.StartTime);
 
+                // Any non-empty DeleteReason on a finished process means it
+                // was torn down (cancelled) rather than reaching an end event.
+                // We don't pin the exact reason string — Delete fully removes
+                // the historic record, so the only reasons that survive here
+                // are cancellations (ours or operator-issued).
+                var status = isRunning
+                    ? "Running"
+                    : !string.IsNullOrWhiteSpace(instance.DeleteReason)
+                        ? "Cancelled"
+                        : "Complete";
+
                 return new WorkflowExecutionSummary
                 {
                     Id = instance.Id!,
                     WorkflowModelName = workflowModelName,
                     StartedAtUtc = instance.StartTime,
                     LastActivityAtUtc = lastActivityAt,
-                    Status = isRunning ? "Running" : "Complete",
+                    Status = status,
                     CurrentStep = currentStep
                 };
             })
@@ -285,8 +296,35 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
         var variablesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricVariableInstanceResponse>>(variablesResponse, cancellationToken);
 
+        // A non-empty DeleteReason means the process was torn down rather
+        // than completing through an end event. For each in-flight activity
+        // Flowable usually propagates that DeleteReason; in versions where
+        // the REST history response omits the per-activity field we fall
+        // back to "ended within a few seconds of the process EndTime", which
+        // is the only window in which a cancellation can land them.
+        var isCancelled = !string.IsNullOrWhiteSpace(processInstance.DeleteReason);
+        var cancelWindow = TimeSpan.FromSeconds(5);
+
+        var cancelledActivityIds = isCancelled
+            ? activitiesPayload.Data
+                .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId)
+                                && (
+                                    !string.IsNullOrWhiteSpace(activity.DeleteReason)
+                                    || (processInstance.EndTime is not null
+                                        && activity.EndTime is not null
+                                        && (processInstance.EndTime.Value - activity.EndTime.Value).Duration() <= cancelWindow)
+                                ))
+                .Select(activity => activity.ActivityId!)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
+            : Array.Empty<string>();
+
+        var cancelledSet = new HashSet<string>(cancelledActivityIds, StringComparer.Ordinal);
+
         var completedActivityIds = activitiesPayload.Data
-            .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId) && activity.EndTime is not null)
+            .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId)
+                            && activity.EndTime is not null
+                            && !cancelledSet.Contains(activity.ActivityId!))
             .Select(activity => activity.ActivityId!)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -297,7 +335,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        if (currentActivityIds.Length == 0)
+        if (currentActivityIds.Length == 0 && !isCancelled)
         {
             var runtimeInstance = await GetProcessInstanceAsync(processInstanceId, cancellationToken);
             if (!string.IsNullOrWhiteSpace(runtimeInstance?.ActivityId))
@@ -327,6 +365,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             BpmnXml = bpmnXml,
             CompletedActivityIds = completedActivityIds,
             CurrentActivityIds = currentActivityIds,
+            CancelledActivityIds = cancelledActivityIds,
             Variables = variables
         };
     }
@@ -374,6 +413,35 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         {
             await EnsureSuccessAsync(historyDeleteResponse, "delete the historic process instance");
         }
+    }
+
+    // Cancellation flag stored as Flowable's `deleteReason` on the historic
+    // record so GetWorkflowExecutionsAsync can render the row as "Cancelled".
+    // Keep this string stable — the listing read-back compares against it.
+    private const string CancelDeleteReason = "Cancelled from AutoNate workflow executions page";
+
+    public async Task CancelWorkflowExecutionAsync(string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        var encodedProcessInstanceId = Uri.EscapeDataString(processInstanceId);
+        var runtimeInstance = await GetProcessInstanceAsync(processInstanceId, cancellationToken);
+
+        // Already finished — nothing to cancel.
+        if (runtimeInstance is null)
+        {
+            return;
+        }
+
+        var deleteReason = Uri.EscapeDataString(CancelDeleteReason);
+        using var runtimeDeleteResponse = await _httpClient.DeleteAsync(
+            $"service/runtime/process-instances/{encodedProcessInstanceId}?deleteReason={deleteReason}",
+            cancellationToken);
+
+        if (runtimeDeleteResponse.StatusCode == HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        await EnsureSuccessAsync(runtimeDeleteResponse, "cancel the running process instance");
     }
 
     public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default)
@@ -776,6 +844,10 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public DateTimeOffset? StartTime { get; init; }
 
         public DateTimeOffset? EndTime { get; init; }
+
+        // Set by Flowable when the instance was ended via runtime DELETE with
+        // a reason — used to distinguish a cancelled run from a normal finish.
+        public string? DeleteReason { get; init; }
     }
 
     private sealed class FlowableHistoricActivityInstanceResponse
@@ -787,6 +859,11 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public DateTimeOffset? StartTime { get; init; }
 
         public DateTimeOffset? EndTime { get; init; }
+
+        // Flowable propagates the process-level delete reason to every
+        // activity instance that was in flight at cancellation time. This is
+        // the authoritative signal for "this node was halted, not finished."
+        public string? DeleteReason { get; init; }
     }
 
     private sealed class FlowableHistoricVariableInstanceResponse

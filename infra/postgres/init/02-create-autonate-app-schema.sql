@@ -679,11 +679,6 @@ BEGIN
             created_at_utc, updated_at_utc)
         VALUES (gen_random_uuid(), main_id, g, 1, 'Workflow Executions', NULL,
             'route', '{"path":"/workflow-executions"}'::jsonb, TRUE, TRUE, NOW(), NOW());
-        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
-            icon, item_type, config, is_visible, is_system,
-            created_at_utc, updated_at_utc)
-        VALUES (gen_random_uuid(), main_id, g, 2, 'Bus Watcher', NULL,
-            'route', '{"path":"/bus-watcher"}'::jsonb, TRUE, TRUE, NOW(), NOW());
     END IF;
 
     -- ---------- Icon menu (top-right icon strip) ----------
@@ -783,12 +778,32 @@ BEGIN
             'The left-hand navigation shown inside the Site Configuration area.',
             TRUE, NOW(), seed_actor, NOW(), seed_actor);
 
+        -- Site Information group
+        g := gen_random_uuid();
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (g, site_id, NULL, 0, 'Site Information', 'fa fa-circle-info',
+            'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 0, 'Bus Watcher', 'fa fa-tower-broadcast',
+            'route', '{"path":"/admin/config/bus-watcher"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 1, 'Events', 'fa fa-bell',
+            'route', '{"path":"/admin/config/events"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+
         -- Sitewide Configuration group
         g := gen_random_uuid();
         INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
             icon, item_type, config, is_visible, is_system,
             created_at_utc, updated_at_utc)
-        VALUES (g, site_id, NULL, 0, 'Sitewide Configuration', 'fa fa-sliders',
+        VALUES (g, site_id, NULL, 1, 'Sitewide Configuration', 'fa fa-sliders',
             'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
         INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
             icon, item_type, config, is_visible, is_system,
@@ -832,7 +847,7 @@ BEGIN
         INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
             icon, item_type, config, is_visible, is_system,
             created_at_utc, updated_at_utc)
-        VALUES (g, site_id, NULL, 1, 'Security', 'fa fa-shield-halved',
+        VALUES (g, site_id, NULL, 2, 'Security', 'fa fa-shield-halved',
             'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
         INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
             icon, item_type, config, is_visible, is_system,

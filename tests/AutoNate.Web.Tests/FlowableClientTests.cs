@@ -263,6 +263,37 @@ public sealed class FlowableClientTests
         await client.DeleteWorkflowExecutionAsync("inst-3");
     }
 
+    // --- CancelWorkflowExecutionAsync ----------------------------------------
+
+    [Fact]
+    public async Task CancelWorkflowExecutionAsync_DeletesRuntime_WithCancelReason_AndLeavesHistoryUntouched()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/runtime/process-instances/inst-c1",
+            new { id = "inst-c1", processDefinitionId = "pd-1", activityId = (string?)null, suspended = false });
+        stub.WhenStatus(HttpMethod.Delete, "service/runtime/process-instances/inst-c1", HttpStatusCode.NoContent);
+
+        await client.CancelWorkflowExecutionAsync("inst-c1");
+
+        var runtimeDelete = Assert.Single(stub.Requests, r =>
+            r.Method == HttpMethod.Delete && r.Url.Contains("service/runtime/process-instances/inst-c1"));
+        Assert.Contains("deleteReason=", runtimeDelete.Url);
+        Assert.Contains("Cancelled", Uri.UnescapeDataString(runtimeDelete.Url));
+        Assert.DoesNotContain(stub.Requests, r =>
+            r.Method == HttpMethod.Delete && r.Url.Contains("service/history/historic-process-instances/"));
+    }
+
+    [Fact]
+    public async Task CancelWorkflowExecutionAsync_NoOps_WhenInstanceAlreadyEnded()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Get, "service/runtime/process-instances/inst-c2", HttpStatusCode.NotFound);
+
+        await client.CancelWorkflowExecutionAsync("inst-c2");
+
+        Assert.DoesNotContain(stub.Requests, r => r.Method == HttpMethod.Delete);
+    }
+
     // --- GetTasksByProcessInstanceAsync --------------------------------------
 
     [Fact]
@@ -466,7 +497,7 @@ public sealed class FlowableClientTests
     // --- GetWorkflowExecutionsAsync ------------------------------------------
 
     [Fact]
-    public async Task GetWorkflowExecutionsAsync_ClassifiesRunningAndCompletedInstances()
+    public async Task GetWorkflowExecutionsAsync_ClassifiesRunningCompletedAndCancelledInstances()
     {
         var (client, stub) = CreateClient();
         stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances", new
@@ -474,9 +505,14 @@ public sealed class FlowableClientTests
             data = new[]
             {
                 new { id = "inst-running", processDefinitionId = "pd-1",
-                      startTime = "2026-04-01T00:00:00Z", endTime = (string?)null },
+                      startTime = "2026-04-01T00:00:00Z", endTime = (string?)null,
+                      deleteReason = (string?)null },
                 new { id = "inst-done", processDefinitionId = "pd-1",
-                      startTime = "2026-03-01T00:00:00Z", endTime = "2026-03-02T00:00:00Z" }
+                      startTime = "2026-03-01T00:00:00Z", endTime = "2026-03-02T00:00:00Z",
+                      deleteReason = (string?)null },
+                new { id = "inst-cancelled", processDefinitionId = "pd-1",
+                      startTime = "2026-03-10T00:00:00Z", endTime = "2026-03-10T01:00:00Z",
+                      deleteReason = "Cancelled from AutoNate workflow executions page" }
             }
         });
         stub.When(HttpMethod.Get, "service/runtime/process-instances", _ =>
@@ -495,7 +531,7 @@ public sealed class FlowableClientTests
 
         var executions = await client.GetWorkflowExecutionsAsync();
 
-        Assert.Equal(2, executions.Count);
+        Assert.Equal(3, executions.Count);
         var running = executions.Single(e => e.Id == "inst-running");
         Assert.Equal("Running", running.Status);
         Assert.Equal("task-step", running.CurrentStep);
@@ -504,6 +540,10 @@ public sealed class FlowableClientTests
         var done = executions.Single(e => e.Id == "inst-done");
         Assert.Equal("Complete", done.Status);
         Assert.Null(done.CurrentStep);
+
+        var cancelled = executions.Single(e => e.Id == "inst-cancelled");
+        Assert.Equal("Cancelled", cancelled.Status);
+        Assert.Null(cancelled.CurrentStep);
     }
 
     // --- GetWorkflowExecutionDiagramDetailAsync ------------------------------
@@ -562,6 +602,100 @@ public sealed class FlowableClientTests
         var amount = Assert.Single(detail.Variables);
         Assert.Equal("amount", amount.Name);
         Assert.Equal("42", amount.Value);
+    }
+
+    [Fact]
+    public async Task GetWorkflowExecutionDiagramDetailAsync_BucketsActivitiesWithDeleteReason_AsCancelled()
+    {
+        var (client, stub) = CreateClient();
+
+        const string cancelReason = "Cancelled from AutoNate workflow executions page";
+
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances/inst-cx", new
+        {
+            id = "inst-cx",
+            processDefinitionId = "pd-1",
+            startTime = "2026-04-01T00:00:00Z",
+            endTime = "2026-04-02T12:00:00Z",
+            deleteReason = cancelReason
+        });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions/pd-1", new
+        {
+            id = "pd-1", key = "k", name = "My Flow", version = 1,
+            graphicalNotationDefined = true
+        });
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/pd-1/resourcedata", _ =>
+            StubHttpMessageHandler.TextResponse(BpmnWithDiagram, mediaType: "application/xml"));
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-activity-instances", new
+        {
+            data = new[]
+            {
+                // Finished normally before cancel — no deleteReason.
+                new { activityId = "start", processInstanceId = "inst-cx",
+                      startTime = "2026-04-01T00:00:00Z", endTime = "2026-04-01T00:01:00Z",
+                      deleteReason = (string?)null },
+                // In flight at cancel — Flowable propagates the process-level
+                // deleteReason onto the activity instance.
+                new { activityId = "task-step", processInstanceId = "inst-cx",
+                      startTime = "2026-04-01T00:01:00Z", endTime = "2026-04-02T11:59:59Z",
+                      deleteReason = cancelReason }
+            }
+        });
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-variable-instances", new { data = Array.Empty<object>() });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("inst-cx");
+
+        Assert.Contains("start", detail.CompletedActivityIds);
+        Assert.DoesNotContain("task-step", detail.CompletedActivityIds);
+        Assert.Contains("task-step", detail.CancelledActivityIds);
+        Assert.Empty(detail.CurrentActivityIds);
+    }
+
+    [Fact]
+    public async Task GetWorkflowExecutionDiagramDetailAsync_FallsBackToTimestampWindow_WhenActivityHasNoDeleteReason()
+    {
+        // Some Flowable versions don't surface deleteReason in the per-activity
+        // REST history payload. The classifier should still mark in-flight
+        // activities as cancelled when the process itself is flagged and the
+        // activity ended within seconds of the process EndTime.
+        var (client, stub) = CreateClient();
+
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances/inst-cy", new
+        {
+            id = "inst-cy",
+            processDefinitionId = "pd-1",
+            startTime = "2026-04-01T00:00:00Z",
+            endTime = "2026-04-02T12:00:05Z",
+            deleteReason = "Cancelled from AutoNate workflow executions page"
+        });
+        stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions/pd-1", new
+        {
+            id = "pd-1", key = "k", name = "My Flow", version = 1,
+            graphicalNotationDefined = true
+        });
+        stub.When(HttpMethod.Get, "service/repository/process-definitions/pd-1/resourcedata", _ =>
+            StubHttpMessageHandler.TextResponse(BpmnWithDiagram, mediaType: "application/xml"));
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-activity-instances", new
+        {
+            data = new[]
+            {
+                // Finished hours before cancel — outside the cancel window.
+                new { activityId = "start", processInstanceId = "inst-cy",
+                      startTime = "2026-04-01T00:00:00Z", endTime = "2026-04-01T00:00:01Z",
+                      deleteReason = (string?)null },
+                // Within the 5s cancel window of the process EndTime.
+                new { activityId = "task-step", processInstanceId = "inst-cy",
+                      startTime = "2026-04-01T00:01:00Z", endTime = "2026-04-02T12:00:03Z",
+                      deleteReason = (string?)null }
+            }
+        });
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-variable-instances", new { data = Array.Empty<object>() });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("inst-cy");
+
+        Assert.Contains("start", detail.CompletedActivityIds);
+        Assert.DoesNotContain("task-step", detail.CompletedActivityIds);
+        Assert.Contains("task-step", detail.CancelledActivityIds);
     }
 
     [Fact]

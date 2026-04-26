@@ -64,6 +64,19 @@ public sealed class ExecutionEndpointsTests
     }
 
     [Fact]
+    public async Task CancelExecution_Returns204AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsync("/api/executions/inst-cancel/cancel", content: null);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("CancelExecution:inst-cancel", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
     public async Task TasksAssignedToMe_PassesActorIdToClient()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();

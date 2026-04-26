@@ -832,8 +832,6 @@ internal static class DatabaseSchemaInitializer
                 VALUES (gen_random_uuid(), main_id, g, 0, 'Workflow Studio', NULL, 'route', '{{"path":"/workflow"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), main_id, g, 1, 'Workflow Executions', NULL, 'route', '{{"path":"/workflow-executions"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
-                INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), main_id, g, 2, 'Bus Watcher', NULL, 'route', '{{"path":"/bus-watcher"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
             END IF;
 
             IF NOT EXISTS (SELECT 1 FROM menus WHERE key = 'icon') THEN
@@ -877,7 +875,15 @@ internal static class DatabaseSchemaInitializer
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (g, site_id, NULL, 0, 'Sitewide Configuration', 'fa fa-sliders', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (g, site_id, NULL, 0, 'Site Information', 'fa fa-circle-info', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
+                VALUES (gen_random_uuid(), site_id, g, 0, 'Bus Watcher', 'fa fa-tower-broadcast', 'route', '{{"path":"/admin/config/bus-watcher"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
+                VALUES (gen_random_uuid(), site_id, g, 1, 'Events', 'fa fa-bell', 'route', '{{"path":"/admin/config/events"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+
+                g := gen_random_uuid();
+                INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
+                VALUES (g, site_id, NULL, 1, 'Sitewide Configuration', 'fa fa-sliders', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), site_id, g, 0, 'General', 'fa fa-gear', 'route', '{{"path":"/admin/config/general"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -893,7 +899,7 @@ internal static class DatabaseSchemaInitializer
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (g, site_id, NULL, 1, 'Security', 'fa fa-shield-halved', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (g, site_id, NULL, 2, 'Security', 'fa fa-shield-halved', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), site_id, g, 0, 'Manage Users', 'fa fa-users', 'route', '{{"path":"/admin/config/users"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -950,6 +956,114 @@ internal static class DatabaseSchemaInitializer
 
                 INSERT INTO auth_seed_state (key, applied_at_utc)
                 VALUES ('icon_menu_wrap_settings_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
+    // Introduce a "Site Information" group to the site-config left-nav that
+    // holds non-security, non-sitewide informational pages. Moves the Bus
+    // Watcher item out of the main menu's Workflows group and into this new
+    // group (rerouted to /admin/config/bus-watcher so it renders inside
+    // ConfigLayout), and adds the new Events documentation page. Idempotent
+    // via auth_seed_state.
+    private const string SiteConfigSiteInformationSql =
+        """
+        DO $$
+        DECLARE
+            main_id UUID := '00000000-0000-0000-0001-000000000001';
+            site_id UUID := '00000000-0000-0000-0001-000000000004';
+            site_information_group_id UUID;
+            bus_watcher_item_id UUID;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'site_config_site_information_v1') THEN
+                IF EXISTS (SELECT 1 FROM menus WHERE id = site_id) THEN
+                    SELECT id INTO site_information_group_id
+                    FROM menu_items
+                    WHERE menu_id = site_id
+                      AND parent_id IS NULL
+                      AND display_name = 'Site Information'
+                      AND item_type = 'group'
+                    LIMIT 1;
+
+                    IF site_information_group_id IS NULL THEN
+                        UPDATE menu_items
+                        SET sort_order = sort_order + 1,
+                            updated_at_utc = NOW()
+                        WHERE menu_id = site_id
+                          AND parent_id IS NULL;
+
+                        site_information_group_id := gen_random_uuid();
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            site_information_group_id, site_id, NULL, 0,
+                            'Site Information', 'fa fa-circle-info',
+                            'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+
+                    SELECT id INTO bus_watcher_item_id
+                    FROM menu_items
+                    WHERE menu_id = main_id
+                      AND display_name = 'Bus Watcher'
+                      AND item_type = 'route'
+                      AND config->>'path' = '/bus-watcher'
+                    LIMIT 1;
+
+                    IF bus_watcher_item_id IS NOT NULL THEN
+                        UPDATE menu_items
+                        SET menu_id = site_id,
+                            parent_id = site_information_group_id,
+                            sort_order = 0,
+                            icon = 'fa fa-tower-broadcast',
+                            config = '{{"path":"/admin/config/bus-watcher"}}'::jsonb,
+                            updated_at_utc = NOW()
+                        WHERE id = bus_watcher_item_id;
+                    ELSIF NOT EXISTS (
+                        SELECT 1 FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id = site_information_group_id
+                          AND display_name = 'Bus Watcher'
+                    ) THEN
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            gen_random_uuid(), site_id, site_information_group_id, 0,
+                            'Bus Watcher', 'fa fa-tower-broadcast',
+                            'route', '{{"path":"/admin/config/bus-watcher"}}'::jsonb,
+                            TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id = site_information_group_id
+                          AND config->>'path' = '/admin/config/events'
+                    ) THEN
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            gen_random_uuid(), site_id, site_information_group_id, 1,
+                            'Events', 'fa fa-bell',
+                            'route', '{{"path":"/admin/config/events"}}'::jsonb,
+                            TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('site_config_site_information_v1', NOW())
                 ON CONFLICT (key) DO NOTHING;
             END IF;
         END $$;
@@ -1025,6 +1139,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(MenusSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(IconMenuWrapSettingsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigStatusAppearanceSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSiteInformationSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

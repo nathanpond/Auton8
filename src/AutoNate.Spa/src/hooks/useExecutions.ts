@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelExecution,
   completeTask,
   deleteExecution,
   forceCompleteTaskAtNode,
@@ -53,6 +54,20 @@ export function useDeleteExecution() {
   return useMutation({
     mutationFn: (processInstanceId: string) => deleteExecution(processInstanceId),
     onSuccess: () => qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY })
+  });
+}
+
+export function useCancelExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (processInstanceId: string) => cancelExecution(processInstanceId),
+    onSuccess: (_data, processInstanceId) => {
+      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: executionDiagramQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+    }
   });
 }
 

@@ -1180,17 +1180,24 @@ function fitAndCenter(viewer) {
   }
 }
 
-export function highlightExecutionState(viewerHandle, completedActivityIds, currentActivityIds) {
+export function highlightExecutionState(
+  viewerHandle,
+  completedActivityIds,
+  currentActivityIds,
+  cancelledActivityIds
+) {
   clearExecutionState(viewerHandle);
 
   console.log("[AutoNate viewer] highlightExecutionState", {
     completed: completedActivityIds,
-    current: currentActivityIds
+    current: currentActivityIds,
+    cancelled: cancelledActivityIds
   });
 
   viewerHandle?.setCurrentActivityIds?.(currentActivityIds);
   addMarkers(viewerHandle, completedActivityIds, "execution-step-completed");
   addMarkers(viewerHandle, currentActivityIds, "execution-step-current");
+  addMarkers(viewerHandle, cancelledActivityIds, "execution-step-cancelled");
 }
 
 // `options` carries thunks that are read on every right-click so React state

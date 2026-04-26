@@ -33,6 +33,9 @@ export type WorkflowExecutionDiagramDetail = {
   bpmnXml: string;
   completedActivityIds: string[];
   currentActivityIds: string[];
+  // Populated only for cancelled executions: activities that were in flight
+  // when cancellation halted the process.
+  cancelledActivityIds: string[];
   variables: FlowableProcessVariable[];
 };
 

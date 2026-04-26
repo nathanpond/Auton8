@@ -37,6 +37,12 @@ export async function deleteExecution(processInstanceId: string): Promise<void> 
   await api.delete(`/api/executions/${encodeURIComponent(processInstanceId)}`);
 }
 
+// Stops a running execution. The historic record stays so the row flips to
+// "Cancelled" status. Gated on workflowexecution/cancel.
+export async function cancelExecution(processInstanceId: string): Promise<void> {
+  await api.post(`/api/executions/${encodeURIComponent(processInstanceId)}/cancel`);
+}
+
 export async function completeTask(
   taskId: string,
   variables?: Record<string, unknown>

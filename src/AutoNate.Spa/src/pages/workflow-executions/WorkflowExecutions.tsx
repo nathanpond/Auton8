@@ -5,6 +5,7 @@ import {
   EXECUTIONS_QUERY_KEY,
   executionDiagramQueryKey,
   executionTasksQueryKey,
+  useCancelExecution,
   useExecutionDiagram,
   useExecutionTasks,
   useExecutions,
@@ -34,6 +35,19 @@ export default function WorkflowExecutions() {
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const deleteExecution = useDeleteExecution();
+  const cancelExecution = useCancelExecution();
+
+  // Batched cancel-permission lookups, one per row.
+  const cancelChecks = useMemo(
+    () =>
+      executions.map((execution) => ({
+        kind: "workflowexecution",
+        action: "cancel",
+        id: execution.id
+      })),
+    [executions]
+  );
+  const { data: cancelPermissions } = usePermissionChecks(cancelChecks);
 
   const onBusMessage = useCallback(
     (msg: { topic: string; payload: string }) => {
@@ -64,6 +78,20 @@ export default function WorkflowExecutions() {
         setSelectedId(null);
       }
       setFlash({ kind: "success", message: `Execution '${execution.id}' was deleted.` });
+    } catch (err) {
+      setFlash({ kind: "error", message: describeError(err) });
+    }
+  };
+
+  const onCancel = async (execution: WorkflowExecutionSummary) => {
+    const confirmed = window.confirm(
+      `Cancel workflow execution '${execution.id}'? It will stop and be marked as cancelled.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await cancelExecution.mutateAsync(execution.id);
+      setFlash({ kind: "success", message: `Execution '${execution.id}' was cancelled.` });
     } catch (err) {
       setFlash({ kind: "error", message: describeError(err) });
     }
@@ -130,42 +158,67 @@ export default function WorkflowExecutions() {
                 </tr>
               </thead>
               <tbody>
-                {executions.map((execution) => (
-                  <tr
-                    key={execution.id}
-                    className="workflow-execution-row"
-                    onClick={() => setSelectedId(execution.id)}
-                  >
-                    <td className="workflow-execution-id">{execution.id}</td>
-                    <td>{execution.workflowModelName ?? "Unknown"}</td>
-                    <td>{formatTimestamp(execution.startedAtUtc)}</td>
-                    <td>{formatTimestamp(execution.lastActivityAtUtc)}</td>
-                    <td>
-                      <span
-                        className="badge rounded-pill"
-                        style={statusBadgeStyle(execution.status, statusAppearance)}
-                      >
-                        {execution.status}
-                      </span>
-                    </td>
-                    <td>{execution.currentStep ?? "Not running"}</td>
-                    <td className="workflow-executions-actions-cell">
-                      <button
-                        type="button"
-                        className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
-                        title="Delete execution"
-                        aria-label={`Delete execution ${execution.id}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDelete(execution);
-                        }}
-                        disabled={deleteExecution.isPending && deleteExecution.variables === execution.id}
-                      >
-                        <span>Delete</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {executions.map((execution) => {
+                  const canCancel =
+                    cancelPermissions?.get(
+                      permissionKey({ kind: "workflowexecution", action: "cancel", id: execution.id })
+                    ) ?? false;
+                  const isRunning = execution.status === "Running";
+                  const cancelInFlight =
+                    cancelExecution.isPending && cancelExecution.variables === execution.id;
+
+                  return (
+                    <tr
+                      key={execution.id}
+                      className="workflow-execution-row"
+                      onClick={() => setSelectedId(execution.id)}
+                    >
+                      <td className="workflow-execution-id">{execution.id}</td>
+                      <td>{execution.workflowModelName ?? "Unknown"}</td>
+                      <td>{formatTimestamp(execution.startedAtUtc)}</td>
+                      <td>{formatTimestamp(execution.lastActivityAtUtc)}</td>
+                      <td>
+                        <span
+                          className="badge rounded-pill"
+                          style={statusBadgeStyle(execution.status, statusAppearance)}
+                        >
+                          {execution.status}
+                        </span>
+                      </td>
+                      <td>{execution.currentStep ?? "Not running"}</td>
+                      <td className="workflow-executions-actions-cell">
+                        {isRunning && canCancel && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-warning btn-sm workflow-execution-cancel-button"
+                            title="Cancel execution"
+                            aria-label={`Cancel execution ${execution.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onCancel(execution);
+                            }}
+                            disabled={cancelInFlight}
+                          >
+                            <span>Cancel</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
+                          title="Delete execution"
+                          aria-label={`Delete execution ${execution.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(execution);
+                          }}
+                          disabled={deleteExecution.isPending && deleteExecution.variables === execution.id}
+                        >
+                          <span>Delete</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -275,10 +328,13 @@ export function ExecutionContent({
     xml: detail?.bpmnXml ?? null,
     completedActivityIds: detail?.completedActivityIds ?? [],
     currentActivityIds: detail?.currentActivityIds ?? [],
+    cancelledActivityIds: detail?.cancelledActivityIds ?? [],
     callbacks: viewerCallbacks,
     enableContextMenu: true,
     contextMenu: contextMenuOptions
   });
+
+  const hasCancelledActivities = (detail?.cancelledActivityIds?.length ?? 0) > 0;
 
   const errorMessage = error
     ? describeError(error)
@@ -322,6 +378,12 @@ export function ExecutionContent({
               <span className="workflow-execution-swatch workflow-execution-swatch-current"></span>{" "}
               Current
             </span>
+            {hasCancelledActivities && (
+              <span>
+                <span className="workflow-execution-swatch workflow-execution-swatch-cancelled"></span>{" "}
+                Cancelled
+              </span>
+            )}
             <span>
               <span className="workflow-execution-swatch workflow-execution-swatch-future"></span>{" "}
               Future

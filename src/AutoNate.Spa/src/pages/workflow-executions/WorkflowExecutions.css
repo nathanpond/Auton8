@@ -55,6 +55,11 @@
     white-space: nowrap;
 }
 
+.workflow-executions-actions-cell .btn + .btn {
+    margin-left: 0.4rem;
+}
+
+.workflow-execution-cancel-button,
 .workflow-execution-delete-button {
     display: inline-flex;
     align-items: center;
@@ -146,6 +151,10 @@
 
 .workflow-execution-swatch-current {
     background: #dcfce7;
+}
+
+.workflow-execution-swatch-cancelled {
+    background: #fef3c7;
 }
 
 .workflow-execution-swatch-future {
@@ -290,6 +299,15 @@
 .workflow-execution-viewer-shell .execution-step-current .djs-visual > path:not(text),
 .workflow-execution-viewer-shell .execution-step-current .djs-visual > polyline {
     fill: #dcfce7 !important;
+}
+
+.workflow-execution-viewer-shell .execution-step-cancelled .djs-visual > rect,
+.workflow-execution-viewer-shell .execution-step-cancelled .djs-visual > circle,
+.workflow-execution-viewer-shell .execution-step-cancelled .djs-visual > ellipse,
+.workflow-execution-viewer-shell .execution-step-cancelled .djs-visual > polygon,
+.workflow-execution-viewer-shell .execution-step-cancelled .djs-visual > path:not(text),
+.workflow-execution-viewer-shell .execution-step-cancelled .djs-visual > polyline {
+    fill: #fef3c7 !important;
 }
 
 @media (max-width: 1200px) {
