@@ -552,7 +552,7 @@ export async function createReadonlyViewer(container, xml) {
   });
 
   await viewer.importXML(xml);
-  viewer.get("canvas").zoom("fit-viewport");
+  fitAndCenter(viewer);
 
   return {
     viewer,
@@ -1158,7 +1158,26 @@ export async function createNewDiagram(modelerHandle, xml) {
 export async function loadReadonlyDiagram(viewerHandle, xml) {
   clearExecutionState(viewerHandle);
   await viewerHandle.viewer.importXML(xml);
-  viewerHandle.viewer.get("canvas").zoom("fit-viewport");
+  fitAndCenter(viewerHandle.viewer);
+}
+
+// Fits the diagram in the viewport and centers it. Deferred to the next
+// animation frame so layout has settled — at import time the container often
+// hasn't reached its final size yet, which causes fit-viewport to size
+// against a stale (smaller) viewport and pin the diagram to the top-left.
+function fitAndCenter(viewer) {
+  const apply = () => {
+    const canvas = viewer.get("canvas");
+    if (typeof canvas.resized === "function") {
+      canvas.resized();
+    }
+    canvas.zoom("fit-viewport", "auto");
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(apply);
+  } else {
+    apply();
+  }
 }
 
 export function highlightExecutionState(viewerHandle, completedActivityIds, currentActivityIds) {
