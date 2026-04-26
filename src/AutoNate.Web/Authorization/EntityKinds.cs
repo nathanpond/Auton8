@@ -10,4 +10,5 @@ public static class EntityKinds
     public const string WorkflowModel = "workflowmodel";
     public const string WorkflowExecution = "workflowexecution";
     public const string WorkflowTask = "workflowtask";
+    public const string SiteConfig = "siteconfig";
 }

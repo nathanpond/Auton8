@@ -50,6 +50,10 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<PermissionGrant> PermissionGrants { get; set; }
 
+    public virtual DbSet<Menu> Menus { get; set; }
+
+    public virtual DbSet<MenuItem> MenuItems { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -525,6 +529,55 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Menu>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("menus_pkey");
+
+            entity.ToTable("menus");
+
+            entity.HasIndex(e => e.Key, "menus_key_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Key).HasColumnName("key");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.IsSystem).HasColumnName("is_system");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<MenuItem>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("menu_items_pkey");
+
+            entity.ToTable("menu_items");
+
+            entity.HasIndex(e => new { e.MenuId, e.ParentId, e.SortOrder },
+                "ix_menu_items_menu_parent_sort");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.MenuId).HasColumnName("menu_id");
+            entity.Property(e => e.ParentId).HasColumnName("parent_id");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.DisplayName).HasColumnName("display_name");
+            entity.Property(e => e.Icon).HasColumnName("icon");
+            entity.Property(e => e.ItemType).HasColumnName("item_type");
+            entity.Property(e => e.Config)
+                .HasColumnName("config")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.PermissionRequired).HasColumnName("permission_required");
+            entity.Property(e => e.IsVisible).HasColumnName("is_visible");
+            entity.Property(e => e.IsSystem).HasColumnName("is_system");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
         });
 
         OnModelCreatingPartial(modelBuilder);

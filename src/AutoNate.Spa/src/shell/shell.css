@@ -28,3 +28,11 @@
 #top-menu .menu-brand-link .menu-text {
     color: #fff !important;
 }
+
+#top-menu .menu-submenu-separator {
+    height: 1px;
+    margin: 0.4rem 0.75rem;
+    background: rgba(255, 255, 255, 0.12);
+    padding: 0;
+    pointer-events: none;
+}

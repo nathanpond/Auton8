@@ -448,3 +448,295 @@ VALUES (
     'local-admin'
 )
 ON CONFLICT (username) DO NOTHING;
+
+-- =============================================================================
+-- Site menus & dynamic pages
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS menus (
+    id UUID PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NULL,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    updated_by UUID NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS menu_items (
+    id UUID PRIMARY KEY,
+    menu_id UUID NOT NULL REFERENCES menus (id) ON DELETE CASCADE,
+    parent_id UUID NULL REFERENCES menu_items (id) ON DELETE CASCADE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    display_name TEXT NOT NULL,
+    icon TEXT NULL,
+    item_type TEXT NOT NULL,
+    config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    permission_required TEXT NULL,
+    is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_menu_items_menu_parent_sort
+    ON menu_items (menu_id, parent_id NULLS FIRST, sort_order);
+
+CREATE INDEX IF NOT EXISTS ix_menu_items_page_path
+    ON menu_items ((config->>'path'))
+    WHERE item_type = 'page';
+
+-- Seed the four built-in menus and their items mirroring the previously
+-- hardcoded structure in NavMenu.tsx and ConfigLayout.tsx. Items are seeded
+-- only when the menu is first created so admin edits aren't clobbered on
+-- re-runs.
+
+DO $$
+DECLARE
+    seed_actor UUID := '00000000-0000-0000-0000-000000000000';
+    main_id UUID := '00000000-0000-0000-0001-000000000001';
+    icon_id UUID := '00000000-0000-0000-0001-000000000002';
+    user_id UUID := '00000000-0000-0000-0001-000000000003';
+    site_id UUID := '00000000-0000-0000-0001-000000000004';
+    g UUID;
+BEGIN
+    -- ---------- Main menu ----------
+    IF NOT EXISTS (SELECT 1 FROM menus WHERE key = 'main') THEN
+        INSERT INTO menus (id, key, name, description, is_system,
+            created_at_utc, created_by, updated_at_utc, updated_by)
+        VALUES (main_id, 'main', 'Main Menu',
+            'The top navigation bar shown on every page.',
+            TRUE, NOW(), seed_actor, NOW(), seed_actor);
+
+        -- Dashboard group
+        g := gen_random_uuid();
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (g, main_id, NULL, 0, 'Dashboard', 'fa fa-house',
+            'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), main_id, g, 0, 'Home', NULL,
+            'route', '{"path":"/home"}'::jsonb, TRUE, TRUE, NOW(), NOW());
+
+        -- Records group (with dynamic record-type children)
+        g := gen_random_uuid();
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (g, main_id, NULL, 1, 'Records', 'fa fa-database',
+            'group', '{"dynamicChildren":"recordTypes"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), main_id, g, 0, 'Record Types', NULL,
+            'route', '{"path":"/record-types"}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), main_id, g, 1, 'Edge Types', NULL,
+            'route', '{"path":"/record-edge-types"}'::jsonb, TRUE, TRUE, NOW(), NOW());
+
+        -- Workflows group
+        g := gen_random_uuid();
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (g, main_id, NULL, 2, 'Workflows', 'fa fa-diagram-project',
+            'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), main_id, g, 0, 'Workflow Studio', NULL,
+            'route', '{"path":"/workflow"}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), main_id, g, 1, 'Workflow Executions', NULL,
+            'route', '{"path":"/workflow-executions"}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), main_id, g, 2, 'Bus Watcher', NULL,
+            'route', '{"path":"/bus-watcher"}'::jsonb, TRUE, TRUE, NOW(), NOW());
+    END IF;
+
+    -- ---------- Icon menu (top-right icon strip) ----------
+    -- Each top-level item becomes its own icon in the top bar. Group items
+    -- render as icon+dropdown; route/page/link items render as a single icon
+    -- link. Default install seeds a single 'Settings' (gear) group with all
+    -- the existing admin shortcuts.
+    IF NOT EXISTS (SELECT 1 FROM menus WHERE key = 'icon') THEN
+        INSERT INTO menus (id, key, name, description, is_system,
+            created_at_utc, created_by, updated_at_utc, updated_by)
+        VALUES (icon_id, 'icon', 'Icon Menu',
+            'Top-right icon strip. Each top-level item is a separate icon; group items become dropdowns.',
+            TRUE, NOW(), seed_actor, NOW(), seed_actor);
+
+        g := gen_random_uuid();
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (g, icon_id, NULL, 0, 'Settings', 'fa fa-gear',
+            'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), icon_id, g, 0, 'Site Configuration',
+            'fa fa-sliders', 'route', '{"path":"/admin/config"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), icon_id, g, 1, 'Manage Users',
+            'fa fa-users', 'route', '{"path":"/manage-users"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), icon_id, g, 2, 'Roles & Permissions',
+            'fa fa-user-shield', 'route', '{"path":"/admin/roles"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), icon_id, g, 3, 'Groups',
+            'fa fa-people-group', 'route', '{"path":"/admin/groups"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), icon_id, g, 4, 'Permissions',
+            'fa fa-key', 'route', '{"path":"/admin/grants"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), icon_id, g, 5, 'Hierarchy',
+            'fa fa-sitemap', 'route', '{"path":"/admin/hierarchy"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), icon_id, g, 6, 'Effective Permissions',
+            'fa fa-magnifying-glass', 'route', '{"path":"/admin/explain"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+    END IF;
+
+    -- ---------- User menu ----------
+    IF NOT EXISTS (SELECT 1 FROM menus WHERE key = 'user') THEN
+        INSERT INTO menus (id, key, name, description, is_system,
+            created_at_utc, created_by, updated_at_utc, updated_by)
+        VALUES (user_id, 'user', 'User Menu',
+            'The dropdown beside the signed-in user''s name in the top navigation.',
+            TRUE, NOW(), seed_actor, NOW(), seed_actor);
+
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), user_id, NULL, 0, 'User Profile',
+            'fa fa-user', 'route', '{"path":"/user-profile"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), user_id, NULL, 1, '',
+            NULL, 'separator', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), user_id, NULL, 2, 'Logout',
+            'fa fa-right-from-bracket', 'action', '{"action":"logout"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+    END IF;
+
+    -- ---------- Site Configuration menu (left side nav at /admin/config) ----------
+    IF NOT EXISTS (SELECT 1 FROM menus WHERE key = 'site-config') THEN
+        INSERT INTO menus (id, key, name, description, is_system,
+            created_at_utc, created_by, updated_at_utc, updated_by)
+        VALUES (site_id, 'site-config', 'Site Configuration',
+            'The left-hand navigation shown inside the Site Configuration area.',
+            TRUE, NOW(), seed_actor, NOW(), seed_actor);
+
+        -- Sitewide Configuration group
+        g := gen_random_uuid();
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (g, site_id, NULL, 0, 'Sitewide Configuration', 'fa fa-sliders',
+            'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 0, 'General', 'fa fa-gear',
+            'route', '{"path":"/admin/config/general"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 1, 'Features', 'fa fa-toggle-on',
+            'route', '{"path":"/admin/config/features"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 2, 'Appearance', 'fa fa-palette',
+            'route', '{"path":"/admin/config/appearance"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 3, 'External Connections', 'fa fa-plug',
+            'route', '{"path":"/admin/config/external-connections"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 4, 'Pages / Menus', 'fa fa-list',
+            'route', '{"path":"/admin/config/pages-menus"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+
+        -- Security group
+        g := gen_random_uuid();
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (g, site_id, NULL, 1, 'Security', 'fa fa-shield-halved',
+            'group', '{}'::jsonb, TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 0, 'Manage Users', 'fa fa-users',
+            'route', '{"path":"/admin/config/users"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 1, 'Manage Groups', 'fa fa-people-group',
+            'route', '{"path":"/admin/config/groups"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 2, 'Manage Roles', 'fa fa-user-shield',
+            'route', '{"path":"/admin/config/roles"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 3, 'Set Permissions', 'fa fa-key',
+            'route', '{"path":"/admin/config/permissions"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 4, 'Permission Checker', 'fa fa-magnifying-glass',
+            'route', '{"path":"/admin/config/permission-checker"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+    END IF;
+END $$;

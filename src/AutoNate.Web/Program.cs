@@ -12,6 +12,7 @@ using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Menus;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Workflow;
@@ -112,6 +113,7 @@ builder.Services.AddScoped<IRoleStore, EfCoreRoleStore>();
 builder.Services.AddScoped<IGroupStore, EfCoreGroupStore>();
 builder.Services.AddScoped<IRoleAssignmentStore, EfCoreRoleAssignmentStore>();
 builder.Services.AddScoped<IPermissionGrantStore, EfCorePermissionGrantStore>();
+builder.Services.AddScoped<IMenuStore, EfCoreMenuStore>();
 builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();
 builder.Services.AddScoped<IWorkflowModelStore, EfCoreWorkflowModelStore>();
 builder.Services.AddSingleton<IFieldType, TextFieldType>();
@@ -383,6 +385,8 @@ app.MapRoleAssignmentEndpoints();
 app.MapPermissionGrantEndpoints();
 app.MapAuthorizationExplainEndpoints();
 app.MapRegistryEndpoints();
+app.MapMenuEndpoints();
+app.MapPageEndpoints();
 
 app.MapStaticAssets();
 

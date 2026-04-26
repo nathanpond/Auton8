@@ -1,0 +1,137 @@
+.config-layout {
+    display: flex;
+    align-items: stretch;
+    min-height: calc(100vh - 64px);
+}
+
+.config-sidenav {
+    flex: 0 0 260px;
+    background: #1c2127;
+    color: #d3d8de;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+}
+
+.config-sidenav-header {
+    padding: 1rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    letter-spacing: 0.02em;
+}
+
+.config-sidenav-nav {
+    padding: 0.5rem 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+}
+
+.config-nav-group + .config-nav-group {
+    margin-top: 0.25rem;
+}
+
+.config-nav-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.55rem 1.1rem;
+    background: transparent;
+    border: 0;
+    color: #c9d1d9;
+    font-weight: 600;
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.config-nav-group-header:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+}
+
+.config-nav-group-icon {
+    width: 1rem;
+    text-align: center;
+    color: #8a93a0;
+}
+
+.config-nav-group-label {
+    flex: 1 1 auto;
+}
+
+.config-nav-group-caret {
+    font-size: 0.7rem;
+    color: #6a7280;
+}
+
+.config-nav-items {
+    list-style: none;
+    margin: 0;
+    padding: 0.15rem 0 0.5rem 0;
+}
+
+.config-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 1.1rem 0.45rem 2.1rem;
+    color: #b7bec8;
+    font-size: 0.875rem;
+    text-decoration: none;
+    border-left: 3px solid transparent;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.config-nav-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+}
+
+.config-nav-item.active {
+    background: rgba(13, 110, 253, 0.18);
+    color: #fff;
+    border-left-color: #0d6efd;
+}
+
+.config-nav-item-icon {
+    width: 1rem;
+    text-align: center;
+    color: inherit;
+    opacity: 0.85;
+}
+
+.config-nav-separator {
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin: 0.4rem 1.1rem;
+    opacity: 1;
+}
+
+.config-content {
+    flex: 1 1 auto;
+    padding: 1.5rem 1.75rem;
+    min-width: 0;
+}
+
+@media (max-width: 768px) {
+    .config-layout {
+        flex-direction: column;
+    }
+
+    .config-sidenav {
+        flex: 0 0 auto;
+        width: 100%;
+        border-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .config-content {
+        padding: 1rem;
+    }
+}
