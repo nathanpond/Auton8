@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
 import { MenuItem, MenuItemType } from "@/types/menus";
+import IconPicker from "@/components/IconPicker";
+import { findIcon } from "@/lib/faIcons";
+
+function extractIconName(stored: string | null | undefined): string {
+  if (!stored) return "";
+  const tokens = stored.split(/\s+/).filter(Boolean);
+  for (const t of tokens) {
+    if (findIcon(t)) return t.startsWith("fa-") ? t : `fa-${t}`;
+  }
+  return stored.trim();
+}
 
 type Props = {
   item: MenuItem;
@@ -25,8 +36,26 @@ const ACTION_OPTIONS = [{ value: "logout", label: "Logout (POST /account/logout)
 
 export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
   const [draft, setDraft] = useState<MenuItem>(item);
+  const [iconQuery, setIconQuery] = useState<string>(() => extractIconName(item.icon));
 
-  useEffect(() => setDraft(item), [item]);
+  useEffect(() => {
+    setDraft(item);
+    setIconQuery(extractIconName(item.icon));
+  }, [item]);
+
+  const handleIconChange = (next: string) => {
+    setIconQuery(next);
+    if (!next.trim()) {
+      setDraft((d) => ({ ...d, icon: null }));
+      return;
+    }
+    const found = findIcon(next);
+    if (found) {
+      setDraft((d) => ({ ...d, icon: `fa fa-${found.name}` }));
+    } else {
+      setDraft((d) => ({ ...d, icon: null }));
+    }
+  };
 
   const config = (draft.config ?? {}) as Record<string, unknown>;
   const setConfigField = (key: string, value: unknown) =>
@@ -70,16 +99,12 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
               )}
               {draft.itemType !== "separator" && (
                 <div className="col-md-6">
-                  <label className="form-label">Icon (FontAwesome class)</label>
-                  <div className="input-group">
-                    {draft.icon && <span className="input-group-text"><i className={draft.icon} /></span>}
-                    <input
-                      className="form-control font-monospace"
-                      placeholder="fa fa-star"
-                      value={draft.icon ?? ""}
-                      onChange={(e) => setDraft({ ...draft, icon: e.target.value || null })}
-                    />
-                  </div>
+                  <label className="form-label">Icon</label>
+                  <IconPicker
+                    value={iconQuery}
+                    onChange={handleIconChange}
+                    placeholder="Search icons (e.g. star)"
+                  />
                 </div>
               )}
 

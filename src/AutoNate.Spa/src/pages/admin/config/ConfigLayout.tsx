@@ -31,7 +31,7 @@ export default function ConfigLayout() {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
 
   return (
-    <div className="config-layout">
+    <div className="config-layout app-content-margin">
       <aside className="config-sidenav">
         <div className="config-sidenav-header">
           <i className="fa fa-sliders me-2" />
