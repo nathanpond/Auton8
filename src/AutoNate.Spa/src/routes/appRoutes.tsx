@@ -22,6 +22,7 @@ import AdminHierarchy from "@/pages/admin/Hierarchy";
 import AdminExplain from "@/pages/admin/Explain";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
+import StatusAppearance from "@/pages/admin/config/StatusAppearance";
 import {
   ConfigIndex,
   SecurityManageGroups,
@@ -76,6 +77,7 @@ export const APP_ROUTES: AppRoute[] = [
       { path: "general", element: <SitewideGeneral /> },
       { path: "features", element: <SitewideFeatures /> },
       { path: "appearance", element: <SitewideAppearance /> },
+      { path: "status-appearance", element: <StatusAppearance /> },
       { path: "external-connections", element: <SitewideExternalConnections /> },
       { path: "pages-menus", element: <PagesMenus /> },
       { path: "users", element: <SecurityManageUsers /> },

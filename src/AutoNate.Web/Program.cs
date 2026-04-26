@@ -387,6 +387,7 @@ app.MapAuthorizationExplainEndpoints();
 app.MapRegistryEndpoints();
 app.MapMenuEndpoints();
 app.MapPageEndpoints();
+app.MapStatusAppearanceEndpoints();
 
 app.MapStaticAssets();
 

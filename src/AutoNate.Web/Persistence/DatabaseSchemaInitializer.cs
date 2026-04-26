@@ -675,6 +675,16 @@ internal static class DatabaseSchemaInitializer
             ON menu_items ((config->>'path'))
             WHERE item_type = 'page';
 
+        CREATE TABLE IF NOT EXISTS status_appearance_entries (
+            id UUID PRIMARY KEY,
+            status TEXT NOT NULL UNIQUE,
+            color TEXT NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
         DO $$
         DECLARE
             seed_actor UUID := '00000000-0000-0000-0000-000000000000';
@@ -765,9 +775,11 @@ internal static class DatabaseSchemaInitializer
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), site_id, g, 2, 'Appearance', 'fa fa-palette', 'route', '{{"path":"/admin/config/appearance"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 3, 'External Connections', 'fa fa-plug', 'route', '{{"path":"/admin/config/external-connections"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 3, 'Status Appearance', 'fa fa-circle-info', 'route', '{{"path":"/admin/config/status-appearance"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 4, 'Pages / Menus', 'fa fa-list', 'route', '{{"path":"/admin/config/pages-menus"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 4, 'External Connections', 'fa fa-plug', 'route', '{{"path":"/admin/config/external-connections"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
+                VALUES (gen_random_uuid(), site_id, g, 5, 'Pages / Menus', 'fa fa-list', 'route', '{{"path":"/admin/config/pages-menus"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -833,6 +845,59 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    private const string SiteConfigStatusAppearanceSql =
+        """
+        DO $$
+        DECLARE
+            site_id UUID := '00000000-0000-0000-0001-000000000004';
+            sitewide_group_id UUID;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'site_config_status_appearance_v1') THEN
+                SELECT id
+                INTO sitewide_group_id
+                FROM menu_items
+                WHERE menu_id = site_id
+                  AND parent_id IS NULL
+                  AND display_name = 'Sitewide Configuration'
+                ORDER BY sort_order, created_at_utc
+                LIMIT 1;
+
+                IF sitewide_group_id IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM menu_items
+                       WHERE menu_id = site_id
+                         AND parent_id = sitewide_group_id
+                         AND config->>'path' = '/admin/config/status-appearance'
+                   )
+                THEN
+                    UPDATE menu_items
+                    SET sort_order = sort_order + 1,
+                        updated_at_utc = NOW()
+                    WHERE menu_id = site_id
+                      AND parent_id = sitewide_group_id
+                      AND sort_order >= 3;
+
+                    INSERT INTO menu_items (
+                        id, menu_id, parent_id, sort_order, display_name, icon,
+                        item_type, config, is_visible, is_system,
+                        created_at_utc, updated_at_utc
+                    )
+                    VALUES (
+                        gen_random_uuid(), site_id, sitewide_group_id, 3,
+                        'Status Appearance', 'fa fa-circle-info',
+                        'route', '{{"path":"/admin/config/status-appearance"}}'::jsonb,
+                        TRUE, TRUE, NOW(), NOW()
+                    );
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('site_config_status_appearance_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -849,6 +914,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(RolePermissionsToGrantsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(MenusSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(IconMenuWrapSettingsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigStatusAppearanceSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

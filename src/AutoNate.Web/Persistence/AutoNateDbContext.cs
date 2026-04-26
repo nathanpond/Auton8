@@ -54,6 +54,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<MenuItem> MenuItems { get; set; }
 
+    public virtual DbSet<StatusAppearanceEntry> StatusAppearanceEntries { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -578,6 +580,25 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.IsSystem).HasColumnName("is_system");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<StatusAppearanceEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("status_appearance_entries_pkey");
+
+            entity.ToTable("status_appearance_entries");
+
+            entity.HasIndex(e => e.Status, "status_appearance_entries_status_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.Color).HasColumnName("color");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         OnModelCreatingPartial(modelBuilder);

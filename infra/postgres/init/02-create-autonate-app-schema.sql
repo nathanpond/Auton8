@@ -488,6 +488,16 @@ CREATE INDEX IF NOT EXISTS ix_menu_items_page_path
     ON menu_items ((config->>'path'))
     WHERE item_type = 'page';
 
+CREATE TABLE IF NOT EXISTS status_appearance_entries (
+    id UUID PRIMARY KEY,
+    status TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    updated_by UUID NOT NULL
+);
+
 -- Seed the four built-in menus and their items mirroring the previously
 -- hardcoded structure in NavMenu.tsx and ConfigLayout.tsx. Items are seeded
 -- only when the menu is first created so admin edits aren't clobbered on
@@ -691,13 +701,19 @@ BEGIN
         INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
             icon, item_type, config, is_visible, is_system,
             created_at_utc, updated_at_utc)
-        VALUES (gen_random_uuid(), site_id, g, 3, 'External Connections', 'fa fa-plug',
+        VALUES (gen_random_uuid(), site_id, g, 3, 'Status Appearance', 'fa fa-circle-info',
+            'route', '{"path":"/admin/config/status-appearance"}'::jsonb,
+            TRUE, TRUE, NOW(), NOW());
+        INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
+            icon, item_type, config, is_visible, is_system,
+            created_at_utc, updated_at_utc)
+        VALUES (gen_random_uuid(), site_id, g, 4, 'External Connections', 'fa fa-plug',
             'route', '{"path":"/admin/config/external-connections"}'::jsonb,
             TRUE, TRUE, NOW(), NOW());
         INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name,
             icon, item_type, config, is_visible, is_system,
             created_at_utc, updated_at_utc)
-        VALUES (gen_random_uuid(), site_id, g, 4, 'Pages / Menus', 'fa fa-list',
+        VALUES (gen_random_uuid(), site_id, g, 5, 'Pages / Menus', 'fa fa-list',
             'route', '{"path":"/admin/config/pages-menus"}'::jsonb,
             TRUE, TRUE, NOW(), NOW());
 
