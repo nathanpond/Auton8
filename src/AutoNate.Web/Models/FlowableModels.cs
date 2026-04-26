@@ -96,3 +96,18 @@ public sealed record class FlowableProcessVariable
 
     public string? Value { get; init; }
 }
+
+// Override-write payload for a single process variable. The diagram-detail GET
+// flattens Flowable's typed values (json/number/bool) to a string via
+// FormatVariableValue; the SPA parses the string back into a runtime value
+// using the variable's Type as a hint before sending it here. When Type is
+// null Flowable infers from the value's JSON kind. A null Value clears the
+// variable on Flowable's side.
+public sealed record class ProcessVariableUpdate
+{
+    public required string Name { get; init; }
+
+    public object? Value { get; init; }
+
+    public string? Type { get; init; }
+}

@@ -2,14 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   completeTask,
   deleteExecution,
+  forceCompleteTaskAtNode,
+  getCompletedAssigneesForActivity,
   getExecutionDiagram,
   getExecutionTasks,
   listExecutions,
   listMyAssignedTasks,
-  listTasksVisibleToMe
+  listTasksVisibleToMe,
+  updateExecutionVariables
 } from "@/api/executions";
 import {
   FlowableTaskSummary,
+  ProcessVariableUpdate,
   WorkflowExecutionDiagramDetail,
   WorkflowExecutionSummary
 } from "@/types/flowable";
@@ -76,5 +80,50 @@ export function useTasksVisibleToMe() {
   return useQuery<FlowableTaskSummary[]>({
     queryKey: VISIBLE_TASKS_QUERY_KEY,
     queryFn: ({ signal }) => listTasksVisibleToMe(signal)
+  });
+}
+
+export const completedAssigneesQueryKey = (processInstanceId: string, activityId: string) =>
+  ["executions", "completed-assignees", processInstanceId, activityId] as const;
+
+export function useUpdateExecutionVariables(processInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (variables: ProcessVariableUpdate[]) =>
+      updateExecutionVariables(processInstanceId, variables),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: executionDiagramQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
+    }
+  });
+}
+
+export function useForceCompleteTask(processInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, variables }: { taskId: string; variables?: Record<string, unknown> }) =>
+      forceCompleteTaskAtNode(processInstanceId, taskId, variables),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: executionDiagramQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+    }
+  });
+}
+
+export function useCompletedAssigneesForActivity(
+  processInstanceId: string | null,
+  activityId: string | null,
+  enabled: boolean
+) {
+  return useQuery<string[]>({
+    queryKey: completedAssigneesQueryKey(processInstanceId ?? "unset", activityId ?? "unset"),
+    queryFn: ({ signal }) =>
+      processInstanceId && activityId
+        ? getCompletedAssigneesForActivity(processInstanceId, activityId, signal)
+        : Promise.resolve([]),
+    enabled: enabled && Boolean(processInstanceId) && Boolean(activityId)
   });
 }

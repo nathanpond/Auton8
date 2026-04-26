@@ -4,9 +4,12 @@ import { useMyAssignedRecords } from "@/hooks/useRecords";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { useCompleteTask, useTasksVisibleToMe } from "@/hooks/useExecutions";
 import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
+import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { RecordModel, RecordType } from "@/types/records";
 import { FlowableTaskSummary } from "@/types/flowable";
+import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { findIcon, preferredStyle, stripFaPrefix } from "@/lib/faIcons";
+import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
 
 const PAGE_SIZE = 10;
 
@@ -33,6 +36,7 @@ export default function MyTasksPanel() {
   const { data: recordPage, isLoading: recordsLoading, isError: recordsError } =
     useMyAssignedRecords(params);
   const { data: types = [] } = useRecordTypes(true);
+  const { data: statusAppearance = [] } = useStatusAppearance();
   const {
     data: workflowTasks = [],
     isLoading: tasksLoading,
@@ -138,7 +142,12 @@ export default function MyTasksPanel() {
               )}
               {!isLoading && !hasError && rows.map((row) =>
                 row.kind === "record" ? (
-                  <RecordRow key={row.id} record={row.record} type={row.type} />
+                  <RecordRow
+                    key={row.id}
+                    record={row.record}
+                    type={row.type}
+                    statusAppearance={statusAppearance}
+                  />
                 ) : (
                   <WorkflowRow
                     key={row.id}
@@ -150,6 +159,7 @@ export default function MyTasksPanel() {
                         permissionKey({ kind: "workflowtask", action: "complete", id: row.task.id })
                       ) ?? false
                     }
+                    statusAppearance={statusAppearance}
                   />
                 )
               )}
@@ -166,7 +176,15 @@ export default function MyTasksPanel() {
   );
 }
 
-function RecordRow({ record, type }: { record: RecordModel; type: RecordType | null }) {
+function RecordRow({
+  record,
+  type,
+  statusAppearance
+}: {
+  record: RecordModel;
+  type: RecordType | null;
+  statusAppearance: StatusAppearanceEntry[];
+}) {
   const description = readDescription(record.values);
   return (
     <tr>
@@ -176,7 +194,18 @@ function RecordRow({ record, type }: { record: RecordModel; type: RecordType | n
           {record.name}
         </Link>
       </td>
-      <td>{record.status ?? <span className="text-body text-opacity-50">—</span>}</td>
+      <td>
+        {record.status ? (
+          <span
+            className="badge rounded-pill"
+            style={statusBadgeStyle(record.status, statusAppearance)}
+          >
+            {record.status}
+          </span>
+        ) : (
+          <span className="text-body text-opacity-50">—</span>
+        )}
+      </td>
       <td>
         {type ? (
           <>
@@ -213,16 +242,29 @@ function RecordRow({ record, type }: { record: RecordModel; type: RecordType | n
   );
 }
 
+function statusBadgeStyle(
+  status: string,
+  entries: StatusAppearanceEntry[]
+): React.CSSProperties {
+  const backgroundColor = resolveStatusBadgeColor(status, entries);
+  return {
+    backgroundColor,
+    color: badgeTextColor(backgroundColor)
+  };
+}
+
 function WorkflowRow({
   task,
   onComplete,
   isCompleting,
-  canComplete
+  canComplete,
+  statusAppearance
 }: {
   task: FlowableTaskSummary;
   onComplete: (taskId: string) => void;
   isCompleting: boolean;
   canComplete: boolean;
+  statusAppearance: StatusAppearanceEntry[];
 }) {
   const workflowName = task.processDefinitionName ?? task.processDefinitionId ?? task.name ?? task.id;
   const activeNode = task.name?.trim() ? task.name : task.taskDefinitionKey ?? null;
@@ -238,7 +280,16 @@ function WorkflowRow({
         )}
       </td>
       <td>
-        {activeNode ?? <span className="text-body text-opacity-50">—</span>}
+        {activeNode ? (
+          <span
+            className="badge rounded-pill"
+            style={statusBadgeStyle(activeNode, statusAppearance)}
+          >
+            {activeNode}
+          </span>
+        ) : (
+          <span className="text-body text-opacity-50">—</span>
+        )}
       </td>
       <td>
         <i className="fa fa-diagram-project me-2"></i>

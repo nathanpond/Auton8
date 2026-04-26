@@ -1,6 +1,7 @@
 import { api } from "./client";
 import {
   FlowableTaskSummary,
+  ProcessVariableUpdate,
   WorkflowExecutionDiagramDetail,
   WorkflowExecutionSummary
 } from "@/types/flowable";
@@ -54,5 +55,40 @@ export async function listMyAssignedTasks(signal?: AbortSignal): Promise<Flowabl
 // supervise. Acting on a task requires a separate permission check.
 export async function listTasksVisibleToMe(signal?: AbortSignal): Promise<FlowableTaskSummary[]> {
   const { data } = await api.get<FlowableTaskSummary[]>("/api/tasks/visible-to-me", { signal });
+  return data;
+}
+
+// Override-write process variables. Gated on workflowexecution/override.
+export async function updateExecutionVariables(
+  processInstanceId: string,
+  variables: ProcessVariableUpdate[]
+): Promise<void> {
+  await api.put(`/api/executions/${encodeURIComponent(processInstanceId)}/variables`, {
+    variables
+  });
+}
+
+// Override-complete a runtime task at a specific node, regardless of assignee.
+// Gated on workflowexecution/override.
+export async function forceCompleteTaskAtNode(
+  processInstanceId: string,
+  taskId: string,
+  variables?: Record<string, unknown>
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/tasks/${encodeURIComponent(taskId)}/force-complete`,
+    { variables: variables ?? null }
+  );
+}
+
+export async function getCompletedAssigneesForActivity(
+  processInstanceId: string,
+  activityId: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const { data } = await api.get<string[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/activities/${encodeURIComponent(activityId)}/completed-assignees`,
+    { signal }
+  );
   return data;
 }

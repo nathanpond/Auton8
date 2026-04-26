@@ -1174,13 +1174,34 @@ export function highlightExecutionState(viewerHandle, completedActivityIds, curr
   addMarkers(viewerHandle, currentActivityIds, "execution-step-current");
 }
 
-export function enableCurrentStepContextMenu(viewerHandle, dotNetRef) {
+// `options` carries thunks that are read on every right-click so React state
+// (notably the override permission check) can change without rebuilding the
+// viewer. All thunks are optional with sensible defaults.
+//   - getCanOverride()                — boolean. Menu is suppressed when false.
+//   - getActiveTasksAtActivity(id)    — array of { id, assignee } for runtime
+//                                       tasks at this BPMN activity.
+//   - getCompletedAssignees(id)       — Promise resolving to assignees that
+//                                       already completed an instance (used to
+//                                       gray out submenu entries for parallel
+//                                       multi-instance user tasks).
+export function enableCurrentStepContextMenu(viewerHandle, dotNetRef, options) {
   if (!viewerHandle?.viewer || !dotNetRef) {
     return;
   }
 
+  const opts = options || {};
+  const getCanOverride = typeof opts.getCanOverride === "function" ? opts.getCanOverride : () => true;
+  const getActiveTasksAtActivity = typeof opts.getActiveTasksAtActivity === "function"
+    ? opts.getActiveTasksAtActivity
+    : () => [];
+  const getCompletedAssignees = typeof opts.getCompletedAssignees === "function"
+    ? opts.getCompletedAssignees
+    : () => Promise.resolve([]);
+
   const eventBus = viewerHandle.viewer.get("eventBus");
-  const contextMenu = createExecutionContextMenu(dotNetRef, viewerHandle.cssScopeAttribute);
+  const contextMenu = createExecutionContextMenu(dotNetRef, viewerHandle.cssScopeAttribute, {
+    getCompletedAssignees
+  });
 
   const onElementContextMenu = (event) => {
     const element = event?.element;
@@ -1197,14 +1218,30 @@ export function enableCurrentStepContextMenu(viewerHandle, dotNetRef) {
       return;
     }
 
+    if (!getCanOverride()) {
+      contextMenu.hide();
+      return;
+    }
+
+    const activityName = element.businessObject?.name || null;
+    const activeTasks = getActiveTasksAtActivity(element.id, activityName) || [];
+    if (activeTasks.length === 0) {
+      contextMenu.hide();
+      return;
+    }
+
     originalEvent.preventDefault();
     originalEvent.stopPropagation();
 
+    // clientX/clientY are viewport-relative — matches our position: fixed
+    // wrapper. pageX/pageY would add scroll offset and place the menu below
+    // the cursor on scrolled pages.
     contextMenu.show({
       activityId: element.id,
-      activityName: element.businessObject?.name || null,
-      x: originalEvent.pageX,
-      y: originalEvent.pageY
+      activityName,
+      tasks: activeTasks,
+      x: originalEvent.clientX,
+      y: originalEvent.clientY
     });
   };
 
@@ -1233,9 +1270,19 @@ function getCssScopeAttribute(element) {
   return element?.getAttributeNames?.().find((name) => name.startsWith("b-")) || null;
 }
 
-function createExecutionContextMenu(dotNetRef, cssScopeAttribute) {
+function createExecutionContextMenu(dotNetRef, cssScopeAttribute, contextOptions) {
+  const opts = contextOptions || {};
+  const getCompletedAssignees = typeof opts.getCompletedAssignees === "function"
+    ? opts.getCompletedAssignees
+    : () => Promise.resolve([]);
+
+  // Drop the Bootstrap "dropdown" class from the outer wrapper — it sets
+  // position: relative and would put us into normal page flow. Force fixed
+  // positioning inline so no later cascade can knock us out.
   const menu = document.createElement("div");
-  menu.className = "workflow-execution-context-menu dropdown";
+  menu.className = "workflow-execution-context-menu";
+  menu.style.position = "fixed";
+  menu.style.zIndex = "1080";
   if (cssScopeAttribute) {
     menu.setAttribute(cssScopeAttribute, "");
   }
@@ -1243,30 +1290,21 @@ function createExecutionContextMenu(dotNetRef, cssScopeAttribute) {
   const list = document.createElement("ul");
   list.className = "dropdown-menu workflow-execution-context-menu__list";
   list.hidden = true;
+  // Bootstrap's .dropdown-menu defaults to position:absolute and is normally
+  // placed by Popper. Without Popper, anchor it to the wrapper's origin so
+  // x/y coords on the wrapper place the list correctly.
+  list.style.position = "static";
+  list.style.margin = "0";
   if (cssScopeAttribute) {
     list.setAttribute(cssScopeAttribute, "");
   }
 
-  const listItem = document.createElement("li");
-  if (cssScopeAttribute) {
-    listItem.setAttribute(cssScopeAttribute, "");
-  }
-
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "dropdown-item workflow-execution-context-menu__item";
-  button.textContent = "Complete Task";
-  if (cssScopeAttribute) {
-    button.setAttribute(cssScopeAttribute, "");
-  }
-
-  listItem.appendChild(button);
-  list.appendChild(listItem);
   menu.appendChild(list);
   document.body.appendChild(menu);
 
-  let currentActivityId = null;
   let isDisposed = false;
+  // Submenu lives at top level for z-index isolation; only one is open at a time.
+  let activeSubmenu = null;
 
   const hide = () => {
     if (isDisposed) {
@@ -1276,19 +1314,97 @@ function createExecutionContextMenu(dotNetRef, cssScopeAttribute) {
     list.hidden = true;
     list.classList.remove("show");
     menu.setAttribute("aria-hidden", "true");
-    currentActivityId = null;
-    delete button.dataset.activityName;
+    list.replaceChildren();
+    closeSubmenu();
+  };
+
+  const closeSubmenu = () => {
+    if (activeSubmenu) {
+      activeSubmenu.remove();
+      activeSubmenu = null;
+    }
+  };
+
+  const setScope = (el) => {
+    if (cssScopeAttribute) {
+      el.setAttribute(cssScopeAttribute, "");
+    }
+  };
+
+  const buildItem = (label, handler, { disabled = false } = {}) => {
+    const li = document.createElement("li");
+    setScope(li);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "dropdown-item workflow-execution-context-menu__item";
+    button.textContent = label;
+    if (disabled) {
+      button.classList.add("disabled");
+      button.setAttribute("aria-disabled", "true");
+      button.disabled = true;
+    } else {
+      button.addEventListener("click", handler);
+    }
+    setScope(button);
+    li.appendChild(button);
+    return li;
+  };
+
+  const buildSubmenuItem = (label, onActivate) => {
+    const li = document.createElement("li");
+    setScope(li);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "dropdown-item workflow-execution-context-menu__item dropdown-toggle";
+    button.textContent = label;
+    setScope(button);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const rect = button.getBoundingClientRect();
+      onActivate(rect);
+    });
+    li.appendChild(button);
+    return li;
+  };
+
+  const renderSubmenu = (anchorRect, tasks, completedAssignees, onPick) => {
+    closeSubmenu();
+    const submenu = document.createElement("ul");
+    submenu.className = "dropdown-menu workflow-execution-context-menu__list show";
+    setScope(submenu);
+    submenu.style.position = "fixed";
+    submenu.style.left = `${anchorRect.right}px`;
+    submenu.style.top = `${anchorRect.top}px`;
+    submenu.style.zIndex = "1090";
+
+    const completedSet = new Set(completedAssignees || []);
+    for (const task of tasks) {
+      const assignee = task.assignee || "(unassigned)";
+      const alreadyCompleted = task.assignee ? completedSet.has(task.assignee) : false;
+      const label = alreadyCompleted ? `${assignee} (completed)` : assignee;
+      submenu.appendChild(buildItem(label, () => onPick(task), { disabled: alreadyCompleted }));
+    }
+
+    document.body.appendChild(submenu);
+    activeSubmenu = submenu;
   };
 
   const onPointerDown = (event) => {
-    if (list.hidden || menu.contains(event.target)) {
+    if (list.hidden) {
       return;
     }
-
+    if (event.button === 2) {
+      return;
+    }
+    if (menu.contains(event.target)) {
+      return;
+    }
+    if (activeSubmenu && activeSubmenu.contains(event.target)) {
+      return;
+    }
     hide();
   };
 
-  const onWindowBlur = () => hide();
   const onWindowResize = () => hide();
   const onKeyDown = (event) => {
     if (event.key === "Escape") {
@@ -1296,31 +1412,57 @@ function createExecutionContextMenu(dotNetRef, cssScopeAttribute) {
     }
   };
 
-  const onButtonClick = async () => {
-    if (!currentActivityId) {
-      return;
-    }
-
-    const activityId = currentActivityId;
-    const activityName = button.dataset.activityName || null;
-    hide();
-    await dotNetRef.invokeMethodAsync("CompleteTaskFromContextMenu", activityId, activityName);
-  };
-
   document.addEventListener("pointerdown", onPointerDown, true);
-  window.addEventListener("blur", onWindowBlur);
   window.addEventListener("resize", onWindowResize);
   window.addEventListener("keydown", onKeyDown);
-  button.addEventListener("click", onButtonClick);
 
   return {
-    show({ activityId, activityName, x, y }) {
+    show({ activityId, activityName, tasks, x, y }) {
       if (isDisposed) {
         return;
       }
 
-      currentActivityId = activityId;
-      button.dataset.activityName = activityName || "";
+      list.replaceChildren();
+      closeSubmenu();
+
+      if (!tasks || tasks.length === 0) {
+        return;
+      }
+
+      if (tasks.length === 1) {
+        const onlyTask = tasks[0];
+        list.appendChild(buildItem("Complete Task", async () => {
+          hide();
+          await dotNetRef.invokeMethodAsync(
+            "CompleteTaskFromContextMenu", activityId, activityName, onlyTask.id);
+        }));
+      } else {
+        const taskIds = tasks.map((t) => t.id);
+        const taskCount = tasks.length;
+        list.appendChild(buildItem(`Complete Task (all ${taskCount})`, async () => {
+          if (!window.confirm(`Override-complete ${taskCount} runtime tasks at this step?`)) {
+            return;
+          }
+          hide();
+          await dotNetRef.invokeMethodAsync(
+            "CompleteAllTasksFromContextMenu", activityId, activityName, taskIds);
+        }));
+
+        list.appendChild(buildSubmenuItem("Complete Task For…", async (anchorRect) => {
+          let completed = [];
+          try {
+            completed = await getCompletedAssignees(activityId);
+          } catch {
+            // Submenu still renders without disabled state if the lookup fails.
+          }
+          renderSubmenu(anchorRect, tasks, completed, async (task) => {
+            hide();
+            await dotNetRef.invokeMethodAsync(
+              "CompleteTaskFromContextMenu", activityId, activityName, task.id);
+          });
+        }));
+      }
+
       menu.style.left = `${x}px`;
       menu.style.top = `${y}px`;
       list.hidden = false;
@@ -1334,12 +1476,10 @@ function createExecutionContextMenu(dotNetRef, cssScopeAttribute) {
       }
 
       isDisposed = true;
-      delete button.dataset.activityName;
+      closeSubmenu();
       document.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("blur", onWindowBlur);
       window.removeEventListener("resize", onWindowResize);
       window.removeEventListener("keydown", onKeyDown);
-      button.removeEventListener("click", onButtonClick);
       menu.remove();
     }
   };

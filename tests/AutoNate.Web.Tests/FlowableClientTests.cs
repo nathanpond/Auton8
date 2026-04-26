@@ -338,6 +338,84 @@ public sealed class FlowableClientTests
         Assert.Contains("task already completed", ex.Message);
     }
 
+    // --- UpdateProcessVariablesAsync -----------------------------------------
+
+    [Fact]
+    public async Task UpdateProcessVariablesAsync_PutsBatchPayloadWithName_Value_AndType()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/process-instances/inst-1/variables", HttpStatusCode.OK);
+
+        await client.UpdateProcessVariablesAsync("inst-1", new[]
+        {
+            new ProcessVariableUpdate { Name = "amount", Value = 42, Type = "integer" },
+            new ProcessVariableUpdate { Name = "label", Value = "ok" }
+        });
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Put, sent.Method);
+        Assert.Contains("\"name\":\"amount\"", sent.Body);
+        Assert.Contains("\"value\":42", sent.Body);
+        Assert.Contains("\"type\":\"integer\"", sent.Body);
+        Assert.Contains("\"name\":\"label\"", sent.Body);
+        Assert.Contains("\"value\":\"ok\"", sent.Body);
+    }
+
+    [Fact]
+    public async Task UpdateProcessVariablesAsync_NoOps_WhenUpdatesEmpty()
+    {
+        var (client, stub) = CreateClient();
+
+        await client.UpdateProcessVariablesAsync("inst-1", Array.Empty<ProcessVariableUpdate>());
+
+        Assert.Empty(stub.Requests);
+    }
+
+    [Fact]
+    public async Task UpdateProcessVariablesAsync_ThrowsOnNon2xx()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/process-instances/inst-1/variables",
+            HttpStatusCode.BadRequest, "bad var");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.UpdateProcessVariablesAsync("inst-1", new[]
+            {
+                new ProcessVariableUpdate { Name = "x", Value = 1 }
+            }));
+        Assert.Contains("Flowable could not update the process variables", ex.Message);
+    }
+
+    // --- GetCompletedAssigneesForActivityAsync -------------------------------
+
+    [Fact]
+    public async Task GetCompletedAssigneesForActivityAsync_ReturnsDistinctAssignees()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-task-instances", new
+        {
+            data = new[]
+            {
+                new { id = "ht-1", assignee = "alice", taskDefinitionKey = "review",
+                      endTime = "2026-04-01T00:00:00Z" },
+                new { id = "ht-2", assignee = "alice", taskDefinitionKey = "review",
+                      endTime = "2026-04-02T00:00:00Z" },
+                new { id = "ht-3", assignee = "bob", taskDefinitionKey = "review",
+                      endTime = "2026-04-03T00:00:00Z" },
+                new { id = "ht-4", assignee = (string?)null, taskDefinitionKey = "review",
+                      endTime = "2026-04-04T00:00:00Z" }
+            }
+        });
+
+        var assignees = await client.GetCompletedAssigneesForActivityAsync("inst-1", "review");
+
+        Assert.Equal(new[] { "alice", "bob" }, assignees.OrderBy(a => a).ToArray());
+        Assert.Contains(stub.Requests, r =>
+            r.Url.Contains("processInstanceId=inst-1") &&
+            r.Url.Contains("taskDefinitionKey=review") &&
+            r.Url.Contains("finished=true"));
+    }
+
     // --- GetTasksAssignedToUserAsync -----------------------------------------
 
     [Fact]

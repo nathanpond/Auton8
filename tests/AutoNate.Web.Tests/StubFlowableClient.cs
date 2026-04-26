@@ -119,4 +119,34 @@ internal sealed class StubFlowableClient : IFlowableClient
         Calls.Add($"CompleteTask:{taskId}");
         return Task.CompletedTask;
     }
+
+    public Dictionary<string, List<ProcessVariableUpdate>> VariableUpdatesByInstance { get; } = new();
+
+    public Dictionary<(string ProcessInstanceId, string ActivityId), List<string>> CompletedAssigneesByActivity { get; } = new();
+
+    public Task UpdateProcessVariablesAsync(
+        string processInstanceId,
+        IReadOnlyList<ProcessVariableUpdate> updates,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"UpdateVariables:{processInstanceId}");
+        if (!VariableUpdatesByInstance.TryGetValue(processInstanceId, out var list))
+        {
+            list = new List<ProcessVariableUpdate>();
+            VariableUpdatesByInstance[processInstanceId] = list;
+        }
+        list.AddRange(updates);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<string>> GetCompletedAssigneesForActivityAsync(
+        string processInstanceId,
+        string activityId,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"CompletedAssignees:{processInstanceId}:{activityId}");
+        CompletedAssigneesByActivity.TryGetValue((processInstanceId, activityId), out var list);
+        IReadOnlyList<string> result = list?.AsReadOnly() ?? (IReadOnlyList<string>)Array.Empty<string>();
+        return Task.FromResult(result);
+    }
 }

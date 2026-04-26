@@ -2,8 +2,10 @@ import { useMemo } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useMe } from "@/hooks/useMe";
 import { usePublicMenu } from "@/hooks/useMenus";
+import { useSiteAppearance } from "@/providers/SiteAppearanceProvider";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { MenuItem } from "@/types/menus";
+import SiteBrand from "@/components/SiteBrand";
 
 type RecordTypeChild = { key: string; path: string; label: string; shortCode: string };
 
@@ -14,6 +16,7 @@ export default function NavMenu() {
   const { data: iconMenu } = usePublicMenu("icon");
   const { data: userMenu } = usePublicMenu("user");
   const { data: recordTypes = [] } = useRecordTypes(false);
+  const { effectiveAppearance } = useSiteAppearance();
 
   const recordTypeChildren: RecordTypeChild[] = useMemo(
     () =>
@@ -183,12 +186,13 @@ export default function NavMenu() {
       <div className="menu">
         <div className="menu-item menu-brand-item">
           <NavLink to="/home" className="menu-link menu-brand-link">
-            <div className="menu-icon">
-              <i className="fa fa-robot"></i>
-            </div>
-            <div className="menu-text">
-              <b>Auto</b> Nate
-            </div>
+            <SiteBrand
+              appearance={effectiveAppearance}
+              className="d-inline-flex align-items-center gap-2"
+              iconClassName="menu-icon"
+              textClassName="menu-text"
+              imageClassName="menu-brand-image"
+            />
           </NavLink>
         </div>
 

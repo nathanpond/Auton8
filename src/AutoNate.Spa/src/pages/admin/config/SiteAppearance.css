@@ -1,0 +1,94 @@
+.site-appearance-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.site-appearance-section-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.site-appearance-preview-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.site-appearance-preview-card {
+  border: 1px solid var(--bs-component-border-color);
+  border-radius: 0.75rem;
+  background: var(--bs-component-bg);
+  color: var(--bs-component-color);
+  overflow: hidden;
+  min-height: 100%;
+}
+
+.site-appearance-preview-header {
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--bs-component-border-color);
+  background: var(--bs-app-top-menu-bg);
+  color: var(--bs-app-top-menu-link-color);
+}
+
+.site-appearance-preview-body {
+  padding: 1rem;
+}
+
+.site-appearance-preview-sidebar {
+  background: var(--bs-app-sidebar-bg);
+  color: var(--bs-app-sidebar-menu-link-color);
+}
+
+.site-appearance-preview-sidebar .nav-link {
+  border-radius: 0.6rem;
+  color: var(--bs-app-sidebar-menu-link-color);
+  padding: 0.55rem 0.75rem;
+}
+
+.site-appearance-preview-sidebar .nav-link.active {
+  background: var(--bs-app-sidebar-component-active-bg);
+  color: var(--bs-app-sidebar-component-active-color);
+}
+
+.site-appearance-brand-image {
+  display: block;
+  max-height: 36px;
+  max-width: 180px;
+  object-fit: contain;
+}
+
+.site-appearance-login-cover {
+  min-height: 180px;
+  background-position: center;
+  background-size: cover;
+  position: relative;
+}
+
+.site-appearance-login-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.12));
+}
+
+.site-appearance-login-brand {
+  position: relative;
+  z-index: 1;
+}
+
+.site-appearance-swatch-label {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color, #6c757d);
+  margin-bottom: 0.35rem;
+}
+
+@media (max-width: 767.98px) {
+  .site-appearance-actions {
+    width: 100%;
+  }
+
+  .site-appearance-actions .btn {
+    flex: 1 1 auto;
+  }
+}

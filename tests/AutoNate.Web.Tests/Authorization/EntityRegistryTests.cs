@@ -59,6 +59,7 @@ public sealed class EntityRegistryTests
     [InlineData(EntityKinds.Record, "assign")]
     [InlineData(EntityKinds.WorkflowModel, "publish")]
     [InlineData(EntityKinds.WorkflowTask, "complete")]
+    [InlineData(EntityKinds.WorkflowExecution, "override")]
     [InlineData(EntityKinds.User, "deactivate")]
     public void Actions_PerKind_AreDocumented(string kind, string action)
     {

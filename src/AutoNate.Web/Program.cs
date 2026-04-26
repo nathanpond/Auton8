@@ -388,6 +388,7 @@ app.MapRegistryEndpoints();
 app.MapMenuEndpoints();
 app.MapPageEndpoints();
 app.MapStatusAppearanceEndpoints();
+app.MapSiteAppearanceEndpoints();
 
 app.MapStaticAssets();
 

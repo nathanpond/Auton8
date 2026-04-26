@@ -89,7 +89,7 @@ public static class CoreEntityTypes
         idClrType: typeof(string),
         actions: new[]
         {
-            Actions.View, Actions.Cancel, Actions.Signal, Actions.Terminate
+            Actions.View, Actions.Cancel, Actions.Signal, Actions.Terminate, Actions.Override
         },
         tags: new[] { "processkey", "definitionkey", "startedby", "assignee" });
 

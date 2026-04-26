@@ -90,4 +90,58 @@ public sealed class ExecutionEndpointsTests
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Contains("CompleteTask:task-1", factory.FlowableStub.Calls);
     }
+
+    [Fact]
+    public async Task UpdateProcessVariables_Returns204AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PutAsJsonAsync(
+            "/api/executions/inst-vars/variables",
+            new ExecutionEndpoints.UpdateProcessVariablesRequest(new[]
+            {
+                new ProcessVariableUpdate { Name = "amount", Value = 42, Type = "integer" },
+                new ProcessVariableUpdate { Name = "label", Value = "ok" }
+            }));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("UpdateVariables:inst-vars", factory.FlowableStub.Calls);
+        Assert.True(factory.FlowableStub.VariableUpdatesByInstance.TryGetValue("inst-vars", out var captured));
+        Assert.Equal(2, captured!.Count);
+        Assert.Equal("amount", captured[0].Name);
+        Assert.Equal("integer", captured[0].Type);
+    }
+
+    [Fact]
+    public async Task ForceCompleteTask_Returns204AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-fc/tasks/task-fc/force-complete",
+            new ExecutionEndpoints.CompleteTaskRequest(null));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("CompleteTask:task-fc", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task GetCompletedAssignees_DelegatesToFlowableClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        factory.FlowableStub.CompletedAssigneesByActivity[("inst-q", "userTask_review")]
+            = new List<string> { "alice", "bob" };
+        var client = factory.CreateClient();
+
+        var assignees = await client.GetFromJsonAsync<string[]>(
+            "/api/executions/inst-q/activities/userTask_review/completed-assignees");
+
+        Assert.NotNull(assignees);
+        Assert.Equal(new[] { "alice", "bob" }, assignees);
+        Assert.Contains("CompletedAssignees:inst-q:userTask_review", factory.FlowableStub.Calls);
+    }
 }

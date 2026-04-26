@@ -6,13 +6,17 @@
     color: inherit;
 }
 
+#top-menu .menu-item > .menu-link .menu-icon {
+    color: inherit;
+}
+
 #top-menu .menu-item.active > .menu-link {
-    background: rgba(255, 255, 255, 0.08);
+    background: color-mix(in srgb, var(--bs-app-top-menu-link-active-color) 8%, transparent);
 }
 
 #top-menu .menu-item.active > .menu-link .menu-text,
 #top-menu .menu-item.active > .menu-link .menu-icon {
-    color: #fff;
+    color: var(--bs-app-top-menu-link-active-color);
 }
 
 #top-menu .menu-brand-item {
@@ -24,15 +28,22 @@
     font-weight: 700;
 }
 
+#top-menu .menu-brand-image {
+    display: block;
+    max-height: 34px;
+    max-width: 180px;
+    object-fit: contain;
+}
+
 #top-menu .menu-brand-link .menu-icon,
 #top-menu .menu-brand-link .menu-text {
-    color: #fff !important;
+    color: var(--bs-app-top-menu-link-active-color) !important;
 }
 
 #top-menu .menu-submenu-separator {
     height: 1px;
     margin: 0.4rem 0.75rem;
-    background: rgba(255, 255, 255, 0.12);
+    background: color-mix(in srgb, var(--bs-app-top-menu-link-active-color) 12%, transparent);
     padding: 0;
     pointer-events: none;
 }

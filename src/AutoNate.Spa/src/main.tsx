@@ -6,6 +6,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ReactNotifications } from "react-notifications-component";
 
 import Router from "./router";
+import { SiteAppearanceProvider } from "./providers/SiteAppearanceProvider";
 
 import "bootstrap";
 import "@fortawesome/fontawesome-free/css/all.css";
@@ -34,10 +35,12 @@ if (!container) {
 createRoot(container).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ReactNotifications />
-        <Router />
-      </BrowserRouter>
+      <SiteAppearanceProvider>
+        <BrowserRouter>
+          <ReactNotifications />
+          <Router />
+        </BrowserRouter>
+      </SiteAppearanceProvider>
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   </React.StrictMode>

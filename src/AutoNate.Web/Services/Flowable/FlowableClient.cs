@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -522,6 +523,51 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(response, "complete the user task");
     }
 
+    public async Task UpdateProcessVariablesAsync(
+        string processInstanceId,
+        IReadOnlyList<ProcessVariableUpdate> updates,
+        CancellationToken cancellationToken = default)
+    {
+        if (updates.Count == 0)
+        {
+            return;
+        }
+
+        var payload = updates.Select(update => update.Type is null
+            ? (object)new { name = update.Name, value = update.Value }
+            : new { name = update.Name, value = update.Value, type = update.Type }).ToArray();
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/variables")
+        {
+            Content = JsonContent.Create(payload)
+        };
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, "update the process variables");
+    }
+
+    public async Task<IReadOnlyList<string>> GetCompletedAssigneesForActivityAsync(
+        string processInstanceId,
+        string activityId,
+        CancellationToken cancellationToken = default)
+    {
+        var url = $"service/history/historic-task-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}"
+                  + $"&taskDefinitionKey={Uri.EscapeDataString(activityId)}&finished=true&size={WorkflowExecutionQuerySize}";
+
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "query historic task instances");
+
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableHistoricTaskResponse>>(response, cancellationToken);
+        return payload.Data
+            .Select(task => task.Assignee)
+            .Where(assignee => !string.IsNullOrWhiteSpace(assignee))
+            .Select(assignee => assignee!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private async Task<string> ReadDeploymentIdAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var payload = await DeserializeAsync<FlowableDeploymentResponse>(response, cancellationToken);
@@ -778,6 +824,17 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public DateTimeOffset? CreateTime { get; init; }
 
         public DateTimeOffset? DueDate { get; init; }
+    }
+
+    private sealed class FlowableHistoricTaskResponse
+    {
+        public string? Id { get; init; }
+
+        public string? Assignee { get; init; }
+
+        public string? TaskDefinitionKey { get; init; }
+
+        public DateTimeOffset? EndTime { get; init; }
     }
 
     private sealed class FlowableScriptTaskSupportResponse

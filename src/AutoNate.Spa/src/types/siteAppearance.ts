@@ -1,0 +1,41 @@
+export type SiteAppearanceLogoMode = "image" | "icon";
+
+export type SiteAppearance = {
+  siteName: string;
+  logoMode: SiteAppearanceLogoMode;
+  logoImageUrl: string | null;
+  logoIcon: string | null;
+  logoText: string;
+  loginTagline: string | null;
+  loginCoverImageUrl: string | null;
+  primaryAccentColor: string;
+  headerBg: string;
+  headerColor: string;
+  topMenuBg: string;
+  topMenuLinkColor: string;
+  topMenuLinkHoverBg: string;
+  topMenuLinkHoverColor: string;
+  topMenuLinkActiveBg: string;
+  topMenuLinkActiveColor: string;
+  sidebarBg: string;
+  sidebarLinkColor: string;
+  sidebarLinkHoverColor: string;
+  sidebarActiveBg: string;
+  sidebarActiveColor: string;
+  sidebarIconColor: string;
+  sidebarSubmenuBg: string;
+  sidebarSectionColor: string;
+  surfaceBg: string;
+  surfaceSecondaryBg: string;
+  surfaceTextColor: string;
+  borderColor: string;
+  dropdownBg: string;
+  modalBg: string;
+  secondaryButtonBg: string;
+  secondaryButtonTextColor: string;
+  secondaryButtonBorderColor: string;
+  secondaryButtonHoverBg: string;
+  secondaryButtonHoverTextColor: string;
+};
+
+export type UpdateSiteAppearanceRequest = SiteAppearance;

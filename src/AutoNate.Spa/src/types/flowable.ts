@@ -9,6 +9,16 @@ export type FlowableProcessVariable = {
   value: string | null;
 };
 
+// Mirror of AutoNate.Web.Models.ProcessVariableUpdate — write payload for the
+// override path (PUT /api/executions/{id}/variables). The diagram-detail GET
+// flattens typed values to a string; the SPA parses back to the runtime type
+// using the GET'd `type` as a hint before sending one of these.
+export type ProcessVariableUpdate = {
+  name: string;
+  value: unknown;
+  type?: string | null;
+};
+
 export type WorkflowExecutionSummary = {
   id: string;
   workflowModelName: string | null;

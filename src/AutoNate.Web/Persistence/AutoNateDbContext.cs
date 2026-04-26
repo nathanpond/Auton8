@@ -54,6 +54,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<MenuItem> MenuItems { get; set; }
 
+    public virtual DbSet<SiteAppearanceSettings> SiteAppearanceSettings { get; set; }
+
     public virtual DbSet<StatusAppearanceEntry> StatusAppearanceEntries { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -580,6 +582,56 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.IsSystem).HasColumnName("is_system");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<SiteAppearanceSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("site_appearance_settings_pkey");
+
+            entity.ToTable("site_appearance_settings");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.SiteName).HasColumnName("site_name");
+            entity.Property(e => e.LogoMode).HasColumnName("logo_mode");
+            entity.Property(e => e.LogoImageUrl).HasColumnName("logo_image_url");
+            entity.Property(e => e.LogoIcon).HasColumnName("logo_icon");
+            entity.Property(e => e.LogoText).HasColumnName("logo_text");
+            entity.Property(e => e.LoginTagline).HasColumnName("login_tagline");
+            entity.Property(e => e.LoginCoverImageUrl).HasColumnName("login_cover_image_url");
+            entity.Property(e => e.PrimaryAccentColor).HasColumnName("primary_accent_color");
+            entity.Property(e => e.HeaderBg).HasColumnName("header_bg");
+            entity.Property(e => e.HeaderColor).HasColumnName("header_color");
+            entity.Property(e => e.TopMenuBg).HasColumnName("top_menu_bg");
+            entity.Property(e => e.TopMenuLinkColor).HasColumnName("top_menu_link_color");
+            entity.Property(e => e.TopMenuLinkHoverBg).HasColumnName("top_menu_link_hover_bg");
+            entity.Property(e => e.TopMenuLinkHoverColor).HasColumnName("top_menu_link_hover_color");
+            entity.Property(e => e.TopMenuLinkActiveBg).HasColumnName("top_menu_link_active_bg");
+            entity.Property(e => e.TopMenuLinkActiveColor).HasColumnName("top_menu_link_active_color");
+            entity.Property(e => e.SidebarBg).HasColumnName("sidebar_bg");
+            entity.Property(e => e.SidebarLinkColor).HasColumnName("sidebar_link_color");
+            entity.Property(e => e.SidebarLinkHoverColor).HasColumnName("sidebar_link_hover_color");
+            entity.Property(e => e.SidebarActiveBg).HasColumnName("sidebar_active_bg");
+            entity.Property(e => e.SidebarActiveColor).HasColumnName("sidebar_active_color");
+            entity.Property(e => e.SidebarIconColor).HasColumnName("sidebar_icon_color");
+            entity.Property(e => e.SidebarSubmenuBg).HasColumnName("sidebar_submenu_bg");
+            entity.Property(e => e.SidebarSectionColor).HasColumnName("sidebar_section_color");
+            entity.Property(e => e.SurfaceBg).HasColumnName("surface_bg");
+            entity.Property(e => e.SurfaceSecondaryBg).HasColumnName("surface_secondary_bg");
+            entity.Property(e => e.SurfaceTextColor).HasColumnName("surface_text_color");
+            entity.Property(e => e.BorderColor).HasColumnName("border_color");
+            entity.Property(e => e.DropdownBg).HasColumnName("dropdown_bg");
+            entity.Property(e => e.ModalBg).HasColumnName("modal_bg");
+            entity.Property(e => e.SecondaryButtonBg).HasColumnName("secondary_button_bg");
+            entity.Property(e => e.SecondaryButtonTextColor).HasColumnName("secondary_button_text_color");
+            entity.Property(e => e.SecondaryButtonBorderColor).HasColumnName("secondary_button_border_color");
+            entity.Property(e => e.SecondaryButtonHoverBg).HasColumnName("secondary_button_hover_bg");
+            entity.Property(e => e.SecondaryButtonHoverTextColor).HasColumnName("secondary_button_hover_text_color");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         modelBuilder.Entity<StatusAppearanceEntry>(entity =>

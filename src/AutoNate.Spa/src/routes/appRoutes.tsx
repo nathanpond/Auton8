@@ -7,6 +7,7 @@ import UserProfile from "@/pages/user-profile/UserProfile";
 import BusWatcher from "@/pages/bus-watcher/BusWatcher";
 import ManageUsers from "@/pages/manage-users/ManageUsers";
 import WorkflowExecutions from "@/pages/workflow-executions/WorkflowExecutions";
+import ExecutionPage from "@/pages/workflow-executions/ExecutionPage";
 import WorkflowStudio from "@/pages/workflow/WorkflowStudio";
 import RecordTypeList from "@/pages/record-types/RecordTypeList";
 import RecordTypeEditor from "@/pages/record-types/RecordTypeEditor";
@@ -23,6 +24,7 @@ import AdminExplain from "@/pages/admin/Explain";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
 import StatusAppearance from "@/pages/admin/config/StatusAppearance";
+import SiteAppearancePage from "@/pages/admin/config/SiteAppearance";
 import {
   ConfigIndex,
   SecurityManageGroups,
@@ -30,7 +32,6 @@ import {
   SecurityManageUsers,
   SecurityPermissionChecker,
   SecuritySetPermissions,
-  SitewideAppearance,
   SitewideExternalConnections,
   SitewideFeatures,
   SitewideGeneral
@@ -55,6 +56,7 @@ export const APP_ROUTES: AppRoute[] = [
   { path: "bus-watcher", element: protect(<BusWatcher />) },
   { path: "manage-users", element: protect(<ManageUsers />) },
   { path: "workflow-executions", element: protect(<WorkflowExecutions />) },
+  { path: "executions/:id", element: protect(<ExecutionPage />) },
   { path: "workflow", element: protect(<WorkflowStudio />) },
   { path: "record-types", element: protect(<RecordTypeList />) },
   { path: "record-types/:id", element: protect(<RecordTypeEditor />) },
@@ -76,7 +78,7 @@ export const APP_ROUTES: AppRoute[] = [
       { index: true, element: <ConfigIndex /> },
       { path: "general", element: <SitewideGeneral /> },
       { path: "features", element: <SitewideFeatures /> },
-      { path: "appearance", element: <SitewideAppearance /> },
+      { path: "appearance", element: <SiteAppearancePage /> },
       { path: "status-appearance", element: <StatusAppearance /> },
       { path: "external-connections", element: <SitewideExternalConnections /> },
       { path: "pages-menus", element: <PagesMenus /> },

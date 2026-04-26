@@ -74,6 +74,14 @@
     color: #6b7280;
 }
 
+.workflow-execution-page {
+    background: #fff;
+    border: 1px solid #dbe3f0;
+    border-radius: 1rem;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+    padding: 1.25rem;
+}
+
 .workflow-execution-modal-backdrop {
     position: fixed;
     inset: 0;
@@ -184,6 +192,23 @@
     letter-spacing: 0.02em;
     text-transform: uppercase;
     color: #334155;
+}
+
+.workflow-execution-variables-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.workflow-execution-variables-header .workflow-execution-variables-title {
+    margin: 0;
+}
+
+.workflow-execution-variables-actions {
+    display: flex;
+    gap: 0.4rem;
 }
 
 .workflow-execution-variables-empty {

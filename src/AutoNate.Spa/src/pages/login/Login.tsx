@@ -2,6 +2,8 @@ import { useForm } from "react-hook-form";
 import { useSearchParams, Navigate } from "react-router-dom";
 import { submitLoginForm } from "@/api/auth";
 import { useMe } from "@/hooks/useMe";
+import SiteBrand from "@/components/SiteBrand";
+import { useSiteAppearance } from "@/providers/SiteAppearanceProvider";
 
 type FormValues = {
   username: string;
@@ -11,6 +13,7 @@ type FormValues = {
 export default function Login() {
   const [searchParams] = useSearchParams();
   const { data: me, isLoading: meLoading } = useMe();
+  const { effectiveAppearance } = useSiteAppearance();
 
   const error = searchParams.get("error");
   const prefilledUsername = searchParams.get("username") ?? "";
@@ -47,7 +50,11 @@ export default function Login() {
         <div className="login-cover">
           <div
             className="login-cover-img"
-            style={{ backgroundImage: "url('/spa/assets/img/login-bg/login-bg-17.jpg')" }}
+            style={{
+              backgroundImage: effectiveAppearance.loginCoverImageUrl
+                ? `url("${effectiveAppearance.loginCoverImageUrl}")`
+                : undefined
+            }}
             data-id="login-cover-image"
           ></div>
           <div className="login-cover-bg"></div>
@@ -57,9 +64,17 @@ export default function Login() {
           <div className="login-header">
             <div className="brand">
               <div className="d-flex align-items-center">
-                <span className="logo"></span> <b>Auto</b> Nate
+                <SiteBrand
+                  appearance={effectiveAppearance}
+                  className="d-inline-flex align-items-center gap-2"
+                  iconClassName="logo"
+                  textClassName="d-inline-flex align-items-center"
+                  imageClassName="site-appearance-brand-image"
+                />
               </div>
-              <small>Sign in to continue to the automation dashboard</small>
+              <small>
+                {effectiveAppearance.loginTagline || "Sign in to continue to the automation dashboard"}
+              </small>
             </div>
             <div className="icon">
               <i className="fa fa-lock"></i>

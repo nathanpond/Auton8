@@ -34,4 +34,6 @@ public static class Actions
     public const string Claim = "claim";
     public const string Unclaim = "unclaim";
     public const string Complete = "complete";
+
+    public const string Override = "override";
 }

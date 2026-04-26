@@ -2,6 +2,7 @@ using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Flowable;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +39,39 @@ public static class ExecutionEndpoints
             var tasks = await flowable.GetTasksByProcessInstanceAsync(processInstanceId, cancellationToken);
             return Results.Ok(tasks);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        executions.MapGet("/{processInstanceId}/activities/{activityId}/completed-assignees", async (
+            string processInstanceId,
+            string activityId,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            var assignees = await flowable.GetCompletedAssigneesForActivityAsync(processInstanceId, activityId, cancellationToken);
+            return Results.Ok(assignees);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        executions.MapPut("/{processInstanceId}/variables", async (
+            string processInstanceId,
+            UpdateProcessVariablesRequest request,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            await flowable.UpdateProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/tasks/{taskId}/force-complete", async (
+            string processInstanceId,
+            string taskId,
+            CompleteTaskRequest? request,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
 
         executions.MapDelete("/{processInstanceId}", async (
             string processInstanceId,
@@ -115,4 +149,6 @@ public static class ExecutionEndpoints
     }
 
     public sealed record CompleteTaskRequest(Dictionary<string, object?>? Variables);
+
+    public sealed record UpdateProcessVariablesRequest(IReadOnlyList<ProcessVariableUpdate> Variables);
 }

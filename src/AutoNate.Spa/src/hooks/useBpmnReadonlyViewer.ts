@@ -8,12 +8,37 @@ import * as workflow from "@/lib/bpmn/workflow.js";
 
 export type ReadonlyViewerHandle = unknown;
 
+export type ContextMenuActiveTask = {
+  id: string;
+  assignee: string | null;
+};
+
+export type ContextMenuOptions = {
+  // Called on every right-click. Returning false suppresses the menu entirely.
+  getCanOverride: () => boolean;
+  // Returns the active runtime tasks at a BPMN activity. Empty array → no menu.
+  // activityName is the BPMN element's display label, used as a fallback when
+  // taskDefinitionKey doesn't match (some Flowable deployments key tasks
+  // differently than the XML id).
+  getActiveTasksAtActivity: (
+    activityId: string,
+    activityName: string | null
+  ) => ContextMenuActiveTask[];
+  // Lazily fetched on submenu open. Drives the disabled state of completed
+  // entries in "Complete Task For…".
+  getCompletedAssignees: (activityId: string) => Promise<string[]>;
+};
+
 export type UseBpmnReadonlyViewerOptions = {
   xml: string | null;
   completedActivityIds: readonly string[];
   currentActivityIds: readonly string[];
-  callbacks?: Pick<WorkflowCallbacks, "CompleteTaskFromContextMenu">;
+  callbacks?: Pick<
+    WorkflowCallbacks,
+    "CompleteTaskFromContextMenu" | "CompleteAllTasksFromContextMenu"
+  >;
   enableContextMenu?: boolean;
+  contextMenu?: ContextMenuOptions;
 };
 
 export type UseBpmnReadonlyViewerReturn = {
@@ -25,7 +50,7 @@ export type UseBpmnReadonlyViewerReturn = {
 export function useBpmnReadonlyViewer(
   options: UseBpmnReadonlyViewerOptions
 ): UseBpmnReadonlyViewerReturn {
-  const { xml, completedActivityIds, currentActivityIds, callbacks, enableContextMenu } = options;
+  const { xml, completedActivityIds, currentActivityIds, callbacks, enableContextMenu, contextMenu } = options;
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -33,6 +58,12 @@ export function useBpmnReadonlyViewer(
   const currentXmlRef = useRef<string | null>(null);
   const callbacksRef = useRef<UseBpmnReadonlyViewerOptions["callbacks"]>(callbacks);
   callbacksRef.current = callbacks;
+
+  // Refs let workflow.js read the latest values on each contextmenu event
+  // without the React side rebuilding the viewer when permissions or task data
+  // change. The thunks closed over below always read .current.
+  const contextMenuRef = useRef<ContextMenuOptions | undefined>(contextMenu);
+  contextMenuRef.current = contextMenu;
 
   // Mount + unmount on container / xml-identity change.
   useEffect(() => {
@@ -62,7 +93,13 @@ export function useBpmnReadonlyViewer(
 
           if (enableContextMenu && callbacksRef.current) {
             const dotNetLike = createDotNetAdapter(callbacksRef.current);
-            workflow.enableCurrentStepContextMenu(created, dotNetLike);
+            workflow.enableCurrentStepContextMenu(created, dotNetLike, {
+              getCanOverride: () => contextMenuRef.current?.getCanOverride() ?? true,
+              getActiveTasksAtActivity: (activityId: string, activityName: string | null) =>
+                contextMenuRef.current?.getActiveTasksAtActivity(activityId, activityName) ?? [],
+              getCompletedAssignees: (activityId: string) =>
+                contextMenuRef.current?.getCompletedAssignees(activityId) ?? Promise.resolve([])
+            });
           }
         }
 

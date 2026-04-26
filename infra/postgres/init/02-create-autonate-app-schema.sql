@@ -498,6 +498,60 @@ CREATE TABLE IF NOT EXISTS status_appearance_entries (
     updated_by UUID NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS site_appearance_settings (
+    id UUID PRIMARY KEY,
+    site_name TEXT NOT NULL,
+    logo_mode TEXT NOT NULL,
+    logo_image_url TEXT NULL,
+    logo_icon TEXT NULL,
+    logo_text TEXT NOT NULL,
+    login_tagline TEXT NULL,
+    login_cover_image_url TEXT NULL,
+    primary_accent_color TEXT NOT NULL,
+    header_bg TEXT NOT NULL,
+    header_color TEXT NOT NULL,
+    top_menu_bg TEXT NOT NULL,
+    top_menu_link_color TEXT NOT NULL,
+    top_menu_link_hover_bg TEXT NOT NULL,
+    top_menu_link_hover_color TEXT NOT NULL,
+    top_menu_link_active_bg TEXT NOT NULL,
+    top_menu_link_active_color TEXT NOT NULL,
+    sidebar_bg TEXT NOT NULL,
+    sidebar_link_color TEXT NOT NULL,
+    sidebar_link_hover_color TEXT NOT NULL,
+    sidebar_active_bg TEXT NOT NULL,
+    sidebar_active_color TEXT NOT NULL,
+    sidebar_icon_color TEXT NOT NULL,
+    sidebar_submenu_bg TEXT NOT NULL,
+    sidebar_section_color TEXT NOT NULL,
+    surface_bg TEXT NOT NULL,
+    surface_secondary_bg TEXT NOT NULL,
+    surface_text_color TEXT NOT NULL,
+    border_color TEXT NOT NULL,
+    dropdown_bg TEXT NOT NULL,
+    modal_bg TEXT NOT NULL,
+    secondary_button_bg TEXT NOT NULL DEFAULT '#ffffff',
+    secondary_button_text_color TEXT NOT NULL DEFAULT '#495057',
+    secondary_button_border_color TEXT NOT NULL DEFAULT '#6c757d',
+    secondary_button_hover_bg TEXT NOT NULL DEFAULT '#f1f3f5',
+    secondary_button_hover_text_color TEXT NOT NULL DEFAULT '#212529',
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    updated_by UUID NOT NULL
+);
+
+ALTER TABLE site_appearance_settings
+    ADD COLUMN IF NOT EXISTS secondary_button_bg TEXT NOT NULL DEFAULT '#ffffff';
+ALTER TABLE site_appearance_settings
+    ADD COLUMN IF NOT EXISTS secondary_button_text_color TEXT NOT NULL DEFAULT '#495057';
+ALTER TABLE site_appearance_settings
+    ADD COLUMN IF NOT EXISTS secondary_button_border_color TEXT NOT NULL DEFAULT '#6c757d';
+ALTER TABLE site_appearance_settings
+    ADD COLUMN IF NOT EXISTS secondary_button_hover_bg TEXT NOT NULL DEFAULT '#f1f3f5';
+ALTER TABLE site_appearance_settings
+    ADD COLUMN IF NOT EXISTS secondary_button_hover_text_color TEXT NOT NULL DEFAULT '#212529';
+
 -- Seed the four built-in menus and their items mirroring the previously
 -- hardcoded structure in NavMenu.tsx and ConfigLayout.tsx. Items are seeded
 -- only when the menu is first created so admin edits aren't clobbered on
@@ -510,8 +564,64 @@ DECLARE
     icon_id UUID := '00000000-0000-0000-0001-000000000002';
     user_id UUID := '00000000-0000-0000-0001-000000000003';
     site_id UUID := '00000000-0000-0000-0001-000000000004';
+    appearance_id UUID := '00000000-0000-0000-0001-000000000005';
     g UUID;
 BEGIN
+    IF NOT EXISTS (SELECT 1 FROM site_appearance_settings WHERE id = appearance_id) THEN
+        INSERT INTO site_appearance_settings (
+            id, site_name, logo_mode, logo_image_url, logo_icon, logo_text,
+            login_tagline, login_cover_image_url, primary_accent_color,
+            header_bg, header_color, top_menu_bg, top_menu_link_color,
+            top_menu_link_hover_bg, top_menu_link_hover_color,
+            top_menu_link_active_bg, top_menu_link_active_color,
+            sidebar_bg, sidebar_link_color, sidebar_link_hover_color,
+            sidebar_active_bg, sidebar_active_color, sidebar_icon_color,
+            sidebar_submenu_bg, sidebar_section_color, surface_bg,
+            surface_secondary_bg, surface_text_color, border_color,
+            dropdown_bg, modal_bg, secondary_button_bg,
+            secondary_button_text_color, secondary_button_border_color,
+            secondary_button_hover_bg, secondary_button_hover_text_color,
+            created_at_utc, created_by,
+            updated_at_utc, updated_by)
+        VALUES (
+            appearance_id, 'Auto Nate', 'icon', NULL, 'fa fa-robot', 'Auto Nate',
+            'Sign in to continue to the automation dashboard',
+            '/spa/assets/img/login-bg/login-bg-17.jpg', '#00acac',
+            '#ffffff', '#212529', '#20252a', '#a6aaac',
+            '#20252a', '#ffffff', '#20252a', '#ffffff',
+            '#ffffff', '#6c757d', '#212529', '#f1f3f5',
+            '#212529', '#212529', '#ffffff', '#adb5bd',
+            '#ffffff', '#dee2e6', '#212529', '#ced4da',
+            '#ffffff', '#ffffff', '#ffffff', '#495057',
+            '#6c757d', '#f1f3f5', '#212529',
+            NOW(), seed_actor, NOW(), seed_actor);
+    END IF;
+
+    UPDATE site_appearance_settings
+    SET secondary_button_bg = COALESCE(secondary_button_bg, '#ffffff'),
+        secondary_button_text_color = COALESCE(secondary_button_text_color, '#495057'),
+        secondary_button_border_color = COALESCE(secondary_button_border_color, '#6c757d'),
+        secondary_button_hover_bg = COALESCE(secondary_button_hover_bg, '#f1f3f5'),
+        secondary_button_hover_text_color = COALESCE(secondary_button_hover_text_color, '#212529')
+    WHERE id = appearance_id;
+
+    UPDATE site_appearance_settings
+    SET top_menu_bg = '#20252a',
+        top_menu_link_color = '#a6aaac',
+        top_menu_link_hover_bg = '#20252a',
+        top_menu_link_hover_color = '#ffffff',
+        top_menu_link_active_bg = '#20252a',
+        top_menu_link_active_color = '#ffffff',
+        updated_at_utc = NOW(),
+        updated_by = seed_actor
+    WHERE id = appearance_id
+      AND top_menu_bg = '#ffffff'
+      AND top_menu_link_color = '#6c757d'
+      AND top_menu_link_hover_bg = '#f8f9fa'
+      AND top_menu_link_hover_color = '#212529'
+      AND top_menu_link_active_bg = '#f8f9fa'
+      AND top_menu_link_active_color = '#212529';
+
     -- ---------- Main menu ----------
     IF NOT EXISTS (SELECT 1 FROM menus WHERE key = 'main') THEN
         INSERT INTO menus (id, key, name, description, is_system,

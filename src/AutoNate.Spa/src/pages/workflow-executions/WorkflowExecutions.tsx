@@ -5,14 +5,23 @@ import {
   EXECUTIONS_QUERY_KEY,
   executionDiagramQueryKey,
   executionTasksQueryKey,
-  useCompleteTask,
-  useDeleteExecution,
   useExecutionDiagram,
   useExecutionTasks,
-  useExecutions
+  useExecutions,
+  useDeleteExecution,
+  useForceCompleteTask
 } from "@/hooks/useExecutions";
-import { useBpmnReadonlyViewer } from "@/hooks/useBpmnReadonlyViewer";
+import {
+  ContextMenuActiveTask,
+  useBpmnReadonlyViewer
+} from "@/hooks/useBpmnReadonlyViewer";
+import { useStatusAppearance } from "@/hooks/useStatusAppearance";
+import { usePermissionChecks, permissionKey } from "@/hooks/usePermissionChecks";
+import { getCompletedAssigneesForActivity } from "@/api/executions";
+import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
+import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { FlowableTaskSummary, WorkflowExecutionSummary } from "@/types/flowable";
+import ProcessVariablesPanel from "./ProcessVariablesPanel";
 import "./WorkflowExecutions.css";
 
 const WORKFLOW_EXECUTION_TOPIC_PREFIX = "workflow.execution";
@@ -20,6 +29,7 @@ const WORKFLOW_EXECUTION_TOPIC_PREFIX = "workflow.execution";
 export default function WorkflowExecutions() {
   const qc = useQueryClient();
   const { data: executions = [], isLoading, error, refetch } = useExecutions();
+  const { data: statusAppearance = [] } = useStatusAppearance();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
@@ -131,7 +141,12 @@ export default function WorkflowExecutions() {
                     <td>{formatTimestamp(execution.startedAtUtc)}</td>
                     <td>{formatTimestamp(execution.lastActivityAtUtc)}</td>
                     <td>
-                      <span className={statusBadgeClass(execution.status)}>{execution.status}</span>
+                      <span
+                        className="badge rounded-pill"
+                        style={statusBadgeStyle(execution.status, statusAppearance)}
+                      >
+                        {execution.status}
+                      </span>
                     </td>
                     <td>{execution.currentStep ?? "Not running"}</td>
                     <td className="workflow-executions-actions-cell">
@@ -158,50 +173,102 @@ export default function WorkflowExecutions() {
       </div>
 
       {selectedId && (
-        <ExecutionModal
-          processInstanceId={selectedId}
-          onClose={() => setSelectedId(null)}
-          onTaskCompleted={(message) => setFlash({ kind: "success", message })}
-          onError={(message) => setFlash({ kind: "error", message })}
-        />
+        <div
+          className="workflow-execution-modal-backdrop"
+          onClick={() => setSelectedId(null)}
+        >
+          <div
+            className="workflow-execution-modal"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExecutionContent
+              processInstanceId={selectedId}
+              onClose={() => setSelectedId(null)}
+              onTaskCompleted={(message) => setFlash({ kind: "success", message })}
+              onError={(message) => setFlash({ kind: "error", message })}
+            />
+          </div>
+        </div>
       )}
     </>
   );
 }
 
-type ExecutionModalProps = {
+type ExecutionContentProps = {
   processInstanceId: string;
-  onClose: () => void;
+  onClose?: () => void;
   onTaskCompleted: (message: string) => void;
   onError: (message: string) => void;
 };
 
-function ExecutionModal({ processInstanceId, onClose, onTaskCompleted, onError }: ExecutionModalProps) {
+export function ExecutionContent({
+  processInstanceId,
+  onClose,
+  onTaskCompleted,
+  onError
+}: ExecutionContentProps) {
   const { data: detail, isLoading: detailLoading, error } = useExecutionDiagram(processInstanceId);
   const { data: tasks = [] } = useExecutionTasks(processInstanceId);
-  const completeTask = useCompleteTask();
+  const forceCompleteTask = useForceCompleteTask(processInstanceId);
+
+  const overrideCheck = useMemo(
+    () => [{ kind: "workflowexecution", action: "override", id: processInstanceId }],
+    [processInstanceId]
+  );
+  const { data: permissions } = usePermissionChecks(overrideCheck);
+  const canOverride = permissions?.get(permissionKey(overrideCheck[0])) ?? false;
 
   const onCompleteTaskFromContextMenu = useCallback(
-    async (activityId: string, activityName: string | null) => {
-      const task = resolveTaskForActivity(tasks, activityId, activityName);
-      if (!task) {
-        onError(`No active runtime task matched workflow step '${activityName || activityId}'.`);
-        return;
-      }
-
+    async (activityId: string, _activityName: string | null, taskId: string) => {
       try {
-        await completeTask.mutateAsync({ taskId: task.id });
-        onTaskCompleted(`Completed task '${task.name}'.`);
+        await forceCompleteTask.mutateAsync({ taskId });
+        onTaskCompleted(`Override-completed task at step '${activityId}'.`);
       } catch (err) {
         onError(describeError(err));
       }
     },
-    [tasks, completeTask, onError, onTaskCompleted]
+    [forceCompleteTask, onError, onTaskCompleted]
+  );
+
+  const onCompleteAllTasksFromContextMenu = useCallback(
+    async (activityId: string, _activityName: string | null, taskIds: string[]) => {
+      try {
+        for (const id of taskIds) {
+          await forceCompleteTask.mutateAsync({ taskId: id });
+        }
+        onTaskCompleted(`Override-completed ${taskIds.length} tasks at step '${activityId}'.`);
+      } catch (err) {
+        onError(describeError(err));
+      }
+    },
+    [forceCompleteTask, onError, onTaskCompleted]
   );
 
   const viewerCallbacks = useMemo(
-    () => ({ CompleteTaskFromContextMenu: onCompleteTaskFromContextMenu }),
-    [onCompleteTaskFromContextMenu]
+    () => ({
+      CompleteTaskFromContextMenu: onCompleteTaskFromContextMenu,
+      CompleteAllTasksFromContextMenu: onCompleteAllTasksFromContextMenu
+    }),
+    [onCompleteTaskFromContextMenu, onCompleteAllTasksFromContextMenu]
+  );
+
+  const contextMenuOptions = useMemo(
+    () => ({
+      getCanOverride: () => canOverride,
+      getActiveTasksAtActivity: (
+        activityId: string,
+        activityName: string | null
+      ): ContextMenuActiveTask[] =>
+        resolveTasksForActivity(tasks, activityId, activityName).map((t) => ({
+          id: t.id,
+          assignee: t.assignee
+        })),
+      getCompletedAssignees: (activityId: string) =>
+        getCompletedAssigneesForActivity(processInstanceId, activityId)
+    }),
+    [canOverride, tasks, processInstanceId]
   );
 
   const { containerRef, error: viewerError } = useBpmnReadonlyViewer({
@@ -209,7 +276,8 @@ function ExecutionModal({ processInstanceId, onClose, onTaskCompleted, onError }
     completedActivityIds: detail?.completedActivityIds ?? [],
     currentActivityIds: detail?.currentActivityIds ?? [],
     callbacks: viewerCallbacks,
-    enableContextMenu: true
+    enableContextMenu: true,
+    contextMenu: contextMenuOptions
   });
 
   const errorMessage = error
@@ -219,113 +287,107 @@ function ExecutionModal({ processInstanceId, onClose, onTaskCompleted, onError }
       : null;
 
   return (
-    <div className="workflow-execution-modal-backdrop" onClick={onClose}>
-      <div
-        className="workflow-execution-modal"
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="workflow-execution-modal-header">
-          <div>
-            <h2>Execution {processInstanceId}</h2>
-            <p className="workflow-execution-modal-copy">
-              Read-only execution view with completed, current, and future steps highlighted.
-              Right-click the active step to complete its task.
-            </p>
-          </div>
+    <>
+      <div className="workflow-execution-modal-header">
+        <div>
+          <h2>Execution {processInstanceId}</h2>
+          <p className="workflow-execution-modal-copy">
+            Read-only execution view with completed, current, and future steps highlighted.
+            {canOverride && " Right-click an active step to override-complete its task."}
+          </p>
+        </div>
+        {onClose && (
           <button type="button" className="btn btn-outline-secondary" onClick={onClose} title="Close">
             Close
           </button>
-        </div>
-
-        {errorMessage && (
-          <div className="alert alert-danger" role="alert">
-            {errorMessage}
-          </div>
         )}
-
-        {detailLoading ? (
-          <p className="workflow-executions-loading">Loading execution diagram...</p>
-        ) : detail ? (
-          <>
-            <div className="workflow-execution-legend">
-              <span>
-                <span className="workflow-execution-swatch workflow-execution-swatch-completed"></span>{" "}
-                Completed
-              </span>
-              <span>
-                <span className="workflow-execution-swatch workflow-execution-swatch-current"></span>{" "}
-                Current
-              </span>
-              <span>
-                <span className="workflow-execution-swatch workflow-execution-swatch-future"></span>{" "}
-                Future
-              </span>
-            </div>
-
-            <div className="workflow-execution-body">
-              <div className="workflow-execution-viewer-shell">
-                <div
-                  ref={containerRef}
-                  className="workflow-execution-viewer-canvas"
-                  aria-label="Read-only BPMN execution diagram"
-                ></div>
-              </div>
-
-              <aside className="workflow-execution-variables-panel" aria-label="Process variables">
-                <h3 className="workflow-execution-variables-title">Process Variables</h3>
-                {detail.variables.length === 0 ? (
-                  <p className="workflow-execution-variables-empty">
-                    No variables have been set on this execution.
-                  </p>
-                ) : (
-                  <ul className="workflow-execution-variables-list">
-                    {detail.variables.map((variable) => (
-                      <li key={variable.name} className="workflow-execution-variable">
-                        <div className="workflow-execution-variable-header">
-                          <span className="workflow-execution-variable-name">{variable.name}</span>
-                          {variable.type && (
-                            <span className="workflow-execution-variable-type">{variable.type}</span>
-                          )}
-                        </div>
-                        <div className="workflow-execution-variable-value">
-                          {variable.value ?? "null"}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </aside>
-            </div>
-          </>
-        ) : null}
       </div>
-    </div>
+
+      {errorMessage && (
+        <div className="alert alert-danger" role="alert">
+          {errorMessage}
+        </div>
+      )}
+
+      {detailLoading ? (
+        <p className="workflow-executions-loading">Loading execution diagram...</p>
+      ) : detail ? (
+        <>
+          <div className="workflow-execution-legend">
+            <span>
+              <span className="workflow-execution-swatch workflow-execution-swatch-completed"></span>{" "}
+              Completed
+            </span>
+            <span>
+              <span className="workflow-execution-swatch workflow-execution-swatch-current"></span>{" "}
+              Current
+            </span>
+            <span>
+              <span className="workflow-execution-swatch workflow-execution-swatch-future"></span>{" "}
+              Future
+            </span>
+          </div>
+
+          <div className="workflow-execution-body">
+            <div className="workflow-execution-viewer-shell">
+              <div
+                ref={containerRef}
+                className="workflow-execution-viewer-canvas"
+                aria-label="Read-only BPMN execution diagram"
+              ></div>
+            </div>
+
+            <ProcessVariablesPanel
+              processInstanceId={processInstanceId}
+              variables={detail.variables}
+              canOverride={canOverride}
+              onError={onError}
+              onSaved={() => onTaskCompleted("Process variables updated.")}
+            />
+          </div>
+        </>
+      ) : null}
+    </>
   );
 }
 
-function resolveTaskForActivity(
+// Returns all runtime tasks at this BPMN activity. For parallel multi-instance
+// user tasks Flowable returns one task row per assignee, and the override-
+// complete UX needs the whole set so it can offer "complete all" or
+// "complete for…" submenu options.
+//
+// Fallbacks mirror the original single-task resolver: prefer
+// taskDefinitionKey, fall back to display-name match (some legacy deployments
+// key tasks differently than the BPMN xml id), and finally — when there's
+// only one active runtime task in the whole process — assume it belongs to
+// the clicked node. The single-task fallback is what keeps the menu usable
+// against simple linear workflows where Flowable's task key may not surface
+// on the BPMN side.
+function resolveTasksForActivity(
   tasks: readonly FlowableTaskSummary[],
   activityId: string,
   activityName: string | null
-): FlowableTaskSummary | null {
-  const byDefinition = tasks.find((t) => t.taskDefinitionKey === activityId);
-  if (byDefinition) return byDefinition;
+): FlowableTaskSummary[] {
+  const byDefinition = tasks.filter((t) => t.taskDefinitionKey === activityId);
+  if (byDefinition.length > 0) return byDefinition;
 
   if (activityName) {
-    const byName = tasks.find((t) => t.name === activityName);
-    if (byName) return byName;
+    const byName = tasks.filter((t) => t.name === activityName);
+    if (byName.length > 0) return byName;
   }
 
-  return tasks.length === 1 ? tasks[0] : null;
+  return tasks.length === 1 ? [tasks[0]] : [];
 }
 
-function statusBadgeClass(status: string): string {
-  const lower = status.toLowerCase();
-  if (lower === "running") return "badge text-bg-primary";
-  if (lower === "failed" || lower === "cancelled") return "badge text-bg-danger";
-  return "badge text-bg-success";
+function statusBadgeStyle(
+  status: string,
+  entries: StatusAppearanceEntry[]
+): React.CSSProperties {
+  const backgroundColor = resolveStatusBadgeColor(status, entries);
+  return {
+    backgroundColor,
+    color: badgeTextColor(backgroundColor)
+  };
 }
 
 function connectionBadgeClass(status: string): string {
@@ -349,7 +411,7 @@ function formatTimestamp(iso: string | null): string {
   return date.toLocaleString();
 }
 
-function describeError(error: unknown): string {
+export function describeError(error: unknown): string {
   if (error instanceof Error) {
     const response = (error as { response?: { data?: { message?: string } } }).response;
     return response?.data?.message ?? error.message;
