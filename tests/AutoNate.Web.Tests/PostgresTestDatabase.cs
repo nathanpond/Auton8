@@ -1,9 +1,17 @@
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Edges;
+using AutoNate.Web.Authorization.EntityTypes;
+using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace AutoNate.Web.Tests;
@@ -35,7 +43,69 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         new(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry());
 
     public EfCoreRecordStore CreateRecordStore() =>
-        new(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry());
+        CreateRecordStore(authorizationEnabled: false);
+
+    public EfCoreRecordStore CreateRecordStore(bool authorizationEnabled, string enforcement = AuthorizationEnforcement.Off)
+    {
+        var authorizer = CreateAuthorizer(authorizationEnabled, enforcement);
+        return new EfCoreRecordStore(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry(), new EntityEdgeWriter(), authorizer);
+    }
+
+    public EntityEdgeReconciler CreateEdgeReconciler() => new(CreateDbContextFactory());
+
+    public IEntityEdgeWriter CreateEdgeWriter() => new EntityEdgeWriter();
+
+    private AuthCacheBumper CreateBumper() => new(CreateDbContextFactory());
+
+    public EfCoreRoleStore CreateRoleStore() => CreateRoleStore(authorizationEnabled: false);
+
+    public EfCoreRoleStore CreateRoleStore(bool authorizationEnabled, string enforcement = AuthorizationEnforcement.Off) =>
+        new(CreateDbContextFactory(), CreateBumper(), CreateAuthorizer(authorizationEnabled, enforcement));
+
+    public EfCoreGroupStore CreateGroupStore() => CreateGroupStore(authorizationEnabled: false);
+
+    public EfCoreGroupStore CreateGroupStore(bool authorizationEnabled, string enforcement = AuthorizationEnforcement.Off) =>
+        new(CreateDbContextFactory(), CreateBumper(), CreateAuthorizer(authorizationEnabled, enforcement));
+
+    public EfCoreRoleAssignmentStore CreateRoleAssignmentStore() =>
+        new(CreateDbContextFactory(), CreateBumper());
+
+    public EfCorePermissionGrantStore CreatePermissionGrantStore() =>
+        new(CreateDbContextFactory(), CreateBumper());
+
+    public IAuthorizer CreateAuthorizer(
+        bool enabled,
+        string enforcement = AuthorizationEnforcement.ReadOnly,
+        bool dryRun = false)
+    {
+        var registry = new EntityRegistry(CoreEntityTypes.All);
+        var compilers = new SelectorCompilerRegistry(new ISelectorCompiler[]
+        {
+            new RecordSelectorCompiler(),
+            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Role>(EntityKinds.Role, x => x.Id),
+            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Group>(EntityKinds.Group, x => x.Id),
+            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.RecordType>(EntityKinds.RecordType, x => x.Id),
+            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.WorkflowModel>(EntityKinds.WorkflowModel, x => x.Id)
+        });
+        var dbFactory = CreateDbContextFactory();
+        var instanceAuthorizers = new IInstanceAuthorizer[]
+        {
+            new RecordInstanceAuthorizer(dbFactory),
+            new RoleInstanceAuthorizer(dbFactory),
+            new GroupInstanceAuthorizer(dbFactory),
+            new RecordTypeInstanceAuthorizer(dbFactory),
+            new WorkflowModelInstanceAuthorizer(dbFactory)
+        };
+        var options = Options.Create(new AuthorizationOptions
+        {
+            Enabled = enabled,
+            Enforcement = enforcement,
+            DryRun = dryRun
+        });
+        return new Authorizer(
+            CreateDbContextFactory(), options, registry, compilers, instanceAuthorizers,
+            NullLogger<Authorizer>.Instance);
+    }
 
     public EfCoreRecordHistoryStore CreateRecordHistoryStore() =>
         new(CreateDbContextFactory());

@@ -276,6 +276,153 @@ CREATE TABLE IF NOT EXISTS record_comment_revisions (
 CREATE INDEX IF NOT EXISTS ix_record_comment_revisions_comment
     ON record_comment_revisions (comment_id, replaced_at_utc DESC);
 
+-- =============================================================================
+-- Authorization framework (Phase 1 scaffolding)
+--   entity_kinds         - registry mirror, mostly documentation
+--   entity_edges         - generalized polymorphic relationships between entities
+--   roles                - named bundles of permissions; SuperAdmin is built-in
+--   role_assignments     - which principal (user|group) holds which role
+--   auth_cache_version   - single-row counter to bust the in-memory grant cache
+--   auth_seed_state      - one-shot keys for migrations such as the SuperAdmin
+--                          backfill
+-- Permission grants and groups arrive in later phases.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS entity_kinds (
+    kind TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    is_external BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS entity_edges (
+    id UUID PRIMARY KEY,
+    edge_kind TEXT NOT NULL,
+    from_kind TEXT NOT NULL,
+    from_id TEXT NOT NULL,
+    to_kind TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_entity_edges_to
+    ON entity_edges (to_kind, to_id, edge_kind);
+CREATE INDEX IF NOT EXISTS ix_entity_edges_from
+    ON entity_edges (from_kind, from_id, edge_kind);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entity_edges_triple
+    ON entity_edges (edge_kind, from_kind, from_id, to_kind, to_id);
+
+CREATE TABLE IF NOT EXISTS roles (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NULL,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    updated_by UUID NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS role_assignments (
+    id UUID PRIMARY KEY,
+    role_id UUID NOT NULL REFERENCES roles (id) ON DELETE CASCADE,
+    principal_kind TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    scope_string TEXT NULL,
+    scope_ast JSONB NULL,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_role_assignments_principal
+    ON role_assignments (principal_kind, principal_id);
+CREATE INDEX IF NOT EXISTS ix_role_assignments_role
+    ON role_assignments (role_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_role_assignments_triple
+    ON role_assignments (role_id, principal_kind, principal_id);
+
+CREATE TABLE IF NOT EXISTS auth_cache_version (
+    id INT PRIMARY KEY DEFAULT 1,
+    version BIGINT NOT NULL DEFAULT 1,
+    bumped_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO auth_cache_version (id, version, bumped_at_utc)
+VALUES (1, 1, NOW())
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS auth_seed_state (
+    key TEXT PRIMARY KEY,
+    applied_at_utc TIMESTAMPTZ NOT NULL
+);
+
+INSERT INTO roles (
+    id, name, description, is_system,
+    created_at_utc, created_by, updated_at_utc, updated_by
+)
+VALUES (
+    '00000000-0000-0000-0000-000000000001'::uuid,
+    'SuperAdmin',
+    'Built-in role that bypasses all authorization checks.',
+    TRUE,
+    NOW(),
+    '00000000-0000-0000-0000-000000000000'::uuid,
+    NOW(),
+    '00000000-0000-0000-0000-000000000000'::uuid
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- =============================================================================
+-- Authorization framework (Phase 3: groups, group_members)
+-- Permissions used to live in a separate role_permissions table; they're now
+-- unified into permission_grants below with principal_kind='role'.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS groups (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NULL,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    updated_by UUID NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS group_members (
+    group_id UUID NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+    user_id UUID NOT NULL,
+    added_at_utc TIMESTAMPTZ NOT NULL,
+    added_by UUID NOT NULL,
+    PRIMARY KEY (group_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_group_members_user
+    ON group_members (user_id);
+
+-- =============================================================================
+-- Authorization framework (Phase 4: direct grants + read-path enforcement)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS permission_grants (
+    id UUID PRIMARY KEY,
+    principal_kind TEXT NOT NULL,           -- 'user' | 'group' | 'role'
+    principal_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    selector_string TEXT NOT NULL,
+    selector_ast JSONB NOT NULL,
+    effect TEXT NOT NULL CHECK (effect IN ('allow','deny')),
+    priority INT NOT NULL DEFAULT 0,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    created_by UUID NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    updated_by UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_permission_grants_principal
+    ON permission_grants (principal_kind, principal_id);
+
 INSERT INTO local_users (
     username,
     password_hash,

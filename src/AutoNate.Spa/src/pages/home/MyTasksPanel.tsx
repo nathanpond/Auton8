@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMyAssignedRecords } from "@/hooks/useRecords";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
-import { useCompleteTask, useMyAssignedTasks } from "@/hooks/useExecutions";
+import { useCompleteTask, useTasksVisibleToMe } from "@/hooks/useExecutions";
+import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
 import { RecordModel, RecordType } from "@/types/records";
 import { FlowableTaskSummary } from "@/types/flowable";
 import { findIcon, preferredStyle, stripFaPrefix } from "@/lib/faIcons";
@@ -36,9 +37,22 @@ export default function MyTasksPanel() {
     data: workflowTasks = [],
     isLoading: tasksLoading,
     isError: tasksError
-  } = useMyAssignedTasks();
+  } = useTasksVisibleToMe();
   const completeTask = useCompleteTask();
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+
+  // Whether the current actor can complete each visible task. Tasks the
+  // actor sees only because they supervise the assignee return false here,
+  // so we render those rows without the Complete button.
+  const completeChecks = useMemo(
+    () => workflowTasks.map((t) => ({
+      kind: "workflowtask",
+      action: "complete",
+      id: t.id
+    })),
+    [workflowTasks]
+  );
+  const { data: completePermissions } = usePermissionChecks(completeChecks);
 
   const onCompleteTask = async (taskId: string) => {
     setCompletingTaskId(taskId);
@@ -131,6 +145,11 @@ export default function MyTasksPanel() {
                     task={row.task}
                     onComplete={onCompleteTask}
                     isCompleting={completingTaskId === row.task.id}
+                    canComplete={
+                      completePermissions?.get(
+                        permissionKey({ kind: "workflowtask", action: "complete", id: row.task.id })
+                      ) ?? false
+                    }
                   />
                 )
               )}
@@ -197,11 +216,13 @@ function RecordRow({ record, type }: { record: RecordModel; type: RecordType | n
 function WorkflowRow({
   task,
   onComplete,
-  isCompleting
+  isCompleting,
+  canComplete
 }: {
   task: FlowableTaskSummary;
   onComplete: (taskId: string) => void;
   isCompleting: boolean;
+  canComplete: boolean;
 }) {
   const workflowName = task.processDefinitionName ?? task.processDefinitionId ?? task.name ?? task.id;
   const activeNode = task.name?.trim() ? task.name : task.taskDefinitionKey ?? null;
@@ -235,14 +256,18 @@ function WorkflowRow({
       </td>
       <td>{formatWhen(task.createdAtUtc)}</td>
       <td>
-        <button
-          type="button"
-          className="btn btn-sm btn-success"
-          onClick={() => onComplete(task.id)}
-          disabled={isCompleting}
-        >
-          Complete
-        </button>
+        {canComplete ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-success"
+            onClick={() => onComplete(task.id)}
+            disabled={isCompleting}
+          >
+            Complete
+          </button>
+        ) : (
+          <span className="text-body text-opacity-50 small">View only</span>
+        )}
       </td>
     </tr>
   );

@@ -22,6 +22,10 @@ public sealed record class FlowableProcessInstanceSummary
     public string? ActivityId { get; init; }
 
     public bool Suspended { get; init; }
+
+    // Flowable's `startUserId` — the user who started the process instance.
+    // Drives the `startedby` selector tag.
+    public string? StartUserId { get; init; }
 }
 
 public sealed record class FlowableHistoricProcessInstanceSummary

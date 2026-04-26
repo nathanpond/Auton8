@@ -38,3 +38,30 @@ export async function resetUserPassword(id: number, password: string): Promise<v
 export async function deleteUser(id: number): Promise<void> {
   await api.delete(`/api/users/${id}`);
 }
+
+export type UserSupervisorPayload = {
+  userId: string;
+  supervisorUserId: string | null;
+};
+
+export async function fetchUserSupervisor(userId: string, signal?: AbortSignal): Promise<UserSupervisorPayload> {
+  const { data } = await api.get<UserSupervisorPayload>(`/api/users/${userId}/supervisor`, { signal });
+  return data;
+}
+
+export type SupervisorPair = {
+  userId: string;
+  supervisorUserId: string;
+};
+
+export async function fetchSupervisorHierarchy(signal?: AbortSignal): Promise<SupervisorPair[]> {
+  const { data } = await api.get<SupervisorPair[]>("/api/users/supervisors", { signal });
+  return data;
+}
+
+export async function setUserSupervisor(
+  userId: string,
+  supervisorUserId: string | null
+): Promise<void> {
+  await api.put(`/api/users/${userId}/supervisor`, { supervisorUserId });
+}

@@ -49,3 +49,10 @@ export async function listMyAssignedTasks(signal?: AbortSignal): Promise<Flowabl
   const { data } = await api.get<FlowableTaskSummary[]>("/api/tasks/assigned-to-me", { signal });
   return data;
 }
+
+// Tasks the current actor can see — their own plus tasks of anyone they
+// supervise. Acting on a task requires a separate permission check.
+export async function listTasksVisibleToMe(signal?: AbortSignal): Promise<FlowableTaskSummary[]> {
+  const { data } = await api.get<FlowableTaskSummary[]>("/api/tasks/visible-to-me", { signal });
+  return data;
+}

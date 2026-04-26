@@ -2,10 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CreateUserRequest,
   UpdateUserRequest,
+  UserSupervisorPayload,
   createUser,
   deleteUser,
+  fetchUserSupervisor,
   listUsers,
   resetUserPassword,
+  setUserSupervisor,
   updateUser
 } from "@/api/users";
 import { LocalUser } from "@/types/flowable";
@@ -48,5 +51,27 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: (id: number) => deleteUser(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: USERS_QUERY_KEY })
+  });
+}
+
+export const USER_SUPERVISOR_KEY = (userId: string) => ["users", userId, "supervisor"] as const;
+
+export function useUserSupervisor(userId: string | null) {
+  return useQuery<UserSupervisorPayload>({
+    queryKey: USER_SUPERVISOR_KEY(userId ?? "unset"),
+    queryFn: ({ signal }) => fetchUserSupervisor(userId!, signal),
+    enabled: !!userId
+  });
+}
+
+export function useSetUserSupervisor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, supervisorUserId }: { userId: string; supervisorUserId: string | null }) =>
+      setUserSupervisor(userId, supervisorUserId),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: USER_SUPERVISOR_KEY(vars.userId) });
+      qc.invalidateQueries({ queryKey: ["hierarchy"] });
+    }
   });
 }

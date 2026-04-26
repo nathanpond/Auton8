@@ -99,6 +99,9 @@ export type AuthenticatedUser = {
   email: string;
   authSource: string;
   idpKey: string | null;
+  isSuperAdmin: boolean;
+  roles: { id: string; name: string; isSystem: boolean }[];
+  groups: { id: string; name: string }[];
 };
 
 export type AnonymousUser = {

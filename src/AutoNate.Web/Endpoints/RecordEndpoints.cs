@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
@@ -75,6 +77,7 @@ public static class RecordEndpoints
             bool? includeArchived,
             Guid? assigneeId,
             string? sort,
+            HttpContext http,
             IRecordStore store,
             CancellationToken cancellationToken) =>
         {
@@ -88,6 +91,7 @@ public static class RecordEndpoints
                     Page: page ?? 0,
                     PageSize: pageSize ?? 25,
                     Sort: sort),
+                    http.User,
                     cancellationToken);
                 return Results.Ok(ToPageDto(result));
             }
@@ -118,6 +122,7 @@ public static class RecordEndpoints
                 pageSize ?? 25,
                 includeArchived ?? false,
                 sort,
+                http.User,
                 cancellationToken);
             return Results.Ok(ToPageDto(result));
         });
@@ -126,7 +131,7 @@ public static class RecordEndpoints
         {
             var record = await store.GetAsync(id, cancellationToken);
             return record is null ? Results.NotFound() : Results.Ok(ToDto(record));
-        });
+        }).RequirePermission(EntityKinds.Record, Actions.View);
 
         group.MapGet("/by-key/{key}", async (string key, IRecordStore store, CancellationToken cancellationToken) =>
         {
@@ -158,7 +163,8 @@ public static class RecordEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message, errors = ex.Errors });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.Record, Actions.Create);
 
         group.MapPatch("/{id:guid}", async (
             Guid id,
@@ -181,7 +187,8 @@ public static class RecordEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message, errors = ex.Errors });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Edit);
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
@@ -198,7 +205,8 @@ public static class RecordEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Archive);
 
         group.MapPost("/{id:guid}/restore", async (
             Guid id,
@@ -215,7 +223,8 @@ public static class RecordEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Edit);
 
         group.MapPut("/{id:guid}/assignees", async (
             Guid id,
@@ -242,7 +251,8 @@ public static class RecordEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Assign);
 
         group.MapGet("/{id:guid}/history", async (
             Guid id,
@@ -257,6 +267,7 @@ public static class RecordEndpoints
 
         group.MapPost("/search", async (
             SearchRecordsRequest request,
+            HttpContext http,
             IRecordStore store,
             CancellationToken cancellationToken) =>
         {
@@ -277,6 +288,7 @@ public static class RecordEndpoints
                     Page: request.Page,
                     PageSize: request.PageSize == 0 ? 25 : request.PageSize,
                     Sort: request.Sort),
+                    http.User,
                     cancellationToken);
                 return Results.Ok(ToPageDto(result));
             }

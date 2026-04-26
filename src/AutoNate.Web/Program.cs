@@ -1,8 +1,14 @@
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Edges;
+using AutoNate.Web.Authorization.EntityTypes;
+using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Endpoints;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Flowable;
@@ -67,6 +73,45 @@ builder.Services.AddDbContextFactory<AutoNateDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("Default")
         ?? throw new InvalidOperationException("Connection string 'Default' is required.")));
+builder.Services.AddOptions<AutoNate.Web.Authorization.AuthorizationOptions>()
+    .BindConfiguration(AutoNate.Web.Authorization.AuthorizationOptions.SectionName);
+foreach (var entityType in CoreEntityTypes.All)
+{
+    builder.Services.AddSingleton<IEntityType>(entityType);
+}
+builder.Services.AddSingleton<IEntityRegistry, EntityRegistry>();
+builder.Services.AddSingleton<IEntityEdgeWriter, EntityEdgeWriter>();
+
+builder.Services.AddSingleton<ISelectorCompiler, RecordSelectorCompiler>();
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Role>(
+        EntityKinds.Role, x => x.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Group>(
+        EntityKinds.Group, x => x.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.RecordType>(
+        EntityKinds.RecordType, x => x.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.WorkflowModel>(
+        EntityKinds.WorkflowModel, x => x.Id));
+builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
+
+builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, RoleInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, GroupInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, RecordTypeInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, WorkflowModelInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, WorkflowTaskInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, WorkflowExecutionInstanceAuthorizer>();
+
+builder.Services.AddScoped<IAuthorizer, Authorizer>();
+builder.Services.AddScoped<AuthCacheBumper>();
+builder.Services.AddScoped<EntityEdgeReconciler>();
+builder.Services.AddScoped<IRoleStore, EfCoreRoleStore>();
+builder.Services.AddScoped<IGroupStore, EfCoreGroupStore>();
+builder.Services.AddScoped<IRoleAssignmentStore, EfCoreRoleAssignmentStore>();
+builder.Services.AddScoped<IPermissionGrantStore, EfCorePermissionGrantStore>();
 builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();
 builder.Services.AddScoped<IWorkflowModelStore, EfCoreWorkflowModelStore>();
 builder.Services.AddSingleton<IFieldType, TextFieldType>();
@@ -332,6 +377,12 @@ app.MapRecordTypeEndpoints();
 app.MapRecordEndpoints();
 app.MapRecordEdgeEndpoints();
 app.MapRecordCommentEndpoints();
+app.MapRoleEndpoints();
+app.MapGroupEndpoints();
+app.MapRoleAssignmentEndpoints();
+app.MapPermissionGrantEndpoints();
+app.MapAuthorizationExplainEndpoints();
+app.MapRegistryEndpoints();
 
 app.MapStaticAssets();
 

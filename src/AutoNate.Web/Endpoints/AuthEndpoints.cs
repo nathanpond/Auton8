@@ -1,4 +1,7 @@
 using System.Security.Claims;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Services.Authorization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -11,7 +14,12 @@ public static class AuthEndpoints
     {
         var group = app.MapGroup("/api/auth").AllowAnonymous();
 
-        group.MapGet("/me", (HttpContext context) =>
+        group.MapGet("/me", async (
+            HttpContext context,
+            IRoleStore roleStore,
+            IRoleAssignmentStore assignments,
+            IGroupStore groupStore,
+            CancellationToken ct) =>
         {
             var user = context.User;
             if (user.Identity?.IsAuthenticated != true)
@@ -19,16 +27,57 @@ public static class AuthEndpoints
                 return Results.Json(new { authenticated = false });
             }
 
+            var userIdRaw = user.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = Guid.TryParse(userIdRaw, out var parsed) ? parsed : Guid.Empty;
+
+            var groups = userId == Guid.Empty
+                ? Array.Empty<object>()
+                : (await groupStore.ListGroupsForUserAsync(userId, ct))
+                    .Select(g => (object)new { id = g.Id, name = g.Name })
+                    .ToArray();
+
+            var groupIds = userId == Guid.Empty
+                ? new List<Guid>()
+                : (await groupStore.ListGroupsForUserAsync(userId, ct)).Select(g => g.Id).ToList();
+
+            var directAssignments = userId == Guid.Empty
+                ? Array.Empty<Models.Authorization.RoleAssignment>()
+                : (await assignments.ListForPrincipalAsync(EntityKinds.User, userId.ToString(), ct)).ToArray();
+
+            var groupAssignments = new List<Models.Authorization.RoleAssignment>();
+            foreach (var gid in groupIds)
+            {
+                groupAssignments.AddRange(
+                    await assignments.ListForPrincipalAsync(EntityKinds.Group, gid.ToString(), ct));
+            }
+
+            var allAssignments = directAssignments.Concat(groupAssignments).ToList();
+            var roleIds = allAssignments.Select(a => a.RoleId).Distinct().ToList();
+
+            var allRoles = await roleStore.ListAsync(ct);
+            var rolesById = allRoles.ToDictionary(r => r.Id);
+
+            var roleSummaries = roleIds
+                .Where(rolesById.ContainsKey)
+                .Select(id => rolesById[id])
+                .Select(r => (object)new { id = r.Id, name = r.Name, isSystem = r.IsSystem })
+                .ToArray();
+
+            var isSuperAdmin = roleIds.Contains(SystemRoles.SuperAdminId);
+
             return Results.Json(new
             {
                 authenticated = true,
-                userId = user.FindFirstValue(ClaimTypes.NameIdentifier),
+                userId = userIdRaw,
                 username = user.FindFirstValue(ClaimTypes.Name),
                 firstName = user.FindFirstValue(ClaimTypes.GivenName),
                 lastName = user.FindFirstValue(ClaimTypes.Surname),
                 email = user.FindFirstValue(ClaimTypes.Email),
                 authSource = user.FindFirstValue("auth_source"),
-                idpKey = user.FindFirstValue("idp_key")
+                idpKey = user.FindFirstValue("idp_key"),
+                isSuperAdmin,
+                roles = roleSummaries,
+                groups
             });
         });
 
@@ -39,6 +88,44 @@ public static class AuthEndpoints
         })
         .DisableAntiforgery();
 
+        // Batched per-instance permission lookup. The SPA uses this to gate
+        // action buttons (e.g. "Complete" on a task) on a list at a time —
+        // one round trip rather than one per row. Order is preserved so the
+        // caller can map back to its keys.
+        group.MapPost("/check", async (
+            CheckPermissionsRequest request,
+            HttpContext http,
+            IAuthorizer authorizer,
+            CancellationToken ct) =>
+        {
+            if (http.User.Identity?.IsAuthenticated != true)
+            {
+                return Results.Json(new { authenticated = false, results = Array.Empty<object>() });
+            }
+
+            var checks = request.Checks ?? Array.Empty<CheckPermissionItem>();
+            var results = new List<object>(checks.Count);
+            foreach (var c in checks)
+            {
+                var decision = await authorizer.AuthorizeAsync(
+                    http.User, c.Action ?? string.Empty,
+                    new EntityRef(c.Kind ?? string.Empty, c.Id ?? string.Empty), ct);
+                results.Add(new
+                {
+                    kind = c.Kind,
+                    action = c.Action,
+                    id = c.Id,
+                    allowed = decision.IsAllowed
+                });
+            }
+
+            return Results.Json(new { authenticated = true, results });
+        }).DisableAntiforgery();
+
         return app;
     }
+
+    public sealed record CheckPermissionsRequest(IReadOnlyList<CheckPermissionItem> Checks);
+
+    public sealed record CheckPermissionItem(string? Kind, string? Action, string? Id);
 }

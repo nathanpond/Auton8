@@ -1,5 +1,9 @@
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Edges;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Records.Fields;
@@ -14,7 +18,9 @@ namespace AutoNate.Web.Services.Records;
 
 public sealed class EfCoreRecordStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
-    IFieldTypeRegistry fieldTypeRegistry) : IRecordStore
+    IFieldTypeRegistry fieldTypeRegistry,
+    IEntityEdgeWriter entityEdgeWriter,
+    IAuthorizer authorizer) : IRecordStore
 {
     public async Task<Record?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -32,7 +38,19 @@ public sealed class EfCoreRecordStore(
         return entity?.ToModel();
     }
 
-    public async Task<RecordListPage> SearchAsync(RecordSearchInput input, CancellationToken cancellationToken = default)
+    public Task<RecordListPage> SearchAsync(RecordSearchInput input, CancellationToken cancellationToken = default) =>
+        SearchInternalAsync(input, actor: null, cancellationToken);
+
+    public Task<RecordListPage> SearchAsync(
+        RecordSearchInput input,
+        ClaimsPrincipal actor,
+        CancellationToken cancellationToken = default) =>
+        SearchInternalAsync(input, actor, cancellationToken);
+
+    private async Task<RecordListPage> SearchInternalAsync(
+        RecordSearchInput input,
+        ClaimsPrincipal? actor,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         var page = Math.Max(0, input.Page);
@@ -68,6 +86,20 @@ public sealed class EfCoreRecordStore(
         {
             where.Append(" AND ").Append(filterSql);
             parameters.AddRange(filterParams);
+        }
+
+        // Authorization gate: append the actor's record-visibility SQL when
+        // the caller hands us a ClaimsPrincipal. Tests that don't care
+        // continue calling the no-actor overload and skip this entirely.
+        if (actor is not null)
+        {
+            var visibility = await authorizer.BuildRecordSqlFilterAsync(
+                actor, AutoNate.Web.Authorization.Actions.View, parameters.Count, cancellationToken);
+            if (!visibility.AccessOpen)
+            {
+                where.Append(" AND ").Append(visibility.Sql);
+                parameters.AddRange(visibility.Parameters);
+            }
         }
 
         var orderBy = ResolveOrderBy(input.Sort);
@@ -106,26 +138,61 @@ public sealed class EfCoreRecordStore(
         return new RecordListPage(records, (int)totalCount, page, pageSize);
     }
 
-    public async Task<RecordListPage> SearchAssignedAsync(
+    public Task<RecordListPage> SearchAssignedAsync(
         Guid assigneeId,
         int page,
         int pageSize,
         bool includeArchived,
         string? sort,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        SearchAssignedInternalAsync(assigneeId, page, pageSize, includeArchived, sort,
+            actor: null, cancellationToken);
+
+    public Task<RecordListPage> SearchAssignedAsync(
+        Guid assigneeId,
+        int page,
+        int pageSize,
+        bool includeArchived,
+        string? sort,
+        ClaimsPrincipal actor,
+        CancellationToken cancellationToken = default) =>
+        SearchAssignedInternalAsync(assigneeId, page, pageSize, includeArchived, sort,
+            actor, cancellationToken);
+
+    private async Task<RecordListPage> SearchAssignedInternalAsync(
+        Guid assigneeId,
+        int page,
+        int pageSize,
+        bool includeArchived,
+        string? sort,
+        ClaimsPrincipal? actor,
+        CancellationToken cancellationToken)
     {
         var safePage = Math.Max(0, page);
         var safePageSize = Math.Clamp(pageSize, 1, 200);
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var parameters = new object?[] { assigneeId, includeArchived };
-        var where = "{0}::uuid = ANY(assignee_ids) AND (is_archived = FALSE OR {1} = TRUE)";
+        var parameters = new List<object?> { assigneeId, includeArchived };
+        var where = new StringBuilder("{0}::uuid = ANY(assignee_ids) AND (is_archived = FALSE OR {1} = TRUE)");
+
+        if (actor is not null)
+        {
+            var visibility = await authorizer.BuildRecordSqlFilterAsync(
+                actor, AutoNate.Web.Authorization.Actions.View, parameters.Count, cancellationToken);
+            if (!visibility.AccessOpen)
+            {
+                where.Append(" AND ").Append(visibility.Sql);
+                parameters.AddRange(visibility.Parameters);
+            }
+        }
+
         var orderBy = ResolveOrderBy(sort);
 
+        var paramArray = parameters.ToArray()!;
         var countSql = $"SELECT COUNT(*) AS \"Value\" FROM records WHERE {where}";
         var totalCount = await dbContext.Database
-            .SqlQueryRaw<long>(countSql, parameters!)
+            .SqlQueryRaw<long>(countSql, paramArray)
             .SingleAsync(cancellationToken);
 
         var pageSql = new StringBuilder();
@@ -149,11 +216,55 @@ public sealed class EfCoreRecordStore(
         pageSql.Append(" LIMIT ").Append(safePageSize).Append(" OFFSET ").Append(safePage * safePageSize);
 
         var rows = await dbContext.Database
-            .SqlQueryRaw<RecordRow>(pageSql.ToString(), parameters!)
+            .SqlQueryRaw<RecordRow>(pageSql.ToString(), paramArray)
             .ToListAsync(cancellationToken);
 
         var records = rows.Select(r => r.ToModel()).ToList();
         return new RecordListPage(records, (int)totalCount, safePage, safePageSize);
+    }
+
+    public async Task<RecordListPage> ListAuthorizedAsync(
+        ClaimsPrincipal actor,
+        Guid? recordTypeId,
+        int page,
+        int pageSize,
+        bool includeArchived,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        var safePage = Math.Max(0, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 200);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        IQueryable<RecordEntity> baseQuery = dbContext.Records.AsNoTracking();
+        if (recordTypeId is { } typeId)
+        {
+            baseQuery = baseQuery.Where(r => r.RecordTypeId == typeId);
+        }
+
+        if (!includeArchived)
+        {
+            baseQuery = baseQuery.Where(r => !r.IsArchived);
+        }
+
+        var visible = await authorizer.FilterQueryAsync(
+            dbContext,
+            actor,
+            EntityKinds.Record,
+            Actions.View,
+            baseQuery,
+            cancellationToken);
+
+        var total = await visible.CountAsync(cancellationToken);
+        var rows = await visible
+            .OrderByDescending(r => r.UpdatedAtUtc)
+            .Skip(safePage * safePageSize)
+            .Take(safePageSize)
+            .ToListAsync(cancellationToken);
+
+        var models = rows.Select(r => r.ToModel()).ToList();
+        return new RecordListPage(models, total, safePage, safePageSize);
     }
 
     public async Task<Record> CreateAsync(CreateRecordInput input, Guid actorId, CancellationToken cancellationToken = default)
@@ -244,6 +355,25 @@ public sealed class EfCoreRecordStore(
             }
         }
 
+        // Phase 2: shadow Record.CreatedBy and Record.AssigneeIds into entity_edges
+        // so the new authorization model has a uniform truth source. Reads still
+        // come from the legacy columns; this is a dual-write only.
+        var recordIdString = recordId.ToString();
+        entityEdgeWriter.AddEdge(
+            dbContext, EdgeKinds.Creator,
+            EntityKinds.User, actorId.ToString(),
+            EntityKinds.Record, recordIdString,
+            actorId, now);
+
+        foreach (var assigneeId in assigneeIds)
+        {
+            entityEdgeWriter.AddEdge(
+                dbContext, EdgeKinds.Assignee,
+                EntityKinds.User, assigneeId.ToString(),
+                EntityKinds.Record, recordIdString,
+                actorId, now);
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
 
@@ -288,6 +418,8 @@ public sealed class EfCoreRecordStore(
             }
         }
 
+        Guid[]? assigneeEdgeOld = null;
+        Guid[]? assigneeEdgeNew = null;
         if (input.AssigneeIds is { } incomingAssignees)
         {
             var newAssignees = incomingAssignees.Distinct().ToArray();
@@ -298,6 +430,8 @@ public sealed class EfCoreRecordStore(
                     oldValue: JsonSerializer.Serialize(entity.AssigneeIds),
                     newValue: JsonSerializer.Serialize(newAssignees),
                     actorId, now));
+                assigneeEdgeOld = entity.AssigneeIds;
+                assigneeEdgeNew = newAssignees;
                 entity.AssigneeIds = newAssignees;
                 changed = true;
             }
@@ -373,6 +507,21 @@ public sealed class EfCoreRecordStore(
         {
             dbContext.RecordFieldChanges.Add(row);
         }
+
+        if (assigneeEdgeOld is not null && assigneeEdgeNew is not null)
+        {
+            await entityEdgeWriter.SyncUserEdgesAsync(
+                dbContext,
+                EdgeKinds.Assignee,
+                EntityKinds.Record,
+                entity.Id.ToString(),
+                assigneeEdgeOld,
+                assigneeEdgeNew,
+                actorId,
+                now,
+                cancellationToken);
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
 

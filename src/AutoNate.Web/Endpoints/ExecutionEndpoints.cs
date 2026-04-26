@@ -1,5 +1,10 @@
 using System.Security.Claims;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Edges;
+using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Flowable;
+using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -23,7 +28,7 @@ public static class ExecutionEndpoints
         {
             var detail = await flowable.GetWorkflowExecutionDiagramDetailAsync(processInstanceId, cancellationToken);
             return Results.Ok(detail);
-        });
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
         executions.MapGet("/{processInstanceId}/tasks", async (
             string processInstanceId,
@@ -32,7 +37,7 @@ public static class ExecutionEndpoints
         {
             var tasks = await flowable.GetTasksByProcessInstanceAsync(processInstanceId, cancellationToken);
             return Results.Ok(tasks);
-        });
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
         executions.MapDelete("/{processInstanceId}", async (
             string processInstanceId,
@@ -41,7 +46,8 @@ public static class ExecutionEndpoints
         {
             await flowable.DeleteWorkflowExecutionAsync(processInstanceId, cancellationToken);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Cancel, "processInstanceId");
 
         var tasks = app.MapGroup("/api/tasks")
             .RequireAuthorization();
@@ -61,6 +67,39 @@ public static class ExecutionEndpoints
             return Results.Ok(list);
         });
 
+        // Tasks the actor can see — their own plus tasks of any user they
+        // supervise (entity_edges, edge_kind='supervisor', from = actor).
+        // The Complete button on each row is gated separately via
+        // POST /api/auth/check, so the same list serves "I can act" and
+        // "I can only watch" cases.
+        tasks.MapGet("/visible-to-me", async (
+            HttpContext http,
+            IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            CancellationToken cancellationToken) =>
+        {
+            var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrWhiteSpace(actorId))
+            {
+                return Results.Unauthorized();
+            }
+
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            var supervisees = await db.EntityEdges.AsNoTracking()
+                .Where(e => e.EdgeKind == EdgeKinds.Supervisor
+                         && e.FromKind == EntityKinds.User
+                         && e.FromId == actorId
+                         && e.ToKind == EntityKinds.User)
+                .Select(e => e.ToId)
+                .ToListAsync(cancellationToken);
+
+            var users = new List<string>(supervisees.Count + 1) { actorId };
+            users.AddRange(supervisees);
+
+            var list = await flowable.GetTasksAssignedToUsersAsync(users, cancellationToken);
+            return Results.Ok(list);
+        });
+
         tasks.MapPost("/{taskId}/complete", async (
             string taskId,
             CompleteTaskRequest? request,
@@ -69,7 +108,8 @@ public static class ExecutionEndpoints
         {
             await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowTask, Actions.Complete, "taskId");
 
         return app;
     }

@@ -12,6 +12,11 @@ internal sealed class StubFlowableClient : IFlowableClient
 {
     public List<string> Calls { get; } = new();
 
+    // Tests configure these to seed canned responses for the methods that
+    // authorization handlers consult.
+    public Dictionary<string, FlowableProcessInstanceSummary> InstancesById { get; } = new();
+    public Dictionary<string, List<FlowableTaskSummary>> TasksByUser { get; } = new();
+
     public Task<WorkflowDeploymentInfo> DeployProcessAsync(
         WorkflowModel model, CancellationToken cancellationToken = default)
     {
@@ -46,7 +51,8 @@ internal sealed class StubFlowableClient : IFlowableClient
         string processInstanceId, CancellationToken cancellationToken = default)
     {
         Calls.Add($"GetInstance:{processInstanceId}");
-        return Task.FromResult<FlowableProcessInstanceSummary?>(null);
+        InstancesById.TryGetValue(processInstanceId, out var summary);
+        return Task.FromResult(summary);
     }
 
     public Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
@@ -83,8 +89,26 @@ internal sealed class StubFlowableClient : IFlowableClient
         string userId, CancellationToken cancellationToken = default)
     {
         Calls.Add($"TasksForUser:{userId}");
-        return Task.FromResult<IReadOnlyList<FlowableTaskSummary>>(
-            Array.Empty<FlowableTaskSummary>());
+        TasksByUser.TryGetValue(userId, out var tasks);
+        IReadOnlyList<FlowableTaskSummary> list = tasks?.AsReadOnly() ?? (IReadOnlyList<FlowableTaskSummary>)Array.Empty<FlowableTaskSummary>();
+        return Task.FromResult(list);
+    }
+
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+        IReadOnlyCollection<string> userIds, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"TasksForUsers:{string.Join(",", userIds)}");
+        var merged = new Dictionary<string, FlowableTaskSummary>(StringComparer.Ordinal);
+        foreach (var userId in userIds.Distinct(StringComparer.Ordinal))
+        {
+            if (!TasksByUser.TryGetValue(userId, out var tasks)) continue;
+            foreach (var t in tasks)
+            {
+                merged.TryAdd(t.Id, t);
+            }
+        }
+        IReadOnlyList<FlowableTaskSummary> list = merged.Values.ToArray();
+        return Task.FromResult(list);
     }
 
     public Task CompleteTaskAsync(

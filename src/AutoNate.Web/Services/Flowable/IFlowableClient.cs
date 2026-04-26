@@ -22,5 +22,12 @@ public interface IFlowableClient
 
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default);
 
+    // Fan-out helper for "tasks assigned to anyone in this set." Used when a
+    // supervisor needs to see tasks for the people they supervise without
+    // assuming any back-end query supports list-of-assignees.
+    Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+        IReadOnlyCollection<string> userIds,
+        CancellationToken cancellationToken = default);
+
     Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
 }

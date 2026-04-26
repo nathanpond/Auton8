@@ -90,7 +90,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             Id = payload.Id ?? string.Empty,
             ProcessDefinitionId = payload.ProcessDefinitionId ?? string.Empty,
             ActivityId = payload.ActivityId,
-            Suspended = payload.Suspended
+            Suspended = payload.Suspended,
+            StartUserId = payload.StartUserId
         };
     }
 
@@ -110,7 +111,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             Id = payload.Id ?? string.Empty,
             ProcessDefinitionId = payload.ProcessDefinitionId ?? string.Empty,
             ActivityId = payload.ActivityId,
-            Suspended = payload.Suspended
+            Suspended = payload.Suspended,
+            StartUserId = payload.StartUserId
         };
     }
 
@@ -449,6 +451,32 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
+        IReadOnlyCollection<string> userIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userIds);
+        if (userIds.Count == 0)
+        {
+            return Array.Empty<FlowableTaskSummary>();
+        }
+
+        // Fan out per user. Flowable's tasks endpoint is single-assignee, so
+        // we issue one request per id in parallel and dedupe by task id.
+        var perUser = await Task.WhenAll(userIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .Select(id => GetTasksAssignedToUserAsync(id, cancellationToken)));
+
+        return perUser
+            .SelectMany(list => list)
+            .GroupBy(t => t.Id, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .OrderByDescending(t => t.CreatedAtUtc ?? DateTimeOffset.MinValue)
+            .ThenBy(t => t.Id, StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private async Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
         IEnumerable<FlowableTaskResponse> tasks,
         CancellationToken cancellationToken)
@@ -689,6 +717,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? ActivityId { get; init; }
 
         public bool Suspended { get; init; }
+
+        public string? StartUserId { get; init; }
     }
 
     private sealed class FlowableHistoricProcessInstanceResponse

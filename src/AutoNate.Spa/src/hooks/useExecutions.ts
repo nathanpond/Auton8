@@ -5,7 +5,8 @@ import {
   getExecutionDiagram,
   getExecutionTasks,
   listExecutions,
-  listMyAssignedTasks
+  listMyAssignedTasks,
+  listTasksVisibleToMe
 } from "@/api/executions";
 import {
   FlowableTaskSummary,
@@ -17,6 +18,7 @@ export const EXECUTIONS_QUERY_KEY = ["executions"] as const;
 export const executionDiagramQueryKey = (id: string) => ["executions", "diagram", id] as const;
 export const executionTasksQueryKey = (id: string) => ["executions", "tasks", id] as const;
 export const ASSIGNED_TASKS_QUERY_KEY = ["tasks", "assigned-to-me"] as const;
+export const VISIBLE_TASKS_QUERY_KEY = ["tasks", "visible-to-me"] as const;
 
 export function useExecutions() {
   return useQuery<WorkflowExecutionSummary[]>({
@@ -58,6 +60,7 @@ export function useCompleteTask() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
     }
   });
 }
@@ -66,5 +69,12 @@ export function useMyAssignedTasks() {
   return useQuery<FlowableTaskSummary[]>({
     queryKey: ASSIGNED_TASKS_QUERY_KEY,
     queryFn: ({ signal }) => listMyAssignedTasks(signal)
+  });
+}
+
+export function useTasksVisibleToMe() {
+  return useQuery<FlowableTaskSummary[]>({
+    queryKey: VISIBLE_TASKS_QUERY_KEY,
+    queryFn: ({ signal }) => listTasksVisibleToMe(signal)
   });
 }

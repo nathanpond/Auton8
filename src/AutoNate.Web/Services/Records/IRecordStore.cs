@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Services.Records.Fields;
@@ -73,12 +74,42 @@ public interface IRecordStore
 {
     Task<RecordListPage> SearchAsync(RecordSearchInput input, CancellationToken cancellationToken = default);
 
+    // Like SearchAsync but applies the actor's record-visibility grants on
+    // top of the existing record-type/assignee/field filters. The endpoint
+    // layer routes through this overload; tests that don't care about
+    // authorization continue using the simple SearchAsync above.
+    Task<RecordListPage> SearchAsync(
+        RecordSearchInput input,
+        ClaimsPrincipal actor,
+        CancellationToken cancellationToken = default);
+
     Task<RecordListPage> SearchAssignedAsync(
         Guid assigneeId,
         int page,
         int pageSize,
         bool includeArchived,
         string? sort,
+        CancellationToken cancellationToken = default);
+
+    Task<RecordListPage> SearchAssignedAsync(
+        Guid assigneeId,
+        int page,
+        int pageSize,
+        bool includeArchived,
+        string? sort,
+        ClaimsPrincipal actor,
+        CancellationToken cancellationToken = default);
+
+    // Lists records that the actor is authorized to view. Phase 4 introduces
+    // this LINQ-based path so list queries flow through the authorizer's
+    // FilterQueryAsync. The raw-SQL SearchAsync still bypasses authorization
+    // until Phase 5 wires SQL-fragment enforcement onto it.
+    Task<RecordListPage> ListAuthorizedAsync(
+        ClaimsPrincipal actor,
+        Guid? recordTypeId,
+        int page,
+        int pageSize,
+        bool includeArchived,
         CancellationToken cancellationToken = default);
 
     Task<Record?> GetAsync(Guid id, CancellationToken cancellationToken = default);

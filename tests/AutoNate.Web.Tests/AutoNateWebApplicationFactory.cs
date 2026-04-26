@@ -11,18 +11,23 @@ namespace AutoNate.Web.Tests;
 internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly PostgresTestDatabase _database;
+    private readonly IReadOnlyDictionary<string, string?> _extraConfig;
 
-    private AutoNateWebApplicationFactory(PostgresTestDatabase database)
+    private AutoNateWebApplicationFactory(
+        PostgresTestDatabase database,
+        IReadOnlyDictionary<string, string?>? extraConfig)
     {
         _database = database;
+        _extraConfig = extraConfig ?? new Dictionary<string, string?>();
         // Skip the startup Dapr probe — it would block the host from starting in tests.
         Environment.SetEnvironmentVariable("AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR", "true");
     }
 
-    public static async Task<AutoNateWebApplicationFactory> CreateAsync()
+    public static async Task<AutoNateWebApplicationFactory> CreateAsync(
+        IReadOnlyDictionary<string, string?>? extraConfig = null)
     {
         var database = await PostgresTestDatabase.CreateAsync();
-        return new AutoNateWebApplicationFactory(database);
+        return new AutoNateWebApplicationFactory(database, extraConfig);
     }
 
     public PostgresTestDatabase Database => _database;
@@ -36,7 +41,7 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = _database.ConnectionString,
                 // Auto-login as the seeded `admin` user so authenticated endpoints
@@ -46,7 +51,20 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
                 // Flowable is not exercised by these tests, but the options binding
                 // requires a section to exist.
                 ["Flowable:BaseAddress"] = "http://localhost/flowable",
-            });
+                // Default tests to authorization-off so appsettings.Development.json
+                // (which a dev may have flipped on) doesn't change their semantics.
+                // Tests that need enforcement opt in via extraConfig.
+                ["Authorization:Enabled"] = "false",
+                ["Authorization:Enforcement"] = "off",
+                ["Authorization:AssignSuperAdminToAllExistingUsers"] = "false",
+            };
+
+            foreach (var (key, value) in _extraConfig)
+            {
+                settings[key] = value;
+            }
+
+            config.AddInMemoryCollection(settings);
         });
 
         // Replace the real IFlowableClient with a stub so endpoint tests don't

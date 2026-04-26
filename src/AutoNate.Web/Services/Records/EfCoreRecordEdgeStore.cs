@@ -1,8 +1,10 @@
 using System.Text.Json;
+using AutoNate.Web.Authorization;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Records.Fields;
 using Microsoft.EntityFrameworkCore;
+using EntityEdgeEntity = AutoNate.Web.Persistence.Scaffolded.EntityEdge;
 using RecordEdgeEntity = AutoNate.Web.Persistence.Scaffolded.RecordEdge;
 
 namespace AutoNate.Web.Services.Records;
@@ -96,17 +98,35 @@ public sealed class EfCoreRecordEdgeStore(
         var normalizedData = ValidateEdgeData(fields, input.Data);
 
         var now = DateTimeOffset.UtcNow;
+        var edgeId = Guid.NewGuid();
+        var dataJson = normalizedData.GetRawText();
         var entity = new RecordEdgeEntity
         {
-            Id = Guid.NewGuid(),
+            Id = edgeId,
             EdgeTypeId = edgeType.Id,
             FromRecordId = input.FromRecordId,
             ToRecordId = input.ToRecordId,
-            Data = normalizedData.GetRawText(),
+            Data = dataJson,
             CreatedAtUtc = now.UtcDateTime,
             CreatedBy = actorId
         };
         dbContext.RecordEdges.Add(entity);
+
+        // Phase 7: shadow into entity_edges so the unified graph stays in sync
+        // for selectors and traversals. Same primary key keeps dedup trivial.
+        dbContext.EntityEdges.Add(new EntityEdgeEntity
+        {
+            Id = edgeId,
+            EdgeKind = edgeType.ShortCode,
+            FromKind = EntityKinds.Record,
+            FromId = input.FromRecordId.ToString(),
+            ToKind = EntityKinds.Record,
+            ToId = input.ToRecordId.ToString(),
+            Data = dataJson,
+            CreatedAtUtc = now.UtcDateTime,
+            CreatedBy = actorId
+        });
+
         await dbContext.SaveChangesAsync(cancellationToken);
         return entity.ToModel();
     }
@@ -117,6 +137,13 @@ public sealed class EfCoreRecordEdgeStore(
         var entity = await dbContext.RecordEdges.SingleOrDefaultAsync(e => e.Id == edgeId, cancellationToken);
         if (entity is null) return;
         dbContext.RecordEdges.Remove(entity);
+
+        var shadow = await dbContext.EntityEdges.SingleOrDefaultAsync(e => e.Id == edgeId, cancellationToken);
+        if (shadow is not null)
+        {
+            dbContext.EntityEdges.Remove(shadow);
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 

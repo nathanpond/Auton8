@@ -38,6 +38,18 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<RecordCommentRevision> RecordCommentRevisions { get; set; }
 
+    public virtual DbSet<Role> Roles { get; set; }
+
+    public virtual DbSet<RoleAssignment> RoleAssignments { get; set; }
+
+    public virtual DbSet<EntityEdge> EntityEdges { get; set; }
+
+    public virtual DbSet<Group> Groups { get; set; }
+
+    public virtual DbSet<GroupMember> GroupMembers { get; set; }
+
+    public virtual DbSet<PermissionGrant> PermissionGrants { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -382,6 +394,137 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Body).HasColumnName("body");
             entity.Property(e => e.ReplacedAtUtc).HasColumnName("replaced_at_utc");
             entity.Property(e => e.ReplacedBy).HasColumnName("replaced_by");
+        });
+
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("roles_pkey");
+
+            entity.ToTable("roles");
+
+            entity.HasIndex(e => e.Name, "roles_name_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.IsSystem).HasColumnName("is_system");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<RoleAssignment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("role_assignments_pkey");
+
+            entity.ToTable("role_assignments");
+
+            entity.HasIndex(e => new { e.PrincipalKind, e.PrincipalId }, "ix_role_assignments_principal");
+            entity.HasIndex(e => e.RoleId, "ix_role_assignments_role");
+            entity.HasIndex(e => new { e.RoleId, e.PrincipalKind, e.PrincipalId }, "uq_role_assignments_triple")
+                .IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.RoleId).HasColumnName("role_id");
+            entity.Property(e => e.PrincipalKind).HasColumnName("principal_kind");
+            entity.Property(e => e.PrincipalId).HasColumnName("principal_id");
+            entity.Property(e => e.ScopeString).HasColumnName("scope_string");
+            entity.Property(e => e.ScopeAst)
+                .HasColumnName("scope_ast")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<EntityEdge>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("entity_edges_pkey");
+
+            entity.ToTable("entity_edges");
+
+            entity.HasIndex(e => new { e.ToKind, e.ToId, e.EdgeKind }, "ix_entity_edges_to");
+            entity.HasIndex(e => new { e.FromKind, e.FromId, e.EdgeKind }, "ix_entity_edges_from");
+            entity.HasIndex(e => new { e.EdgeKind, e.FromKind, e.FromId, e.ToKind, e.ToId },
+                "uq_entity_edges_triple").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.EdgeKind).HasColumnName("edge_kind");
+            entity.Property(e => e.FromKind).HasColumnName("from_kind");
+            entity.Property(e => e.FromId).HasColumnName("from_id");
+            entity.Property(e => e.ToKind).HasColumnName("to_kind");
+            entity.Property(e => e.ToId).HasColumnName("to_id");
+            entity.Property(e => e.Data)
+                .HasColumnName("data")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<Group>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("groups_pkey");
+
+            entity.ToTable("groups");
+
+            entity.HasIndex(e => e.Name, "groups_name_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<GroupMember>(entity =>
+        {
+            entity.HasKey(e => new { e.GroupId, e.UserId }).HasName("group_members_pkey");
+
+            entity.ToTable("group_members");
+
+            entity.HasIndex(e => e.UserId, "ix_group_members_user");
+
+            entity.Property(e => e.GroupId).HasColumnName("group_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.AddedAtUtc).HasColumnName("added_at_utc");
+            entity.Property(e => e.AddedBy).HasColumnName("added_by");
+        });
+
+        modelBuilder.Entity<PermissionGrant>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("permission_grants_pkey");
+
+            entity.ToTable("permission_grants");
+
+            entity.HasIndex(e => new { e.PrincipalKind, e.PrincipalId }, "ix_permission_grants_principal");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.PrincipalKind).HasColumnName("principal_kind");
+            entity.Property(e => e.PrincipalId).HasColumnName("principal_id");
+            entity.Property(e => e.Action).HasColumnName("action");
+            entity.Property(e => e.SelectorString).HasColumnName("selector_string");
+            entity.Property(e => e.SelectorAst)
+                .HasColumnName("selector_ast")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.Effect).HasColumnName("effect");
+            entity.Property(e => e.Priority).HasColumnName("priority");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         OnModelCreatingPartial(modelBuilder);

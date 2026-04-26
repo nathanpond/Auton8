@@ -18,6 +18,11 @@ import RecordCreate from "./pages/records/RecordCreate";
 import RecordDetail from "./pages/records/RecordDetail";
 import EdgeTypeList from "./pages/edge-types/EdgeTypeList";
 import EdgeTypeEditor from "./pages/edge-types/EdgeTypeEditor";
+import AdminRoles from "./pages/admin/Roles";
+import AdminGroups from "./pages/admin/Groups";
+import AdminGrants from "./pages/admin/Grants";
+import AdminHierarchy from "./pages/admin/Hierarchy";
+import AdminExplain from "./pages/admin/Explain";
 import NotFound from "./pages/not-found/NotFound";
 
 export default function Router() {
@@ -137,6 +142,46 @@ export default function Router() {
           element={
             <ProtectedRoute>
               <EdgeTypeEditor />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/roles"
+          element={
+            <ProtectedRoute>
+              <AdminRoles />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/groups"
+          element={
+            <ProtectedRoute>
+              <AdminGroups />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/grants"
+          element={
+            <ProtectedRoute>
+              <AdminGrants />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/hierarchy"
+          element={
+            <ProtectedRoute>
+              <AdminHierarchy />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/explain"
+          element={
+            <ProtectedRoute>
+              <AdminExplain />
             </ProtectedRoute>
           }
         />

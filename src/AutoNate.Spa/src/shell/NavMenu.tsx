@@ -157,6 +157,21 @@ export default function NavMenu() {
             <NavLink className="dropdown-item" to="/manage-users">
               <i className="fa fa-users me-2"></i>Manage Users
             </NavLink>
+            <NavLink className="dropdown-item" to="/admin/roles">
+              <i className="fa fa-user-shield me-2"></i>Roles &amp; Permissions
+            </NavLink>
+            <NavLink className="dropdown-item" to="/admin/groups">
+              <i className="fa fa-people-group me-2"></i>Groups
+            </NavLink>
+            <NavLink className="dropdown-item" to="/admin/grants">
+              <i className="fa fa-key me-2"></i>Permissions
+            </NavLink>
+            <NavLink className="dropdown-item" to="/admin/hierarchy">
+              <i className="fa fa-sitemap me-2"></i>Hierarchy
+            </NavLink>
+            <NavLink className="dropdown-item" to="/admin/explain">
+              <i className="fa fa-magnifying-glass me-2"></i>Effective Permissions
+            </NavLink>
           </div>
         </div>
 
