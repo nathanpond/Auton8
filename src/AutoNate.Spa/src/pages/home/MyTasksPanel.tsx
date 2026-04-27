@@ -1,8 +1,15 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useMyAssignedRecords } from "@/hooks/useRecords";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
-import { useCompleteTask, useTasksVisibleToMe } from "@/hooks/useExecutions";
+import {
+  ASSIGNED_TASKS_QUERY_KEY,
+  useCompleteTask,
+  useTasksVisibleToMe,
+  VISIBLE_TASKS_QUERY_KEY
+} from "@/hooks/useExecutions";
+import { useBusConnection } from "@/hooks/useBusConnection";
 import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { RecordModel, RecordType } from "@/types/records";
@@ -29,6 +36,7 @@ type TaskRow =
     };
 
 export default function MyTasksPanel() {
+  const qc = useQueryClient();
   const params = useMemo(
     () => ({ page: 0, pageSize: PAGE_SIZE, sort: "updated_desc" as const, includeArchived: false }),
     []
@@ -44,6 +52,24 @@ export default function MyTasksPanel() {
   } = useTasksVisibleToMe();
   const completeTask = useCompleteTask();
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+
+  // Refetch on any record or workflow-execution bus event. The server-side
+  // /assigned-to-me and /visible-to-me endpoints already filter by the current
+  // user, so we don't need to inspect payloads to decide whether to act —
+  // assignments and reassignments both flow through these topics.
+  const onBusMessage = useCallback(
+    (msg: { topic: string }) => {
+      const topic = msg.topic ?? "";
+      if (topic.startsWith("record.")) {
+        qc.invalidateQueries({ queryKey: ["records", "assigned-to-me"] });
+      } else if (topic.startsWith("workflow.execution")) {
+        qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+        qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+      }
+    },
+    [qc]
+  );
+  useBusConnection({ onMessage: onBusMessage });
 
   // Whether the current actor can complete each visible task. Tasks the
   // actor sees only because they supervise the assignee return false here,
