@@ -17,6 +17,9 @@ public sealed record class FlowableProcessInstanceSummary
 {
     public string Id { get; init; } = string.Empty;
 
+    // Display name set when the run was started (or null).
+    public string? Name { get; init; }
+
     public string ProcessDefinitionId { get; init; } = string.Empty;
 
     public string? ActivityId { get; init; }
@@ -51,6 +54,10 @@ public sealed record class FlowableTaskSummary
 
     public string? ProcessInstanceId { get; init; }
 
+    // Per-instance display name of the task's parent process. Mirrors
+    // WorkflowExecutionSummary.Name. Null when the run wasn't named.
+    public string? ProcessInstanceName { get; init; }
+
     public string? ProcessDefinitionId { get; init; }
 
     public string? ProcessDefinitionName { get; init; }
@@ -63,6 +70,10 @@ public sealed record class FlowableTaskSummary
 public sealed record class WorkflowExecutionSummary
 {
     public string Id { get; set; } = string.Empty;
+
+    // Flowable's per-instance display name (`act_hi_procinst.name_`). Set at
+    // start time. Null when the run wasn't given a name.
+    public string? Name { get; set; }
 
     public string? WorkflowModelName { get; set; }
 
@@ -78,6 +89,9 @@ public sealed record class WorkflowExecutionSummary
 public sealed record class WorkflowExecutionDiagramDetail
 {
     public string ExecutionId { get; init; } = string.Empty;
+
+    // Display name from Flowable (mirrors WorkflowExecutionSummary.Name).
+    public string? Name { get; init; }
 
     public string BpmnXml { get; init; } = string.Empty;
 

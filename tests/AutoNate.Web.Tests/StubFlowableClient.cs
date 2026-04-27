@@ -40,11 +40,23 @@ internal sealed class StubFlowableClient : IFlowableClient
 
     public Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(
         string processDefinitionKey,
+        string? name = null,
         IReadOnlyDictionary<string, object?>? variables = null,
         CancellationToken cancellationToken = default)
     {
-        Calls.Add($"Start:{processDefinitionKey}");
-        return Task.FromResult(new FlowableProcessInstanceSummary());
+        Calls.Add($"Start:{processDefinitionKey}:{name ?? "(unnamed)"}");
+        return Task.FromResult(new FlowableProcessInstanceSummary { Name = name });
+    }
+
+    // Tests can seed this to assert the count-based auto-naming flow.
+    public Dictionary<string, int> InstanceCountsByDefinitionKey { get; } = new();
+
+    public Task<int> GetHistoricProcessInstanceCountByDefinitionKeyAsync(
+        string processDefinitionKey, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"CountByDefinitionKey:{processDefinitionKey}");
+        InstanceCountsByDefinitionKey.TryGetValue(processDefinitionKey, out var count);
+        return Task.FromResult(count);
     }
 
     public Task<FlowableProcessInstanceSummary?> GetProcessInstanceAsync(
@@ -130,6 +142,27 @@ internal sealed class StubFlowableClient : IFlowableClient
     public Dictionary<string, List<ProcessVariableUpdate>> VariableUpdatesByInstance { get; } = new();
 
     public Dictionary<(string ProcessInstanceId, string ActivityId), List<string>> CompletedAssigneesByActivity { get; } = new();
+
+    public List<(string SignalName, IReadOnlyDictionary<string, object?>? Variables)> BroadcastedSignals { get; } = new();
+
+    // Set to make BroadcastSignalAsync throw — tests for the dispatcher's
+    // error-swallowing path use this to simulate Flowable being unreachable
+    // without needing a separate IFlowableClient implementation.
+    public Exception? BroadcastSignalThrows { get; set; }
+
+    public Task BroadcastSignalAsync(
+        string signalName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"BroadcastSignal:{signalName}");
+        BroadcastedSignals.Add((signalName, variables));
+        if (BroadcastSignalThrows is not null)
+        {
+            throw BroadcastSignalThrows;
+        }
+        return Task.CompletedTask;
+    }
 
     public Task UpdateProcessVariablesAsync(
         string processInstanceId,

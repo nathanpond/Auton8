@@ -11,6 +11,11 @@ public static partial class WorkflowBpmnXml
     private static readonly XNamespace BpmndiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
     private static readonly XNamespace XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
     private static readonly XNamespace FlowableNamespace = "http://flowable.org/bpmn";
+
+    // Default Dapr topic for signal start events when the user doesn't override
+    // it on the signal in the modeler. External producers publish to this topic
+    // unless a workflow opts into a custom topic per signal.
+    public const string DefaultSignalTopic = "workflow.signals";
     private static readonly HashSet<string> ReplaceableTaskElementNames =
     [
         "task",
@@ -101,6 +106,7 @@ public static partial class WorkflowBpmnXml
             ?? throw new InvalidOperationException(BuildMissingProcessDefinitionMessage(document));
 
         EnsureFlowableNamespaceDeclared(document);
+        PruneOrphanSignalRoots(document);
 
         var oldProcessKey = processElement.Attribute("id")?.Value;
         var normalizedProcessKey = NormalizeProcessKey(processKey);
@@ -149,11 +155,14 @@ public static partial class WorkflowBpmnXml
                 return WorkflowBpmnValidationResult.WithError("The BPMN process must be marked as executable before deployment.");
             }
 
-            var scriptTaskErrors = BuildScriptTaskValidationErrors(document);
-            if (scriptTaskErrors.Count > 0)
+            var errors = new List<string>();
+            errors.AddRange(BuildScriptTaskValidationErrors(document));
+            errors.AddRange(BuildSignalStartEventValidationErrors(document));
+
+            if (errors.Count > 0)
             {
                 return new WorkflowBpmnValidationResult(
-                    scriptTaskErrors,
+                    errors,
                     BuildUnsupportedRuntimeWarnings(document));
             }
 
@@ -314,7 +323,171 @@ public static partial class WorkflowBpmnXml
             {
                 ApplySequenceFlowSnapshot(element, snapshot);
             }
+
+            if (string.Equals(element.Name.LocalName, "startEvent", StringComparison.Ordinal) &&
+                element.Element(BpmnNamespace + "signalEventDefinition") is not null)
+            {
+                ApplySignalStartEventSnapshot(document, element, snapshot);
+            }
         }
+    }
+
+    private static void ApplySignalStartEventSnapshot(XDocument document, XElement startEventElement, WorkflowElementSnapshot snapshot)
+    {
+        var signalEventDefinition = startEventElement.Element(BpmnNamespace + "signalEventDefinition");
+        if (signalEventDefinition is null)
+        {
+            return;
+        }
+
+        var trimmedSignalName = snapshot.SignalName?.Trim();
+        if (string.IsNullOrEmpty(trimmedSignalName))
+        {
+            // bpmn-js leaves the event with an unresolved signalRef when the
+            // user hasn't picked a name. Strip the signalRef so the XML at
+            // least parses cleanly; validation will surface the missing name.
+            signalEventDefinition.SetAttributeValue("signalRef", null);
+            return;
+        }
+
+        var trimmedTopic = string.IsNullOrWhiteSpace(snapshot.SignalTopic)
+            ? DefaultSignalTopic
+            : snapshot.SignalTopic.Trim();
+
+        var definitionsElement = document.Root!;
+        var signal = ResolveOrCreateSignalRoot(definitionsElement, trimmedSignalName);
+        signal.SetAttributeValue("name", trimmedSignalName);
+        signal.SetAttributeValue(FlowableNamespace + "topic", trimmedTopic);
+
+        signalEventDefinition.SetAttributeValue("signalRef", signal.Attribute("id")!.Value);
+    }
+
+    private static XElement ResolveOrCreateSignalRoot(XElement definitionsElement, string signalName)
+    {
+        var existing = definitionsElement
+            .Elements(BpmnNamespace + "signal")
+            .FirstOrDefault(element =>
+                string.Equals(element.Attribute("name")?.Value, signalName, StringComparison.Ordinal));
+
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var id = $"Signal_{Math.Abs(signalName.GetHashCode(StringComparison.Ordinal)):X}";
+        // Disambiguate if the slug collides with an unrelated existing signal.
+        var counter = 1;
+        var finalId = id;
+        while (definitionsElement.Elements(BpmnNamespace + "signal")
+                   .Any(s => string.Equals(s.Attribute("id")?.Value, finalId, StringComparison.Ordinal)))
+        {
+            finalId = $"{id}_{counter++}";
+        }
+
+        var signal = new XElement(BpmnNamespace + "signal", new XAttribute("id", finalId));
+        // Signals must come before <process> in the BPMN schema. Insert at the
+        // top of the definitions element to keep the document valid.
+        var firstProcess = definitionsElement.Elements(BpmnNamespace + "process").FirstOrDefault();
+        if (firstProcess is not null)
+        {
+            firstProcess.AddBeforeSelf(signal);
+        }
+        else
+        {
+            definitionsElement.Add(signal);
+        }
+
+        return signal;
+    }
+
+    // Removes <bpmn:signal> roots that are no longer referenced by any
+    // signalEventDefinition in the document. Runs before the per-snapshot
+    // apply step so renamed/cleared signals don't leak stale root entries.
+    private static void PruneOrphanSignalRoots(XDocument document)
+    {
+        var referencedIds = document
+            .Descendants(BpmnNamespace + "signalEventDefinition")
+            .Select(definition => definition.Attribute("signalRef")?.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var orphans = document.Root!
+            .Elements(BpmnNamespace + "signal")
+            .Where(signal =>
+            {
+                var id = signal.Attribute("id")?.Value;
+                return string.IsNullOrWhiteSpace(id) || !referencedIds.Contains(id);
+            })
+            .ToArray();
+
+        foreach (var orphan in orphans)
+        {
+            orphan.Remove();
+        }
+    }
+
+    // Reads (signalName, topic) tuples for every signal start event in the
+    // document. Used by the runtime registry to know which Dapr topics to
+    // subscribe on and which signal names to dispatch when a message arrives.
+    public static IReadOnlyList<WorkflowSignalRegistration> ExtractSignalRegistrations(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<WorkflowSignalRegistration>();
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch (Exception)
+        {
+            return Array.Empty<WorkflowSignalRegistration>();
+        }
+
+        var signalsById = document.Root?
+            .Elements(BpmnNamespace + "signal")
+            .Where(signal => !string.IsNullOrWhiteSpace(signal.Attribute("id")?.Value))
+            .ToDictionary(
+                signal => signal.Attribute("id")!.Value,
+                signal => signal,
+                StringComparer.Ordinal)
+            ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
+
+        var registrations = new Dictionary<(string Name, string Topic), WorkflowSignalRegistration>();
+
+        foreach (var startEvent in document.Descendants(BpmnNamespace + "startEvent"))
+        {
+            var signalEventDefinition = startEvent.Element(BpmnNamespace + "signalEventDefinition");
+            if (signalEventDefinition is null)
+            {
+                continue;
+            }
+
+            var signalRef = signalEventDefinition.Attribute("signalRef")?.Value;
+            if (string.IsNullOrWhiteSpace(signalRef) || !signalsById.TryGetValue(signalRef, out var signal))
+            {
+                continue;
+            }
+
+            var name = signal.Attribute("name")?.Value?.Trim();
+            if (string.IsNullOrEmpty(name))
+            {
+                continue;
+            }
+
+            var topic = signal.Attribute(FlowableNamespace + "topic")?.Value?.Trim();
+            if (string.IsNullOrWhiteSpace(topic))
+            {
+                topic = DefaultSignalTopic;
+            }
+
+            var key = (name, topic);
+            registrations.TryAdd(key, new WorkflowSignalRegistration(name, topic));
+        }
+
+        return registrations.Values.ToArray();
     }
 
     private static void ApplyScriptTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
@@ -468,6 +641,47 @@ public static partial class WorkflowBpmnXml
         return $"The BPMN XML does not contain a process definition. Root element: {rootName}. Payload preview: {preview}";
     }
 
+    private static IReadOnlyList<string> BuildSignalStartEventValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        var signalsById = document.Root?
+            .Elements(BpmnNamespace + "signal")
+            .Where(signal => !string.IsNullOrWhiteSpace(signal.Attribute("id")?.Value))
+            .ToDictionary(
+                signal => signal.Attribute("id")!.Value,
+                signal => signal,
+                StringComparer.Ordinal)
+            ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
+
+        foreach (var startEvent in document.Descendants(BpmnNamespace + "startEvent"))
+        {
+            var signalEventDefinition = startEvent.Element(BpmnNamespace + "signalEventDefinition");
+            if (signalEventDefinition is null)
+            {
+                continue;
+            }
+
+            var label = startEvent.Attribute("name")?.Value
+                ?? startEvent.Attribute("id")?.Value
+                ?? "Unnamed signal start event";
+
+            var signalRef = signalEventDefinition.Attribute("signalRef")?.Value;
+            if (string.IsNullOrWhiteSpace(signalRef) || !signalsById.TryGetValue(signalRef, out var signal))
+            {
+                errors.Add($"Signal start event '{label}' must specify an Event Type before publishing.");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(signal.Attribute("name")?.Value))
+            {
+                errors.Add($"Signal start event '{label}' must specify an Event Type before publishing.");
+            }
+        }
+
+        return errors;
+    }
+
     private static IReadOnlyList<string> BuildScriptTaskValidationErrors(XDocument document)
     {
         var errors = new List<string>();
@@ -534,6 +748,15 @@ public static partial class WorkflowBpmnXml
             if (localName.EndsWith("EventDefinition", StringComparison.Ordinal) &&
                 !localName.Equals("TerminateEventDefinition", StringComparison.Ordinal))
             {
+                // Signal start events are now first-class — only warn for
+                // signal event definitions that are NOT on a start event
+                // (boundary, intermediate, end events still trigger the warning).
+                if (localName.Equals("SignalEventDefinition", StringComparison.Ordinal) &&
+                    element.Parent?.Name == BpmnNamespace + "startEvent")
+                {
+                    continue;
+                }
+
                 eventDrivenBehaviors.Add(ToFriendlyElementName(localName));
             }
         }

@@ -1,11 +1,18 @@
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Signals;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Services.Workflow;
 
-public sealed class EfCoreWorkflowModelStore(IDbContextFactory<AutoNateDbContext> dbContextFactory) : IWorkflowModelStore
+public sealed class EfCoreWorkflowModelStore(
+    IDbContextFactory<AutoNateDbContext> dbContextFactory,
+    IWorkflowSignalRegistry signalRegistry,
+    IDaprStreamingSubscriber streamingSubscriber) : IWorkflowModelStore
 {
+    private readonly IWorkflowSignalRegistry _signalRegistry = signalRegistry;
+    private readonly IDaprStreamingSubscriber _streamingSubscriber = streamingSubscriber;
+
     public async Task<IReadOnlyList<WorkflowModel>> ListAsync(CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -36,6 +43,16 @@ public sealed class EfCoreWorkflowModelStore(IDbContextFactory<AutoNateDbContext
             .AsNoTracking()
             .OrderByDescending(model => model.UpdatedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
+
+        return entity?.ToModel();
+    }
+
+    public async Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.WorkflowModels
+            .AsNoTracking()
+            .FirstOrDefaultAsync(model => model.ProcessKey == processKey, cancellationToken);
 
         return entity?.ToModel();
     }
@@ -143,6 +160,14 @@ public sealed class EfCoreWorkflowModelStore(IDbContextFactory<AutoNateDbContext
         existingVersion.PublishedAtUtc = deployment.DeployedAtUtc.UtcDateTime;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Re-derive the topic→signal map from all currently-published workflows
+        // and ask the streaming subscriber to pick up any new topics or release
+        // ones that no longer back a published workflow. Streaming subscriptions
+        // mean these changes take effect without a sidecar restart.
+        await _signalRegistry.RefreshAsync(cancellationToken);
+        await _streamingSubscriber.SyncAsync(cancellationToken);
+
         return entity.ToModel();
     }
 

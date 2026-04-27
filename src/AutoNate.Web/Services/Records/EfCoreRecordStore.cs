@@ -106,7 +106,7 @@ public sealed class EfCoreRecordStore(
 
         var countSql = $"SELECT COUNT(*) AS \"Value\" FROM records WHERE {where}";
         var totalCount = await dbContext.Database
-            .SqlQueryRaw<long>(countSql, parameters.ToArray()!)
+            .SqlQueryRaw<long>(countSql, parameters.Select(p => p!).ToArray())
             .SingleAsync(cancellationToken);
 
         var pageSqlBuilder = new StringBuilder();
@@ -130,7 +130,7 @@ public sealed class EfCoreRecordStore(
         pageSqlBuilder.Append(" LIMIT ").Append(pageSize).Append(" OFFSET ").Append(page * pageSize);
 
         var rows = await dbContext.Database
-            .SqlQueryRaw<RecordRow>(pageSqlBuilder.ToString(), parameters.ToArray()!)
+            .SqlQueryRaw<RecordRow>(pageSqlBuilder.ToString(), parameters.Select(p => p!).ToArray())
             .ToListAsync(cancellationToken);
 
         var records = rows.Select(r => r.ToModel()).ToList();
@@ -189,7 +189,7 @@ public sealed class EfCoreRecordStore(
 
         var orderBy = ResolveOrderBy(sort);
 
-        var paramArray = parameters.ToArray()!;
+        var paramArray = parameters.Select(p => p!).ToArray();
         var countSql = $"SELECT COUNT(*) AS \"Value\" FROM records WHERE {where}";
         var totalCount = await dbContext.Database
             .SqlQueryRaw<long>(countSql, paramArray)

@@ -63,6 +63,8 @@ export type WorkflowElementSnapshot = {
   candidateUsers?: string[] | null;
   candidateGroups?: string[] | null;
   dueDate?: string | null;
+  signalName?: string | null;
+  signalTopic?: string | null;
 };
 
 export type PrepareWorkflowRequest = {

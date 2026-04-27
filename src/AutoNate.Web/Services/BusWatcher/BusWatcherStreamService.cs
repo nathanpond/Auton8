@@ -1,16 +1,20 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
-using AutoNate.Web.Configuration;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Primitives;
 
 namespace AutoNate.Web.Services.BusWatcher;
 
+// Owns the in-process and WebSocket fan-out for the workflow telemetry stream.
+//
+// Inbound messages arrive via the Dapr streaming subscriber (Services/Signals/
+// DaprStreamingSubscriber.cs), which calls PublishAsync to feed them in. From
+// there they reach two consumer types:
+//   - In-process subscribers via Subscribe(...) — used today only for tests
+//     and any future server-side consumers of the telemetry stream.
+//   - WebSocket clients connected at /ws/bus-watcher (the SPA's BusWatcher
+//     live page).
 public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> logger)
 {
-    public const string SubscriptionRoute = "/bus-watcher/messages";
     public const string WebSocketRoute = "/ws/bus-watcher";
     public const string TopicRoot = "workflow.execution";
     public const string TopicName = "workflow.execution.events";
@@ -24,33 +28,7 @@ public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> log
     private readonly ConcurrentDictionary<Guid, BusWatcherClientConnection> _connections = new();
     private readonly ConcurrentDictionary<Guid, Func<BusWatcherMessage, Task>> _messageSubscribers = new();
 
-    public object[] GetSubscriptions(DaprOptions options)
-    {
-        return
-        [
-            new
-            {
-                pubsubname = options.PubSubName,
-                topic = TopicName,
-                routes = new Dictionary<string, string>
-                {
-                    ["default"] = SubscriptionRoute
-                },
-                metadata = new Dictionary<string, string>
-                {
-                    ["rawPayload"] = "true"
-                }
-            }
-        ];
-    }
-
-    public async Task PublishAsync(HttpContext context, CancellationToken cancellationToken)
-    {
-        var message = await CreateMessageAsync(context, cancellationToken);
-        await PublishMessageAsync(message, cancellationToken);
-    }
-
-    private async Task PublishMessageAsync(BusWatcherMessage message, CancellationToken cancellationToken)
+    public async Task PublishAsync(BusWatcherMessage message, CancellationToken cancellationToken)
     {
         _logger.LogInformation(
             "BusWatcher publishing message for topic {Topic} to {SubscriberCount} in-process subscribers and {WebSocketCount} websocket clients.",
@@ -136,56 +114,10 @@ public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> log
         }
     }
 
-    private static async Task<BusWatcherMessage> CreateMessageAsync(HttpContext context, CancellationToken cancellationToken)
-    {
-        context.Request.EnableBuffering();
-
-        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-        var payload = await reader.ReadToEndAsync(cancellationToken);
-        context.Request.Body.Position = 0;
-
-        return new BusWatcherMessage(
-            DateTimeOffset.UtcNow,
-            ResolveTopic(context.Request),
-            context.Request.ContentType,
-            ResolveHeaders(context.Request.Headers),
-            TryFormatJson(payload));
-    }
-
-    private static string ResolveTopic(HttpRequest request)
-    {
-        return TryGetHeaderValue(request.Headers, "ce-topic")
-               ?? TryGetHeaderValue(request.Headers, "topic")
-               ?? TryGetHeaderValue(request.Headers, "x-dapr-topic")
-               ?? TopicName;
-    }
-
-    private static Dictionary<string, string> ResolveHeaders(IHeaderDictionary headers)
-    {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var header in headers)
-        {
-            if (header.Key.StartsWith("ce-", StringComparison.OrdinalIgnoreCase)
-                || header.Key.Equals("topic", StringComparison.OrdinalIgnoreCase)
-                || header.Key.Equals("x-dapr-topic", StringComparison.OrdinalIgnoreCase)
-                || header.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase))
-            {
-                result[header.Key] = header.Value.ToString();
-            }
-        }
-
-        return result;
-    }
-
-    private static string? TryGetHeaderValue(IHeaderDictionary headers, string key)
-    {
-        return headers.TryGetValue(key, out var values) && !StringValues.IsNullOrEmpty(values)
-            ? values.ToString()
-            : null;
-    }
-
-    private static string TryFormatJson(string payload)
+    // Pretty-formats a JSON payload for display. The streaming subscriber
+    // pre-formats the telemetry stream for the BusWatcher live page; non-JSON
+    // payloads round-trip unchanged.
+    public static string FormatJson(string payload)
     {
         if (string.IsNullOrWhiteSpace(payload))
         {

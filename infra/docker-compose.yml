@@ -46,7 +46,7 @@ services:
       start_period: 30s
 
   flowable-dapr:
-    image: daprio/daprd:1.17.4
+    image: daprio/daprd:1.17.5
     container_name: autonate-flowable-dapr
     command:
       - ./daprd
@@ -124,14 +124,14 @@ services:
       - ./scripts/bootstrap-jetstream.sh:/scripts/bootstrap-jetstream.sh:ro
 
   dapr-placement:
-    image: daprio/placement:1.17.4
+    image: daprio/placement:1.17.5
     container_name: autonate-dapr-placement
     command: ["./placement", "--port", "50006"]
     ports:
       - "50006:50006"
 
   dapr-scheduler:
-    image: daprio/scheduler:1.17.4
+    image: daprio/scheduler:1.17.5
     container_name: autonate-dapr-scheduler
     command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
     ports:

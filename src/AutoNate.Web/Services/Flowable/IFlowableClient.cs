@@ -8,7 +8,11 @@ public interface IFlowableClient
 
     Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
 
-    Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(string processDefinitionKey, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
+    Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(string processDefinitionKey, string? name = null, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
+
+    // Count of all process instances (running + finished) for a definition
+    // key. Drives "ModelName (N+1)" auto-naming on workflow start.
+    Task<int> GetHistoricProcessInstanceCountByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
 
     Task<FlowableProcessInstanceSummary?> GetProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
@@ -39,4 +43,9 @@ public interface IFlowableClient
     Task UpdateProcessVariablesAsync(string processInstanceId, IReadOnlyList<ProcessVariableUpdate> updates, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<string>> GetCompletedAssigneesForActivityAsync(string processInstanceId, string activityId, CancellationToken cancellationToken = default);
+
+    // Broadcasts a Flowable signal. Every deployed process whose signal start
+    // event references this name spawns a new instance. Variables become
+    // process variables on each spawned instance.
+    Task BroadcastSignalAsync(string signalName, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
 }

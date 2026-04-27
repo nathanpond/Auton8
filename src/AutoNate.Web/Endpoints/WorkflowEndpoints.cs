@@ -112,10 +112,23 @@ public static class WorkflowEndpoints
             string processKey,
             StartInstanceRequest? request,
             IFlowableClient flowable,
+            IWorkflowModelStore store,
             CancellationToken cancellationToken) =>
         {
+            // Caller can pass an explicit Name (richer call sites will). When
+            // they don't (Studio "Start Instance" button) we generate
+            // "ModelName (N)" using Flowable's running total of executions
+            // for this definition. Best-effort: if the model lookup or count
+            // fails, fall back to letting Flowable assign no name.
+            var name = request?.Name?.Trim();
+            if (string.IsNullOrEmpty(name))
+            {
+                name = await TryGenerateInstanceNameAsync(flowable, store, processKey, cancellationToken);
+            }
+
             var instance = await flowable.StartProcessInstanceAsync(
                 processKey,
+                name,
                 request?.Variables,
                 cancellationToken);
             return Results.Ok(instance);
@@ -124,7 +137,20 @@ public static class WorkflowEndpoints
         return app;
     }
 
+    private static async Task<string?> TryGenerateInstanceNameAsync(
+        IFlowableClient flowable,
+        IWorkflowModelStore store,
+        string processKey,
+        CancellationToken cancellationToken)
+    {
+        var model = await store.GetByProcessKeyAsync(processKey, cancellationToken);
+        var label = string.IsNullOrWhiteSpace(model?.Name) ? processKey : model!.Name;
+
+        var existing = await flowable.GetHistoricProcessInstanceCountByDefinitionKeyAsync(processKey, cancellationToken);
+        return $"{label} ({existing + 1})";
+    }
+
     public sealed record PublishResponse(WorkflowModel Model, WorkflowDeploymentInfo Deployment);
 
-    public sealed record StartInstanceRequest(Dictionary<string, object?>? Variables);
+    public sealed record StartInstanceRequest(string? Name, Dictionary<string, object?>? Variables);
 }

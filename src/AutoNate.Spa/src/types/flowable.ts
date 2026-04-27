@@ -21,6 +21,9 @@ export type ProcessVariableUpdate = {
 
 export type WorkflowExecutionSummary = {
   id: string;
+  // Display name set when the execution was started (e.g. "Lead Qualification (3)").
+  // Null when no name was set; SPA falls back to the id.
+  name: string | null;
   workflowModelName: string | null;
   startedAtUtc: string | null;
   lastActivityAtUtc: string | null;
@@ -30,6 +33,8 @@ export type WorkflowExecutionSummary = {
 
 export type WorkflowExecutionDiagramDetail = {
   executionId: string;
+  // Same display name as on the summary; null if the run wasn't named.
+  name: string | null;
   bpmnXml: string;
   completedActivityIds: string[];
   currentActivityIds: string[];
@@ -45,6 +50,8 @@ export type FlowableTaskSummary = {
   taskDefinitionKey: string | null;
   assignee: string | null;
   processInstanceId: string | null;
+  // Per-execution display name. Null when the run wasn't named.
+  processInstanceName: string | null;
   processDefinitionId: string | null;
   processDefinitionName: string | null;
   createdAtUtc: string | null;
@@ -53,6 +60,8 @@ export type FlowableTaskSummary = {
 
 export type FlowableProcessInstanceSummary = {
   id: string;
+  // Display name set on the run, if any.
+  name: string | null;
   processDefinitionId: string;
   activityId: string | null;
   suspended: boolean;

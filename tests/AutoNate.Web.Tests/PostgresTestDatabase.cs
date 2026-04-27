@@ -8,6 +8,7 @@ using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
+using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -37,7 +38,44 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
     public EfCoreLocalUserStore CreateLocalUserStore() => new(CreateDbContextFactory());
 
-    public EfCoreWorkflowModelStore CreateWorkflowStore() => new(CreateDbContextFactory());
+    public EfCoreWorkflowModelStore CreateWorkflowStore() =>
+        CreateWorkflowStore(new RecordingWorkflowSignalRegistry(), new NoopStreamingSubscriber());
+
+    public EfCoreWorkflowModelStore CreateWorkflowStore(
+        IWorkflowSignalRegistry signalRegistry,
+        IDaprStreamingSubscriber streamingSubscriber) =>
+        new(CreateDbContextFactory(), signalRegistry, streamingSubscriber);
+
+    // Minimal in-memory test double. Counts RefreshAsync invocations so tests
+    // can assert that publish triggers a refresh; doesn't actually parse XML.
+    internal sealed class RecordingWorkflowSignalRegistry : IWorkflowSignalRegistry
+    {
+        private static readonly IReadOnlySet<string> Empty =
+            new HashSet<string>(StringComparer.Ordinal);
+
+        public int RefreshCount { get; private set; }
+
+        public IReadOnlyCollection<string> GetSubscribedTopics() => Array.Empty<string>();
+
+        public IReadOnlySet<string> GetSignalNamesForTopic(string topic) => Empty;
+
+        public Task RefreshAsync(CancellationToken cancellationToken = default)
+        {
+            RefreshCount++;
+            return Task.CompletedTask;
+        }
+    }
+
+    internal sealed class NoopStreamingSubscriber : IDaprStreamingSubscriber
+    {
+        public int SyncCount { get; private set; }
+
+        public Task SyncAsync(CancellationToken cancellationToken)
+        {
+            SyncCount++;
+            return Task.CompletedTask;
+        }
+    }
 
     public EfCoreRecordTypeStore CreateRecordTypeStore() =>
         new(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry());

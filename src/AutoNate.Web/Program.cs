@@ -15,7 +15,9 @@ using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Menus;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
+using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.Workflow;
+using Dapr.Messaging.PublishSubscribe.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication;
 using System.Security.Claims;
@@ -70,6 +72,23 @@ builder.Services.AddOptions<DaprOptions>()
     .BindConfiguration(DaprOptions.SectionName);
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddSingleton<DaprSidecarProbe>();
+builder.Services.AddSingleton<IWorkflowSignalRegistry, EfCoreWorkflowSignalRegistry>();
+builder.Services.AddSingleton<WorkflowSignalDispatcher>();
+builder.Services.AddDaprPubSubClient((sp, b) =>
+{
+    var options = sp.GetRequiredService<IOptions<DaprOptions>>().Value;
+    if (!string.IsNullOrWhiteSpace(options.GrpcEndpoint))
+    {
+        b.UseGrpcEndpoint(options.GrpcEndpoint);
+    }
+    if (!string.IsNullOrWhiteSpace(options.HttpEndpoint))
+    {
+        b.UseHttpEndpoint(options.HttpEndpoint);
+    }
+});
+builder.Services.AddSingleton<DaprStreamingSubscriber>();
+builder.Services.AddSingleton<IDaprStreamingSubscriber>(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
 builder.Services.AddDbContextFactory<AutoNateDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("Default")
@@ -297,18 +316,11 @@ if (app.Environment.IsDevelopment())
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapGet(
-    "/dapr/subscribe",
-    (IOptions<DaprOptions> options, BusWatcherStreamService busWatcherStreamService) =>
-        Results.Json(busWatcherStreamService.GetSubscriptions(options.Value)));
-app.MapPost(
-        BusWatcherStreamService.SubscriptionRoute,
-        async (HttpContext context, BusWatcherStreamService busWatcherStreamService, CancellationToken cancellationToken) =>
-        {
-            await busWatcherStreamService.PublishAsync(context, cancellationToken);
-            return Results.Ok();
-        })
-    .DisableAntiforgery();
+// Bus delivery is now via Dapr.Messaging streaming subscriptions owned by
+// DaprStreamingSubscriber. The historical /dapr/subscribe manifest and the
+// /bus-watcher/messages POST endpoint are gone — there's nothing left to
+// declare statically and nothing pushing into the BusWatcher over HTTP. Only
+// the WebSocket fan-out for the SPA's live BusWatcher page remains.
 app.Map(
     BusWatcherStreamService.WebSocketRoute,
     async (HttpContext context, BusWatcherStreamService busWatcherStreamService, CancellationToken cancellationToken) =>
@@ -373,6 +385,7 @@ app.MapPost(
 app.MapAuthEndpoints();
 app.MapHealthEndpoints();
 app.MapUserEndpoints();
+app.MapEventCatalogEndpoints();
 app.MapWorkflowEndpoints();
 app.MapExecutionEndpoints();
 app.MapRecordTypeEndpoints();

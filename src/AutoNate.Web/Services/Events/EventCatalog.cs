@@ -1,0 +1,150 @@
+using AutoNate.Web.Services.BusWatcher;
+
+namespace AutoNate.Web.Services.Events;
+
+// Hardcoded catalog of every event AutoNate's services publish to the bus.
+// Today only the Flowable extension publishes (on `workflow.execution.events`),
+// so this is a one-topic catalog. Adding new publishers means appending entries
+// here; the SPA Events page and the signal start event modal both consume it.
+public static class EventCatalog
+{
+    public static readonly EventCatalogPayloadField[] PayloadFields =
+    [
+        new("eventId", "string (UUID)", "Unique identifier for this event occurrence."),
+        new("eventType", "string", "Friendly event type — one of the values listed below (e.g. 'task.created')."),
+        new("occurredAtUtc", "string (ISO 8601)", "UTC timestamp at which the engine emitted the event after transaction commit."),
+        new("processInstanceId", "string", "Flowable process instance ID. Identifies the running workflow."),
+        new("processDefinitionId", "string", "Versioned Flowable process definition ID (e.g. 'my-process:3:abc...')."),
+        new("processDefinitionKey", "string", "Stable BPMN process key — the same across versions of the same model."),
+        new("processDefinitionName", "string", "Human-readable process definition name."),
+        new("activityId", "string | null", "BPMN element ID for the activity in scope (null for some process-level events)."),
+        new("activityName", "string | null", "Display name of the activity in scope."),
+        new("taskId", "string | null", "User task ID — populated only on task.* events."),
+        new("taskName", "string | null", "User task name — populated only on task.* events."),
+        new("assignee", "string | null", "User the task is currently assigned to — populated only on task.* events."),
+        new("tenantId", "string | null", "Flowable tenant identifier when multi-tenancy is enabled."),
+        new("rawFlowableEventType", "string", "Original Flowable engine event type (e.g. 'TASK_CREATED'). Useful for debugging."),
+        new("sourceAppId", "string", "Identifier of the publishing application (configured in the Flowable extension).")
+    ];
+
+    public static readonly EventCatalogTransport[] Transports =
+    [
+        new(
+            BusWatcherStreamService.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). CloudEvents envelope, JSON payload.",
+            "The autonate-flowable-events extension running inside Flowable. The application itself does not publish workflow events directly.")
+    ];
+
+    public static readonly EventCatalogCategory[] Categories =
+    [
+        new(
+            "Process",
+            "Lifecycle events for a workflow process instance — emitted once Flowable commits the underlying transaction.",
+            [
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "process.started",
+                    "A new process instance has begun execution.",
+                    "Flowable raises PROCESS_STARTED, typically after a successful POST to start a workflow or a timer/message start event.",
+                    [
+                        "processInstanceId, processDefinitionId, processDefinitionKey, processDefinitionName populated.",
+                        "activityId reflects the BPMN start event element (no taskId)."
+                    ]),
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "process.completed",
+                    "A process instance reached a normal end event and finished successfully.",
+                    "Flowable raises PROCESS_COMPLETED on a successful end event.",
+                    ["No taskId. activityId is the end event element."]),
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "process.completed.error",
+                    "A process instance ended via an error end event.",
+                    "Flowable raises PROCESS_COMPLETED_WITH_ERROR_END_EVENT — the workflow terminated through an error boundary path.",
+                    []),
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "process.cancelled",
+                    "A process instance was cancelled before it could complete.",
+                    "Flowable raises PROCESS_CANCELLED — e.g. an admin/API delete, terminate end event, or cancellation boundary.",
+                    [])
+            ]),
+        new(
+            "Activity",
+            "Step-level events emitted as control flows through individual BPMN elements (service tasks, gateways, sub-processes, etc.).",
+            [
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "activity.started",
+                    "An activity (BPMN element) began execution.",
+                    "Flowable raises ACTIVITY_STARTED for the element.",
+                    ["activityId and activityName identify the BPMN element."]),
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "activity.completed",
+                    "An activity finished.",
+                    "Flowable raises ACTIVITY_COMPLETED for the element.",
+                    [])
+            ]),
+        new(
+            "User Task",
+            "Events for human-assigned tasks. These are the events most often used to drive inbox/UI updates.",
+            [
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "task.created",
+                    "A new user task is now waiting on a human.",
+                    "Flowable raises TASK_CREATED on entry to a user task element.",
+                    [
+                        "taskId, taskName populated.",
+                        "assignee populated if the task is created with an assignee already set."
+                    ]),
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "task.assigned",
+                    "A task's assignee has changed (or been set for the first time).",
+                    "Flowable raises TASK_ASSIGNED whenever the task's assignee field is set or updated.",
+                    ["assignee reflects the new owner."]),
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "task.completed",
+                    "A user task was completed and the workflow can move forward.",
+                    "Flowable raises TASK_COMPLETED.",
+                    [
+                        "Includes the assignee that completed the task in 'assignee'.",
+                        "Note: also fired by the 'force complete' admin action."
+                    ])
+            ]),
+        new(
+            "Job",
+            "Events surfaced by the Flowable async job executor — useful for surfacing background failures.",
+            [
+                new EventCatalogEntry(
+                    BusWatcherStreamService.TopicName,
+                    "job.execution.failed",
+                    "A Flowable async job (timer, async continuation, etc.) threw an exception.",
+                    "Flowable raises JOB_EXECUTION_FAILURE. Typically retried by the engine; surfaced here so operators can see failures in real time.",
+                    [])
+            ])
+    ];
+
+    // Flat (topic, eventType) projection for autocomplete consumers.
+    public static IEnumerable<EventCatalogEntry> AllEntries =>
+        Categories.SelectMany(category => category.Events);
+}
+
+public sealed record EventCatalogTransport(string Topic, string Description, string Source);
+
+public sealed record EventCatalogPayloadField(string Name, string Type, string Description);
+
+public sealed record EventCatalogCategory(
+    string Title,
+    string Description,
+    IReadOnlyList<EventCatalogEntry> Events);
+
+public sealed record EventCatalogEntry(
+    string Topic,
+    string EventType,
+    string Summary,
+    string FiresWhen,
+    IReadOnlyList<string> PayloadHighlights);

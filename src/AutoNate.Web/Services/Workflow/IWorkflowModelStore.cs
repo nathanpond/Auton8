@@ -10,6 +10,8 @@ public interface IWorkflowModelStore
 
     Task<WorkflowModel?> GetMostRecentAsync(CancellationToken cancellationToken = default);
 
+    Task<WorkflowModel?> GetByProcessKeyAsync(string processKey, CancellationToken cancellationToken = default);
+
     Task<WorkflowModel> SaveAsync(WorkflowModel model, CancellationToken cancellationToken = default);
 
     Task<WorkflowModel> PublishAsync(

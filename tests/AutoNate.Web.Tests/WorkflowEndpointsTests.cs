@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using AutoNate.Web.Endpoints;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Workflow;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -171,7 +172,38 @@ public sealed class WorkflowEndpointsTests
     }
 
     [Fact]
-    public async Task StartProcessInstance_DelegatesToFlowableStub()
+    public async Task StartProcessInstance_AutoNamesUsingModelNameAndCount_WhenRequestNameIsMissing()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        // Seed a workflow model so the auto-name lookup finds a label.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IWorkflowModelStore>();
+            await store.SaveAsync(new WorkflowModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "Lead Qualification",
+                ProcessKey = "my_flow",
+                BpmnXml = string.Empty
+            });
+        }
+
+        // Three existing runs → next auto-name should be "(4)".
+        factory.FlowableStub.InstanceCountsByDefinitionKey["my_flow"] = 3;
+
+        var response = await client.PostAsJsonAsync(
+            "/api/workflows/my_flow/start",
+            new WorkflowEndpoints.StartInstanceRequest(null, null));
+        response.EnsureSuccessStatusCode();
+
+        Assert.Contains("Start:my_flow:Lead Qualification (4)", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task StartProcessInstance_PassesExplicitName_VerbatimToFlowable()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
         var client = factory.CreateClient();
@@ -179,10 +211,12 @@ public sealed class WorkflowEndpointsTests
 
         var response = await client.PostAsJsonAsync(
             "/api/workflows/my_flow/start",
-            new WorkflowEndpoints.StartInstanceRequest(null));
+            new WorkflowEndpoints.StartInstanceRequest("Custom Run Label", null));
         response.EnsureSuccessStatusCode();
 
-        Assert.Contains("Start:my_flow", factory.FlowableStub.Calls);
+        Assert.Contains("Start:my_flow:Custom Run Label", factory.FlowableStub.Calls);
+        // No count lookup when caller supplied a name.
+        Assert.DoesNotContain(factory.FlowableStub.Calls, c => c.StartsWith("CountByDefinitionKey:"));
     }
 
     private static async Task PrimeAuthAsync(HttpClient client)

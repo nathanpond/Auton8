@@ -72,28 +72,50 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             };
     }
 
-    public async Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(string processDefinitionKey, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default)
+    public async Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(string processDefinitionKey, string? name = null, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default)
     {
+        // Build the body explicitly so an absent name omits the field rather
+        // than sending an explicit null — Flowable treats them differently.
+        var payload = new Dictionary<string, object?>
+        {
+            ["processDefinitionKey"] = processDefinitionKey,
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            payload["name"] = name;
+        }
+
         using var response = await _httpClient.PostAsJsonAsync(
             "service/runtime/process-instances",
-            new
-            {
-                processDefinitionKey,
-                variables = ToFlowableVariables(variables)
-            },
+            payload,
             cancellationToken);
 
         await EnsureSuccessAsync(response, "start the process instance");
 
-        var payload = await DeserializeAsync<FlowableProcessInstanceResponse>(response, cancellationToken);
+        var responsePayload = await DeserializeAsync<FlowableProcessInstanceResponse>(response, cancellationToken);
         return new FlowableProcessInstanceSummary
         {
-            Id = payload.Id ?? string.Empty,
-            ProcessDefinitionId = payload.ProcessDefinitionId ?? string.Empty,
-            ActivityId = payload.ActivityId,
-            Suspended = payload.Suspended,
-            StartUserId = payload.StartUserId
+            Id = responsePayload.Id ?? string.Empty,
+            Name = string.IsNullOrWhiteSpace(responsePayload.Name) ? null : responsePayload.Name,
+            ProcessDefinitionId = responsePayload.ProcessDefinitionId ?? string.Empty,
+            ActivityId = responsePayload.ActivityId,
+            Suspended = responsePayload.Suspended,
+            StartUserId = responsePayload.StartUserId
         };
+    }
+
+    public async Task<int> GetHistoricProcessInstanceCountByDefinitionKeyAsync(string processDefinitionKey, CancellationToken cancellationToken = default)
+    {
+        // Smallest possible response — we only need the `total` field, so
+        // ask for one row.
+        var url = $"service/history/historic-process-instances?processDefinitionKey={Uri.EscapeDataString(processDefinitionKey)}&size=1";
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "count historic process instances by definition key");
+
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(response, cancellationToken);
+        return payload.Total;
     }
 
     public async Task<FlowableProcessInstanceSummary?> GetProcessInstanceAsync(string processInstanceId, CancellationToken cancellationToken = default)
@@ -110,6 +132,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         return new FlowableProcessInstanceSummary
         {
             Id = payload.Id ?? string.Empty,
+            Name = string.IsNullOrWhiteSpace(payload.Name) ? null : payload.Name,
             ProcessDefinitionId = payload.ProcessDefinitionId ?? string.Empty,
             ActivityId = payload.ActivityId,
             Suspended = payload.Suspended,
@@ -206,6 +229,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                 return new WorkflowExecutionSummary
                 {
                     Id = instance.Id!,
+                    Name = string.IsNullOrWhiteSpace(instance.Name) ? null : instance.Name,
                     WorkflowModelName = workflowModelName,
                     StartedAtUtc = instance.StartTime,
                     LastActivityAtUtc = lastActivityAt,
@@ -362,6 +386,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         return new WorkflowExecutionDiagramDetail
         {
             ExecutionId = processInstanceId,
+            Name = string.IsNullOrWhiteSpace(processInstance.Name) ? null : processInstance.Name,
             BpmnXml = bpmnXml,
             CompletedActivityIds = completedActivityIds,
             CurrentActivityIds = currentActivityIds,
@@ -451,17 +476,23 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(response, "query runtime tasks");
 
         var payload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(response, cancellationToken);
+        var processInstanceNames = await GetProcessInstanceNamesByIdAsync(payload.Data, cancellationToken);
         return payload.Data
-            .Select(task => new FlowableTaskSummary
+            .Select(task =>
             {
-                Id = task.Id ?? string.Empty,
-                Name = task.Name ?? string.Empty,
-                TaskDefinitionKey = task.TaskDefinitionKey,
-                Assignee = task.Assignee,
-                ProcessInstanceId = task.ProcessInstanceId,
-                ProcessDefinitionId = task.ProcessDefinitionId,
-                CreatedAtUtc = task.CreateTime,
-                DueDate = task.DueDate
+                processInstanceNames.TryGetValue(task.ProcessInstanceId ?? string.Empty, out var instanceName);
+                return new FlowableTaskSummary
+                {
+                    Id = task.Id ?? string.Empty,
+                    Name = task.Name ?? string.Empty,
+                    TaskDefinitionKey = task.TaskDefinitionKey,
+                    Assignee = task.Assignee,
+                    ProcessInstanceId = task.ProcessInstanceId,
+                    ProcessInstanceName = FirstNonEmpty(task.ProcessInstanceName, instanceName),
+                    ProcessDefinitionId = task.ProcessDefinitionId,
+                    CreatedAtUtc = task.CreateTime,
+                    DueDate = task.DueDate
+                };
             })
             .ToArray();
     }
@@ -496,12 +527,18 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             mergedById.TryAdd(task.Id, task);
         }
 
-        var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(mergedById.Values, cancellationToken);
+        var processDefinitionNamesTask = GetProcessDefinitionNamesByIdAsync(mergedById.Values, cancellationToken);
+        var processInstanceNamesTask = GetProcessInstanceNamesByIdAsync(mergedById.Values, cancellationToken);
+        await Task.WhenAll(processDefinitionNamesTask, processInstanceNamesTask);
+
+        var processDefinitionNames = processDefinitionNamesTask.Result;
+        var processInstanceNames = processInstanceNamesTask.Result;
 
         return mergedById.Values
             .Select(task =>
             {
                 processDefinitionNames.TryGetValue(task.ProcessDefinitionId ?? string.Empty, out var definitionName);
+                processInstanceNames.TryGetValue(task.ProcessInstanceId ?? string.Empty, out var instanceName);
                 return new FlowableTaskSummary
                 {
                     Id = task.Id ?? string.Empty,
@@ -509,6 +546,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                     TaskDefinitionKey = task.TaskDefinitionKey,
                     Assignee = task.Assignee,
                     ProcessInstanceId = task.ProcessInstanceId,
+                    ProcessInstanceName = FirstNonEmpty(task.ProcessInstanceName, instanceName),
                     ProcessDefinitionId = task.ProcessDefinitionId,
                     ProcessDefinitionName = definitionName,
                     CreatedAtUtc = task.CreateTime,
@@ -518,6 +556,52 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             .OrderByDescending(task => task.CreatedAtUtc ?? DateTimeOffset.MinValue)
             .ThenBy(task => task.Id, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    // Backfill helper: for any tasks whose runtime response didn't include a
+    // processInstanceName, look it up in history. Only fetches the unique
+    // ids that need it. Returns an id→name map (entries with no name found
+    // or already populated are simply absent).
+    private async Task<Dictionary<string, string>> GetProcessInstanceNamesByIdAsync(
+        IEnumerable<FlowableTaskResponse> tasks,
+        CancellationToken cancellationToken)
+    {
+        var idsNeedingLookup = tasks
+            .Where(task => string.IsNullOrWhiteSpace(task.ProcessInstanceName)
+                        && !string.IsNullOrWhiteSpace(task.ProcessInstanceId))
+            .Select(task => task.ProcessInstanceId!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var namesById = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (idsNeedingLookup.Length == 0)
+        {
+            return namesById;
+        }
+
+        var fetched = await Task.WhenAll(idsNeedingLookup.Select(async id =>
+        {
+            using var response = await _httpClient.GetAsync(
+                $"service/history/historic-process-instances/{Uri.EscapeDataString(id)}",
+                cancellationToken);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return (id, name: (string?)null);
+            }
+            await EnsureSuccessAsync(response, $"query historic process instance '{id}'");
+            var payload = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(response, cancellationToken);
+            return (id, name: string.IsNullOrWhiteSpace(payload.Name) ? null : payload.Name);
+        }));
+
+        foreach (var (id, name) in fetched)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                namesById[id] = name!;
+            }
+        }
+
+        return namesById;
     }
 
     public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUsersAsync(
@@ -614,6 +698,26 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, "update the process variables");
+    }
+
+    public async Task BroadcastSignalAsync(
+        string signalName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["signalName"] = signalName,
+            ["async"] = false,
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/runtime/signals",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"broadcast signal '{signalName}'");
     }
 
     public async Task<IReadOnlyList<string>> GetCompletedAssigneesForActivityAsync(
@@ -800,6 +904,9 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     private sealed class FlowableListResponse<T>
     {
         public List<T> Data { get; init; } = [];
+
+        // Flowable echoes the unpaged total on every list response.
+        public int Total { get; init; }
     }
 
     private sealed class FlowableDeploymentResponse
@@ -826,6 +933,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     {
         public string? Id { get; init; }
 
+        public string? Name { get; init; }
+
         public string? ProcessDefinitionId { get; init; }
 
         public string? ActivityId { get; init; }
@@ -838,6 +947,9 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     private sealed class FlowableHistoricProcessInstanceResponse
     {
         public string? Id { get; init; }
+
+        // Per-instance display name set when the run was started. Often null.
+        public string? Name { get; init; }
 
         public string? ProcessDefinitionId { get; init; }
 
@@ -895,6 +1007,10 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? Assignee { get; init; }
 
         public string? ProcessInstanceId { get; init; }
+
+        // Some Flowable versions surface the per-instance name on the runtime
+        // task response; backfilled from history if missing.
+        public string? ProcessInstanceName { get; init; }
 
         public string? ProcessDefinitionId { get; init; }
 

@@ -22,6 +22,7 @@ import { getCompletedAssigneesForActivity } from "@/api/executions";
 import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { FlowableTaskSummary, WorkflowExecutionSummary } from "@/types/flowable";
+import ConfirmModal from "@/components/ConfirmModal";
 import ProcessVariablesPanel from "./ProcessVariablesPanel";
 import "./WorkflowExecutions.css";
 
@@ -33,6 +34,9 @@ export default function WorkflowExecutions() {
   const { data: statusAppearance = [] } = useStatusAppearance();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    { kind: "cancel" | "delete"; execution: WorkflowExecutionSummary } | null
+  >(null);
 
   const deleteExecution = useDeleteExecution();
   const cancelExecution = useCancelExecution();
@@ -65,36 +69,39 @@ export default function WorkflowExecutions() {
 
   const { status: busStatus } = useBusConnection({ onMessage: onBusMessage });
 
-  const onDelete = async (execution: WorkflowExecutionSummary) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete workflow execution '${execution.id}'? This will permanently remove it from AutoNate and Flowable.`
-    );
-    if (!confirmed) return;
+  const requestDelete = (execution: WorkflowExecutionSummary) => {
+    setPendingAction({ kind: "delete", execution });
+  };
+
+  const requestCancel = (execution: WorkflowExecutionSummary) => {
+    setPendingAction({ kind: "cancel", execution });
+  };
+
+  const confirmPendingAction = async () => {
+    if (!pendingAction) return;
+    const { kind, execution } = pendingAction;
 
     try {
-      await deleteExecution.mutateAsync(execution.id);
-      if (selectedId === execution.id) {
-        setSelectedId(null);
+      if (kind === "delete") {
+        await deleteExecution.mutateAsync(execution.id);
+        if (selectedId === execution.id) {
+          setSelectedId(null);
+        }
+        setFlash({ kind: "success", message: `Execution '${execution.id}' was deleted.` });
+      } else {
+        await cancelExecution.mutateAsync(execution.id);
+        setFlash({ kind: "success", message: `Execution '${execution.id}' was cancelled.` });
       }
-      setFlash({ kind: "success", message: `Execution '${execution.id}' was deleted.` });
+      setPendingAction(null);
     } catch (err) {
       setFlash({ kind: "error", message: describeError(err) });
+      setPendingAction(null);
     }
   };
 
-  const onCancel = async (execution: WorkflowExecutionSummary) => {
-    const confirmed = window.confirm(
-      `Cancel workflow execution '${execution.id}'? It will stop and be marked as cancelled.`
-    );
-    if (!confirmed) return;
-
-    try {
-      await cancelExecution.mutateAsync(execution.id);
-      setFlash({ kind: "success", message: `Execution '${execution.id}' was cancelled.` });
-    } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
-    }
-  };
+  const pendingActionInFlight =
+    (pendingAction?.kind === "delete" && deleteExecution.isPending) ||
+    (pendingAction?.kind === "cancel" && cancelExecution.isPending);
 
   return (
     <>
@@ -145,7 +152,7 @@ export default function WorkflowExecutions() {
             <table className="table table-hover align-middle workflow-executions-table">
               <thead>
                 <tr>
-                  <th scope="col">Execution ID</th>
+                  <th scope="col">Execution</th>
                   <th scope="col">Workflow Model</th>
                   <th scope="col">Started</th>
                   <th scope="col">Last Activity Date</th>
@@ -170,13 +177,21 @@ export default function WorkflowExecutions() {
                   const cancelInFlight =
                     cancelExecution.isPending && cancelExecution.variables === execution.id;
 
+                  const displayName = execution.name ?? execution.id;
                   return (
                     <tr
                       key={execution.id}
                       className="workflow-execution-row"
                       onClick={() => setSelectedId(execution.id)}
                     >
-                      <td className="workflow-execution-id">{execution.id}</td>
+                      <td>
+                        <div className="workflow-execution-name">{displayName}</div>
+                        {execution.name && (
+                          <div className="workflow-execution-id workflow-execution-id-secondary">
+                            {execution.id}
+                          </div>
+                        )}
+                      </td>
                       <td>{execution.workflowModelName ?? "Unknown"}</td>
                       <td>{formatTimestamp(execution.startedAtUtc)}</td>
                       <td>{formatTimestamp(execution.lastActivityAtUtc)}</td>
@@ -195,10 +210,10 @@ export default function WorkflowExecutions() {
                             type="button"
                             className="btn btn-outline-warning btn-sm workflow-execution-cancel-button"
                             title="Cancel execution"
-                            aria-label={`Cancel execution ${execution.id}`}
+                            aria-label={`Cancel execution ${displayName}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onCancel(execution);
+                              requestCancel(execution);
                             }}
                             disabled={cancelInFlight}
                           >
@@ -210,10 +225,10 @@ export default function WorkflowExecutions() {
                             type="button"
                             className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
                             title="Delete execution"
-                            aria-label={`Delete execution ${execution.id}`}
+                            aria-label={`Delete execution ${displayName}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onDelete(execution);
+                              requestDelete(execution);
                             }}
                             disabled={deleteExecution.isPending && deleteExecution.variables === execution.id}
                           >
@@ -250,6 +265,37 @@ export default function WorkflowExecutions() {
           </div>
         </div>
       )}
+
+      {pendingAction && (() => {
+        const label = pendingAction.execution.name ?? pendingAction.execution.id;
+        return (
+          <ConfirmModal
+            title={pendingAction.kind === "delete" ? "Delete execution?" : "Cancel execution?"}
+            message={
+              pendingAction.kind === "delete" ? (
+                <p className="mb-0">
+                  Permanently delete workflow execution{" "}
+                  <strong>{label}</strong>? This removes it from AutoNate and
+                  Flowable — the run, its history, variables, and tasks will
+                  all be gone.
+                </p>
+              ) : (
+                <p className="mb-0">
+                  Cancel workflow execution <strong>{label}</strong>? Execution
+                  stops immediately and the run is marked as cancelled. The
+                  history is kept.
+                </p>
+              )
+            }
+            confirmLabel={pendingAction.kind === "delete" ? "Delete" : "Cancel execution"}
+            cancelLabel="Keep"
+            variant={pendingAction.kind === "delete" ? "danger" : "warning"}
+            busy={pendingActionInFlight}
+            onConfirm={confirmPendingAction}
+            onCancel={() => setPendingAction(null)}
+          />
+        );
+      })()}
     </>
   );
 }
@@ -351,7 +397,12 @@ export function ExecutionContent({
     <>
       <div className="workflow-execution-modal-header">
         <div>
-          <h2>Execution {processInstanceId}</h2>
+          <h2>{detail?.name ?? `Execution ${processInstanceId}`}</h2>
+          {detail?.name && (
+            <p className="workflow-execution-modal-id">
+              <code>{processInstanceId}</code>
+            </p>
+          )}
           <p className="workflow-execution-modal-copy">
             Read-only execution view with completed, current, and future steps highlighted.
             {canOverride && " Right-click an active step to override-complete its task."}

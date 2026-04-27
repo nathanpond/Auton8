@@ -15,7 +15,7 @@ SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
 FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
-.PHONY: infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status
+.PHONY: infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart
 
 infra-prepare:
 	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
@@ -32,6 +32,12 @@ rider-sidecar: infra-ensure
 
 rider-sidecar-status:
 	./infra/check-autonate-web-sidecar.sh
+
+rider-sidecar-stop:
+	./infra/stop-autonate-web-sidecar.sh
+
+rider-sidecar-restart: infra-ensure
+	./infra/restart-autonate-web-sidecar.sh
 
 infra-up: infra-prepare
 	$(COMPOSE) up -d

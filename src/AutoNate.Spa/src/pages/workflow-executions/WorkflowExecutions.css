@@ -49,6 +49,23 @@
     font-size: 0.92rem;
 }
 
+.workflow-execution-name {
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.workflow-execution-id-secondary {
+    color: #64748b;
+    font-size: 0.78rem;
+    margin-top: 0.15rem;
+}
+
+.workflow-execution-modal-id {
+    margin: 0.15rem 0 0.35rem;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
 .workflow-executions-actions-header,
 .workflow-executions-actions-cell {
     text-align: right;

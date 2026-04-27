@@ -27,6 +27,7 @@ import * as workflow from "@/lib/bpmn/workflow.js";
 import AssigneePicker from "@/components/AssigneePicker";
 import { useUsers } from "@/hooks/useUsers";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
+import { useEventCatalog } from "@/hooks/useEventCatalog";
 import "./Workflow.css";
 
 type ScriptTaskEditor = {
@@ -44,6 +45,16 @@ type SequenceFlowEditor = {
   name: string;
   conditionExpression: string;
 };
+
+type SignalStartEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  signalName: string;
+  signalTopic: string;
+};
+
+const DEFAULT_SIGNAL_TOPIC = "workflow.signals";
 
 type AssignmentMode = "picker" | "expression";
 
@@ -77,6 +88,8 @@ type ElementSelection = {
   candidateUsers?: string[] | null;
   candidateGroups?: string[] | null;
   dueDate?: string | null;
+  signalName?: string | null;
+  signalTopic?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -154,6 +167,7 @@ export default function WorkflowStudio() {
   const [scriptTaskEditor, setScriptTaskEditor] = useState<ScriptTaskEditor | null>(null);
   const [sequenceFlowEditor, setSequenceFlowEditor] = useState<SequenceFlowEditor | null>(null);
   const [userTaskEditor, setUserTaskEditor] = useState<UserTaskEditor | null>(null);
+  const [signalStartEditor, setSignalStartEditor] = useState<SignalStartEventEditor | null>(null);
 
   // Seed currentModel from the first workflow once the list query resolves. Gating on
   // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
@@ -175,6 +189,28 @@ export default function WorkflowStudio() {
 
   const onSelectionChanged = useCallback((raw: unknown) => {
     const selection = raw as ElementSelection;
+    const isSignalStart =
+      !!selection &&
+      selection.type === "bpmn:StartEvent" &&
+      // describeBusinessObject only sets signalName/signalTopic when the
+      // start event has a SignalEventDefinition; plain start events leave
+      // these properties undefined entirely (not just null).
+      ("signalName" in selection || "signalTopic" in selection);
+    if (isSignalStart && selection) {
+      // describeBusinessObject only emits signalName/signalTopic when a signal
+      // event definition is present. Plain start events keep them undefined.
+      setSignalStartEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        signalName: selection.signalName ?? "",
+        signalTopic: selection.signalTopic ?? ""
+      });
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      return;
+    }
     if (selection && selection.type === "bpmn:ScriptTask") {
       setScriptTaskEditor({
         id: selection.id,
@@ -186,6 +222,7 @@ export default function WorkflowStudio() {
       });
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
+      setSignalStartEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -195,6 +232,7 @@ export default function WorkflowStudio() {
       });
       setScriptTaskEditor(null);
       setUserTaskEditor(null);
+      setSignalStartEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -221,10 +259,12 @@ export default function WorkflowStudio() {
       });
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
+      setSignalStartEditor(null);
     } else {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
+      setSignalStartEditor(null);
     }
   }, []);
 
@@ -255,6 +295,7 @@ export default function WorkflowStudio() {
     setScriptTaskEditor(null);
     setSequenceFlowEditor(null);
     setUserTaskEditor(null);
+    setSignalStartEditor(null);
   };
 
   const onSelectionChange = async (id: string) => {
@@ -346,6 +387,7 @@ export default function WorkflowStudio() {
       setCurrentModel(result.model);
       setLoadedXml(result.model.bpmnXml);
       setDirty(false);
+
       setStatus(
         `Published '${result.model.name}' draft v${result.model.draftVersionNumber} to Flowable as definition version ${result.deployment.processDefinitionVersion}.`
       );
@@ -363,7 +405,8 @@ export default function WorkflowStudio() {
       setCurrentModel(nextModel);
 
       const hasUnpublishedChanges = dirty || currentModel.isDraft;
-      const prefix = `Started process instance ${instance.id}`;
+      const label = instance.name ? `'${instance.name}' (${instance.id})` : instance.id;
+      const prefix = `Started process instance ${label}`;
       setStatus(
         hasUnpublishedChanges
           ? `${prefix} from published v${currentModel.publishedVersionNumber}. Local draft v${currentModel.draftVersionNumber} has unpublished changes; publish to run them.`
@@ -387,6 +430,21 @@ export default function WorkflowStudio() {
       }
       await workflow.updateSequenceFlowProperties(handle, sequenceFlowEditor);
       setSequenceFlowEditor(null);
+    });
+
+  const applySignalStart = () =>
+    runBusy("applying signal start event changes", async () => {
+      if (!handle || !signalStartEditor) {
+        throw new Error("Select a signal start event before applying changes.");
+      }
+
+      await workflow.updateSignalStartEventProperties(handle, {
+        id: signalStartEditor.id,
+        name: signalStartEditor.name,
+        signalName: signalStartEditor.signalName.trim(),
+        signalTopic: signalStartEditor.signalTopic.trim()
+      });
+      setSignalStartEditor(null);
     });
 
   const applyUserTask = () =>
@@ -623,6 +681,19 @@ export default function WorkflowStudio() {
             setUserTaskEditor(null);
           }}
           onApply={applyUserTask}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {signalStartEditor && (
+        <SignalStartEventModal
+          editor={signalStartEditor}
+          onChange={setSignalStartEditor}
+          onClose={() => {
+            if (busy) return;
+            setSignalStartEditor(null);
+          }}
+          onApply={applySignalStart}
           disabled={!!busy || !handle}
         />
       )}
@@ -988,6 +1059,166 @@ function ScriptTaskModal({
             Close
           </button>
           <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SignalStartEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: SignalStartEventEditor;
+  onChange: (next: SignalStartEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const { data: catalog } = useEventCatalog();
+
+  // Merge static catalog entries (events Flowable / future publishers raise)
+  // with dynamic registrations (event types other workflows are listening for)
+  // so the user can pick anything the system knows about, plus type free-form.
+  const knownEvents = useMemo(() => {
+    const entries = new Map<string, { topic: string; eventType: string; description?: string }>();
+    for (const category of catalog?.categories ?? []) {
+      for (const evt of category.events) {
+        entries.set(`${evt.topic} ${evt.eventType}`, {
+          topic: evt.topic,
+          eventType: evt.eventType,
+          description: evt.summary
+        });
+      }
+    }
+    for (const reg of catalog?.workflowRegistrations ?? []) {
+      const key = `${reg.topic} ${reg.eventType}`;
+      if (!entries.has(key)) {
+        entries.set(key, { topic: reg.topic, eventType: reg.eventType });
+      }
+    }
+    return [...entries.values()].sort((a, b) =>
+      a.topic === b.topic ? a.eventType.localeCompare(b.eventType) : a.topic.localeCompare(b.topic)
+    );
+  }, [catalog]);
+
+  const knownTopics = useMemo(() => {
+    const set = new Set<string>([DEFAULT_SIGNAL_TOPIC]);
+    for (const evt of knownEvents) {
+      set.add(evt.topic);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [knownEvents]);
+
+  // When the user has typed (or defaulted to) a topic, only suggest event
+  // types that match — saves them from picking process.started while their
+  // topic is set to orders.events. With no topic typed, fall back to all.
+  const effectiveTopic = editor.signalTopic.trim() || DEFAULT_SIGNAL_TOPIC;
+  const eventTypeSuggestions = useMemo(() => {
+    const filtered = knownEvents.filter((evt) => evt.topic === effectiveTopic);
+    return filtered.length > 0 ? filtered : knownEvents;
+  }, [knownEvents, effectiveTopic]);
+
+  const topicListId = `signal-topic-${editor.id}`;
+  const eventTypeListId = `signal-event-type-${editor.id}`;
+  const missingEventType = editor.signalName.trim().length === 0;
+
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Signal Start Event</h2>
+            <p className="workflow-modal-copy">
+              Configure a Dapr pub/sub event that starts this workflow. AutoNate listens on the
+              configured Topic and starts a new instance when an incoming message's{" "}
+              <code>eventType</code> field matches the Event Type. The full payload is exposed to the
+              workflow as a process variable named <code>eventData</code> (a JSON string —
+              <code> JSON.parse(eventData)</code> in script tasks).
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        <label className="workflow-field">
+          <span>Event Name (optional)</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Order placed"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Topic</span>
+          <input
+            className="form-control"
+            list={topicListId}
+            value={editor.signalTopic}
+            onChange={(e) => onChange({ ...editor, signalTopic: e.target.value })}
+            placeholder={DEFAULT_SIGNAL_TOPIC}
+          />
+          <datalist id={topicListId}>
+            {knownTopics.map((topic) => (
+              <option key={topic} value={topic} />
+            ))}
+          </datalist>
+          <p className="workflow-modal-note">
+            Dapr pub/sub topic. Defaults to <code>{DEFAULT_SIGNAL_TOPIC}</code> when blank. Adding a
+            new topic requires a Dapr sidecar restart for messages to flow.
+          </p>
+        </label>
+
+        <label className="workflow-field">
+          <span>Event Type</span>
+          <input
+            className="form-control"
+            list={eventTypeListId}
+            value={editor.signalName}
+            onChange={(e) => onChange({ ...editor, signalName: e.target.value })}
+            placeholder="OrderPlaced"
+          />
+          <datalist id={eventTypeListId}>
+            {eventTypeSuggestions.map((evt) => (
+              <option
+                key={`${evt.topic}:${evt.eventType}`}
+                value={evt.eventType}
+                label={evt.description}
+              />
+            ))}
+          </datalist>
+          <p className="workflow-modal-note">
+            Matched verbatim against the top-level <code>eventType</code> field of incoming
+            messages. Required.
+          </p>
+        </label>
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onApply}
+            disabled={disabled || missingEventType}
+          >
             Apply
           </button>
         </div>
@@ -1376,7 +1607,12 @@ type BpmnTypeGroup = {
 const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
   {
     category: "Events",
-    items: ["Start Event (None)", "End Event (None)", "End Event (Terminate)"]
+    items: [
+      "Start Event (None)",
+      "Signal Start Event",
+      "End Event (None)",
+      "End Event (Terminate)"
+    ]
   },
   {
     category: "Tasks",
@@ -1398,7 +1634,6 @@ const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
     items: [
       "Message Start Event",
       "Timer Start Event",
-      "Signal Start Event",
       "Conditional Start Event",
       "Error Start Event",
       "Escalation Start Event",

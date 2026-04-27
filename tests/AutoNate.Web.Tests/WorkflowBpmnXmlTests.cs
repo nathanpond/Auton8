@@ -333,4 +333,254 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Empty(plane.Elements());
     }
 
+    // --- Signal start events --------------------------------------------------
+
+    [Fact]
+    public void ApplyProcessMetadata_MaterializesSignalRoot_FromStartEventSnapshot()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:signalEventDefinition />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "signal_flow",
+            "Signal Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    SignalName: "OrderPlaced",
+                    SignalTopic: "orders.events")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var signal = Assert.Single(document.Root!.Elements(bpmn + "signal"));
+        Assert.Equal("OrderPlaced", signal.Attribute("name")?.Value);
+        Assert.Equal("orders.events", signal.Attribute(flowable + "topic")?.Value);
+
+        var startEvent = document.Descendants(bpmn + "startEvent").Single();
+        var signalEventDefinition = startEvent.Element(bpmn + "signalEventDefinition")!;
+        Assert.Equal(signal.Attribute("id")?.Value, signalEventDefinition.Attribute("signalRef")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_DefaultsTopicToWorkflowSignals_WhenSnapshotTopicMissing()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:signalEventDefinition />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "signal_flow",
+            "Signal Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    SignalName: "OrderPlaced")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var signal = Assert.Single(document.Root!.Elements(bpmn + "signal"));
+        Assert.Equal(WorkflowBpmnXml.DefaultSignalTopic, signal.Attribute(flowable + "topic")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_PrunesOrphanSignalRoots_WhenSnapshotClearsName()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Signal_Order" name="OrderPlaced" flowable:topic="orders.events" />
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:signalEventDefinition signalRef="Signal_Order" />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "signal_flow",
+            "Signal Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    SignalName: null)
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        Assert.Empty(document.Root!.Elements(bpmn + "signal"));
+        var signalEventDefinition = document.Descendants(bpmn + "signalEventDefinition").Single();
+        Assert.Null(signalEventDefinition.Attribute("signalRef"));
+    }
+
+    [Fact]
+    public void ExtractSignalRegistrations_ReturnsTuplesForEverySignalStartEvent()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Signal_Order" name="OrderPlaced" flowable:topic="orders.events" />
+                             <bpmn:signal id="Signal_Stock" name="StockChanged" />
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:signalEventDefinition signalRef="Signal_Order" />
+                               </bpmn:startEvent>
+                               <bpmn:startEvent id="StartEvent_2">
+                                 <bpmn:signalEventDefinition signalRef="Signal_Stock" />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var registrations = WorkflowBpmnXml.ExtractSignalRegistrations(xml);
+
+        Assert.Equal(2, registrations.Count);
+        Assert.Contains(registrations, r => r.SignalName == "OrderPlaced" && r.Topic == "orders.events");
+        Assert.Contains(registrations, r =>
+            r.SignalName == "StockChanged" && r.Topic == WorkflowBpmnXml.DefaultSignalTopic);
+    }
+
+    [Fact]
+    public void ExtractSignalRegistrations_IgnoresSignalEventDefinitionsOnNonStartEvents()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Signal_Order" name="OrderPlaced" />
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1" />
+                               <bpmn:intermediateCatchEvent id="Intermediate_1">
+                                 <bpmn:signalEventDefinition signalRef="Signal_Order" />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var registrations = WorkflowBpmnXml.ExtractSignalRegistrations(xml);
+
+        Assert.Empty(registrations);
+    }
+
+    [Fact]
+    public void ExtractSignalRegistrations_ReturnsEmpty_OnMalformedXml()
+    {
+        Assert.Empty(WorkflowBpmnXml.ExtractSignalRegistrations("not really xml"));
+        Assert.Empty(WorkflowBpmnXml.ExtractSignalRegistrations(string.Empty));
+    }
+
+    [Fact]
+    public void ValidateProcess_DoesNotWarnAboutSignalEventDefinition_OnStartEvents()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Signal_Order" name="OrderPlaced" flowable:topic="orders.events" />
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:signalEventDefinition signalRef="Signal_Order" />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("signal events", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsSignalStartEventWithoutEventType()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:signalEventDefinition />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("Event Type", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_AllowsSignalStartEventListeningOnTelemetryTopic()
+    {
+        // Listening on the BusWatcher's own topic is now allowed: a workflow can
+        // legitimately want to react to events Flowable itself publishes (e.g.
+        // run a janitor workflow whenever any process completes). Loop avoidance
+        // is the user's responsibility — pick a signal name that doesn't collide
+        // with one of your own published events.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Signal_X" name="process.completed" flowable:topic="workflow.execution.events" />
+                             <bpmn:process id="signal_flow" name="Signal Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:signalEventDefinition signalRef="Signal_X" />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+    }
 }

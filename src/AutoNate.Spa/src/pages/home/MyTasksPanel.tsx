@@ -266,7 +266,15 @@ function WorkflowRow({
   canComplete: boolean;
   statusAppearance: StatusAppearanceEntry[];
 }) {
-  const workflowName = task.processDefinitionName ?? task.processDefinitionId ?? task.name ?? task.id;
+  // Prefer the per-execution display name (set at start time) over the
+  // process definition name. Falls back through definition name → id → task
+  // fields so we always show *something*.
+  const workflowName =
+    task.processInstanceName ??
+    task.processDefinitionName ??
+    task.processDefinitionId ??
+    task.name ??
+    task.id;
   const activeNode = task.name?.trim() ? task.name : task.taskDefinitionKey ?? null;
   return (
     <tr>

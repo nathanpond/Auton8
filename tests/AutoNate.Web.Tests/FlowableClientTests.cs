@@ -181,13 +181,56 @@ public sealed class FlowableClientTests
 
         await client.StartProcessInstanceAsync(
             "my_flow",
-            new Dictionary<string, object?> { ["foo"] = 42, ["bar"] = "baz" });
+            variables: new Dictionary<string, object?> { ["foo"] = 42, ["bar"] = "baz" });
 
         var body = Assert.Single(stub.Requests).Body!;
         Assert.Contains("\"name\":\"foo\"", body);
         Assert.Contains("\"value\":42", body);
         Assert.Contains("\"name\":\"bar\"", body);
         Assert.Contains("\"value\":\"baz\"", body);
+    }
+
+    [Fact]
+    public async Task StartProcessInstanceAsync_IncludesNameInBody_WhenProvided()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Post, "service/runtime/process-instances",
+            new { id = "i", name = "Lead Qualification (3)", processDefinitionId = "p",
+                  activityId = (string?)null, suspended = false });
+
+        var summary = await client.StartProcessInstanceAsync("my_flow", name: "Lead Qualification (3)");
+
+        var body = Assert.Single(stub.Requests).Body!;
+        Assert.Contains("\"name\":\"Lead Qualification (3)\"", body);
+        Assert.Equal("Lead Qualification (3)", summary.Name);
+    }
+
+    [Fact]
+    public async Task StartProcessInstanceAsync_OmitsName_WhenNotProvided()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Post, "service/runtime/process-instances",
+            new { id = "i", processDefinitionId = "p", activityId = (string?)null, suspended = false });
+
+        await client.StartProcessInstanceAsync("my_flow");
+
+        var body = Assert.Single(stub.Requests).Body!;
+        // Body should not include a top-level name field at all when null.
+        Assert.DoesNotContain("\"name\"", body);
+    }
+
+    [Fact]
+    public async Task GetHistoricProcessInstanceCountByDefinitionKeyAsync_ReadsTotal()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances",
+            new { data = Array.Empty<object>(), total = 7 });
+
+        var count = await client.GetHistoricProcessInstanceCountByDefinitionKeyAsync("my_flow");
+
+        Assert.Equal(7, count);
+        Assert.Contains(stub.Requests, r =>
+            r.Url.Contains("processDefinitionKey=my_flow") && r.Url.Contains("size=1"));
     }
 
     // --- GetProcessInstanceAsync ---------------------------------------------
@@ -311,6 +354,7 @@ public sealed class FlowableClientTests
                     taskDefinitionKey = "approve",
                     assignee = "alice",
                     processInstanceId = "inst-1",
+                    processInstanceName = "Lead Qualification (3)",
                     processDefinitionId = "pd-1",
                     createTime = "2026-04-01T00:00:00Z",
                     dueDate = (string?)null
@@ -486,12 +530,18 @@ public sealed class FlowableClientTests
         });
         stub.WhenJson(HttpMethod.Get, "service/repository/process-definitions/pd-1",
             new { id = "pd-1", key = "k", name = "My Process", version = 1 });
+        // Backfill lookup for the per-execution display name. The merged task
+        // set has one unique processInstanceId ("i").
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances/i",
+            new { id = "i", processDefinitionId = "pd-1", name = "My Process (4)",
+                  startTime = "2026-04-01T00:00:00Z", endTime = (string?)null });
 
         var tasks = await client.GetTasksAssignedToUserAsync("u");
 
         Assert.Equal(3, tasks.Count); // shared deduped to one
         Assert.Single(tasks, t => t.Id == "t-shared");
         Assert.All(tasks, t => Assert.Equal("My Process", t.ProcessDefinitionName));
+        Assert.All(tasks, t => Assert.Equal("My Process (4)", t.ProcessInstanceName));
     }
 
     // --- GetWorkflowExecutionsAsync ------------------------------------------
@@ -744,6 +794,50 @@ public sealed class FlowableClientTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             client.GetWorkflowExecutionDiagramDetailAsync("inst-1"));
         Assert.Contains("does not contain renderable diagram notation", ex.Message);
+    }
+
+    // --- BroadcastSignalAsync ------------------------------------------------
+
+    [Fact]
+    public async Task BroadcastSignalAsync_PostsSignalNameAndVariables()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/signals", HttpStatusCode.NoContent);
+
+        await client.BroadcastSignalAsync(
+            "OrderPlaced",
+            new Dictionary<string, object?> { ["eventData"] = "{\"orderId\":42}" });
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Post, sent.Method);
+        Assert.Contains("\"signalName\":\"OrderPlaced\"", sent.Body);
+        Assert.Contains("\"async\":false", sent.Body);
+        Assert.Contains("\"name\":\"eventData\"", sent.Body);
+    }
+
+    [Fact]
+    public async Task BroadcastSignalAsync_OmitsVariables_WhenNotProvided()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/signals", HttpStatusCode.NoContent);
+
+        await client.BroadcastSignalAsync("Heartbeat");
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Contains("\"signalName\":\"Heartbeat\"", sent.Body);
+        Assert.Contains("\"variables\":[]", sent.Body);
+    }
+
+    [Fact]
+    public async Task BroadcastSignalAsync_ThrowsOnNon2xx()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/signals",
+            HttpStatusCode.BadRequest, "no listener");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.BroadcastSignalAsync("Nope"));
+        Assert.Contains("broadcast signal 'Nope'", ex.Message);
     }
 
     // --- DeployProcessAsync --------------------------------------------------

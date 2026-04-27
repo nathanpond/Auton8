@@ -968,7 +968,8 @@ function describeBusinessObject(businessObject) {
   }
 
   const conditionExpression = businessObject.conditionExpression;
-  return {
+  const signal = describeSignalStartEvent(businessObject);
+  const description = {
     id: businessObject.id,
     type: businessObject.$type,
     name: typeof businessObject.name === "string" ? businessObject.name : null,
@@ -981,6 +982,41 @@ function describeBusinessObject(businessObject) {
     candidateGroups: readFlowableList(businessObject, "candidateGroups"),
     dueDate: readFlowableString(businessObject, "dueDate")
   };
+
+  if (signal) {
+    // Only present for signal start events. Used by the SPA to discriminate
+    // from plain start events; downstream code treats `signalName` as the
+    // signal's display name (Flowable matches it against incoming eventType).
+    description.signalName = signal.signalName;
+    description.signalTopic = signal.signalTopic;
+  }
+
+  return description;
+}
+
+function describeSignalStartEvent(businessObject) {
+  if (!businessObject || businessObject.$type !== "bpmn:StartEvent") {
+    return null;
+  }
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const signalEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:SignalEventDefinition"
+  );
+  if (!signalEventDefinition) {
+    return null;
+  }
+
+  const signalRef = signalEventDefinition.signalRef;
+  const signalName = typeof signalRef?.name === "string" ? signalRef.name : null;
+  const signalTopic =
+    typeof signalRef?.$attrs?.["flowable:topic"] === "string"
+      ? signalRef.$attrs["flowable:topic"]
+      : null;
+
+  return { signalName, signalTopic };
 }
 
 function readFlowableString(businessObject, name) {
@@ -1114,6 +1150,108 @@ export function updateUserTaskProperties(modelerHandle, task) {
   modeling.updateProperties(element, {
     name: normalizeOptionalString(task.name)
   });
+}
+
+export function updateSignalStartEventProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the signal start event.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:StartEvent") {
+    throw new Error(`Signal start event '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const businessObject = element.businessObject;
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const signalEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:SignalEventDefinition"
+  );
+  if (!signalEventDefinition) {
+    throw new Error(
+      `Start event '${payload.id}' is not a signal start event — drop a signal start event from the palette instead.`
+    );
+  }
+
+  const signalName = normalizeOptionalString(payload.signalName);
+  const topic = normalizeOptionalString(payload.signalTopic);
+
+  // Wire the signal root element. Reuse an existing root by stable id (kept on
+  // the previously-attached signalRef) so multiple events sharing one signal
+  // stay linked when the user renames it. Fall through to creating a new root
+  // if the user changed the name to one that already has its own definition.
+  const definitions =
+    typeof modeler.getDefinitions === "function" ? modeler.getDefinitions() : null;
+  if (!definitions) {
+    throw new Error("The BPMN modeler is missing a definitions root.");
+  }
+
+  const rootElements = Array.isArray(definitions.rootElements) ? definitions.rootElements : [];
+  let signal = signalEventDefinition.signalRef ?? null;
+
+  if (!signalName) {
+    // Strip the binding when the user clears the name. The server will
+    // surface a validation error before publish.
+    signalEventDefinition.signalRef = undefined;
+    modeling.updateProperties(element, {
+      name: normalizeOptionalString(payload.name)
+    });
+    return;
+  }
+
+  const existingByName = rootElements.find(
+    (rootElement) => rootElement?.$type === "bpmn:Signal" && rootElement.name === signalName
+  );
+
+  if (existingByName && existingByName !== signal) {
+    signal = existingByName;
+  } else if (!signal || signal.$type !== "bpmn:Signal") {
+    signal = moddle.create("bpmn:Signal", {
+      id: buildSignalId(rootElements, signalName),
+      name: signalName
+    });
+    rootElements.push(signal);
+    if (typeof signal.$parent === "object") {
+      signal.$parent = definitions;
+    }
+  }
+
+  signal.name = signalName;
+  writeFlowableAttribute(signal, "topic", topic);
+
+  signalEventDefinition.signalRef = signal;
+
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name)
+  });
+}
+
+function buildSignalId(rootElements, signalName) {
+  const slug = signalName
+    .replace(/[^A-Za-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const base = slug ? `Signal_${slug}` : "Signal_event";
+  const existingIds = new Set(
+    rootElements
+      .map((rootElement) => rootElement?.id)
+      .filter((id) => typeof id === "string" && id.length > 0)
+  );
+
+  if (!existingIds.has(base)) {
+    return base;
+  }
+
+  let counter = 2;
+  while (existingIds.has(`${base}_${counter}`)) {
+    counter += 1;
+  }
+  return `${base}_${counter}`;
 }
 
 export function updateSequenceFlowProperties(modelerHandle, flow) {
