@@ -89,6 +89,16 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    // Tests can seed this to control how many instances the bulk-delete
+    // endpoint reports back; the stub doesn't enumerate real instances.
+    public int DeleteAllWorkflowExecutionsResult { get; set; }
+
+    public Task<int> DeleteAllWorkflowExecutionsAsync(CancellationToken cancellationToken = default)
+    {
+        Calls.Add("DeleteAllExecutions");
+        return Task.FromResult(DeleteAllWorkflowExecutionsResult);
+    }
+
     public Task CancelWorkflowExecutionAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {

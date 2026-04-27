@@ -37,6 +37,14 @@ export async function deleteExecution(processInstanceId: string): Promise<void> 
   await api.delete(`/api/executions/${encodeURIComponent(processInstanceId)}`);
 }
 
+// Wipes every execution in Flowable — runtime + history. Returns the count
+// the server reports as deleted so the UI can show it in a flash message.
+// Gated on workflowexecution/deleteall.
+export async function deleteAllExecutions(): Promise<{ deleted: number }> {
+  const { data } = await api.post<{ deleted: number }>("/api/executions/delete-all");
+  return data;
+}
+
 // Stops a running execution. The historic record stays so the row flips to
 // "Cancelled" status. Gated on workflowexecution/cancel.
 export async function cancelExecution(processInstanceId: string): Promise<void> {

@@ -306,6 +306,60 @@ public sealed class FlowableClientTests
         await client.DeleteWorkflowExecutionAsync("inst-3");
     }
 
+    // --- DeleteAllWorkflowExecutionsAsync ------------------------------------
+
+    [Fact]
+    public async Task DeleteAllWorkflowExecutionsAsync_LoopsUntilHistoricListIsEmpty()
+    {
+        var (client, stub) = CreateClient();
+
+        // First page returns two instances, second page returns none → loop exits.
+        var listCalls = 0;
+        stub.When(HttpMethod.Get, "service/history/historic-process-instances?size=", _ =>
+        {
+            listCalls++;
+            var data = listCalls == 1
+                ? new object[]
+                {
+                    new { id = "inst-a" },
+                    new { id = "inst-b" }
+                }
+                : Array.Empty<object>();
+            return StubHttpMessageHandler.JsonResponse(new { data, total = data.Length });
+        });
+
+        // Per-instance pipeline: GET runtime → DELETE runtime → DELETE history.
+        stub.WhenJson(HttpMethod.Get, "service/runtime/process-instances/inst-a",
+            new { id = "inst-a", processDefinitionId = "pd-1" });
+        stub.WhenStatus(HttpMethod.Delete, "service/runtime/process-instances/inst-a", HttpStatusCode.NoContent);
+        stub.WhenStatus(HttpMethod.Delete, "service/history/historic-process-instances/inst-a", HttpStatusCode.NoContent);
+
+        stub.WhenStatus(HttpMethod.Get, "service/runtime/process-instances/inst-b", HttpStatusCode.NotFound);
+        stub.WhenStatus(HttpMethod.Delete, "service/history/historic-process-instances/inst-b", HttpStatusCode.NoContent);
+
+        var deleted = await client.DeleteAllWorkflowExecutionsAsync();
+
+        Assert.Equal(2, deleted);
+        Assert.Equal(2, listCalls); // initial page + empty trailing page
+        Assert.Contains(stub.Requests, r =>
+            r.Method == HttpMethod.Delete && r.Url.Contains("historic-process-instances/inst-a"));
+        Assert.Contains(stub.Requests, r =>
+            r.Method == HttpMethod.Delete && r.Url.Contains("historic-process-instances/inst-b"));
+    }
+
+    [Fact]
+    public async Task DeleteAllWorkflowExecutionsAsync_ReturnsZero_WhenNoInstancesExist()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-process-instances?size=",
+            new { data = Array.Empty<object>(), total = 0 });
+
+        var deleted = await client.DeleteAllWorkflowExecutionsAsync();
+
+        Assert.Equal(0, deleted);
+        Assert.DoesNotContain(stub.Requests, r => r.Method == HttpMethod.Delete);
+    }
+
     // --- CancelWorkflowExecutionAsync ----------------------------------------
 
     [Fact]

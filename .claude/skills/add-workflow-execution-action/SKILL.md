@@ -52,12 +52,16 @@ executions.MapPost("/{processInstanceId}/myaction", async (
 
 The third arg to `RequirePermission` is the route param name carrying the entity id — must match the `{...}` route token. Mutating endpoints need `.DisableAntiforgery()` because the SPA calls them with `application/json` rather than form posts.
 
+**Kind-level (bulk) variant.** If the action has no per-instance id (e.g. "delete-all", "cancel-all"), use `RequireKindPermission(kind, action)` instead — it routes through `RequireKindPermissionFilter`, which calls the authorizer with `EntityRef(kind, "*")`. The endpoint route then has no `{processInstanceId}` token. Match this on the SPA by checking the permission with `id: "*"`.
+
 ### 5. Wire the SPA hook and UI
 Files:
-- `src/AutoNate.Spa/src/hooks/useExecutions.ts` — add a `useMyAction` mutation following `useCancelExecution` / `useDeleteExecution`. Invalidate the executions query on success.
-- `src/AutoNate.Spa/src/pages/workflow-executions/WorkflowExecutions.tsx` — add the button. Gate it with `permissions.has(permissionKey({ kind: "workflowexecution", action: "myaction", id: execution.id }))`. Add the action key to the `usePermissionPrefetch` array near the top of the component so the gate is preloaded.
+- `src/AutoNate.Spa/src/hooks/useExecutions.ts` — add a `useMyAction` mutation following `useCancelExecution` / `useDeleteExecution`. Invalidate `EXECUTIONS_QUERY_KEY` on success.
+- `src/AutoNate.Spa/src/pages/workflow-executions/WorkflowExecutions.tsx` — add the button. Permission gating uses the batched `usePermissionChecks` hook from `@/hooks/usePermissionChecks`:
+  - **Per-row actions:** add the new `{ kind, action, id }` tuple to the existing `rowActionChecks` `useMemo` array so the lookup is batched with the other row buttons. Read with `rowActionPermissions?.get(permissionKey({ kind: "workflowexecution", action: "myaction", id: execution.id })) ?? false`.
+  - **Kind-level actions:** add a separate `useMemo` returning a single-element array with `id: "*"`, pass it to `usePermissionChecks`, and read the result with `permissionKey` the same way. Mirror whatever id the backend filter uses (`RequireKindPermissionFilter` uses `"*"`).
 
-Confirmation modals in this page funnel through the `pendingAction` state — extend its discriminated union (`{ kind: "cancel" | "delete" | "myaction"; ... }`) and the dispatch in the modal's confirm handler.
+Confirmation modals in this page funnel through the `pendingAction` state — extend its discriminated union (`{ kind: "cancel" | "delete" | "myaction"; ... }`, with kind-level actions usually being a no-payload variant like `{ kind: "delete-all" }`) and the dispatch in the modal's confirm handler. Don't forget the `pendingActionInFlight` boolean — add an `||` clause for your new mutation's `isPending`.
 
 ### 6. Update the help modal
 File: `src/AutoNate.Spa/src/pages/admin/GrantsHelpModal.tsx`

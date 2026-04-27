@@ -292,8 +292,11 @@ Effect:         allow`}</pre>
                 On a workflow execution, <code>cancel</code> halts a running
                 process and marks it cancelled (history kept), while{" "}
                 <code>delete</code> wipes the execution from Flowable entirely
-                — both runtime and history. Treat them as separate
-                permissions.
+                — both runtime and history. <code>deleteall</code> is the
+                bulk-wipe action behind the "Delete All Executions" button on
+                the Workflow Executions page; it isn't tied to a specific
+                instance, so the selector must use <code>/workflowexecution/*</code>.
+                Treat them as separate permissions.
               </p>
               <pre className="bg-light p-2 small">{`# Operators can cancel any execution
 Principal kind: role
@@ -306,6 +309,13 @@ Effect:         allow
 Principal kind: role
 Principal:      Admin
 Action:         delete
+Selector:       /workflowexecution/*
+Effect:         allow
+
+# Only Admins can wipe every execution at once
+Principal kind: role
+Principal:      Admin
+Action:         deleteall
 Selector:       /workflowexecution/*
 Effect:         allow`}</pre>
 

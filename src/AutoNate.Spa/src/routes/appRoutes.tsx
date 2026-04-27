@@ -21,6 +21,7 @@ import AdminGroups from "@/pages/admin/Groups";
 import AdminGrants from "@/pages/admin/Grants";
 import AdminHierarchy from "@/pages/admin/Hierarchy";
 import AdminExplain from "@/pages/admin/Explain";
+import AdminPlugins from "@/pages/admin/Plugins";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
 import StatusAppearance from "@/pages/admin/config/StatusAppearance";
@@ -72,6 +73,7 @@ export const APP_ROUTES: AppRoute[] = [
   { path: "admin/grants", element: protect(<AdminGrants />) },
   { path: "admin/hierarchy", element: protect(<AdminHierarchy />) },
   { path: "admin/explain", element: protect(<AdminExplain />) },
+  { path: "admin/plugins", element: protect(<AdminPlugins />) },
   {
     path: "admin/config",
     element: protect(<ConfigLayout />),

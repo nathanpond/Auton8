@@ -9,6 +9,7 @@ import {
   useExecutionDiagram,
   useExecutionTasks,
   useExecutions,
+  useDeleteAllExecutions,
   useDeleteExecution,
   useForceCompleteTask
 } from "@/hooks/useExecutions";
@@ -35,11 +36,24 @@ export default function WorkflowExecutions() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [pendingAction, setPendingAction] = useState<
-    { kind: "cancel" | "delete"; execution: WorkflowExecutionSummary } | null
+    | { kind: "cancel" | "delete"; execution: WorkflowExecutionSummary }
+    | { kind: "delete-all" }
+    | null
   >(null);
 
   const deleteExecution = useDeleteExecution();
   const cancelExecution = useCancelExecution();
+  const deleteAllExecutions = useDeleteAllExecutions();
+
+  // Kind-level check for the bulk-delete button. Backend gate uses id="*"
+  // (RequireKindPermissionFilter), so the SPA mirrors that.
+  const deleteAllCheck = useMemo(
+    () => [{ kind: "workflowexecution", action: "deleteall", id: "*" }],
+    []
+  );
+  const { data: deleteAllPermissions } = usePermissionChecks(deleteAllCheck);
+  const canDeleteAll =
+    deleteAllPermissions?.get(permissionKey(deleteAllCheck[0])) ?? false;
 
   // Batched per-row permission lookups for the row-action buttons.
   const rowActionChecks = useMemo(
@@ -77,18 +91,32 @@ export default function WorkflowExecutions() {
     setPendingAction({ kind: "cancel", execution });
   };
 
+  const requestDeleteAll = () => {
+    setPendingAction({ kind: "delete-all" });
+  };
+
   const confirmPendingAction = async () => {
     if (!pendingAction) return;
-    const { kind, execution } = pendingAction;
 
     try {
-      if (kind === "delete") {
+      if (pendingAction.kind === "delete-all") {
+        const { deleted } = await deleteAllExecutions.mutateAsync();
+        setSelectedId(null);
+        setFlash({
+          kind: "success",
+          message: deleted === 0
+            ? "There were no executions to delete."
+            : `Deleted ${deleted} execution${deleted === 1 ? "" : "s"} from AutoNate and Flowable.`
+        });
+      } else if (pendingAction.kind === "delete") {
+        const { execution } = pendingAction;
         await deleteExecution.mutateAsync(execution.id);
         if (selectedId === execution.id) {
           setSelectedId(null);
         }
         setFlash({ kind: "success", message: `Execution '${execution.id}' was deleted.` });
       } else {
+        const { execution } = pendingAction;
         await cancelExecution.mutateAsync(execution.id);
         setFlash({ kind: "success", message: `Execution '${execution.id}' was cancelled.` });
       }
@@ -101,7 +129,8 @@ export default function WorkflowExecutions() {
 
   const pendingActionInFlight =
     (pendingAction?.kind === "delete" && deleteExecution.isPending) ||
-    (pendingAction?.kind === "cancel" && cancelExecution.isPending);
+    (pendingAction?.kind === "cancel" && cancelExecution.isPending) ||
+    (pendingAction?.kind === "delete-all" && deleteAllExecutions.isPending);
 
   return (
     <>
@@ -142,6 +171,17 @@ export default function WorkflowExecutions() {
           Refresh
         </button>
         {isLoading && <span className="workflow-executions-loading">Loading executions...</span>}
+        {canDeleteAll && (
+          <button
+            type="button"
+            className="btn btn-outline-danger ms-auto workflow-executions-delete-all-button"
+            onClick={requestDeleteAll}
+            disabled={deleteAllExecutions.isPending || executions.length === 0}
+            title="Delete every execution from AutoNate and Flowable"
+          >
+            Delete All Executions
+          </button>
+        )}
       </div>
 
       <div className="workflow-executions-card">
@@ -267,6 +307,28 @@ export default function WorkflowExecutions() {
       )}
 
       {pendingAction && (() => {
+        if (pendingAction.kind === "delete-all") {
+          return (
+            <ConfirmModal
+              title="Delete every execution?"
+              message={
+                <p className="mb-0">
+                  Permanently delete <strong>every workflow execution</strong>{" "}
+                  in the system? This removes all runs from AutoNate and
+                  Flowable — running and historical, including variables and
+                  tasks. Workflow models stay published.
+                </p>
+              }
+              confirmLabel="Delete all"
+              cancelLabel="Keep"
+              variant="danger"
+              busy={pendingActionInFlight}
+              onConfirm={confirmPendingAction}
+              onCancel={() => setPendingAction(null)}
+            />
+          );
+        }
+
         const label = pendingAction.execution.name ?? pendingAction.execution.id;
         return (
           <ConfirmModal

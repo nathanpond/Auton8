@@ -77,6 +77,25 @@ public sealed class ExecutionEndpointsTests
     }
 
     [Fact]
+    public async Task DeleteAllExecutions_Returns200WithCount_AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        factory.FlowableStub.DeleteAllWorkflowExecutionsResult = 7;
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsync("/api/executions/delete-all", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<DeleteAllResponse>();
+        Assert.NotNull(body);
+        Assert.Equal(7, body!.Deleted);
+        Assert.Contains("DeleteAllExecutions", factory.FlowableStub.Calls);
+    }
+
+    private sealed record DeleteAllResponse(int Deleted);
+
+    [Fact]
     public async Task TasksAssignedToMe_PassesActorIdToClient()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();

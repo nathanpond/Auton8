@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsPackable>false</IsPackable>
+        <!-- This is a plugin assembly loaded into a separate ALC at test time;
+             it must NOT reference AutoNate.Web. Only the abstractions. -->
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../src/AutoNate.Plugin.Abstractions/AutoNate.Plugin.Abstractions.csproj">
+            <!-- Don't copy the abstractions DLL alongside our entry assembly:
+                 the host's PluginAssemblyLoadContext deliberately resolves
+                 abstractions from the host's load context to keep type
+                 identity unified. A local copy in the plugin folder would
+                 cause a different Type — exactly what we're testing for. -->
+            <Private>false</Private>
+        </ProjectReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="plugin.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+</Project>

@@ -1,3 +1,4 @@
+using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Records;
 
@@ -52,6 +53,14 @@ public static class EventCatalog
 
     public static readonly EventCatalogPayloadField[] PayloadFields = EnvelopeFields;
 
+    private static readonly EventCatalogPayloadField[] PluginPayloadFields =
+    [
+        new("pluginId", "string (UUID)", "Identifier of the plugin (matches the plugins table primary key and the on-disk folder name)."),
+        new("name", "string", "Plugin display name from its manifest."),
+        new("version", "string", "Plugin version from its manifest."),
+        new("errorMessage", "string | null", "On `plugin.enable_failed`, the exception message that prevented enable; null on every other plugin event.")
+    ];
+
     public static readonly EventCatalogTransport[] Transports =
     [
         new(
@@ -61,7 +70,11 @@ public static class EventCatalog
         new(
             DaprRecordEventPublisher.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
-            "AutoNate.Web — published from the record store after each create / update / archive commit.")
+            "AutoNate.Web — published from the record store after each create / update / archive commit."),
+        new(
+            DaprApplicationEventPublisher.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from in-app lifecycle events (plugin upload/enable/disable/delete).")
     ];
 
     public static readonly EventCatalogCategory[] Categories =
@@ -200,6 +213,42 @@ public static class EventCatalog
                         "previousStatus carries the value before the change (may be null).",
                         "status carries the new value (may be null when status was cleared)."
                     ])
+            ]),
+        new(
+            "Plugin",
+            "Lifecycle events for runtime-loaded plugins — emitted after the plugin management service commits each upload / enable / disable / delete operation.",
+            PluginPayloadFields,
+            [
+                new EventCatalogEntry(
+                    DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginUploaded,
+                    "A new plugin zip has been uploaded and extracted.",
+                    "Fires from PluginManagementService.UploadAsync after the plugins-row insert commits. Plugin starts in Disabled status — admin must explicitly enable.",
+                    ["errorMessage is null."]),
+                new EventCatalogEntry(
+                    DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginEnabled,
+                    "A plugin has been enabled and its hooks are now live.",
+                    "Fires from PluginManagementService.EnableAsync after PluginRuntime successfully loads the assembly and Configure() returns.",
+                    ["errorMessage is null."]),
+                new EventCatalogEntry(
+                    DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginDisabled,
+                    "A plugin's hooks have been revoked and it is no longer running.",
+                    "Fires from PluginManagementService.DisableAsync after the runtime drops the plugin's subscriptions. The assembly stays loaded (inert) until process restart.",
+                    ["errorMessage is null."]),
+                new EventCatalogEntry(
+                    DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginDeleted,
+                    "A plugin has been deleted from the system.",
+                    "Fires from PluginManagementService.DeleteAsync after the row is removed (or marked DeletedPending if files are still locked).",
+                    ["errorMessage is null."]),
+                new EventCatalogEntry(
+                    DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginEnableFailed,
+                    "An enable attempt failed (Configure threw, or the assembly could not be loaded).",
+                    "Fires from PluginManagementService.EnableAsync when PluginRuntime rejects the load. The plugin's row stays in Disabled status with last_error populated.",
+                    ["errorMessage carries the exception message."])
             ])
     ];
 

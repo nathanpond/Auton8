@@ -440,6 +440,46 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         }
     }
 
+    public async Task<int> DeleteAllWorkflowExecutionsAsync(CancellationToken cancellationToken = default)
+    {
+        // Page through historic instances (covers both running and finished
+        // — Flowable mirrors runtime rows into history) and delete each one
+        // through the per-instance path so the runtime + history pair is
+        // handled identically. Loop until a page returns empty rather than
+        // trusting `total`, which can shift while we're deleting.
+        const int pageSize = 200;
+        var deleted = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var pageResponse = await _httpClient.GetAsync(
+                $"service/history/historic-process-instances?size={pageSize}",
+                cancellationToken);
+            await EnsureSuccessAsync(pageResponse, "list historic process instances for bulk delete");
+
+            var page = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(
+                pageResponse, cancellationToken);
+
+            if (page.Data.Count == 0)
+            {
+                return deleted;
+            }
+
+            foreach (var instance in page.Data)
+            {
+                if (string.IsNullOrWhiteSpace(instance.Id))
+                {
+                    continue;
+                }
+
+                await DeleteWorkflowExecutionAsync(instance.Id, cancellationToken);
+                deleted++;
+            }
+        }
+    }
+
     // Cancellation flag stored as Flowable's `deleteReason` on the historic
     // record so GetWorkflowExecutionsAsync can render the row as "Cancelled".
     // Keep this string stable — the listing read-back compares against it.

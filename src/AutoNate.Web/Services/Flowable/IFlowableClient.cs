@@ -22,6 +22,11 @@ public interface IFlowableClient
 
     Task DeleteWorkflowExecutionAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
+    // Wipes every process instance in Flowable — runtime + history. Used by
+    // the executions admin page to clear noise during signal-event debugging.
+    // Returns the number of instances deleted so the caller can surface it.
+    Task<int> DeleteAllWorkflowExecutionsAsync(CancellationToken cancellationToken = default);
+
     // Stops a running process instance and leaves the historic record in
     // place so the executions list can show it as "Cancelled". No-op if the
     // instance has already finished.

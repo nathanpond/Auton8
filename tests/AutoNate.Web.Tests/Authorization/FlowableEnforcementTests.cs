@@ -111,6 +111,49 @@ public sealed class FlowableEnforcementTests
     }
 
     [Fact]
+    public async Task DeleteAllExecutions_NoGrant_Returns403()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            EnforceConfigNoBackfill());
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsync("/api/executions/delete-all", content: null);
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.DoesNotContain("DeleteAllExecutions", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task DeleteAllExecutions_KindLevelGrant_AllowsAndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            EnforceConfigNoBackfill());
+        factory.FlowableStub.DeleteAllWorkflowExecutionsResult = 3;
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var roleStore = scope.ServiceProvider.GetRequiredService<IRoleStore>();
+            var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
+            var assignments = scope.ServiceProvider.GetRequiredService<IRoleAssignmentStore>();
+            var role = await roleStore.CreateAsync(new CreateRoleInput("ExecutionWiper", null), AdminUserId);
+            await grants.CreateAsync(new CreatePermissionGrantInput(
+                EntityKinds.Role, role.Id.ToString(),
+                Actions.DeleteAll, "/workflowexecution/*", "allow", 0), AdminUserId);
+            await assignments.AssignAsync(new CreateRoleAssignmentInput(
+                role.Id, EntityKinds.User, AdminUserId.ToString(), null), AdminUserId);
+        }
+
+        var resp = await client.PostAsync("/api/executions/delete-all", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("DeleteAllExecutions", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
     public async Task DeleteExecution_GrantOnDifferentProcessKey_Returns403()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(

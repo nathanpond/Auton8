@@ -1122,6 +1122,89 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    private const string PluginsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS plugins (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            entry_assembly TEXT NOT NULL,
+            entry_type TEXT NULL,
+            status INTEGER NOT NULL DEFAULT 0,
+            uploaded_at TIMESTAMPTZ NOT NULL,
+            uploaded_by UUID NOT NULL,
+            last_enabled_at TIMESTAMPTZ NULL,
+            last_disabled_at TIMESTAMPTZ NULL,
+            last_error TEXT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_plugins_status ON plugins (status);
+        """;
+
+    // Add a "Plugins" entry to the icon menu so admins discover the new admin
+    // page without rebuilding seed data. We don't gate on auth_seed_state — the
+    // NOT EXISTS check on the menu_item itself makes the operation purely
+    // idempotent and resilient to operator-renamed parent groups (we look up
+    // whatever top-level group is in the icon menu rather than hardcoding a
+    // display_name like 'Settings').
+    private const string PluginsMenuItemSql =
+        """
+        DO $$
+        DECLARE
+            icon_menu_id UUID;
+            parent_group_id UUID;
+        BEGIN
+            -- Clean up the old seed_state row from the first cut of this seed,
+            -- which marked itself applied even when no work was done. Future
+            -- attempts to re-add this row are no-ops via the menu_item check.
+            DELETE FROM auth_seed_state WHERE key = 'icon_menu_plugins_v1';
+
+            SELECT id INTO icon_menu_id FROM menus WHERE key = 'icon' LIMIT 1;
+            IF icon_menu_id IS NULL THEN
+                RETURN;
+            END IF;
+
+            -- Pick whatever top-level group exists. Prior seeds named it
+            -- 'Settings'; later customizations may have renamed it ('Admin
+            -- Icon' in some envs). We don't care about the name, only that
+            -- there is a group to nest under.
+            SELECT id INTO parent_group_id
+            FROM menu_items
+            WHERE menu_id = icon_menu_id
+              AND parent_id IS NULL
+              AND item_type = 'group'
+            ORDER BY sort_order, created_at_utc
+            LIMIT 1;
+
+            IF parent_group_id IS NULL THEN
+                RETURN;
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM menu_items
+                WHERE menu_id = icon_menu_id
+                  AND parent_id = parent_group_id
+                  AND config->>'path' = '/admin/plugins'
+            )
+            THEN
+                INSERT INTO menu_items (
+                    id, menu_id, parent_id, sort_order, display_name, icon,
+                    item_type, config, is_visible, is_system,
+                    created_at_utc, updated_at_utc
+                )
+                VALUES (
+                    gen_random_uuid(), icon_menu_id, parent_group_id,
+                    (SELECT COALESCE(MAX(sort_order), 0) + 1
+                     FROM menu_items
+                     WHERE menu_id = icon_menu_id AND parent_id = parent_group_id),
+                    'Plugins', 'fa fa-puzzle-piece',
+                    'route', '{{"path":"/admin/plugins"}}'::jsonb,
+                    TRUE, TRUE, NOW(), NOW()
+                );
+            END IF;
+        END $$;
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -1140,6 +1223,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(IconMenuWrapSettingsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigStatusAppearanceSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSiteInformationSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PluginsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PluginsMenuItemSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

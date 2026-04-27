@@ -93,6 +93,17 @@ public static class ExecutionEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Delete, "processInstanceId");
 
+        // Bulk wipe — kind-level gate (no instance id). Used by the executions
+        // admin page to clear noise during signal-event debugging.
+        executions.MapPost("/delete-all", async (
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            var deleted = await flowable.DeleteAllWorkflowExecutionsAsync(cancellationToken);
+            return Results.Ok(new { deleted });
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.WorkflowExecution, Actions.DeleteAll);
+
         var tasks = app.MapGroup("/api/tasks")
             .RequireAuthorization();
 

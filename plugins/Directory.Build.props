@@ -1,0 +1,32 @@
+<Project>
+
+    <!-- Common settings inherited by every plugin csproj under /plugins/.
+         Plugins are .NET classlibs that subscribe to AutoNate hooks at runtime.
+         They MUST NOT reference AutoNate.Web — only the Abstractions assembly,
+         and that reference must be Private=false so the host's loaded copy
+         unifies type identity (otherwise the cast to IAutoNatePlugin fails
+         silently across AssemblyLoadContexts). -->
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsPackable>false</IsPackable>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+
+        <PluginAbstractionsProjectPath>$(MSBuildThisFileDirectory)..\src\AutoNate.Plugin.Abstractions\AutoNate.Plugin.Abstractions.csproj</PluginAbstractionsProjectPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="$(PluginAbstractionsProjectPath)">
+            <Private>false</Private>
+        </ProjectReference>
+    </ItemGroup>
+
+    <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\plugin.json')">
+        <None Include="plugin.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+</Project>

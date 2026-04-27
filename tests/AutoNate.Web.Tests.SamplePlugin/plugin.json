@@ -1,0 +1,6 @@
+{
+  "name": "AutoNate.Web.Tests.SamplePlugin",
+  "version": "1.0.0",
+  "entryAssembly": "AutoNate.Web.Tests.SamplePlugin.dll",
+  "entryType": "AutoNate.Web.Tests.SamplePlugin.SamplePlugin"
+}

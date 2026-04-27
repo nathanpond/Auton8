@@ -3,6 +3,7 @@ using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EntityTypes;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.Selectors;
+using AutoNate.Web.Hooks;
 using AutoNate.Web.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -68,6 +69,7 @@ public sealed class AuthorizerTests
             registry,
             compilers,
             Array.Empty<IInstanceAuthorizer>(),
+            new HookRegistrar(NullLogger<ActionHub>.Instance).Filters,
             NullLogger<Authorizer>.Instance);
     }
 

@@ -58,6 +58,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<StatusAppearanceEntry> StatusAppearanceEntries { get; set; }
 
+    public virtual DbSet<Plugin> Plugins { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -651,6 +653,29 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Plugin>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("plugins_pkey");
+
+            entity.ToTable("plugins");
+
+            entity.HasIndex(e => e.Status, "ix_plugins_status");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Version).HasColumnName("version");
+            entity.Property(e => e.EntryAssembly).HasColumnName("entry_assembly");
+            entity.Property(e => e.EntryType).HasColumnName("entry_type");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at");
+            entity.Property(e => e.UploadedBy).HasColumnName("uploaded_by");
+            entity.Property(e => e.LastEnabledAt).HasColumnName("last_enabled_at");
+            entity.Property(e => e.LastDisabledAt).HasColumnName("last_disabled_at");
+            entity.Property(e => e.LastError).HasColumnName("last_error");
         });
 
         OnModelCreatingPartial(modelBuilder);

@@ -49,17 +49,15 @@
         <SpaInput Include="$(SpaRoot)tsconfig*.json" />
     </ItemGroup>
 
-    <Target Name="BuildReactSpa"
-            BeforeTargets="ResolveStaticWebAssetsInputs;AssignTargetPaths;BeforeBuild"
-            Condition="'$(BuildSpa)' == 'true'"
-            Inputs="@(SpaInput)"
-            Outputs="$(SpaPublishDir)index.html">
+    <ItemGroup>
+      <ProjectReference Include="..\AutoNate.Plugin.Abstractions\AutoNate.Plugin.Abstractions.csproj" />
+    </ItemGroup>
+
+    <Target Name="BuildReactSpa" BeforeTargets="ResolveStaticWebAssetsInputs;AssignTargetPaths;BeforeBuild" Condition="'$(BuildSpa)' == 'true'" Inputs="@(SpaInput)" Outputs="$(SpaPublishDir)index.html">
         <Message Importance="high" Text="Building React SPA at $(SpaRoot) (Configuration=$(Configuration))" />
         <!-- Vite owns its own static-asset bundle at public/vendor/bpmn-js. If it's missing
              (fresh clone, someone ran git clean, etc.), rebuild it before Vite consumes it. -->
-        <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\..\"
-              Command="npm run vendor:bpmn"
-              Condition="!Exists('$(SpaRoot)public\vendor\bpmn-js\bpmn-modeler.development.js')" />
+        <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\..\" Command="npm run vendor:bpmn" Condition="!Exists('$(SpaRoot)public\vendor\bpmn-js\bpmn-modeler.development.js')" />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm ci" Condition="!Exists('$(SpaRoot)node_modules')" />
         <Exec WorkingDirectory="$(SpaRoot)" Command="npm run build" />
         <ItemGroup>

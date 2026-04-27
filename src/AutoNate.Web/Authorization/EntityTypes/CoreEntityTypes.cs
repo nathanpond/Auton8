@@ -17,7 +17,7 @@ public static class CoreEntityTypes
         new IEntityType[]
         {
             User!, Group!, Role!, RecordType!, Record!,
-            WorkflowModel!, WorkflowExecution!, WorkflowTask!
+            WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!
         });
 
     public static EntityTypeDefinition User { get; } = new(
@@ -89,7 +89,7 @@ public static class CoreEntityTypes
         idClrType: typeof(string),
         actions: new[]
         {
-            Actions.View, Actions.Cancel, Actions.Delete, Actions.Signal, Actions.Terminate, Actions.Override
+            Actions.View, Actions.Cancel, Actions.Delete, Actions.Signal, Actions.Terminate, Actions.Override, Actions.DeleteAll
         },
         tags: new[] { "processkey", "definitionkey", "startedby", "assignee" });
 
@@ -103,4 +103,13 @@ public static class CoreEntityTypes
             Actions.Complete, Actions.Unclaim
         },
         tags: new[] { "processkey", "definitionkey", "assignee", "candidategroup" });
+
+    // Single coarse Manage action gates list/view/upload/enable/disable/delete
+    // for plugins. Granular split is a v2 conversation if it ever comes up.
+    public static EntityTypeDefinition Plugin { get; } = new(
+        kind: EntityKinds.Plugin,
+        clrType: typeof(object),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.Manage },
+        tags: new[] { "name", "version", "status" });
 }

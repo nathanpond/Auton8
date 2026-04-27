@@ -23,6 +23,13 @@
 
     <ItemGroup>
         <ProjectReference Include="../../src/AutoNate.Web/AutoNate.Web.csproj" />
+        <ProjectReference Include="../AutoNate.Web.Tests.SamplePlugin/AutoNate.Web.Tests.SamplePlugin.csproj">
+            <!-- We don't reference any of its types directly; we just want the
+                 plugin's output staged under test-plugins/SamplePlugin/ so
+                 PluginLoaderTests can load it via PluginAssemblyLoadContext. -->
+            <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+            <Private>false</Private>
+        </ProjectReference>
     </ItemGroup>
 
     <ItemGroup>
@@ -33,5 +40,19 @@
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
     </ItemGroup>
+
+    <Target Name="StageSamplePluginForTests" AfterTargets="Build">
+        <PropertyGroup>
+            <SamplePluginSrc>$(MSBuildThisFileDirectory)..\AutoNate.Web.Tests.SamplePlugin\bin\$(Configuration)\$(TargetFramework)\</SamplePluginSrc>
+            <SamplePluginDst>$(OutputPath)test-plugins\SamplePlugin\</SamplePluginDst>
+        </PropertyGroup>
+        <ItemGroup>
+            <SamplePluginFiles Include="$(SamplePluginSrc)**\*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(SamplePluginFiles)"
+              DestinationFolder="$(SamplePluginDst)%(RecursiveDir)"
+              SkipUnchangedFiles="true"
+              Condition="Exists('$(SamplePluginSrc)')" />
+    </Target>
 
 </Project>

@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using System.Security.Claims;
+using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,7 @@ public sealed class Authorizer : IAuthorizer
     private readonly IEntityRegistry _registry;
     private readonly ISelectorCompilerRegistry _compilers;
     private readonly IReadOnlyDictionary<string, IInstanceAuthorizer> _instanceAuthorizers;
+    private readonly IFilterHub _filterHub;
     private readonly ILogger<Authorizer> _log;
 
     private ActorContext? _actorContext;
@@ -35,6 +37,7 @@ public sealed class Authorizer : IAuthorizer
         IEntityRegistry registry,
         ISelectorCompilerRegistry compilers,
         IEnumerable<IInstanceAuthorizer> instanceAuthorizers,
+        IFilterHub filterHub,
         ILogger<Authorizer> log)
     {
         _dbFactory = dbFactory;
@@ -42,6 +45,7 @@ public sealed class Authorizer : IAuthorizer
         _registry = registry;
         _compilers = compilers;
         _instanceAuthorizers = instanceAuthorizers.ToDictionary(h => h.Kind, StringComparer.Ordinal);
+        _filterHub = filterHub;
         _log = log;
     }
 
@@ -50,6 +54,16 @@ public sealed class Authorizer : IAuthorizer
         string action,
         EntityRef target,
         CancellationToken cancellationToken = default)
+    {
+        var raw = await ComputeDecisionAsync(actor, action, target, cancellationToken);
+        return await ApplyAuthorizeFilterAsync(actor, action, target, raw, cancellationToken);
+    }
+
+    private async Task<AuthDecision> ComputeDecisionAsync(
+        ClaimsPrincipal actor,
+        string action,
+        EntityRef target,
+        CancellationToken cancellationToken)
     {
         if (!_options.Value.Enabled)
         {
@@ -98,6 +112,51 @@ public sealed class Authorizer : IAuthorizer
             ? AuthDecision.Allow("matched grant")
             : MaybeDryRun(AuthDecision.Deny("no matching grant"), action, target);
     }
+
+    private async Task<AuthDecision> ApplyAuthorizeFilterAsync(
+        ClaimsPrincipal actor,
+        string action,
+        EntityRef target,
+        AuthDecision raw,
+        CancellationToken cancellationToken)
+    {
+        if (!_filterHub.HasFilter(HookPoints.AuthorizeAuthorize))
+        {
+            return raw;
+        }
+
+        var ctx = new AuthorizeFilterContext
+        {
+            Actor = actor,
+            Action = action,
+            Target = new EntityRefDto(target.Kind, target.Id),
+            CurrentDecision = ToDto(raw),
+        };
+
+        AuthorizeFilterContext filtered;
+        try
+        {
+            filtered = await _filterHub.ApplyAsync(HookPoints.AuthorizeAuthorize, ctx, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "auth filter threw; fail-secure deny for action={Action} target={Kind}:{Id}",
+                action, target.Kind, target.Id);
+            return AuthDecision.Deny("filter threw");
+        }
+
+        return FromDto(filtered.CurrentDecision);
+    }
+
+    private static AuthDecisionDto ToDto(AuthDecision d) => new()
+    {
+        Effect = d.Effect == AuthEffect.Allow ? AuthEffectDto.Allow : AuthEffectDto.Deny,
+        Reason = d.Reason,
+    };
+
+    private static AuthDecision FromDto(AuthDecisionDto d) =>
+        d.Effect == AuthEffectDto.Allow ? AuthDecision.Allow(d.Reason) : AuthDecision.Deny(d.Reason);
 
     private async Task<AuthDecision> AuthorizeKindLevelAsync(
         ActorContext actor,

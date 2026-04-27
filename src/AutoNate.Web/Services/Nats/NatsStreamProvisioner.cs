@@ -1,4 +1,5 @@
 using AutoNate.Web.Configuration;
+using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Records;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,15 @@ public sealed class NatsStreamProvisioner(
 {
     private readonly NatsOptions _options = natsOptions.Value;
 
+    // Stale messages on this stream are useless and actively harmful: any new
+    // ephemeral Dapr consumer with deliver_policy=all replays the whole
+    // backlog on reconnect, which fan-outs into spurious signal-start
+    // workflow runs. Cap retention to one day so the backlog stays bounded
+    // even if a consumer is briefly misconfigured. Combined with the
+    // `deliverPolicy: new` setting on the pub/sub component, this is the
+    // defence-in-depth pair against replay storms.
+    private static readonly TimeSpan StreamMaxAge = TimeSpan.FromHours(24);
+
     // The Dapr pub/sub component (infra/dapr/components/pubsub.yaml) is bound
     // to one stream via `streamName: workflow-execution`, so every Dapr
     // subscription — regardless of topic — consumes from this stream. That
@@ -33,8 +43,12 @@ public sealed class NatsStreamProvisioner(
         new StreamConfig(name: "workflow-execution", subjects: new[]
         {
             $"{BusWatcherStreamService.TopicRoot}.>",
-            $"{DaprRecordEventPublisher.TopicRoot}.>"
+            $"{DaprRecordEventPublisher.TopicRoot}.>",
+            $"{DaprApplicationEventPublisher.TopicRoot}.>"
         })
+        {
+            MaxAge = StreamMaxAge
+        }
     ];
 
     // Streams that previous versions of the app provisioned but no longer

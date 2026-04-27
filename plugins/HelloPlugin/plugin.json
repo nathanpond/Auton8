@@ -1,0 +1,6 @@
+{
+  "name": "HelloPlugin",
+  "version": "1.0.0",
+  "entryAssembly": "HelloPlugin.dll",
+  "entryType": "AutoNate.Plugins.HelloPlugin.HelloPlugin"
+}

@@ -1,3 +1,4 @@
+using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EntityTypes;
@@ -5,8 +6,11 @@ using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Endpoints;
+using AutoNate.Web.Hooks;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Plugins;
+using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
@@ -18,6 +22,7 @@ using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.Workflow;
+using Microsoft.AspNetCore.Http.Features;
 using Dapr.Messaging.PublishSubscribe.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication;
@@ -148,6 +153,25 @@ builder.Services.AddSingleton<IFieldType, OptionFieldType>();
 builder.Services.AddSingleton<IFieldType, BooleanFieldType>();
 builder.Services.AddSingleton<IFieldTypeRegistry, FieldTypeRegistry>();
 builder.Services.AddSingleton<IRecordEventPublisher, DaprRecordEventPublisher>();
+builder.Services.AddSingleton<IApplicationEventPublisher, DaprApplicationEventPublisher>();
+
+// Hook system: HookRegistrar is the singleton root that owns both hubs.
+// Plugins receive IHookRegistrar (write surface); host services consume
+// IActionHub / IFilterHub (read/dispatch surface).
+builder.Services.AddOptions<PluginOptions>().BindConfiguration(PluginOptions.SectionName);
+builder.Services.AddSingleton<HookRegistrar>();
+builder.Services.AddSingleton<IHookRegistrar>(sp => sp.GetRequiredService<HookRegistrar>());
+builder.Services.AddSingleton<IActionHub>(sp => sp.GetRequiredService<HookRegistrar>().Actions);
+builder.Services.AddSingleton<IFilterHub>(sp => sp.GetRequiredService<HookRegistrar>().Filters);
+builder.Services.AddSingleton<PluginRuntime>();
+builder.Services.AddScoped<IPluginManagementService, PluginManagementService>();
+builder.Services.AddHostedService<PluginHostedService>();
+builder.Services.AddHttpClient(); // DaprApplicationEventPublisher needs IHttpClientFactory
+builder.Services.Configure<FormOptions>(o =>
+{
+    // Plugin uploads can run up to MaxUploadBytes; keep multipart in sync.
+    o.MultipartBodyLengthLimit = 52_428_800;
+});
 builder.Services.AddScoped<IRecordTypeStore, EfCoreRecordTypeStore>();
 builder.Services.AddScoped<IRecordStore, EfCoreRecordStore>();
 builder.Services.AddScoped<IRecordHistoryStore, EfCoreRecordHistoryStore>();
@@ -417,6 +441,7 @@ app.MapMenuEndpoints();
 app.MapPageEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
+app.MapAdminPluginsEndpoints();
 
 app.MapStaticAssets();
 

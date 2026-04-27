@@ -10,6 +10,14 @@ spec:
       value: nats://localhost:4222
     - name: streamName
       value: workflow-execution
+    # Without this, every newly-created consumer (and Dapr's are ephemeral
+    # with a 5s inactive_threshold) starts at deliver_policy=all and replays
+    # the full stream history on connect. Combined with the once-unbounded
+    # retention this stream had, that produced bursts of stale `record.created`
+    # events being re-broadcast as workflow signals every time the sidecar
+    # reconnected. `new` makes consumers future-only.
+    - name: deliverPolicy
+      value: new
 scopes:
   - autonate-web
   - flowable

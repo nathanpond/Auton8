@@ -4,6 +4,7 @@ using AutoNate.Web.Authorization.EntityTypes;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Configuration;
+using AutoNate.Web.Hooks;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
@@ -167,6 +168,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         });
         return new Authorizer(
             CreateDbContextFactory(), options, registry, compilers, instanceAuthorizers,
+            new HookRegistrar(NullLogger<ActionHub>.Instance).Filters,
             NullLogger<Authorizer>.Instance);
     }
 

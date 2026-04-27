@@ -30,10 +30,13 @@ public static class Actions
     public const string Cancel = "cancel";
     public const string Signal = "signal";
     public const string Terminate = "terminate";
+    public const string DeleteAll = "deleteall";
 
     public const string Claim = "claim";
     public const string Unclaim = "unclaim";
     public const string Complete = "complete";
 
     public const string Override = "override";
+
+    public const string Manage = "manage";
 }
