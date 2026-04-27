@@ -17,9 +17,7 @@ export default function Login() {
 
   const error = searchParams.get("error");
   const prefilledUsername = searchParams.get("username") ?? "";
-  // When the SPA drives the login, default the post-login redirect to /spa/home so the
-  // server's GetSafeReturnUrl lands us inside the React app rather than the Blazor /home.
-  const returnUrl = searchParams.get("returnUrl") ?? "/spa/home";
+  const returnUrl = searchParams.get("returnUrl") ?? "/home";
 
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<FormValues>({
     defaultValues: { username: prefilledUsername, password: "" }
