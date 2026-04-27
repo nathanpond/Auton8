@@ -1,0 +1,57 @@
+---
+name: add-record-event-type
+description: Use when adding a new record lifecycle event type (e.g. record.assigned, record.archived) or adding a new field to the record event payload. Walks through every file that has to be touched so subscribers, the SPA Events admin page, and the JetStream stream stay in sync.
+---
+
+# Adding a record lifecycle event type
+
+Record events are published from `EfCoreRecordStore` to the Dapr pub/sub topic `record.events` as raw JSON (no CloudEvents envelope). The JetStream stream `workflow-execution` covers the subject filter `record.>`, so any `record.*` topic is already covered — but the catalog, schema, and emit sites must be wired up by hand.
+
+## When to invoke this
+
+- Adding a new event *type* on the existing topic (e.g. `record.assigned`).
+- Adding a *field* to the event payload (`RecordEventEnvelope`).
+- Introducing a new `record.*` topic (rare — only if the existing `record.events` topic isn't a fit; see the "new topic" note below).
+
+## Steps
+
+### 1. Define the event type constant
+File: `src/AutoNate.Web/Services/Records/RecordEventPublisher.cs`
+
+Add a `const string` to `RecordEventTypes`. Use the dotted convention: `record.<noun>` or `record.<noun>.<verb>` (e.g. `record.status.changed`).
+
+### 2. Update the envelope if the schema is changing
+Same file: extend `RecordEventEnvelope` with the new field. Keep ordering positional — every existing call site uses positional args. Field naming on the wire is camelCase via `JsonSerializerDefaults.Web`; pick a C# PascalCase name that maps cleanly.
+
+### 3. Document the event in the catalog
+File: `src/AutoNate.Web/Services/Events/EventCatalog.cs`
+
+Two updates here, both mandatory:
+
+- If you added a payload field in step 2, append an entry to `RecordPayloadFields[]` with `(name, type, description)`. The SPA Events admin page renders this directly.
+- Append an `EventCatalogEntry` to the `Record` `EventCatalogCategory` (the last entry in `Categories`), using `DaprRecordEventPublisher.TopicName` and the const you added in step 1. Fill out `Summary`, `FiresWhen` (which method commits the underlying state change), and `PayloadHighlights` (anything non-obvious about which fields are populated for *this* event).
+
+If you forget the catalog entry, the event publishes fine but doesn't appear in the SPA Events page or the signal-start-event modal.
+
+### 4. Emit from the right store method
+File: `src/AutoNate.Web/Services/Records/EfCoreRecordStore.cs`
+
+Search for existing `await eventPublisher.PublishAsync(new RecordEventEnvelope(...))` calls — there are four (Created, Updated, StatusChanged, Deleted/Updated-on-restore). Add the new emit *after the EF transaction commits*, not before. Failures inside `PublishAsync` are logged but don't roll back; do not change that contract.
+
+The `ActorId` should come from the same `ClaimsPrincipal`-derived id the surrounding method uses; `SourceAppId` is `_sourceAppId` (the field on the store, derived from `DaprOptions.AppId`).
+
+### 5. Add tests
+- Unit test the emit path with a fake `IRecordEventPublisher` (look at the existing record store tests for the pattern; they capture envelopes into a list).
+- If the event surfaces in the SPA, add an E2E assertion that the new entry shows up on the Events admin page (it reads `EventCatalog.Categories` via an API endpoint).
+
+## Adding a brand-new topic (rare)
+
+Only if the new event genuinely doesn't fit `record.events`:
+
+1. Add a new `TopicName` const on `DaprRecordEventPublisher` (or a new publisher class).
+2. Append a new `EventCatalogTransport` entry in `EventCatalog.Transports`.
+3. **No JetStream change needed** as long as the subject starts with `record.` — the stream's subject filter is `record.>`. If the subject is outside that prefix, edit `DesiredStreams` in `src/AutoNate.Web/Services/Nats/NatsStreamProvisioner.cs`, and read the comment there about overlapping subjects (JetStream rejects them across streams).
+
+## Wire format reminder
+
+Subscribers must use `rawPayload=true`. Don't add CloudEvents framing — the publish URL already passes `metadata.rawPayload=true` and the entire Flowable telemetry topic relies on the same convention.
