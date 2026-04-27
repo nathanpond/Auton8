@@ -1,4 +1,4 @@
-export type MenuItemType = "group" | "link" | "route" | "page" | "action" | "separator";
+export type MenuItemType = "group" | "link" | "route" | "page" | "action" | "separator" | "template";
 
 export type MenuItemConfig = Record<string, unknown>;
 

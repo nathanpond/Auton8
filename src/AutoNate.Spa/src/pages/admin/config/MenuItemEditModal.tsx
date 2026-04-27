@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { MenuItem, MenuItemType } from "@/types/menus";
 import IconPicker from "@/components/IconPicker";
 import { findIcon } from "@/lib/faIcons";
+import { usePageTemplates } from "@/hooks/usePageTemplates";
 
 function extractIconName(stored: string | null | undefined): string {
   if (!stored) return "";
@@ -20,6 +21,7 @@ type Props = {
 
 const ITEM_TYPES: { value: MenuItemType; label: string; description: string }[] = [
   { value: "group", label: "Group", description: "A header that contains child items." },
+  { value: "template", label: "Template", description: "Mounts a built-in page template at a URL. Choose the template — its component renders at the chosen path." },
   { value: "route", label: "Route", description: "Navigates to an existing route in the app." },
   { value: "page", label: "Page", description: "Defines a new route with custom HTML/JSX content." },
   { value: "link", label: "Link", description: "Opens an external URL." },
@@ -37,6 +39,7 @@ const ACTION_OPTIONS = [{ value: "logout", label: "Logout (POST /account/logout)
 export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
   const [draft, setDraft] = useState<MenuItem>(item);
   const [iconQuery, setIconQuery] = useState<string>(() => extractIconName(item.icon));
+  const { data: pageTemplates = [] } = usePageTemplates();
 
   useEffect(() => {
     setDraft(item);
@@ -77,10 +80,7 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
       <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
         <form className="modal-content" onSubmit={submit}>
           <div className="modal-header">
-            <h5 className="modal-title">
-              Edit menu item
-              {draft.isSystem && <span className="badge bg-secondary ms-2">system</span>}
-            </h5>
+            <h5 className="modal-title">Edit menu item</h5>
             <button type="button" className="btn-close" onClick={onCancel} aria-label="Close" />
           </div>
 
@@ -113,7 +113,6 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                 <select
                   className="form-select"
                   value={draft.itemType}
-                  disabled={draft.isSystem}
                   onChange={(e) => setDraft({ ...draft, itemType: e.target.value as MenuItemType })}
                 >
                   {ITEM_TYPES.map((t) => (
@@ -270,6 +269,74 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                     <small className="text-muted">
                       JSX content can use plain HTML elements, plus <code>NavLink</code> and{" "}
                       <code>Link</code>. Inline event handlers are not allowed.
+                    </small>
+                  </div>
+                </>
+              )}
+
+              {draft.itemType === "template" && (
+                <>
+                  <div className="col-md-6">
+                    <label className="form-label">Page template</label>
+                    <select
+                      className="form-select"
+                      value={String(config.templateKey ?? "")}
+                      onChange={(e) => {
+                        const nextKey = e.target.value;
+                        setDraft((d) => {
+                          const prev = (d.config ?? {}) as Record<string, unknown>;
+                          const customPath = typeof prev.path === "string" ? (prev.path as string) : "";
+                          const prevKey = typeof prev.templateKey === "string" ? (prev.templateKey as string) : "";
+                          const prevDefault = pageTemplates.find((t) => t.key === prevKey)?.defaultPath ?? "";
+                          // If the path field hasn't been customized away from the previous template's default,
+                          // re-default it to the new template's default. Otherwise leave the admin's override alone.
+                          const next = { ...prev, templateKey: nextKey } as Record<string, unknown>;
+                          if (!customPath || customPath === prevDefault) {
+                            delete next.path;
+                          }
+                          return { ...d, config: next };
+                        });
+                      }}
+                    >
+                      <option value="">Select a template…</option>
+                      {pageTemplates.map((t) => (
+                        <option key={t.key} value={t.key}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    {typeof config.templateKey === "string" && config.templateKey ? (
+                      <small className="text-muted">
+                        {pageTemplates.find((t) => t.key === config.templateKey)?.description ?? ""}
+                      </small>
+                    ) : (
+                      <small className="text-muted">
+                        Pick which built-in page template to mount on this menu item.
+                      </small>
+                    )}
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">URL path</label>
+                    <input
+                      className="form-control font-monospace"
+                      placeholder={
+                        pageTemplates.find((t) => t.key === config.templateKey)?.defaultPath ?? "/path"
+                      }
+                      value={String(config.path ?? "")}
+                      onChange={(e) =>
+                        setConfigField("path", e.target.value === "" ? undefined : e.target.value)
+                      }
+                    />
+                    <small className="text-muted">
+                      Leave blank to use the template's default path
+                      {typeof config.templateKey === "string" && config.templateKey && (
+                        <>
+                          {" "}(<code>
+                            {pageTemplates.find((t) => t.key === config.templateKey)?.defaultPath ?? ""}
+                          </code>)
+                        </>
+                      )}
+                      .
                     </small>
                   </div>
                 </>

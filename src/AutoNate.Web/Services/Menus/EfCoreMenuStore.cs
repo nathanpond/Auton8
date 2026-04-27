@@ -16,7 +16,7 @@ public sealed class EfCoreMenuStore(
 {
     private static readonly HashSet<string> AllowedItemTypes = new(StringComparer.Ordinal)
     {
-        "group", "link", "route", "page", "action", "separator"
+        "group", "link", "route", "page", "action", "separator", "template"
     };
 
     private static readonly HashSet<string> ItemTypesWithoutDisplayName = new(StringComparer.Ordinal)
@@ -231,10 +231,6 @@ public sealed class EfCoreMenuStore(
         if (input.ItemType is { } newType)
         {
             ValidateItemType(newType);
-            if (entity.IsSystem && !string.Equals(entity.ItemType, newType, StringComparison.Ordinal))
-            {
-                throw new MenuValidationException("System menu items cannot change their type.");
-            }
             if (!string.Equals(entity.ItemType, newType, StringComparison.Ordinal))
             {
                 entity.ItemType = newType;
@@ -330,7 +326,6 @@ public sealed class EfCoreMenuStore(
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await db.MenuItems.SingleOrDefaultAsync(i => i.Id == id, cancellationToken);
         if (entity is null) return false;
-        if (entity.IsSystem) throw new MenuValidationException("System menu items cannot be deleted.");
         db.MenuItems.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
         return true;
@@ -407,17 +402,21 @@ public sealed class EfCoreMenuStore(
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         // Pages own their URL via item_type='page'. Routes can also "claim" a
         // URL via config.aliasPath — those become aliases the catch-all
-        // resolves to the target route's component.
+        // resolves to the target route's component. Template items mount a
+        // built-in SPA template at their config.path (or the template's own
+        // default_path when path is omitted).
         var rows = await db.MenuItems.AsNoTracking()
-            .Where(i => (i.ItemType == "page" || i.ItemType == "route") && i.IsVisible)
+            .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
             .ToListAsync(cancellationToken);
+
+        var templateDefaultPaths = await LoadTemplateDefaultPathsAsync(db, rows, cancellationToken);
 
         var permissionCache = new Dictionary<string, bool>(StringComparer.Ordinal);
         var entries = new List<PageRegistryEntry>(rows.Count);
         foreach (var row in rows)
         {
             if (!await IsAllowedAsync(row.PermissionRequired, permissionCache, actor, cancellationToken)) continue;
-            var (path, contentType) = ParseRegistryEntry(row);
+            var (path, contentType) = ParseRegistryEntry(row, templateDefaultPaths);
             if (path is null) continue;
             entries.Add(new PageRegistryEntry(row.Id, path, contentType));
         }
@@ -429,13 +428,15 @@ public sealed class EfCoreMenuStore(
         if (string.IsNullOrWhiteSpace(path)) return null;
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var rows = await db.MenuItems.AsNoTracking()
-            .Where(i => (i.ItemType == "page" || i.ItemType == "route") && i.IsVisible)
+            .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
             .ToListAsync(cancellationToken);
+
+        var templateDefaultPaths = await LoadTemplateDefaultPathsAsync(db, rows, cancellationToken);
 
         var permissionCache = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
-            var (rowPath, contentType, content) = ParsePageOrAlias(row);
+            var (rowPath, contentType, content) = ParsePageOrAlias(row, templateDefaultPaths);
             if (rowPath is null) continue;
             if (!string.Equals(rowPath, path, StringComparison.Ordinal)) continue;
             if (!await IsAllowedAsync(row.PermissionRequired, permissionCache, actor, cancellationToken)) return null;
@@ -444,21 +445,58 @@ public sealed class EfCoreMenuStore(
         return null;
     }
 
+    // Build a dictionary of templateKey -> default_path for every template
+    // referenced by a template-typed menu item. Used to resolve paths when a
+    // template item omits config.path.
+    private static async Task<IReadOnlyDictionary<string, string>> LoadTemplateDefaultPathsAsync(
+        AutoNateDbContext db,
+        IReadOnlyList<MenuItemEntity> rows,
+        CancellationToken cancellationToken)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            if (row.ItemType != "template") continue;
+            var key = ReadStringField(row.Config, "templateKey");
+            if (!string.IsNullOrWhiteSpace(key)) keys.Add(key);
+        }
+        if (keys.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        var templates = await db.PageTemplates.AsNoTracking()
+            .Where(t => keys.Contains(t.Key))
+            .Select(t => new { t.Key, t.DefaultPath })
+            .ToListAsync(cancellationToken);
+        return templates.ToDictionary(t => t.Key, t => t.DefaultPath, StringComparer.Ordinal);
+    }
+
     // For an alias-route item, the registry path is the aliasPath and the
     // content type is "alias" (the SPA renders the target component there).
     // For a page item, fall through to the existing page parsing.
-    private static (string? Path, string ContentType) ParseRegistryEntry(MenuItemEntity row)
+    // For a template item, the path is config.path or the template's
+    // default_path; content type is "template".
+    private static (string? Path, string ContentType) ParseRegistryEntry(
+        MenuItemEntity row,
+        IReadOnlyDictionary<string, string> templateDefaultPaths)
     {
         if (row.ItemType == "route")
         {
             var aliasPath = ReadStringField(row.Config, "aliasPath");
             return aliasPath is null ? (null, "alias") : (aliasPath, "alias");
         }
+        if (row.ItemType == "template")
+        {
+            var (path, _, _) = ParseTemplateConfig(row.Config, templateDefaultPaths);
+            return (path, "template");
+        }
         var (p, ct, _) = ParsePageConfig(row.Config);
         return (p, ct);
     }
 
-    private static (string? Path, string ContentType, string? Content) ParsePageOrAlias(MenuItemEntity row)
+    private static (string? Path, string ContentType, string? Content) ParsePageOrAlias(
+        MenuItemEntity row,
+        IReadOnlyDictionary<string, string> templateDefaultPaths)
     {
         if (row.ItemType == "route")
         {
@@ -469,7 +507,25 @@ public sealed class EfCoreMenuStore(
             var targetPath = ReadStringField(row.Config, "path");
             return (aliasPath, "alias", targetPath);
         }
+        if (row.ItemType == "template")
+        {
+            return ParseTemplateConfig(row.Config, templateDefaultPaths);
+        }
         return ParsePageConfig(row.Config);
+    }
+
+    private static (string? Path, string ContentType, string? Content) ParseTemplateConfig(
+        string config,
+        IReadOnlyDictionary<string, string> templateDefaultPaths)
+    {
+        var key = ReadStringField(config, "templateKey");
+        if (string.IsNullOrWhiteSpace(key)) return (null, "template", null);
+        var path = ReadStringField(config, "path");
+        if (string.IsNullOrWhiteSpace(path) && templateDefaultPaths.TryGetValue(key, out var defaultPath))
+        {
+            path = defaultPath;
+        }
+        return (path, "template", key);
     }
 
     private static string? ReadStringField(string config, string key)

@@ -2,9 +2,12 @@ import { useMemo } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useMe } from "@/hooks/useMe";
 import { usePublicMenu } from "@/hooks/useMenus";
+import { usePageTemplates } from "@/hooks/usePageTemplates";
 import { useSiteAppearance } from "@/providers/SiteAppearanceProvider";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { MenuItem } from "@/types/menus";
+import { PageTemplateInfo } from "@/api/pageTemplates";
+import { resolveItemPath } from "@/menus/resolveItemPath";
 import SiteBrand from "@/components/SiteBrand";
 
 type RecordTypeChild = { key: string; path: string; label: string; shortCode: string };
@@ -16,6 +19,7 @@ export default function NavMenu() {
   const { data: iconMenu } = usePublicMenu("icon");
   const { data: userMenu } = usePublicMenu("user");
   const { data: recordTypes = [] } = useRecordTypes(false);
+  const { data: pageTemplates } = usePageTemplates();
   const { effectiveAppearance } = useSiteAppearance();
 
   const recordTypeChildren: RecordTypeChild[] = useMemo(
@@ -44,7 +48,7 @@ export default function NavMenu() {
   }, [me]);
 
   const isActiveLeaf = (item: MenuItem): boolean => {
-    const path = pathOf(item);
+    const path = pathOf(item, pageTemplates);
     if (path && fullPath === path) return true;
     return (item.children ?? []).some(isActiveLeaf);
   };
@@ -112,7 +116,7 @@ export default function NavMenu() {
     if (item.itemType === "separator") {
       return <div key={item.id} className="menu-item menu-submenu-separator" />;
     }
-    const path = pathOf(item);
+    const path = pathOf(item, pageTemplates);
     return (
       <div
         key={item.id}
@@ -144,8 +148,8 @@ export default function NavMenu() {
         </a>
       );
     }
-    if (item.itemType === "route" || item.itemType === "page") {
-      const linkPath = pathOf(item);
+    if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
+      const linkPath = pathOf(item, pageTemplates);
       if (!linkPath) return renderUnconfigured(item, className, "missing path");
       return (
         <NavLink to={linkPath} className={className}>
@@ -216,6 +220,7 @@ export default function NavMenu() {
             item={item}
             isFirst={idx === 0}
             currentPath={currentPath}
+            templates={pageTemplates}
           />
         ))}
 
@@ -237,7 +242,7 @@ export default function NavMenu() {
           </a>
           <div className="dropdown-menu dropdown-menu-end me-1">
             {(userMenu?.items ?? []).map((item) => (
-              <UserDropdownEntry key={item.id} item={item} />
+              <UserDropdownEntry key={item.id} item={item} templates={pageTemplates} />
             ))}
           </div>
         </div>
@@ -253,11 +258,13 @@ export default function NavMenu() {
 function IconMenuTopItem({
   item,
   isFirst,
-  currentPath
+  currentPath,
+  templates
 }: {
   item: MenuItem;
   isFirst: boolean;
   currentPath: string;
+  templates: PageTemplateInfo[] | undefined;
 }) {
   if (item.itemType === "separator") return null;
 
@@ -281,7 +288,7 @@ function IconMenuTopItem({
         </a>
         <div className="dropdown-menu dropdown-menu-end me-1">
           {(item.children ?? []).map((child) => (
-            <DropdownEntry key={child.id} item={child} currentPath={currentPath} />
+            <DropdownEntry key={child.id} item={child} currentPath={currentPath} templates={templates} />
           ))}
         </div>
       </div>
@@ -309,8 +316,8 @@ function IconMenuTopItem({
       </div>
     );
   }
-  if (item.itemType === "route" || item.itemType === "page") {
-    const path = pathOf(item);
+  if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
+    const path = pathOf(item, templates);
     if (!path) return null;
     return (
       <div className={wrapperClass}>
@@ -325,7 +332,15 @@ function IconMenuTopItem({
   return null;
 }
 
-function DropdownEntry({ item, currentPath: _ }: { item: MenuItem; currentPath: string }) {
+function DropdownEntry({
+  item,
+  currentPath: _,
+  templates
+}: {
+  item: MenuItem;
+  currentPath: string;
+  templates: PageTemplateInfo[] | undefined;
+}) {
   // Inside an icon menu dropdown, separators render as a horizontal divider.
   if (item.itemType === "separator") {
     return <div className="dropdown-divider" />;
@@ -345,8 +360,8 @@ function DropdownEntry({ item, currentPath: _ }: { item: MenuItem; currentPath: 
       </a>
     );
   }
-  if (item.itemType === "route" || item.itemType === "page") {
-    const path = pathOf(item);
+  if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
+    const path = pathOf(item, templates);
     if (!path) return null;
     return (
       <NavLink className="dropdown-item" to={path}>
@@ -358,7 +373,13 @@ function DropdownEntry({ item, currentPath: _ }: { item: MenuItem; currentPath: 
   return null;
 }
 
-function UserDropdownEntry({ item }: { item: MenuItem }) {
+function UserDropdownEntry({
+  item,
+  templates
+}: {
+  item: MenuItem;
+  templates: PageTemplateInfo[] | undefined;
+}) {
   if (item.itemType === "separator") {
     return <div className="dropdown-divider" />;
   }
@@ -376,8 +397,8 @@ function UserDropdownEntry({ item }: { item: MenuItem }) {
     }
     return null;
   }
-  if (item.itemType === "route" || item.itemType === "page") {
-    const path = pathOf(item);
+  if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
+    const path = pathOf(item, templates);
     if (!path) return null;
     return (
       <NavLink className="dropdown-item" to={path}>
@@ -398,15 +419,8 @@ function UserDropdownEntry({ item }: { item: MenuItem }) {
   return null;
 }
 
-function pathOf(item: MenuItem): string | null {
-  if (item.itemType === "route") {
-    // Prefer alias URL when set so the menu/link points at the alias.
-    return stringFrom(item.config?.aliasPath) ?? stringFrom(item.config?.path);
-  }
-  if (item.itemType === "page") {
-    return stringFrom(item.config?.path);
-  }
-  return null;
+function pathOf(item: MenuItem, templates: PageTemplateInfo[] | undefined): string | null {
+  return resolveItemPath(item, templates);
 }
 
 function stringFrom(value: unknown): string | null {

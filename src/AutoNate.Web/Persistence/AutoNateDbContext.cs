@@ -60,6 +60,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<Plugin> Plugins { get; set; }
 
+    public virtual DbSet<PageTemplate> PageTemplates { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -676,6 +678,28 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.LastEnabledAt).HasColumnName("last_enabled_at");
             entity.Property(e => e.LastDisabledAt).HasColumnName("last_disabled_at");
             entity.Property(e => e.LastError).HasColumnName("last_error");
+        });
+
+        modelBuilder.Entity<PageTemplate>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("page_templates_pkey");
+
+            entity.ToTable("page_templates");
+
+            entity.HasIndex(e => e.Key, "page_templates_key_key").IsUnique();
+
+            entity.HasIndex(e => e.DefaultPath, "page_templates_default_path_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Key).HasColumnName("key");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.DefaultPath).HasColumnName("default_path");
+            entity.Property(e => e.IsEnabled).HasColumnName("is_enabled");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
         });
 
         OnModelCreatingPartial(modelBuilder);

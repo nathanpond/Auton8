@@ -638,6 +638,24 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    private const string PageTemplatesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS page_templates (
+            id UUID PRIMARY KEY,
+            key TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            default_path TEXT NOT NULL UNIQUE,
+            is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_menu_items_template_key
+            ON menu_items ((config->>'templateKey'))
+            WHERE item_type = 'template';
+        """;
+
     private const string MenusSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS menus (
@@ -815,7 +833,7 @@ internal static class DatabaseSchemaInitializer
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (g, main_id, NULL, 0, 'Dashboard', 'fa fa-house', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), main_id, g, 0, 'Home', NULL, 'route', '{{"path":"/home"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), main_id, g, 0, 'Home', NULL, 'template', '{{"templateKey":"home"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -844,17 +862,17 @@ internal static class DatabaseSchemaInitializer
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), icon_id, g, 0, 'Site Configuration', 'fa fa-sliders', 'route', '{{"path":"/admin/config"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), icon_id, g, 1, 'Manage Users', 'fa fa-users', 'route', '{{"path":"/manage-users"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), icon_id, g, 1, 'Manage Users', 'fa fa-users', 'template', '{{"templateKey":"manageUsers"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), icon_id, g, 2, 'Roles & Permissions', 'fa fa-user-shield', 'route', '{{"path":"/admin/roles"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), icon_id, g, 2, 'Roles & Permissions', 'fa fa-user-shield', 'template', '{{"templateKey":"adminRoles"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), icon_id, g, 3, 'Groups', 'fa fa-people-group', 'route', '{{"path":"/admin/groups"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), icon_id, g, 3, 'Groups', 'fa fa-people-group', 'template', '{{"templateKey":"adminGroups"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), icon_id, g, 4, 'Permissions', 'fa fa-key', 'route', '{{"path":"/admin/grants"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), icon_id, g, 4, 'Permissions', 'fa fa-key', 'template', '{{"templateKey":"adminGrants"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), icon_id, g, 5, 'Hierarchy', 'fa fa-sitemap', 'route', '{{"path":"/admin/hierarchy"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), icon_id, g, 5, 'Hierarchy', 'fa fa-sitemap', 'template', '{{"templateKey":"adminHierarchy"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), icon_id, g, 6, 'Effective Permissions', 'fa fa-magnifying-glass', 'route', '{{"path":"/admin/explain"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), icon_id, g, 6, 'Effective Permissions', 'fa fa-magnifying-glass', 'template', '{{"templateKey":"adminExplain"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
             END IF;
 
             IF NOT EXISTS (SELECT 1 FROM menus WHERE key = 'user') THEN
@@ -862,7 +880,7 @@ internal static class DatabaseSchemaInitializer
                 VALUES (user_id, 'user', 'User Menu', 'The dropdown beside the signed-in user''s name.', TRUE, NOW(), seed_actor, NOW(), seed_actor);
 
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), user_id, NULL, 0, 'User Profile', 'fa fa-user', 'route', '{{"path":"/user-profile"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), user_id, NULL, 0, 'User Profile', 'fa fa-user', 'template', '{{"templateKey":"userProfile"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), user_id, NULL, 1, '', NULL, 'separator', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -877,39 +895,39 @@ internal static class DatabaseSchemaInitializer
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (g, site_id, NULL, 0, 'Site Information', 'fa fa-circle-info', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 0, 'Bus Watcher', 'fa fa-tower-broadcast', 'route', '{{"path":"/admin/config/bus-watcher"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 0, 'Bus Watcher', 'fa fa-tower-broadcast', 'template', '{{"templateKey":"configBusWatcher"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 1, 'Events', 'fa fa-bell', 'route', '{{"path":"/admin/config/events"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 1, 'Events', 'fa fa-bell', 'template', '{{"templateKey":"configEvents"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (g, site_id, NULL, 1, 'Sitewide Configuration', 'fa fa-sliders', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 0, 'General', 'fa fa-gear', 'route', '{{"path":"/admin/config/general"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 0, 'General', 'fa fa-gear', 'template', '{{"templateKey":"configGeneral"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 1, 'Features', 'fa fa-toggle-on', 'route', '{{"path":"/admin/config/features"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 1, 'Features', 'fa fa-toggle-on', 'template', '{{"templateKey":"configFeatures"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 2, 'Appearance', 'fa fa-palette', 'route', '{{"path":"/admin/config/appearance"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 2, 'Appearance', 'fa fa-palette', 'template', '{{"templateKey":"configAppearance"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 3, 'Status Appearance', 'fa fa-circle-info', 'route', '{{"path":"/admin/config/status-appearance"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 3, 'Status Appearance', 'fa fa-circle-info', 'template', '{{"templateKey":"configStatusAppearance"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 4, 'External Connections', 'fa fa-plug', 'route', '{{"path":"/admin/config/external-connections"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 4, 'External Connections', 'fa fa-plug', 'template', '{{"templateKey":"configExternalConnections"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 5, 'Pages / Menus', 'fa fa-list', 'route', '{{"path":"/admin/config/pages-menus"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 5, 'Pages / Menus', 'fa fa-list', 'template', '{{"templateKey":"configPagesMenus"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (g, site_id, NULL, 2, 'Security', 'fa fa-shield-halved', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 0, 'Manage Users', 'fa fa-users', 'route', '{{"path":"/admin/config/users"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 0, 'Manage Users', 'fa fa-users', 'template', '{{"templateKey":"configSecurityUsers"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 1, 'Manage Groups', 'fa fa-people-group', 'route', '{{"path":"/admin/config/groups"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 1, 'Manage Groups', 'fa fa-people-group', 'template', '{{"templateKey":"configSecurityGroups"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 2, 'Manage Roles', 'fa fa-user-shield', 'route', '{{"path":"/admin/config/roles"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 2, 'Manage Roles', 'fa fa-user-shield', 'template', '{{"templateKey":"configSecurityRoles"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 3, 'Set Permissions', 'fa fa-key', 'route', '{{"path":"/admin/config/permissions"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 3, 'Set Permissions', 'fa fa-key', 'template', '{{"templateKey":"configSecurityPermissions"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 4, 'Permission Checker', 'fa fa-magnifying-glass', 'route', '{{"path":"/admin/config/permission-checker"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), site_id, g, 4, 'Permission Checker', 'fa fa-magnifying-glass', 'template', '{{"templateKey":"configSecurityPermissionChecker"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
             END IF;
         END $$;
         """;
@@ -1020,7 +1038,8 @@ internal static class DatabaseSchemaInitializer
                             parent_id = site_information_group_id,
                             sort_order = 0,
                             icon = 'fa fa-tower-broadcast',
-                            config = '{{"path":"/admin/config/bus-watcher"}}'::jsonb,
+                            item_type = 'template',
+                            config = '{{"templateKey":"configBusWatcher"}}'::jsonb,
                             updated_at_utc = NOW()
                         WHERE id = bus_watcher_item_id;
                     ELSIF NOT EXISTS (
@@ -1037,7 +1056,7 @@ internal static class DatabaseSchemaInitializer
                         VALUES (
                             gen_random_uuid(), site_id, site_information_group_id, 0,
                             'Bus Watcher', 'fa fa-tower-broadcast',
-                            'route', '{{"path":"/admin/config/bus-watcher"}}'::jsonb,
+                            'template', '{{"templateKey":"configBusWatcher"}}'::jsonb,
                             TRUE, TRUE, NOW(), NOW()
                         );
                     END IF;
@@ -1046,7 +1065,8 @@ internal static class DatabaseSchemaInitializer
                         SELECT 1 FROM menu_items
                         WHERE menu_id = site_id
                           AND parent_id = site_information_group_id
-                          AND config->>'path' = '/admin/config/events'
+                          AND (config->>'path' = '/admin/config/events'
+                               OR config->>'templateKey' = 'configEvents')
                     ) THEN
                         INSERT INTO menu_items (
                             id, menu_id, parent_id, sort_order, display_name, icon,
@@ -1056,7 +1076,7 @@ internal static class DatabaseSchemaInitializer
                         VALUES (
                             gen_random_uuid(), site_id, site_information_group_id, 1,
                             'Events', 'fa fa-bell',
-                            'route', '{{"path":"/admin/config/events"}}'::jsonb,
+                            'template', '{{"templateKey":"configEvents"}}'::jsonb,
                             TRUE, TRUE, NOW(), NOW()
                         );
                     END IF;
@@ -1092,7 +1112,8 @@ internal static class DatabaseSchemaInitializer
                        FROM menu_items
                        WHERE menu_id = site_id
                          AND parent_id = sitewide_group_id
-                         AND config->>'path' = '/admin/config/status-appearance'
+                         AND (config->>'path' = '/admin/config/status-appearance'
+                              OR config->>'templateKey' = 'configStatusAppearance')
                    )
                 THEN
                     UPDATE menu_items
@@ -1110,7 +1131,7 @@ internal static class DatabaseSchemaInitializer
                     VALUES (
                         gen_random_uuid(), site_id, sitewide_group_id, 3,
                         'Status Appearance', 'fa fa-circle-info',
-                        'route', '{{"path":"/admin/config/status-appearance"}}'::jsonb,
+                        'template', '{{"templateKey":"configStatusAppearance"}}'::jsonb,
                         TRUE, TRUE, NOW(), NOW()
                     );
                 END IF;
@@ -1119,6 +1140,91 @@ internal static class DatabaseSchemaInitializer
                 VALUES ('site_config_status_appearance_v1', NOW())
                 ON CONFLICT (key) DO NOTHING;
             END IF;
+        END $$;
+        """;
+
+    // Seed page_templates rows for every built-in template, create the
+    // `standalone` system menu (a hidden container for templates that need a
+    // URL but no nav placement), and migrate any pre-template menu_items rows
+    // that point at a known templated path to item_type='template'. Idempotent
+    // by construction: page_templates inserts use ON CONFLICT, the standalone
+    // menu uses ON CONFLICT, and the route→template UPDATE filters on
+    // item_type='route' so once converted, it doesn't match again.
+    private const string PageTemplatesSeedSql =
+        """
+        DO $$
+        DECLARE
+            seed_actor UUID := '00000000-0000-0000-0000-000000000000';
+            standalone_id UUID := '00000000-0000-0000-0001-000000000006';
+        BEGIN
+            INSERT INTO page_templates (id, key, name, description, default_path, is_enabled, created_at_utc, updated_at_utc)
+            VALUES
+              (gen_random_uuid(), 'home', 'Home', 'The main dashboard.', '/home', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'userProfile', 'User Profile', 'View and edit the signed-in user''s profile.', '/user-profile', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'manageUsers', 'Manage Users', 'Top-level user management page.', '/manage-users', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'busWatcher', 'Bus Watcher', 'Live event bus inspector.', '/bus-watcher', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminRoles', 'Roles & Permissions', 'Manage roles and assigned permissions.', '/admin/roles', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminGroups', 'Groups', 'Manage user groups.', '/admin/groups', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminGrants', 'Permission Grants', 'Direct permission grants for principals.', '/admin/grants', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminHierarchy', 'Hierarchy', 'View role / group hierarchy.', '/admin/hierarchy', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminExplain', 'Effective Permissions', 'Explain why a principal has a permission.', '/admin/explain', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminPlugins', 'Plugins', 'Manage installed plugins.', '/admin/plugins', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configGeneral', 'General (Site Config)', 'General sitewide configuration.', '/admin/config/general', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configFeatures', 'Features (Site Config)', 'Feature toggles.', '/admin/config/features', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configAppearance', 'Site Appearance (Site Config)', 'Sitewide appearance settings.', '/admin/config/appearance', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configStatusAppearance', 'Status Appearance (Site Config)', 'Status colour mapping.', '/admin/config/status-appearance', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configExternalConnections', 'External Connections (Site Config)', 'External service connections.', '/admin/config/external-connections', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configPagesMenus', 'Pages / Menus (Site Config)', 'Pages and menus admin.', '/admin/config/pages-menus', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configBusWatcher', 'Bus Watcher (Site Config)', 'Bus watcher mounted inside Site Config.', '/admin/config/bus-watcher', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configEvents', 'Events (Site Config)', 'Event subscriptions and topics.', '/admin/config/events', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityUsers', 'Manage Users (Site Config)', 'User management mounted inside Site Config.', '/admin/config/users', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityGroups', 'Manage Groups (Site Config)', 'Group management mounted inside Site Config.', '/admin/config/groups', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityRoles', 'Manage Roles (Site Config)', 'Role management mounted inside Site Config.', '/admin/config/roles', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityPermissions', 'Set Permissions (Site Config)', 'Set permissions mounted inside Site Config.', '/admin/config/permissions', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityPermissionChecker', 'Permission Checker (Site Config)', 'Effective-permission checker.', '/admin/config/permission-checker', TRUE, NOW(), NOW())
+            ON CONFLICT (key) DO NOTHING;
+
+            INSERT INTO menus (id, key, name, description, is_system,
+                created_at_utc, created_by, updated_at_utc, updated_by)
+            VALUES (standalone_id, 'standalone', 'Standalone Pages',
+                'Page templates URL-reachable but not shown in any visible nav.',
+                TRUE, NOW(), seed_actor, NOW(), seed_actor)
+            ON CONFLICT (key) DO NOTHING;
+
+            -- Convert any pre-existing route-typed menu items that point at a
+            -- known templated path. Once converted, the WHERE clause stops
+            -- matching them, making this naturally idempotent.
+            UPDATE menu_items mi
+            SET item_type = 'template',
+                config = jsonb_build_object('templateKey', mapping.template_key),
+                updated_at_utc = NOW()
+            FROM (VALUES
+              ('/home', 'home'),
+              ('/user-profile', 'userProfile'),
+              ('/manage-users', 'manageUsers'),
+              ('/bus-watcher', 'busWatcher'),
+              ('/admin/roles', 'adminRoles'),
+              ('/admin/groups', 'adminGroups'),
+              ('/admin/grants', 'adminGrants'),
+              ('/admin/hierarchy', 'adminHierarchy'),
+              ('/admin/explain', 'adminExplain'),
+              ('/admin/plugins', 'adminPlugins'),
+              ('/admin/config/general', 'configGeneral'),
+              ('/admin/config/features', 'configFeatures'),
+              ('/admin/config/appearance', 'configAppearance'),
+              ('/admin/config/status-appearance', 'configStatusAppearance'),
+              ('/admin/config/external-connections', 'configExternalConnections'),
+              ('/admin/config/pages-menus', 'configPagesMenus'),
+              ('/admin/config/bus-watcher', 'configBusWatcher'),
+              ('/admin/config/events', 'configEvents'),
+              ('/admin/config/users', 'configSecurityUsers'),
+              ('/admin/config/groups', 'configSecurityGroups'),
+              ('/admin/config/roles', 'configSecurityRoles'),
+              ('/admin/config/permissions', 'configSecurityPermissions'),
+              ('/admin/config/permission-checker', 'configSecurityPermissionChecker')
+            ) AS mapping(path, template_key)
+            WHERE mi.item_type = 'route'
+              AND mi.config->>'path' = mapping.path;
         END $$;
         """;
 
@@ -1184,7 +1290,8 @@ internal static class DatabaseSchemaInitializer
                 SELECT 1 FROM menu_items
                 WHERE menu_id = icon_menu_id
                   AND parent_id = parent_group_id
-                  AND config->>'path' = '/admin/plugins'
+                  AND (config->>'path' = '/admin/plugins'
+                       OR config->>'templateKey' = 'adminPlugins')
             )
             THEN
                 INSERT INTO menu_items (
@@ -1198,7 +1305,7 @@ internal static class DatabaseSchemaInitializer
                      FROM menu_items
                      WHERE menu_id = icon_menu_id AND parent_id = parent_group_id),
                     'Plugins', 'fa fa-puzzle-piece',
-                    'route', '{{"path":"/admin/plugins"}}'::jsonb,
+                    'template', '{{"templateKey":"adminPlugins"}}'::jsonb,
                     TRUE, TRUE, NOW(), NOW()
                 );
             END IF;
@@ -1219,12 +1326,14 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(RecordEdgeShadowBackfillSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(EntityEdgeHotIndexesSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RolePermissionsToGrantsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(MenusSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(IconMenuWrapSettingsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigStatusAppearanceSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSiteInformationSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsMenuItemSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSeedSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

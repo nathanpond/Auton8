@@ -14,35 +14,65 @@ import MenuTreeEditor from "./MenuTreeEditor";
 import { FlatMenuItem } from "./menuTreeUtils";
 import { useUpdateMenuItem } from "@/hooks/useMenus";
 import { MenuItemType, UpdateMenuItemRequest } from "@/types/menus";
+import PagesMenusHelpModal from "./PagesMenusHelpModal";
 import "./PagesMenus.css";
+
+// Tab order for the seeded system menus. Anything else (admin-created menus)
+// appears after these in alphabetical order.
+const SYSTEM_MENU_ORDER = ["main", "icon", "user", "site-config", "standalone"];
 
 export default function PagesMenus() {
   const { data: menus = [], isLoading } = useMenus();
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  const orderedMenus = useMemo(() => {
+    const orderIndex = (key: string) => {
+      const idx = SYSTEM_MENU_ORDER.indexOf(key);
+      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+    };
+    return [...menus].sort((a, b) => {
+      const ai = orderIndex(a.key);
+      const bi = orderIndex(b.key);
+      if (ai !== bi) return ai - bi;
+      return a.name.localeCompare(b.name);
+    });
+  }, [menus]);
 
   useEffect(() => {
-    if (!activeKey && menus.length > 0) {
-      setActiveKey(menus[0].key);
+    if (!activeKey && orderedMenus.length > 0) {
+      setActiveKey(orderedMenus[0].key);
     }
-  }, [menus, activeKey]);
+  }, [orderedMenus, activeKey]);
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Pages / Menus</h1>
-        <p className="page-head-copy">
-          Manage every navigation surface on the site. Each tab is a menu — drag items
-          to reorder, edit them to change icons, names, or destinations, and add new
-          items including custom <strong>page</strong> items that create their own routes.
-        </p>
+      <div className="page-head d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <h1 className="page-header mb-1">Pages / Menus</h1>
+          <p className="page-head-copy">
+            Manage every navigation surface on the site. Each tab is a menu — drag items
+            to reorder, edit them to change icons, names, or destinations, and add new
+            items including custom <strong>page</strong> items that create their own routes.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-sm btn-link p-0 text-decoration-none flex-shrink-0"
+          onClick={() => setHelpOpen(true)}
+          title="How Pages / Menus works"
+          aria-label="How Pages / Menus works"
+        >
+          <i className="fa fa-circle-question" /> Help
+        </button>
       </div>
 
       {isLoading && <div>Loading…</div>}
 
-      {!isLoading && menus.length > 0 && (
+      {!isLoading && orderedMenus.length > 0 && (
         <>
           <ul className="nav nav-tabs mb-3">
-            {menus.map((m) => (
+            {orderedMenus.map((m) => (
               <li className="nav-item" key={m.key}>
                 <button
                   type="button"
@@ -62,6 +92,8 @@ export default function PagesMenus() {
           {activeKey && <MenuPanel key={activeKey} menuKey={activeKey} />}
         </>
       )}
+
+      {helpOpen && <PagesMenusHelpModal onClose={() => setHelpOpen(false)} />}
     </>
   );
 }
@@ -184,6 +216,15 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
           </div>
           <div className="panel-body">
             {error && <div className="alert alert-danger">{error}</div>}
+
+            {menu.key === "standalone" && (
+              <div className="alert alert-info py-2 mb-3 small">
+                <i className="fa fa-circle-info me-2" />
+                Items on the <strong>Standalone</strong> menu are URL-reachable but do
+                not appear in any visible navigation menu. Use it to expose page
+                templates that should be available by URL without taking up nav space.
+              </div>
+            )}
 
             <MenuMetaForm menu={menu} onUpdate={(req) => updateMenu.mutateAsync(req)} />
 

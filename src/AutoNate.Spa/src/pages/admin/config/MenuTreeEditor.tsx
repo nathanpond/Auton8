@@ -312,19 +312,17 @@ function SortableRow({
         </button>
         <hr className="flex-grow-1 my-0" />
         <span className="badge bg-light text-dark text-uppercase">separator</span>
-        {!item.isSystem && (
-          <button
-            type="button"
-            className="btn btn-sm btn-link p-0 text-danger"
-            title="Delete"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          >
-            <i className="fa fa-xmark" />
-          </button>
-        )}
+        <button
+          type="button"
+          className="btn btn-sm btn-link p-0 text-danger"
+          title="Delete"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <i className="fa fa-xmark" />
+        </button>
       </li>
     );
   }
@@ -365,7 +363,6 @@ function SortableRow({
       <span className="flex-grow-1">
         {item.displayName}
         {!item.isVisible && <span className="badge bg-warning text-dark ms-2">hidden</span>}
-        {item.isSystem && <span className="badge bg-secondary ms-2">system</span>}
       </span>
       <span className="badge bg-light text-dark text-uppercase">{item.itemType}</span>
       <button
@@ -378,18 +375,16 @@ function SortableRow({
       >
         <i className="fa fa-pen" />
       </button>
-      {!item.isSystem && (
-        <button
-          type="button"
-          className="btn btn-sm btn-outline-danger"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-        >
-          <i className="fa fa-trash" />
-        </button>
-      )}
+      <button
+        type="button"
+        className="btn btn-sm btn-outline-danger"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        <i className="fa fa-trash" />
+      </button>
     </li>
   );
 }

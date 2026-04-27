@@ -3,6 +3,7 @@ import JsxParser from "react-jsx-parser";
 import { usePage, usePages } from "@/hooks/usePages";
 import NotFound from "@/pages/not-found/NotFound";
 import { renderAppRoutes } from "@/routes/appRoutes";
+import { PAGE_TEMPLATES } from "@/pageTemplates";
 import {
   JSX_BLACKLISTED_ATTRS,
   JSX_BLACKLISTED_TAGS,
@@ -46,6 +47,13 @@ export default function DynamicPageRoute() {
       );
     }
     return <Routes location={page.content}>{renderAppRoutes()}</Routes>;
+  }
+
+  // Template: look up the built-in component by its key. The registry contains
+  // every template the SPA ships; missing keys fall through to NotFound.
+  if (page.contentType === "template") {
+    const element = PAGE_TEMPLATES[page.content];
+    return element ?? <NotFound />;
   }
 
   return (

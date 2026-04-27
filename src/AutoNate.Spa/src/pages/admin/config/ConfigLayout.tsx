@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { usePublicMenu } from "@/hooks/useMenus";
+import { usePageTemplates } from "@/hooks/usePageTemplates";
+import { resolveItemPath } from "@/menus/resolveItemPath";
 import { MenuItem } from "@/types/menus";
+import { PageTemplateInfo } from "@/api/pageTemplates";
 import "./ConfigLayout.css";
 
 export default function ConfigLayout() {
   const { data: menu } = usePublicMenu("site-config");
+  const { data: templates } = usePageTemplates();
   const location = useLocation();
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -16,7 +20,7 @@ export default function ConfigLayout() {
       const next = { ...prev };
       for (const group of items) {
         if (next[group.id] === undefined) {
-          next[group.id] = containsActive(group, location.pathname);
+          next[group.id] = containsActive(group, location.pathname, templates);
         }
       }
       // Open the first group by default when nothing matches.
@@ -25,7 +29,7 @@ export default function ConfigLayout() {
       }
       return next;
     });
-  }, [menu, location.pathname]);
+  }, [menu, location.pathname, templates]);
 
   const toggleGroup = (id: string) =>
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -67,7 +71,7 @@ export default function ConfigLayout() {
                           <hr className="config-nav-separator" />
                         </li>
                       ) : (
-                        <ConfigLeaf key={item.id} item={item} />
+                        <ConfigLeaf key={item.id} item={item} templates={templates} />
                       )
                     )}
                   </ul>
@@ -85,12 +89,14 @@ export default function ConfigLayout() {
   );
 }
 
-function ConfigLeaf({ item }: { item: MenuItem }) {
-  const aliasPath =
-    typeof item.config?.aliasPath === "string" ? (item.config.aliasPath as string) : null;
-  const targetPath =
-    typeof item.config?.path === "string" ? (item.config.path as string) : null;
-  const path = aliasPath ?? targetPath;
+function ConfigLeaf({
+  item,
+  templates
+}: {
+  item: MenuItem;
+  templates: PageTemplateInfo[] | undefined;
+}) {
+  const path = resolveItemPath(item, templates);
   if (!path) return null;
   return (
     <li>
@@ -108,11 +114,15 @@ function ConfigLeaf({ item }: { item: MenuItem }) {
   );
 }
 
-function containsActive(group: MenuItem, pathname: string): boolean {
+function containsActive(
+  group: MenuItem,
+  pathname: string,
+  templates: PageTemplateInfo[] | undefined
+): boolean {
   for (const child of group.children ?? []) {
-    const path = typeof child.config?.path === "string" ? (child.config.path as string) : null;
+    const path = resolveItemPath(child, templates);
     if (path && pathname.startsWith(path)) return true;
-    if ((child.children ?? []).length > 0 && containsActive(child, pathname)) return true;
+    if ((child.children ?? []).length > 0 && containsActive(child, pathname, templates)) return true;
   }
   return false;
 }

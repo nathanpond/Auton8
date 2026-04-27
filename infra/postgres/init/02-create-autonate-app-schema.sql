@@ -453,6 +453,17 @@ ON CONFLICT (username) DO NOTHING;
 -- Site menus & dynamic pages
 -- =============================================================================
 
+CREATE TABLE IF NOT EXISTS page_templates (
+    id UUID PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NULL,
+    default_path TEXT NOT NULL UNIQUE,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at_utc TIMESTAMPTZ NOT NULL,
+    updated_at_utc TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS menus (
     id UUID PRIMARY KEY,
     key TEXT NOT NULL UNIQUE,
@@ -487,6 +498,10 @@ CREATE INDEX IF NOT EXISTS ix_menu_items_menu_parent_sort
 CREATE INDEX IF NOT EXISTS ix_menu_items_page_path
     ON menu_items ((config->>'path'))
     WHERE item_type = 'page';
+
+CREATE INDEX IF NOT EXISTS ix_menu_items_template_key
+    ON menu_items ((config->>'templateKey'))
+    WHERE item_type = 'template';
 
 CREATE TABLE IF NOT EXISTS status_appearance_entries (
     id UUID PRIMARY KEY,

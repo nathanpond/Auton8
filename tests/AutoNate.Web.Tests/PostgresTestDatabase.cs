@@ -184,6 +184,12 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     public EfCoreRecordCommentStore CreateRecordCommentStore() =>
         new(CreateDbContextFactory());
 
+    public AutoNate.Web.Services.Menus.EfCorePageTemplateStore CreatePageTemplateStore() =>
+        new(CreateDbContextFactory());
+
+    public AutoNate.Web.Services.Menus.EfCoreMenuStore CreateMenuStore(bool authorizationEnabled = false) =>
+        new(CreateDbContextFactory(), CreateAuthorizer(authorizationEnabled));
+
     public static IFieldTypeRegistry BuildDefaultFieldTypeRegistry() =>
         new FieldTypeRegistry(new IFieldType[]
         {
