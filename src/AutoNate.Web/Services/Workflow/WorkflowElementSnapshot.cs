@@ -13,7 +13,9 @@ public sealed record class WorkflowElementSnapshot(
     IReadOnlyList<string>? CandidateGroups = null,
     string? DueDate = null,
     string? SignalName = null,
-    string? SignalTopic = null);
+    string? SignalTopic = null,
+    string? TimerCycleCron = null,
+    string? TimerEndDate = null);
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr

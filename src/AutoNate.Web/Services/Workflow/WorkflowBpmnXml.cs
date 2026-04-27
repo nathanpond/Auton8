@@ -158,6 +158,7 @@ public static partial class WorkflowBpmnXml
             var errors = new List<string>();
             errors.AddRange(BuildScriptTaskValidationErrors(document));
             errors.AddRange(BuildSignalStartEventValidationErrors(document));
+            errors.AddRange(BuildTimerStartEventValidationErrors(document));
 
             if (errors.Count > 0)
             {
@@ -329,6 +330,61 @@ public static partial class WorkflowBpmnXml
             {
                 ApplySignalStartEventSnapshot(document, element, snapshot);
             }
+
+            if (string.Equals(element.Name.LocalName, "startEvent", StringComparison.Ordinal) &&
+                element.Element(BpmnNamespace + "timerEventDefinition") is not null)
+            {
+                ApplyTimerStartEventSnapshot(element, snapshot);
+            }
+        }
+    }
+
+    private static void ApplyTimerStartEventSnapshot(XElement startEventElement, WorkflowElementSnapshot snapshot)
+    {
+        var timerEventDefinition = startEventElement.Element(BpmnNamespace + "timerEventDefinition");
+        if (timerEventDefinition is null)
+        {
+            return;
+        }
+
+        var trimmedCron = snapshot.TimerCycleCron?.Trim();
+
+        // Strip the alternative timer kinds — bpmn-js leaves them around when the
+        // user switches modes, and Flowable rejects a timerEventDefinition with
+        // multiple kind children.
+        timerEventDefinition.Elements(BpmnNamespace + "timeDate").Remove();
+        timerEventDefinition.Elements(BpmnNamespace + "timeDuration").Remove();
+
+        var timeCycle = timerEventDefinition.Element(BpmnNamespace + "timeCycle");
+        if (string.IsNullOrEmpty(trimmedCron))
+        {
+            timeCycle?.Remove();
+        }
+        else
+        {
+            if (timeCycle is null)
+            {
+                timeCycle = new XElement(BpmnNamespace + "timeCycle");
+                timerEventDefinition.Add(timeCycle);
+            }
+            timeCycle.SetAttributeValue(FlowableNamespace + "type", "cron");
+            timeCycle.Value = trimmedCron;
+        }
+
+        // Persist endDate as an attribute on timerEventDefinition so it
+        // round-trips cleanly through bpmn-moddle on the SPA side (unknown
+        // child elements get stripped without a schema descriptor; attributes
+        // survive via $attrs). Drop any pre-existing child variant in case
+        // the user pasted XML that used the documented child-element form.
+        timerEventDefinition.Elements(FlowableNamespace + "endDate").Remove();
+        var trimmedEndDate = snapshot.TimerEndDate?.Trim();
+        if (string.IsNullOrEmpty(trimmedEndDate))
+        {
+            timerEventDefinition.SetAttributeValue(FlowableNamespace + "endDate", null);
+        }
+        else
+        {
+            timerEventDefinition.SetAttributeValue(FlowableNamespace + "endDate", trimmedEndDate);
         }
     }
 
@@ -682,6 +738,122 @@ public static partial class WorkflowBpmnXml
         return errors;
     }
 
+    private static IReadOnlyList<string> BuildTimerStartEventValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var startEvent in document.Descendants(BpmnNamespace + "startEvent"))
+        {
+            var timerEventDefinition = startEvent.Element(BpmnNamespace + "timerEventDefinition");
+            if (timerEventDefinition is null)
+            {
+                continue;
+            }
+
+            var label = startEvent.Attribute("name")?.Value
+                ?? startEvent.Attribute("id")?.Value
+                ?? "Unnamed timer start event";
+
+            // Reject co-existence with other event definitions on the same start
+            // event — Flowable will deploy it but the resulting trigger
+            // semantics are ambiguous, and we don't want to surprise users.
+            var conflictingDefinitions = startEvent.Elements()
+                .Where(child => child.Name.Namespace == BpmnNamespace)
+                .Select(child => child.Name.LocalName)
+                .Where(name =>
+                    name.Equals("signalEventDefinition", StringComparison.Ordinal) ||
+                    name.Equals("messageEventDefinition", StringComparison.Ordinal) ||
+                    name.Equals("conditionalEventDefinition", StringComparison.Ordinal) ||
+                    name.Equals("errorEventDefinition", StringComparison.Ordinal) ||
+                    name.Equals("escalationEventDefinition", StringComparison.Ordinal) ||
+                    name.Equals("compensateEventDefinition", StringComparison.Ordinal))
+                .ToArray();
+            if (conflictingDefinitions.Length > 0)
+            {
+                errors.Add(
+                    $"Timer start event '{label}' cannot also have a {string.Join(", ", conflictingDefinitions)} — drop a fresh start event for the other trigger type.");
+                continue;
+            }
+
+            var timerKindChildren = timerEventDefinition.Elements()
+                .Where(child => child.Name.Namespace == BpmnNamespace &&
+                    (child.Name.LocalName == "timeCycle" ||
+                     child.Name.LocalName == "timeDate" ||
+                     child.Name.LocalName == "timeDuration"))
+                .ToArray();
+            if (timerKindChildren.Length == 0)
+            {
+                errors.Add($"Timer start event '{label}' must specify a recurrence schedule before publishing.");
+                continue;
+            }
+            if (timerKindChildren.Length > 1)
+            {
+                errors.Add($"Timer start event '{label}' may only specify one of timeCycle, timeDate, or timeDuration.");
+                continue;
+            }
+
+            var timerKind = timerKindChildren[0];
+            var body = timerKind.Value?.Trim();
+            if (string.IsNullOrEmpty(body))
+            {
+                errors.Add($"Timer start event '{label}' has an empty schedule expression.");
+                continue;
+            }
+
+            if (timerKind.Name.LocalName == "timeCycle")
+            {
+                var typeAttribute = timerKind.Attribute(FlowableNamespace + "type")?.Value;
+                if (string.Equals(typeAttribute, "cron", StringComparison.OrdinalIgnoreCase) &&
+                    !LooksLikeQuartzCron(body))
+                {
+                    errors.Add($"Timer start event '{label}' has an invalid cron expression: '{body}'.");
+                    continue;
+                }
+            }
+
+            // endDate may live either as an attribute (the round-trip-safe
+            // shape we emit) or as a child element (older XML or
+            // hand-edited workflows). Accept both for validation.
+            var endDateValue = timerEventDefinition.Attribute(FlowableNamespace + "endDate")?.Value?.Trim()
+                ?? timerEventDefinition.Element(FlowableNamespace + "endDate")?.Value?.Trim();
+            if (!string.IsNullOrEmpty(endDateValue) && !LooksLikeIsoDateOrDateTime(endDateValue))
+            {
+                errors.Add($"Timer start event '{label}' has an invalid end date '{endDateValue}'. Use YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static bool LooksLikeQuartzCron(string expression)
+    {
+        var fields = expression.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (fields.Length is not (6 or 7))
+        {
+            return false;
+        }
+
+        // Quartz allows ?, *, ,, -, /, L, W, # plus literal day/month names.
+        // The field-by-field grammar is rich; this regex only weeds out
+        // obvious nonsense (control chars, unknown letters). The Flowable
+        // engine will surface a precise error on deployment if the expression
+        // is technically syntactically valid but semantically wrong.
+        return QuartzCronRegex().IsMatch(expression);
+    }
+
+    [GeneratedRegex(@"^[0-9A-Z\?\*\,\-\/#LW\s]+$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex QuartzCronRegex();
+
+    private static bool LooksLikeIsoDateOrDateTime(string value)
+    {
+        return DateTime.TryParseExact(
+                value,
+                ["yyyy-MM-dd", "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-ddTHH:mm:ssK", "yyyy-MM-ddTHH:mm:ss.fff"],
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeLocal,
+                out _);
+    }
+
     private static IReadOnlyList<string> BuildScriptTaskValidationErrors(XDocument document)
     {
         var errors = new List<string>();
@@ -748,10 +920,11 @@ public static partial class WorkflowBpmnXml
             if (localName.EndsWith("EventDefinition", StringComparison.Ordinal) &&
                 !localName.Equals("terminateEventDefinition", StringComparison.Ordinal))
             {
-                // Signal start events are now first-class — only warn for
-                // signal event definitions that are NOT on a start event
-                // (boundary, intermediate, end events still trigger the warning).
-                if (localName.Equals("signalEventDefinition", StringComparison.Ordinal) &&
+                // Signal and timer start events are now first-class — only warn
+                // for event definitions that are NOT on a start event (boundary,
+                // intermediate, end events still trigger the warning).
+                if ((localName.Equals("signalEventDefinition", StringComparison.Ordinal) ||
+                     localName.Equals("timerEventDefinition", StringComparison.Ordinal)) &&
                     element.Parent?.Name == BpmnNamespace + "startEvent")
                 {
                     continue;

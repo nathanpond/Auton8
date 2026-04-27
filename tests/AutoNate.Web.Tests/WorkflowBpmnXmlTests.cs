@@ -557,6 +557,364 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Contains(result.Errors, e => e.Contains("Event Type", StringComparison.Ordinal));
     }
 
+    // --- Timer start events ---------------------------------------------------
+
+    [Fact]
+    public void ApplyProcessMetadata_WritesCronTimeCycle_FromTimerStartSnapshot()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    TimerCycleCron: "0 0 9 ? * MON-FRI")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var timerEventDefinition = document.Descendants(bpmn + "timerEventDefinition").Single();
+        var timeCycle = timerEventDefinition.Element(bpmn + "timeCycle");
+        Assert.NotNull(timeCycle);
+        Assert.Equal("0 0 9 ? * MON-FRI", timeCycle!.Value);
+        Assert.Equal("cron", timeCycle.Attribute(flowable + "type")?.Value);
+        Assert.Empty(timerEventDefinition.Elements(bpmn + "timeDate"));
+        Assert.Empty(timerEventDefinition.Elements(bpmn + "timeDuration"));
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_WritesEndDateAttribute_WhenTimerSnapshotProvidesIt()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    TimerCycleCron: "0 0 9 * * ?",
+                    TimerEndDate: "2026-12-31")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var timerEventDefinition = document.Descendants(bpmn + "timerEventDefinition").Single();
+        Assert.Equal("2026-12-31", timerEventDefinition.Attribute(flowable + "endDate")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_RemovesEndDate_WhenTimerSnapshotClearsIt()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition flowable:endDate="2025-12-31">
+                                   <bpmn:timeCycle flowable:type="cron">0 0 9 * * ?</bpmn:timeCycle>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    TimerCycleCron: "0 0 9 * * ?",
+                    TimerEndDate: null)
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var timerEventDefinition = document.Descendants(bpmn + "timerEventDefinition").Single();
+        Assert.Null(timerEventDefinition.Attribute(flowable + "endDate"));
+        Assert.Empty(timerEventDefinition.Elements(flowable + "endDate"));
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_NormalizesEndDateChildElement_ToAttributeForRoundTrip()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition>
+                                   <flowable:endDate>2026-06-01</flowable:endDate>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    TimerCycleCron: "0 0 9 * * ?",
+                    TimerEndDate: "2026-06-01")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var timerEventDefinition = document.Descendants(bpmn + "timerEventDefinition").Single();
+        Assert.Equal("2026-06-01", timerEventDefinition.Attribute(flowable + "endDate")?.Value);
+        Assert.Empty(timerEventDefinition.Elements(flowable + "endDate"));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsTimerStartEventWithoutSchedule()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("recurrence schedule", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsTimerStartEventWithMalformedCron()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeCycle flowable:type="cron">not a cron expression!!</bpmn:timeCycle>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("invalid cron expression", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsTimerStartEventWithMalformedEndDate()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition flowable:endDate="not-a-date">
+                                   <bpmn:timeCycle flowable:type="cron">0 0 9 * * ?</bpmn:timeCycle>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("invalid end date", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsTimerStartEventWithValidCronAndEndDate()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition flowable:endDate="2026-12-31">
+                                   <bpmn:timeCycle flowable:type="cron">0 0 9 ? * MON-FRI</bpmn:timeCycle>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ValidateProcess_DoesNotWarnAboutTimerEventDefinition_OnStartEvents()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeCycle flowable:type="cron">0 0 9 * * ?</bpmn:timeCycle>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("timer events", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsStartEventWithBothTimerAndSignalDefinitions()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Signal_X" name="OrderPlaced" />
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeCycle flowable:type="cron">0 0 9 * * ?</bpmn:timeCycle>
+                                 </bpmn:timerEventDefinition>
+                                 <bpmn:signalEventDefinition signalRef="Signal_X" />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("signalEventDefinition", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_HandlesMultipleTimerStartEventsIndependently()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:startEvent>
+                               <bpmn:startEvent id="StartEvent_2">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:startEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "StartEvent_1",
+                    "bpmn:StartEvent",
+                    null,
+                    TimerCycleCron: "0 0 9 * * ?"),
+                new WorkflowElementSnapshot(
+                    "StartEvent_2",
+                    "bpmn:StartEvent",
+                    null,
+                    TimerCycleCron: "0 0 17 ? * FRI",
+                    TimerEndDate: "2026-12-31")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var startEvents = document.Descendants(bpmn + "startEvent").ToArray();
+        Assert.Equal(2, startEvents.Length);
+
+        var first = startEvents.Single(e => e.Attribute("id")?.Value == "StartEvent_1");
+        Assert.Equal("0 0 9 * * ?", first.Element(bpmn + "timerEventDefinition")?.Element(bpmn + "timeCycle")?.Value);
+        Assert.Null(first.Element(bpmn + "timerEventDefinition")?.Attribute(flowable + "endDate"));
+
+        var second = startEvents.Single(e => e.Attribute("id")?.Value == "StartEvent_2");
+        Assert.Equal("0 0 17 ? * FRI", second.Element(bpmn + "timerEventDefinition")?.Element(bpmn + "timeCycle")?.Value);
+        Assert.Equal("2026-12-31", second.Element(bpmn + "timerEventDefinition")?.Attribute(flowable + "endDate")?.Value);
+    }
+
     [Fact]
     public void ValidateProcess_AllowsSignalStartEventListeningOnTelemetryTopic()
     {

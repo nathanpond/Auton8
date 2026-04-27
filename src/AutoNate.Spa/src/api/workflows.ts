@@ -65,6 +65,8 @@ export type WorkflowElementSnapshot = {
   dueDate?: string | null;
   signalName?: string | null;
   signalTopic?: string | null;
+  timerCycleCron?: string | null;
+  timerEndDate?: string | null;
 };
 
 export type PrepareWorkflowRequest = {

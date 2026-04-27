@@ -26,6 +26,18 @@ import {
 } from "@/api/workflows";
 import { WorkflowModel } from "@/types/flowable";
 import * as workflow from "@/lib/bpmn/workflow.js";
+import {
+  defaultRecurrenceState,
+  describeRecurrence,
+  generateCron,
+  parseCron,
+  WEEK_DAYS,
+  type MonthlyKind,
+  type Ordinal,
+  type RecurrenceState,
+  type TimerMode,
+  type WeekDay
+} from "@/lib/cron/recurrence";
 import AssigneePicker from "@/components/AssigneePicker";
 import { useUsers } from "@/hooks/useUsers";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
@@ -54,6 +66,18 @@ type SignalStartEventEditor = {
   name: string;
   signalName: string;
   signalTopic: string;
+};
+
+type TimerStartEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  recurrence: RecurrenceState;
+  endDate: string;
+  advancedOpen: boolean;
+  rawCronOverride: boolean;
+  rawCronText: string;
+  parseError: string | null;
 };
 
 const DEFAULT_SIGNAL_TOPIC = "workflow.signals";
@@ -92,6 +116,8 @@ type ElementSelection = {
   dueDate?: string | null;
   signalName?: string | null;
   signalTopic?: string | null;
+  timerCycleCron?: string | null;
+  timerEndDate?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -170,6 +196,7 @@ export default function WorkflowStudio() {
   const [sequenceFlowEditor, setSequenceFlowEditor] = useState<SequenceFlowEditor | null>(null);
   const [userTaskEditor, setUserTaskEditor] = useState<UserTaskEditor | null>(null);
   const [signalStartEditor, setSignalStartEditor] = useState<SignalStartEventEditor | null>(null);
+  const [timerStartEditor, setTimerStartEditor] = useState<TimerStartEventEditor | null>(null);
 
   // Seed currentModel from the first workflow once the list query resolves. Gating on
   // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
@@ -191,6 +218,37 @@ export default function WorkflowStudio() {
 
   const onSelectionChanged = useCallback((raw: unknown) => {
     const selection = raw as ElementSelection;
+    const isTimerStart =
+      !!selection &&
+      selection.type === "bpmn:StartEvent" &&
+      // describeBusinessObject only sets timerCycleCron/timerEndDate when the
+      // start event has a TimerEventDefinition; plain start events leave them
+      // undefined entirely.
+      ("timerCycleCron" in selection || "timerEndDate" in selection);
+    if (isTimerStart && selection) {
+      const cron = (selection.timerCycleCron ?? "").trim();
+      const parsed = cron ? parseCron(cron) : null;
+      const recurrence = parsed ?? defaultRecurrenceState();
+      const couldNotParse = cron.length > 0 && parsed === null;
+      setTimerStartEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        recurrence,
+        endDate: selection.timerEndDate ?? "",
+        advancedOpen: couldNotParse,
+        rawCronOverride: couldNotParse,
+        rawCronText: cron,
+        parseError: couldNotParse
+          ? "AutoNate doesn't recognize this cron expression. The picker is locked — edit the raw cron below or clear it to start fresh."
+          : null
+      });
+      setSignalStartEditor(null);
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      return;
+    }
     const isSignalStart =
       !!selection &&
       selection.type === "bpmn:StartEvent" &&
@@ -208,6 +266,7 @@ export default function WorkflowStudio() {
         signalName: selection.signalName ?? "",
         signalTopic: selection.signalTopic ?? ""
       });
+      setTimerStartEditor(null);
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
@@ -225,6 +284,7 @@ export default function WorkflowStudio() {
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setSignalStartEditor(null);
+      setTimerStartEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -235,6 +295,7 @@ export default function WorkflowStudio() {
       setScriptTaskEditor(null);
       setUserTaskEditor(null);
       setSignalStartEditor(null);
+      setTimerStartEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -262,11 +323,13 @@ export default function WorkflowStudio() {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setSignalStartEditor(null);
+      setTimerStartEditor(null);
     } else {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setSignalStartEditor(null);
+      setTimerStartEditor(null);
     }
   }, []);
 
@@ -300,6 +363,7 @@ export default function WorkflowStudio() {
     setSequenceFlowEditor(null);
     setUserTaskEditor(null);
     setSignalStartEditor(null);
+    setTimerStartEditor(null);
   };
 
   const onSelectionChange = async (id: string) => {
@@ -452,6 +516,35 @@ export default function WorkflowStudio() {
         signalTopic: signalStartEditor.signalTopic.trim()
       });
       setSignalStartEditor(null);
+    });
+
+  const applyTimerStart = () =>
+    runBusy("applying timer start event changes", async () => {
+      if (!handle || !timerStartEditor) {
+        throw new Error("Select a timer start event before applying changes.");
+      }
+
+      let cron: string;
+      if (timerStartEditor.rawCronOverride) {
+        cron = timerStartEditor.rawCronText.trim();
+        if (!cron) {
+          throw new Error("Enter a cron expression in the Advanced section before applying.");
+        }
+      } else {
+        const result = generateCron(timerStartEditor.recurrence);
+        if (!result.ok) {
+          throw new Error(result.error);
+        }
+        cron = result.cron;
+      }
+
+      await workflow.updateTimerStartEventProperties(handle, {
+        id: timerStartEditor.id,
+        name: timerStartEditor.name,
+        timeCycle: cron,
+        endDate: timerStartEditor.endDate.trim() || null
+      });
+      setTimerStartEditor(null);
     });
 
   const applyUserTask = () =>
@@ -747,6 +840,19 @@ export default function WorkflowStudio() {
             setSignalStartEditor(null);
           }}
           onApply={applySignalStart}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {timerStartEditor && (
+        <TimerStartEventModal
+          editor={timerStartEditor}
+          onChange={setTimerStartEditor}
+          onClose={() => {
+            if (busy) return;
+            setTimerStartEditor(null);
+          }}
+          onApply={applyTimerStart}
           disabled={!!busy || !handle}
         />
       )}
@@ -1297,6 +1403,458 @@ function SignalStartEventModal({
   );
 }
 
+type TimerStartEventModalProps = {
+  editor: TimerStartEventEditor;
+  onChange: (next: TimerStartEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+};
+
+const ORDINAL_LABELS: Record<Ordinal, string> = {
+  "1": "First",
+  "2": "Second",
+  "3": "Third",
+  "4": "Fourth",
+  L: "Last"
+};
+
+const WEEK_DAY_LABELS: Record<WeekDay, string> = {
+  MON: "Mon",
+  TUE: "Tue",
+  WED: "Wed",
+  THU: "Thu",
+  FRI: "Fri",
+  SAT: "Sat",
+  SUN: "Sun"
+};
+
+const MONTH_LABELS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+
+function TimerStartEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: TimerStartEventModalProps) {
+  const setRecurrence = (mutator: (r: RecurrenceState) => RecurrenceState) => {
+    onChange({ ...editor, recurrence: mutator(editor.recurrence) });
+  };
+
+  const generation = useMemo(() => generateCron(editor.recurrence), [editor.recurrence]);
+  const generatedCron = generation.ok ? generation.cron : "";
+  const generatorError = generation.ok ? null : generation.error;
+  const summary = useMemo(() => describeRecurrence(editor.recurrence), [editor.recurrence]);
+
+  const timeValue = `${pad2(editor.recurrence.hour)}:${pad2(editor.recurrence.minute)}`;
+
+  const onTimeChange = (raw: string) => {
+    const [h = "0", m = "0"] = raw.split(":");
+    setRecurrence((r) => ({ ...r, hour: String(parseInt(h, 10) || 0), minute: String(parseInt(m, 10) || 0) }));
+  };
+
+  const toggleWeekDay = (day: WeekDay) => {
+    setRecurrence((r) => {
+      const next = r.weeklyDays.includes(day)
+        ? r.weeklyDays.filter((d) => d !== day)
+        : [...r.weeklyDays, day];
+      return { ...r, weeklyDays: next };
+    });
+  };
+
+  const applyDisabled =
+    disabled ||
+    (!editor.rawCronOverride && !generation.ok) ||
+    (editor.rawCronOverride && editor.rawCronText.trim().length === 0);
+
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Timer Start Event</h2>
+            <p className="workflow-modal-copy">
+              Schedule this workflow with an Outlook-style recurrence picker. Times use the Flowable
+              engine's timezone (UTC by default) — pick the time as it should fire on the server.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        {editor.parseError && (
+          <div className="alert alert-warning" role="alert">
+            {editor.parseError}
+          </div>
+        )}
+
+        <label className="workflow-field">
+          <span>Event Name (optional)</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Daily reminder"
+          />
+        </label>
+
+        <fieldset disabled={editor.rawCronOverride} className="workflow-field">
+          <legend>
+            <span>Pattern</span>
+          </legend>
+          <select
+            className="form-select"
+            value={editor.recurrence.mode}
+            onChange={(e) =>
+              setRecurrence((r) => ({ ...r, mode: e.target.value as TimerMode }))
+            }
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </fieldset>
+
+        {!editor.rawCronOverride && editor.recurrence.mode === "daily" && (
+          <div className="workflow-field">
+            <span>Recurrence</span>
+            <div className="d-flex align-items-center gap-2 mt-1">
+              <span>Every</span>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                className="form-control"
+                style={{ width: "5rem" }}
+                value={editor.recurrence.dailyEveryN}
+                disabled={editor.recurrence.dailyWeekdaysOnly}
+                onChange={(e) =>
+                  setRecurrence((r) => ({ ...r, dailyEveryN: e.target.value }))
+                }
+              />
+              <span>day(s)</span>
+            </div>
+            <label className="form-check mt-2">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                checked={editor.recurrence.dailyWeekdaysOnly}
+                onChange={(e) =>
+                  setRecurrence((r) => ({ ...r, dailyWeekdaysOnly: e.target.checked }))
+                }
+              />
+              <span className="form-check-label">Weekdays only (Mon–Fri)</span>
+            </label>
+          </div>
+        )}
+
+        {!editor.rawCronOverride && editor.recurrence.mode === "weekly" && (
+          <div className="workflow-field">
+            <span>Recurrence</span>
+            <div className="d-flex align-items-center gap-2 mt-1">
+              <span>Every</span>
+              <input
+                type="number"
+                min={1}
+                max={52}
+                className="form-control"
+                style={{ width: "5rem" }}
+                value={editor.recurrence.weeklyEveryN}
+                onChange={(e) =>
+                  setRecurrence((r) => ({ ...r, weeklyEveryN: e.target.value }))
+                }
+              />
+              <span>week(s) on:</span>
+            </div>
+            <div className="btn-group mt-2" role="group" aria-label="Days of the week">
+              {WEEK_DAYS.map((day) => {
+                const active = editor.recurrence.weeklyDays.includes(day);
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    className={`btn btn-sm ${active ? "btn-primary" : "btn-outline-primary"}`}
+                    onClick={() => toggleWeekDay(day)}
+                  >
+                    {WEEK_DAY_LABELS[day]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {!editor.rawCronOverride && editor.recurrence.mode === "monthly" && (
+          <div className="workflow-field">
+            <span>Recurrence</span>
+            <div className="form-check mt-1">
+              <input
+                type="radio"
+                className="form-check-input"
+                id="timer-monthly-dom"
+                checked={editor.recurrence.monthlyKind === "dayOfMonth"}
+                onChange={() =>
+                  setRecurrence((r) => ({ ...r, monthlyKind: "dayOfMonth" as MonthlyKind }))
+                }
+              />
+              <label className="form-check-label d-flex align-items-center gap-2" htmlFor="timer-monthly-dom">
+                <span>Day</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className="form-control"
+                  style={{ width: "5rem" }}
+                  value={editor.recurrence.monthlyDayOfMonth}
+                  disabled={editor.recurrence.monthlyKind !== "dayOfMonth"}
+                  onChange={(e) =>
+                    setRecurrence((r) => ({ ...r, monthlyDayOfMonth: e.target.value }))
+                  }
+                />
+                <span>of every</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  className="form-control"
+                  style={{ width: "5rem" }}
+                  value={editor.recurrence.monthlyEveryN}
+                  disabled={editor.recurrence.monthlyKind !== "dayOfMonth"}
+                  onChange={(e) =>
+                    setRecurrence((r) => ({ ...r, monthlyEveryN: e.target.value }))
+                  }
+                />
+                <span>month(s)</span>
+              </label>
+            </div>
+            <div className="form-check mt-2">
+              <input
+                type="radio"
+                className="form-check-input"
+                id="timer-monthly-ord"
+                checked={editor.recurrence.monthlyKind === "ordinalWeekday"}
+                onChange={() =>
+                  setRecurrence((r) => ({ ...r, monthlyKind: "ordinalWeekday" as MonthlyKind }))
+                }
+              />
+              <label className="form-check-label d-flex align-items-center gap-2" htmlFor="timer-monthly-ord">
+                <span>The</span>
+                <select
+                  className="form-select"
+                  style={{ width: "auto" }}
+                  value={editor.recurrence.monthlyOrdinal}
+                  disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
+                  onChange={(e) =>
+                    setRecurrence((r) => ({ ...r, monthlyOrdinal: e.target.value as Ordinal }))
+                  }
+                >
+                  {(["1", "2", "3", "4", "L"] as Ordinal[]).map((ord) => (
+                    <option key={ord} value={ord}>
+                      {ORDINAL_LABELS[ord]}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-select"
+                  style={{ width: "auto" }}
+                  value={editor.recurrence.monthlyOrdinalDay}
+                  disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
+                  onChange={(e) =>
+                    setRecurrence((r) => ({ ...r, monthlyOrdinalDay: e.target.value as WeekDay }))
+                  }
+                >
+                  {WEEK_DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      {WEEK_DAY_LABELS[d]}
+                    </option>
+                  ))}
+                </select>
+                <span>of every</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  className="form-control"
+                  style={{ width: "5rem" }}
+                  value={editor.recurrence.monthlyEveryN}
+                  disabled={editor.recurrence.monthlyKind !== "ordinalWeekday"}
+                  onChange={(e) =>
+                    setRecurrence((r) => ({ ...r, monthlyEveryN: e.target.value }))
+                  }
+                />
+                <span>month(s)</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {!editor.rawCronOverride && editor.recurrence.mode === "yearly" && (
+          <div className="workflow-field">
+            <span>Recurrence</span>
+            <div className="d-flex align-items-center gap-2 mt-1">
+              <span>Every year on</span>
+              <select
+                className="form-select"
+                style={{ width: "auto" }}
+                value={editor.recurrence.yearlyMonth}
+                onChange={(e) =>
+                  setRecurrence((r) => ({ ...r, yearlyMonth: e.target.value }))
+                }
+              >
+                {MONTH_LABELS.map((label, i) => (
+                  <option key={label} value={String(i + 1)}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                className="form-control"
+                style={{ width: "5rem" }}
+                value={editor.recurrence.yearlyDay}
+                onChange={(e) =>
+                  setRecurrence((r) => ({ ...r, yearlyDay: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+        )}
+
+        <label className="workflow-field">
+          <span>Time of day</span>
+          <input
+            type="time"
+            className="form-control"
+            style={{ width: "10rem" }}
+            value={timeValue}
+            disabled={editor.rawCronOverride}
+            onChange={(e) => onTimeChange(e.target.value)}
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>End by (optional)</span>
+          <input
+            type="date"
+            className="form-control"
+            style={{ width: "12rem" }}
+            value={editor.endDate}
+            onChange={(e) => onChange({ ...editor, endDate: e.target.value })}
+          />
+          <p className="workflow-modal-note">
+            Leave blank to recur indefinitely. Otherwise, no instances start after this date (engine timezone).
+          </p>
+        </label>
+
+        {generatorError && !editor.rawCronOverride && (
+          <div className="alert alert-danger" role="alert">
+            {generatorError}
+            {" Open Advanced below and override with a raw cron expression."}
+          </div>
+        )}
+
+        {!editor.rawCronOverride && generation.ok && (
+          <p className="workflow-modal-note" aria-live="polite">
+            <strong>Schedule:</strong> {summary}
+            {generation.warnings.map((w, i) => (
+              <span key={i}>
+                <br />
+                <em>Note: {w}</em>
+              </span>
+            ))}
+          </p>
+        )}
+
+        <details
+          open={editor.advancedOpen}
+          onToggle={(e) =>
+            onChange({ ...editor, advancedOpen: (e.target as HTMLDetailsElement).open })
+          }
+        >
+          <summary>Advanced</summary>
+          <label className="workflow-field mt-2">
+            <span>Generated cron expression</span>
+            <input
+              className="form-control font-monospace"
+              readOnly
+              value={generatedCron}
+              placeholder="(Configure recurrence above to see the generated cron)"
+            />
+          </label>
+          <label className="form-check mt-2">
+            <input
+              type="checkbox"
+              className="form-check-input"
+              checked={editor.rawCronOverride}
+              onChange={(e) =>
+                onChange({
+                  ...editor,
+                  rawCronOverride: e.target.checked,
+                  rawCronText: e.target.checked
+                    ? editor.rawCronText || generatedCron
+                    : editor.rawCronText
+                })
+              }
+            />
+            <span className="form-check-label">Override with raw cron expression</span>
+          </label>
+          {editor.rawCronOverride && (
+            <label className="workflow-field mt-2">
+              <span>Raw cron (Quartz 6-field)</span>
+              <input
+                className="form-control font-monospace"
+                value={editor.rawCronText}
+                onChange={(e) => onChange({ ...editor, rawCronText: e.target.value })}
+                placeholder="0 0 9 * * ?"
+              />
+              <p className="workflow-modal-note">
+                Format: <code>seconds minutes hours day-of-month month day-of-week</code>. Example:{" "}
+                <code>0 0 9 ? * MON-FRI</code> = 9:00 AM every weekday.
+              </p>
+            </label>
+          )}
+        </details>
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onApply}
+            disabled={applyDisabled}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function pad2(value: string): string {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return "00";
+  return n.toString().padStart(2, "0");
+}
+
 function SequenceFlowModal({
   editor,
   onChange,
@@ -1680,6 +2238,7 @@ const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
     items: [
       "Start Event (None)",
       "Signal Start Event",
+      "Timer Start Event",
       "End Event (None)",
       "End Event (Terminate)"
     ]
@@ -1703,7 +2262,6 @@ const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
     category: "Start Events",
     items: [
       "Message Start Event",
-      "Timer Start Event",
       "Conditional Start Event",
       "Error Start Event",
       "Escalation Start Event",

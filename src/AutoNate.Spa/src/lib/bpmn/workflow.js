@@ -969,6 +969,7 @@ function describeBusinessObject(businessObject) {
 
   const conditionExpression = businessObject.conditionExpression;
   const signal = describeSignalStartEvent(businessObject);
+  const timer = describeTimerStartEvent(businessObject);
   const description = {
     id: businessObject.id,
     type: businessObject.$type,
@@ -991,7 +992,45 @@ function describeBusinessObject(businessObject) {
     description.signalTopic = signal.signalTopic;
   }
 
+  if (timer) {
+    // Only present for timer start events. Same discrimination role: lets the
+    // SPA route the selection to the timer modal and pre-populate the picker.
+    description.timerCycleCron = timer.timerCycleCron;
+    description.timerEndDate = timer.timerEndDate;
+  }
+
   return description;
+}
+
+function describeTimerStartEvent(businessObject) {
+  if (!businessObject || businessObject.$type !== "bpmn:StartEvent") {
+    return null;
+  }
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const timerEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:TimerEventDefinition"
+  );
+  if (!timerEventDefinition) {
+    return null;
+  }
+
+  const timeCycle = timerEventDefinition.timeCycle;
+  const cron = typeof timeCycle?.body === "string" ? timeCycle.body : null;
+
+  // Flowable's <flowable:endDate> ends up either as a typed extension element
+  // (if the schema picked it up) or in $attrs as the ns-prefixed attribute
+  // when bpmn-moddle didn't materialize it. Read both shapes defensively.
+  let endDate = null;
+  if (typeof timerEventDefinition.endDate === "string") {
+    endDate = timerEventDefinition.endDate;
+  } else if (typeof timerEventDefinition.$attrs?.["flowable:endDate"] === "string") {
+    endDate = timerEventDefinition.$attrs["flowable:endDate"];
+  }
+
+  return { timerCycleCron: cron, timerEndDate: endDate };
 }
 
 function describeSignalStartEvent(businessObject) {
@@ -1226,6 +1265,64 @@ export function updateSignalStartEventProperties(modelerHandle, payload) {
   writeFlowableAttribute(signal, "topic", topic);
 
   signalEventDefinition.signalRef = signal;
+
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name)
+  });
+}
+
+export function updateTimerStartEventProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the timer start event.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:StartEvent") {
+    throw new Error(`Timer start event '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const businessObject = element.businessObject;
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const timerEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:TimerEventDefinition"
+  );
+  if (!timerEventDefinition) {
+    throw new Error(
+      `Start event '${payload.id}' is not a timer start event — drop a timer start event from the palette instead.`
+    );
+  }
+
+  const cron = normalizeOptionalString(payload.timeCycle);
+  if (!cron) {
+    // Clear the schedule entirely. Server-side validation will reject the
+    // workflow on publish; we still write the empty state so saving a draft
+    // round-trips cleanly.
+    timerEventDefinition.timeCycle = undefined;
+  } else {
+    const expression = moddle.create("bpmn:FormalExpression", { body: cron });
+    // Annotate the formal expression with flowable:type="cron" so Flowable
+    // dispatches the body to its cron parser instead of ISO 8601.
+    writeFlowableAttribute(expression, "type", "cron");
+    timerEventDefinition.timeCycle = expression;
+  }
+
+  // Drop the alternative kinds in case the user had configured a one-shot
+  // schedule before; we only emit cycle from this picker.
+  timerEventDefinition.timeDate = undefined;
+  timerEventDefinition.timeDuration = undefined;
+
+  const endDate = normalizeOptionalString(payload.endDate);
+  // Flowable's endDate isn't part of the BPMN moddle schema, so write it as
+  // an attribute under the flowable namespace; the XML serializer keeps it
+  // intact and the engine reads it natively. ApplyElementSnapshots also
+  // normalizes the on-disk shape to a child element on save.
+  writeFlowableAttribute(timerEventDefinition, "endDate", endDate);
 
   modeling.updateProperties(element, {
     name: normalizeOptionalString(payload.name)
