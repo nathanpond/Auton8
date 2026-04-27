@@ -13,6 +13,7 @@ using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Menus;
+using AutoNate.Web.Services.Nats;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
@@ -70,6 +71,9 @@ builder.Services.AddOptions<FlowableOptions>()
     .BindConfiguration(FlowableOptions.SectionName);
 builder.Services.AddOptions<DaprOptions>()
     .BindConfiguration(DaprOptions.SectionName);
+builder.Services.AddOptions<NatsOptions>()
+    .BindConfiguration(NatsOptions.SectionName);
+builder.Services.AddSingleton<NatsStreamProvisioner>();
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddSingleton<DaprSidecarProbe>();
 builder.Services.AddSingleton<IWorkflowSignalRegistry, EfCoreWorkflowSignalRegistry>();
@@ -143,6 +147,7 @@ builder.Services.AddSingleton<IFieldType, EmailFieldType>();
 builder.Services.AddSingleton<IFieldType, OptionFieldType>();
 builder.Services.AddSingleton<IFieldType, BooleanFieldType>();
 builder.Services.AddSingleton<IFieldTypeRegistry, FieldTypeRegistry>();
+builder.Services.AddSingleton<IRecordEventPublisher, DaprRecordEventPublisher>();
 builder.Services.AddScoped<IRecordTypeStore, EfCoreRecordTypeStore>();
 builder.Services.AddScoped<IRecordStore, EfCoreRecordStore>();
 builder.Services.AddScoped<IRecordHistoryStore, EfCoreRecordHistoryStore>();
@@ -176,6 +181,16 @@ if (app.Environment.IsDevelopment()
 }
 
 await DatabaseSchemaInitializer.EnsureAsync(app.Services);
+
+// Provision JetStream streams before any subscriber tries to subscribe and
+// before the first publish. JetStream requires every published subject to be
+// covered by a stream — drift between publisher topics and provisioned
+// streams shows up as messages disappearing without errors.
+await using (var natsScope = app.Services.CreateAsyncScope())
+{
+    var streamProvisioner = natsScope.ServiceProvider.GetRequiredService<NatsStreamProvisioner>();
+    await streamProvisioner.EnsureStreamsAsync();
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

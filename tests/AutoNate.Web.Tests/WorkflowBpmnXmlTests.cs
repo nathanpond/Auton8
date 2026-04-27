@@ -533,6 +533,7 @@ public sealed class WorkflowBpmnXmlTests
 
         Assert.Empty(result.Errors);
         Assert.DoesNotContain(result.Warnings, w => w.Contains("signal events", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("signalEventDefinition", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -746,12 +746,12 @@ public static partial class WorkflowBpmnXml
             }
 
             if (localName.EndsWith("EventDefinition", StringComparison.Ordinal) &&
-                !localName.Equals("TerminateEventDefinition", StringComparison.Ordinal))
+                !localName.Equals("terminateEventDefinition", StringComparison.Ordinal))
             {
                 // Signal start events are now first-class — only warn for
                 // signal event definitions that are NOT on a start event
                 // (boundary, intermediate, end events still trigger the warning).
-                if (localName.Equals("SignalEventDefinition", StringComparison.Ordinal) &&
+                if (localName.Equals("signalEventDefinition", StringComparison.Ordinal) &&
                     element.Parent?.Name == BpmnNamespace + "startEvent")
                 {
                     continue;
@@ -811,15 +811,15 @@ public static partial class WorkflowBpmnXml
             "participant" => "participants",
             "lane" => "lanes",
             "messageFlow" => "message flows",
-            "MessageEventDefinition" => "message events",
-            "TimerEventDefinition" => "timer events",
-            "ConditionalEventDefinition" => "conditional events",
-            "SignalEventDefinition" => "signal events",
-            "EscalationEventDefinition" => "escalation events",
-            "ErrorEventDefinition" => "error events",
-            "CancelEventDefinition" => "cancel events",
-            "CompensateEventDefinition" => "compensation events",
-            "LinkEventDefinition" => "link events",
+            "messageEventDefinition" => "message events",
+            "timerEventDefinition" => "timer events",
+            "conditionalEventDefinition" => "conditional events",
+            "signalEventDefinition" => "signal events",
+            "escalationEventDefinition" => "escalation events",
+            "errorEventDefinition" => "error events",
+            "cancelEventDefinition" => "cancel events",
+            "compensateEventDefinition" => "compensation events",
+            "linkEventDefinition" => "link events",
             _ => localName
         };
     }

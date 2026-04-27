@@ -4,11 +4,13 @@ using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Configuration;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Records.Fields;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Options;
 using RecordEntity = AutoNate.Web.Persistence.Scaffolded.Record;
 using RecordFieldChangeEntity = AutoNate.Web.Persistence.Scaffolded.RecordFieldChange;
 using RecordModel = AutoNate.Web.Models.Records.Record;
@@ -20,8 +22,14 @@ public sealed class EfCoreRecordStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
     IFieldTypeRegistry fieldTypeRegistry,
     IEntityEdgeWriter entityEdgeWriter,
-    IAuthorizer authorizer) : IRecordStore
+    IAuthorizer authorizer,
+    IRecordEventPublisher eventPublisher,
+    IOptions<DaprOptions> daprOptions) : IRecordStore
 {
+    private readonly string _sourceAppId = string.IsNullOrWhiteSpace(daprOptions.Value.AppId)
+        ? "autonate.web"
+        : daprOptions.Value.AppId;
+
     public async Task<Record?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -377,6 +385,22 @@ public sealed class EfCoreRecordStore(
         await dbContext.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
 
+        await eventPublisher.PublishAsync(new RecordEventEnvelope(
+            EventId: Guid.NewGuid(),
+            EventType: RecordEventTypes.Created,
+            OccurredAtUtc: now,
+            RecordId: entity.Id,
+            Key: entity.Key,
+            RecordTypeId: entity.RecordTypeId,
+            Name: entity.Name,
+            Status: entity.Status,
+            PreviousStatus: null,
+            ChangedFields: Array.Empty<string>(),
+            AssigneeIds: assigneeIds,
+            IsArchived: entity.IsArchived,
+            ActorId: actorId,
+            SourceAppId: _sourceAppId), cancellationToken);
+
         return entity.ToModel();
     }
 
@@ -397,7 +421,9 @@ public sealed class EfCoreRecordStore(
         // as a single timeline entry.
         var changeSetId = Guid.NewGuid();
         var historyRows = new List<RecordFieldChangeEntity>();
-        var changed = false;
+        var changedFields = new List<string>();
+        var statusChanged = false;
+        var previousStatus = entity.Status;
 
         if (input.Name is { } newNameRaw)
         {
@@ -414,7 +440,7 @@ public sealed class EfCoreRecordStore(
                     newValue: JsonSerializer.Serialize(newName),
                     actorId, now));
                 entity.Name = newName;
-                changed = true;
+                changedFields.Add("name");
             }
         }
 
@@ -433,7 +459,7 @@ public sealed class EfCoreRecordStore(
                 assigneeEdgeOld = entity.AssigneeIds;
                 assigneeEdgeNew = newAssignees;
                 entity.AssigneeIds = newAssignees;
-                changed = true;
+                changedFields.Add("assigneeIds");
             }
         }
 
@@ -449,7 +475,8 @@ public sealed class EfCoreRecordStore(
                     newValue: JsonSerializer.Serialize(newStatus),
                     actorId, now));
                 entity.Status = newStatus;
-                changed = true;
+                changedFields.Add("status");
+                statusChanged = true;
             }
         }
 
@@ -464,7 +491,7 @@ public sealed class EfCoreRecordStore(
                     newValue: JsonSerializer.Serialize(newDueDate?.ToString("yyyy-MM-dd")),
                     actorId, now));
                 entity.DueDate = newDueDate;
-                changed = true;
+                changedFields.Add("dueDate");
             }
         }
 
@@ -485,7 +512,7 @@ public sealed class EfCoreRecordStore(
                     oldValue: oldValue,
                     newValue: newValue,
                     actorId, now));
-                changed = true;
+                changedFields.Add($"values.{fieldKey}");
             }
 
             if (validation.PerFieldDiffs.Count > 0)
@@ -494,7 +521,7 @@ public sealed class EfCoreRecordStore(
             }
         }
 
-        if (!changed)
+        if (changedFields.Count == 0)
         {
             return entity.ToModel();
         }
@@ -524,6 +551,41 @@ public sealed class EfCoreRecordStore(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
+
+        await eventPublisher.PublishAsync(new RecordEventEnvelope(
+            EventId: Guid.NewGuid(),
+            EventType: RecordEventTypes.Updated,
+            OccurredAtUtc: now,
+            RecordId: entity.Id,
+            Key: entity.Key,
+            RecordTypeId: entity.RecordTypeId,
+            Name: entity.Name,
+            Status: entity.Status,
+            PreviousStatus: statusChanged ? previousStatus : null,
+            ChangedFields: changedFields,
+            AssigneeIds: entity.AssigneeIds,
+            IsArchived: entity.IsArchived,
+            ActorId: actorId,
+            SourceAppId: _sourceAppId), cancellationToken);
+
+        if (statusChanged)
+        {
+            await eventPublisher.PublishAsync(new RecordEventEnvelope(
+                EventId: Guid.NewGuid(),
+                EventType: RecordEventTypes.StatusChanged,
+                OccurredAtUtc: now,
+                RecordId: entity.Id,
+                Key: entity.Key,
+                RecordTypeId: entity.RecordTypeId,
+                Name: entity.Name,
+                Status: entity.Status,
+                PreviousStatus: previousStatus,
+                ChangedFields: new[] { "status" },
+                AssigneeIds: entity.AssigneeIds,
+                IsArchived: entity.IsArchived,
+                ActorId: actorId,
+                SourceAppId: _sourceAppId), cancellationToken);
+        }
 
         return entity.ToModel();
     }
@@ -558,6 +620,22 @@ public sealed class EfCoreRecordStore(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
+
+        await eventPublisher.PublishAsync(new RecordEventEnvelope(
+            EventId: Guid.NewGuid(),
+            EventType: archived ? RecordEventTypes.Deleted : RecordEventTypes.Updated,
+            OccurredAtUtc: now,
+            RecordId: entity.Id,
+            Key: entity.Key,
+            RecordTypeId: entity.RecordTypeId,
+            Name: entity.Name,
+            Status: entity.Status,
+            PreviousStatus: null,
+            ChangedFields: new[] { "isArchived" },
+            AssigneeIds: entity.AssigneeIds,
+            IsArchived: entity.IsArchived,
+            ActorId: actorId,
+            SourceAppId: _sourceAppId), cancellationToken);
 
         return entity.ToModel();
     }

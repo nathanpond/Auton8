@@ -30,6 +30,7 @@
       <PackageReference Include="Dapr.Client" Version="1.17.9" />
       <PackageReference Include="Dapr.Messaging" Version="1.17.9" />
       <PackageReference Include="Microsoft.AspNetCore.SpaProxy" Version="10.0.7" />
+      <PackageReference Include="NATS.Client.JetStream" Version="2.5.10" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
         <PrivateAssets>all</PrivateAssets>
         <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

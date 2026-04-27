@@ -23,6 +23,7 @@ export type EventCatalogEntry = {
 export type EventCatalogCategory = {
   title: string;
   description: string;
+  payloadFields: EventCatalogPayloadField[];
   events: EventCatalogEntry[];
 };
 

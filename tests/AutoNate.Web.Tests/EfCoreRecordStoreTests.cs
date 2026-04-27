@@ -518,4 +518,88 @@ public sealed class EfCoreRecordStoreTests
         Assert.Equal("\"2026-06-15\"", dueRow.OldValue!.Value.GetRawText());
         Assert.Equal("\"2026-07-01\"", dueRow.NewValue!.Value.GetRawText());
     }
+
+    [Fact]
+    public async Task LifecycleMutations_PublishRecordEvents()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var typeStore = database.CreateRecordTypeStore();
+        var publisher = new PostgresTestDatabase.RecordingRecordEventPublisher();
+        var store = database.CreateRecordStore(authorizationEnabled: false, eventPublisher: publisher);
+
+        var type = await SeedTypeWithFieldsAsync(typeStore, "EVT",
+            ("priority", "Priority", "number", "{\"variant\":\"integer\"}", Required: false));
+
+        // record.created
+        var created = await store.CreateAsync(
+            new CreateRecordInput(type.Id, "Initial", "open", null, Json("{\"priority\":1}"), null),
+            Actor);
+
+        var createdEvent = Assert.Single(publisher.Events, e => e.EventType == RecordEventTypes.Created);
+        Assert.Equal(created.Id, createdEvent.RecordId);
+        Assert.Equal("EVT-1", createdEvent.Key);
+        Assert.Equal("open", createdEvent.Status);
+        Assert.Null(createdEvent.PreviousStatus);
+        Assert.Empty(createdEvent.ChangedFields);
+        Assert.Equal(Actor, createdEvent.ActorId);
+        Assert.False(createdEvent.IsArchived);
+
+        // No-op update — should not publish.
+        await store.UpdateAsync(created.Id,
+            new UpdateRecordInput(Name: "Initial", Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.None, Values: null, AssigneeIds: null),
+            Actor);
+        Assert.Single(publisher.Events);
+
+        // Status change → both record.updated AND record.status.changed.
+        await store.UpdateAsync(created.Id,
+            new UpdateRecordInput(Name: null,
+                Status: Optional<string?>.Some("closed"),
+                DueDate: Optional<DateOnly?>.None,
+                Values: null,
+                AssigneeIds: null),
+            Actor);
+
+        var updated = Assert.Single(publisher.Events, e => e.EventType == RecordEventTypes.Updated);
+        Assert.Contains("status", updated.ChangedFields);
+        Assert.Equal("closed", updated.Status);
+        Assert.Equal("open", updated.PreviousStatus);
+
+        var statusChanged = Assert.Single(publisher.Events, e => e.EventType == RecordEventTypes.StatusChanged);
+        Assert.Equal("closed", statusChanged.Status);
+        Assert.Equal("open", statusChanged.PreviousStatus);
+
+        // Update without status change → record.updated only, no status.changed.
+        await store.UpdateAsync(created.Id,
+            new UpdateRecordInput(Name: "Renamed",
+                Status: Optional<string?>.None,
+                DueDate: Optional<DateOnly?>.None,
+                Values: null,
+                AssigneeIds: null),
+            Actor);
+
+        var updateEvents = publisher.Events.Where(e => e.EventType == RecordEventTypes.Updated).ToArray();
+        Assert.Equal(2, updateEvents.Length);
+        Assert.Contains("name", updateEvents[1].ChangedFields);
+        Assert.Null(updateEvents[1].PreviousStatus);
+        Assert.Single(publisher.Events, e => e.EventType == RecordEventTypes.StatusChanged);
+
+        // Archive → record.deleted.
+        await store.SetArchivedAsync(created.Id, archived: true, Actor);
+        var deleted = Assert.Single(publisher.Events, e => e.EventType == RecordEventTypes.Deleted);
+        Assert.True(deleted.IsArchived);
+        Assert.Equal(new[] { "isArchived" }, deleted.ChangedFields);
+
+        // Unarchive → record.updated again (not deleted).
+        await store.SetArchivedAsync(created.Id, archived: false, Actor);
+        var unarchive = publisher.Events.Last();
+        Assert.Equal(RecordEventTypes.Updated, unarchive.EventType);
+        Assert.False(unarchive.IsArchived);
+
+        Assert.All(publisher.Events, e =>
+        {
+            Assert.NotEqual(Guid.Empty, e.EventId);
+            Assert.Equal("autonate.web.tests", e.SourceAppId);
+        });
+    }
 }

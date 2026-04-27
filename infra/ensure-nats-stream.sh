@@ -6,6 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.yml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
+# Only the workflow-execution stream needs out-of-band bootstrap — the
+# Flowable extension publishes onto it before AutoNate.Web has a chance to
+# start. AutoNate.Web's NatsStreamProvisioner ensures the rest of the streams
+# (autonate-records, etc.) at app startup.
 STREAM_NAME="workflow-execution"
 SUBJECT="workflow.execution.>"
 NATS_CONTAINER="autonate-nats"

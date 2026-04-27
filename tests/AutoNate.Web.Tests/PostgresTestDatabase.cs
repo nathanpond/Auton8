@@ -3,6 +3,7 @@ using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EntityTypes;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.Selectors;
+using AutoNate.Web.Configuration;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
@@ -83,10 +84,34 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     public EfCoreRecordStore CreateRecordStore() =>
         CreateRecordStore(authorizationEnabled: false);
 
-    public EfCoreRecordStore CreateRecordStore(bool authorizationEnabled, string enforcement = AuthorizationEnforcement.Off)
+    public EfCoreRecordStore CreateRecordStore(
+        bool authorizationEnabled,
+        string enforcement = AuthorizationEnforcement.Off,
+        IRecordEventPublisher? eventPublisher = null)
     {
         var authorizer = CreateAuthorizer(authorizationEnabled, enforcement);
-        return new EfCoreRecordStore(CreateDbContextFactory(), BuildDefaultFieldTypeRegistry(), new EntityEdgeWriter(), authorizer);
+        var daprOptions = Options.Create(new DaprOptions { AppId = "autonate.web.tests" });
+        return new EfCoreRecordStore(
+            CreateDbContextFactory(),
+            BuildDefaultFieldTypeRegistry(),
+            new EntityEdgeWriter(),
+            authorizer,
+            eventPublisher ?? new NoopRecordEventPublisher(),
+            daprOptions);
+    }
+
+    // Captures every published event so tests can assert publication shape.
+    public sealed class RecordingRecordEventPublisher : IRecordEventPublisher
+    {
+        private readonly List<RecordEventEnvelope> _events = new();
+
+        public IReadOnlyList<RecordEventEnvelope> Events => _events;
+
+        public Task PublishAsync(RecordEventEnvelope envelope, CancellationToken cancellationToken = default)
+        {
+            _events.Add(envelope);
+            return Task.CompletedTask;
+        }
     }
 
     public EntityEdgeReconciler CreateEdgeReconciler() => new(CreateDbContextFactory());

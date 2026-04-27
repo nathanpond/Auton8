@@ -1,6 +1,7 @@
 using System.Text;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Workflow;
 using Dapr.Messaging.PublishSubscribe;
 using Microsoft.Extensions.Options;
@@ -85,9 +86,14 @@ public sealed class DaprStreamingSubscriber(
         await _syncLock.WaitAsync(cancellationToken);
         try
         {
+            // Always-on topics: the workflow telemetry stream, and any topic
+            // the app publishes to itself. Subscribing to our own publishes
+            // means BusWatcher can show them and signal dispatch works without
+            // the operator having to register a workflow first.
             var desired = new HashSet<string>(_registry.GetSubscribedTopics(), StringComparer.Ordinal)
             {
-                BusWatcherStreamService.TopicName
+                BusWatcherStreamService.TopicName,
+                DaprRecordEventPublisher.TopicName
             };
 
             foreach (var topic in desired)
@@ -149,13 +155,11 @@ public sealed class DaprStreamingSubscriber(
                 ? string.Empty
                 : Encoding.UTF8.GetString(message.Data.Span);
 
-            var isTelemetry = string.Equals(topic, BusWatcherStreamService.TopicName, StringComparison.Ordinal);
-            // Telemetry feeds the BusWatcher live page in the SPA — pretty-print
-            // there. Signals go straight to Flowable as eventData; compact bytes
-            // are fine and slightly cheaper to store.
-            var displayPayload = isTelemetry
-                ? BusWatcherStreamService.FormatJson(rawPayload)
-                : rawPayload;
+            // Pretty-print every JSON payload on the way to BusWatcher — the
+            // SPA's live page is meant to be human-readable. Signals still go
+            // to Flowable as raw eventData, so the dispatcher reads from the
+            // un-prettified original below.
+            var displayPayload = BusWatcherStreamService.FormatJson(rawPayload);
 
             var busMessage = new BusWatcherStreamService.BusWatcherMessage(
                 DateTimeOffset.UtcNow,
@@ -164,16 +168,19 @@ public sealed class DaprStreamingSubscriber(
                 BuildHeaders(message),
                 displayPayload);
 
-            if (isTelemetry)
-            {
-                await _busWatcher.PublishAsync(busMessage, cancellationToken);
-            }
+            // BusWatcher is a general live feed of every subscribed topic, not
+            // just the workflow telemetry one — operators rely on it to see
+            // what's flowing through pub/sub.
+            await _busWatcher.PublishAsync(busMessage, cancellationToken);
 
-            // A workflow may still register a signal on the telemetry topic
-            // (we lifted that ban deliberately), so always also try dispatch.
             if (_registry.GetSignalNamesForTopic(topic).Count > 0)
             {
-                await _signalDispatcher.HandleAsync(busMessage);
+                // Signal dispatch reads `eventType` out of the original
+                // payload; pass the raw bytes (not the prettified copy used
+                // for display) so JsonDocument.Parse sees the same shape the
+                // publisher produced.
+                var signalMessage = busMessage with { Payload = rawPayload };
+                await _signalDispatcher.HandleAsync(signalMessage);
             }
 
             return TopicResponseAction.Success;
