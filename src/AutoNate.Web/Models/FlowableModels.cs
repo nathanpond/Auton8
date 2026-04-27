@@ -11,6 +11,10 @@ public sealed record class FlowableProcessDefinitionSummary
     public int Version { get; init; }
 
     public string DeploymentId { get; init; } = string.Empty;
+
+    // Flowable's suspension flag on the process definition. When true, no new
+    // instances can be started for this definition; existing runs continue.
+    public bool Suspended { get; init; }
 }
 
 public sealed record class FlowableProcessInstanceSummary

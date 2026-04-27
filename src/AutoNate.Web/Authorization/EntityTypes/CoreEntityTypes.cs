@@ -77,7 +77,7 @@ public static class CoreEntityTypes
         actions: new[]
         {
             Actions.View, Actions.Edit, Actions.Delete,
-            Actions.Publish, Actions.Start
+            Actions.Publish, Actions.Start, Actions.Pause
         },
         tags: new[] { "processkey", "draft", "published" });
 

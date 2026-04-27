@@ -1,3 +1,5 @@
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
@@ -20,22 +22,28 @@ public static class WorkflowEndpoints
         var group = app.MapGroup("/api/workflows")
             .RequireAuthorization();
 
-        group.MapGet("/", async (IWorkflowModelStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/", async (IWorkflowModelStore store, IFlowableClient flowable, CancellationToken cancellationToken) =>
         {
             var models = await store.ListAsync(cancellationToken);
-            return Results.Ok(models);
+            var suspendedByKey = await BuildSuspendedMapAsync(flowable, cancellationToken);
+            var augmented = models.Select(model => WithRuntimeState(model, suspendedByKey)).ToArray();
+            return Results.Ok(augmented);
         });
 
-        group.MapGet("/latest", async (IWorkflowModelStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/latest", async (IWorkflowModelStore store, IFlowableClient flowable, CancellationToken cancellationToken) =>
         {
             var model = await store.GetMostRecentAsync(cancellationToken);
-            return model is null ? Results.NotFound() : Results.Ok(model);
+            if (model is null) return Results.NotFound();
+            var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            return Results.Ok(augmented);
         });
 
-        group.MapGet("/{id:guid}", async (Guid id, IWorkflowModelStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/{id:guid}", async (Guid id, IWorkflowModelStore store, IFlowableClient flowable, CancellationToken cancellationToken) =>
         {
             var model = await store.GetAsync(id, cancellationToken);
-            return model is null ? Results.NotFound() : Results.Ok(model);
+            if (model is null) return Results.NotFound();
+            var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            return Results.Ok(augmented);
         });
 
         group.MapGet("/{id:guid}/versions", async (Guid id, IWorkflowModelStore store, CancellationToken cancellationToken) =>
@@ -105,7 +113,10 @@ public static class WorkflowEndpoints
 
             var deployment = await flowable.DeployProcessAsync(model, cancellationToken);
             var published = await store.PublishAsync(model, deployment, cancellationToken);
-            return Results.Ok(new PublishResponse(published, deployment));
+            // A fresh deployment is always active in Flowable — null out any
+            // stale suspended flag so the SPA shows "Pause" rather than "Resume".
+            var augmented = published with { IsSuspended = false };
+            return Results.Ok(new PublishResponse(augmented, deployment));
         }).DisableAntiforgery();
 
         group.MapPost("/{processKey}/start", async (
@@ -134,7 +145,99 @@ public static class WorkflowEndpoints
             return Results.Ok(instance);
         }).DisableAntiforgery();
 
+        group.MapPost("/{id:guid}/pause", async (
+            Guid id,
+            IWorkflowModelStore store,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            var model = await store.GetAsync(id, cancellationToken);
+            if (model is null) return Results.NotFound();
+            if (model.LastDeployment is null || string.IsNullOrWhiteSpace(model.LastDeployment.ProcessDefinitionKey))
+            {
+                return Results.BadRequest(new { message = "This workflow has not been published to Flowable yet, so it cannot be paused." });
+            }
+
+            await flowable.SuspendProcessDefinitionAsync(model.LastDeployment.ProcessDefinitionKey, cancellationToken);
+            var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            return Results.Ok(augmented);
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowModel, Actions.Pause, "id");
+
+        group.MapPost("/{id:guid}/resume", async (
+            Guid id,
+            IWorkflowModelStore store,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            var model = await store.GetAsync(id, cancellationToken);
+            if (model is null) return Results.NotFound();
+            if (model.LastDeployment is null || string.IsNullOrWhiteSpace(model.LastDeployment.ProcessDefinitionKey))
+            {
+                return Results.BadRequest(new { message = "This workflow has not been published to Flowable yet, so it cannot be resumed." });
+            }
+
+            await flowable.ActivateProcessDefinitionAsync(model.LastDeployment.ProcessDefinitionKey, cancellationToken);
+            var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            return Results.Ok(augmented);
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowModel, Actions.Pause, "id");
+
         return app;
+    }
+
+    private static async Task<Dictionary<string, bool>> BuildSuspendedMapAsync(
+        IFlowableClient flowable,
+        CancellationToken cancellationToken)
+    {
+        // Tolerate Flowable being unreachable on the list endpoint — the
+        // workflow page must still render the studio when Flowable is down.
+        // The pause/resume actions themselves still bubble Flowable errors.
+        try
+        {
+            var definitions = await flowable.GetLatestProcessDefinitionsAsync(cancellationToken);
+            return definitions
+                .Where(definition => !string.IsNullOrWhiteSpace(definition.Key))
+                .GroupBy(definition => definition.Key, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().Suspended, StringComparer.Ordinal);
+        }
+        catch
+        {
+            return new Dictionary<string, bool>(StringComparer.Ordinal);
+        }
+    }
+
+    private static async Task<WorkflowModel> WithRuntimeStateAsync(
+        IFlowableClient flowable,
+        WorkflowModel model,
+        CancellationToken cancellationToken)
+    {
+        if (model.LastDeployment is null || string.IsNullOrWhiteSpace(model.LastDeployment.ProcessDefinitionKey))
+        {
+            return model with { IsSuspended = null };
+        }
+
+        try
+        {
+            var definition = await flowable.GetLatestProcessDefinitionAsync(model.LastDeployment.ProcessDefinitionKey, cancellationToken);
+            return model with { IsSuspended = definition?.Suspended };
+        }
+        catch
+        {
+            return model with { IsSuspended = null };
+        }
+    }
+
+    private static WorkflowModel WithRuntimeState(WorkflowModel model, IReadOnlyDictionary<string, bool> suspendedByKey)
+    {
+        if (model.LastDeployment is null || string.IsNullOrWhiteSpace(model.LastDeployment.ProcessDefinitionKey))
+        {
+            return model with { IsSuspended = null };
+        }
+
+        return suspendedByKey.TryGetValue(model.LastDeployment.ProcessDefinitionKey, out var suspended)
+            ? model with { IsSuspended = suspended }
+            : model with { IsSuspended = null };
     }
 
     private static async Task<string?> TryGenerateInstanceNameAsync(

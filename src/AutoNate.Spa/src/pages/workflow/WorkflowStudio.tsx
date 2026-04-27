@@ -8,7 +8,9 @@ import {
   useExecutions
 } from "@/hooks/useExecutions";
 import {
+  usePauseWorkflow,
   usePublishWorkflow,
+  useResumeWorkflow,
   useSaveWorkflow,
   useStartInstance,
   useWorkflows,
@@ -284,6 +286,8 @@ export default function WorkflowStudio() {
   const saveMutation = useSaveWorkflow();
   const publishMutation = usePublishWorkflow();
   const startMutation = useStartInstance();
+  const pauseMutation = usePauseWorkflow();
+  const resumeMutation = useResumeWorkflow();
 
   const selectWorkflow = (model: WorkflowModel) => {
     setCurrentModel(model);
@@ -398,6 +402,9 @@ export default function WorkflowStudio() {
       if (!currentModel || !currentModel.publishedVersionNumber) {
         throw new Error("Publish the workflow model to Flowable before starting an instance.");
       }
+      if (currentModel.isSuspended) {
+        throw new Error("This workflow is paused. Resume it before starting a new instance.");
+      }
       const instance = await startMutation.mutateAsync({ processKey: currentModel.processKey });
       qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
 
@@ -484,10 +491,33 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
     });
 
+  const onPause = () =>
+    runBusy("pausing the workflow", async () => {
+      if (!currentModel) return;
+      const updated = await pauseMutation.mutateAsync(currentModel.id);
+      setCurrentModel(updated);
+      setStatus(`Paused '${updated.name}'. Existing executions continue running; new starts are blocked until you resume.`);
+    });
+
+  const onResume = () =>
+    runBusy("resuming the workflow", async () => {
+      if (!currentModel) return;
+      const updated = await resumeMutation.mutateAsync(currentModel.id);
+      setCurrentModel(updated);
+      setStatus(`Resumed '${updated.name}'. New executions can be started again.`);
+    });
+
   const canPublish =
     !busy && !!currentModel && (dirty || currentModel.isDraft || currentModel.lastDeployment === null);
   const canStart =
-    !busy && !!currentModel && !!currentModel.lastDeployment && currentModel.publishedVersionNumber !== null;
+    !busy
+    && !!currentModel
+    && !!currentModel.lastDeployment
+    && currentModel.publishedVersionNumber !== null
+    && !currentModel.isSuspended;
+  const canTogglePause =
+    !busy && !!currentModel && !!currentModel.lastDeployment;
+  const isPaused = currentModel?.isSuspended === true;
 
   return (
     <>
@@ -579,10 +609,33 @@ export default function WorkflowStudio() {
             className="btn btn-outline-success"
             onClick={onStartInstance}
             disabled={!canStart}
-            title="Start instance"
+            title={
+              isPaused
+                ? "Workflow is paused — resume to start a new instance"
+                : "Start instance"
+            }
           >
             Start Instance
           </button>
+          {isPaused ? (
+            <button
+              className="btn btn-outline-success"
+              onClick={onResume}
+              disabled={!canTogglePause}
+              title="Resume — allow new instances to start"
+            >
+              <i className="bi bi-play-fill" aria-hidden="true"></i> Resume
+            </button>
+          ) : (
+            <button
+              className="btn btn-outline-warning"
+              onClick={onPause}
+              disabled={!canTogglePause}
+              title="Pause — block new instances; existing runs continue"
+            >
+              <i className="bi bi-pause-fill" aria-hidden="true"></i> Pause
+            </button>
+          )}
         </div>
       </div>
 
@@ -802,6 +855,12 @@ function WorkflowSidebar({
                 Flowable.
               </p>
             )}
+            {currentModel.isSuspended === true && (
+              <div className="alert alert-warning py-2 mb-2" role="status">
+                <i className="bi bi-pause-circle-fill me-1" aria-hidden="true"></i>
+                Paused — new instances are blocked. Existing runs continue.
+              </div>
+            )}
             <dl className="workflow-meta">
               <div>
                 <dt>Definition ID</dt>
@@ -818,6 +877,16 @@ function WorkflowSidebar({
               <div>
                 <dt>Published</dt>
                 <dd>{formatTimestamp(currentModel.lastDeployment.deployedAtUtc)}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>
+                  {currentModel.isSuspended === true
+                    ? "Paused"
+                    : currentModel.isSuspended === false
+                      ? "Active"
+                      : "Unknown"}
+                </dd>
               </div>
             </dl>
           </>
@@ -905,6 +974,7 @@ function CreateWorkflowModal({
           draftVersionNumber: 1,
           publishedVersionNumber: null,
           lastDeployment: null,
+          isSuspended: null,
           activeProcessInstanceId: null,
           createdAtUtc: new Date().toISOString(),
           updatedAtUtc: new Date().toISOString()

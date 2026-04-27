@@ -31,11 +31,44 @@ internal sealed class StubFlowableClient : IFlowableClient
         });
     }
 
+    // Tests can seed this to drive both GetLatestProcessDefinitionAsync and
+    // the bulk variant. Keyed by processDefinitionKey.
+    public Dictionary<string, FlowableProcessDefinitionSummary> ProcessDefinitionsByKey { get; } = new();
+
     public Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(
         string processDefinitionKey, CancellationToken cancellationToken = default)
     {
         Calls.Add($"GetLatest:{processDefinitionKey}");
-        return Task.FromResult<FlowableProcessDefinitionSummary?>(null);
+        ProcessDefinitionsByKey.TryGetValue(processDefinitionKey, out var summary);
+        return Task.FromResult<FlowableProcessDefinitionSummary?>(summary);
+    }
+
+    public Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetLatestProcessDefinitionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add("ListLatestDefinitions");
+        IReadOnlyList<FlowableProcessDefinitionSummary> list = ProcessDefinitionsByKey.Values.ToArray();
+        return Task.FromResult(list);
+    }
+
+    public Task SuspendProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"SuspendDefinition:{processDefinitionKey}");
+        if (ProcessDefinitionsByKey.TryGetValue(processDefinitionKey, out var existing))
+        {
+            ProcessDefinitionsByKey[processDefinitionKey] = existing with { Suspended = true };
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task ActivateProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ActivateDefinition:{processDefinitionKey}");
+        if (ProcessDefinitionsByKey.TryGetValue(processDefinitionKey, out var existing))
+        {
+            ProcessDefinitionsByKey[processDefinitionKey] = existing with { Suspended = false };
+        }
+        return Task.CompletedTask;
     }
 
     public Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(

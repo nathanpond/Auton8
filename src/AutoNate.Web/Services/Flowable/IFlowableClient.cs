@@ -8,6 +8,18 @@ public interface IFlowableClient
 
     Task<FlowableProcessDefinitionSummary?> GetLatestProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
 
+    // Bulk fetch of every "latest=true" process definition. Used by the
+    // workflow list endpoint to populate the per-workflow IsSuspended flag in
+    // a single Flowable round-trip rather than one call per workflow.
+    Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetLatestProcessDefinitionsAsync(CancellationToken cancellationToken = default);
+
+    // Suspends the latest process definition for this key. Existing running
+    // instances keep going; new starts are rejected by Flowable until
+    // ActivateProcessDefinitionAsync is called.
+    Task SuspendProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
+
+    Task ActivateProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default);
+
     Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(string processDefinitionKey, string? name = null, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
 
     // Count of all process instances (running + finished) for a definition

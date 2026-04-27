@@ -18,6 +18,12 @@ public sealed record class WorkflowModel
 
     public WorkflowDeploymentInfo? LastDeployment { get; init; }
 
+    // Mirrors Flowable's suspension flag on the latest published process
+    // definition. Null when the workflow has not been deployed yet. Populated
+    // by the API endpoints from a Flowable lookup; not stored locally so it
+    // can never drift from Flowable's own state.
+    public bool? IsSuspended { get; init; }
+
     public string? ActiveProcessInstanceId { get; init; }
 
     public DateTimeOffset CreatedAtUtc { get; init; }

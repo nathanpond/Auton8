@@ -84,6 +84,10 @@ export type WorkflowModel = {
   draftVersionNumber: number;
   publishedVersionNumber: number | null;
   lastDeployment: WorkflowDeploymentInfo | null;
+  // Flowable's suspension flag for the latest published process definition.
+  // Null when the workflow has not been published yet (or Flowable was
+  // unreachable when the model was fetched).
+  isSuspended: boolean | null;
   activeProcessInstanceId: string | null;
   createdAtUtc: string;
   updatedAtUtc: string;

@@ -5,7 +5,9 @@ import {
   getWorkflow,
   listWorkflows,
   listWorkflowVersions,
+  pauseWorkflow,
   publishWorkflow,
+  resumeWorkflow,
   saveWorkflow,
   startInstance
 } from "@/api/workflows";
@@ -81,5 +83,27 @@ export function useStartInstance() {
     { processKey: string; variables?: Record<string, unknown> }
   >({
     mutationFn: ({ processKey, variables }) => startInstance(processKey, variables)
+  });
+}
+
+export function usePauseWorkflow() {
+  const qc = useQueryClient();
+  return useMutation<WorkflowModel, Error, string>({
+    mutationFn: (id) => pauseWorkflow(id),
+    onSuccess: (model) => {
+      qc.invalidateQueries({ queryKey: WORKFLOWS_QUERY_KEY });
+      qc.setQueryData(workflowQueryKey(model.id), model);
+    }
+  });
+}
+
+export function useResumeWorkflow() {
+  const qc = useQueryClient();
+  return useMutation<WorkflowModel, Error, string>({
+    mutationFn: (id) => resumeWorkflow(id),
+    onSuccess: (model) => {
+      qc.invalidateQueries({ queryKey: WORKFLOWS_QUERY_KEY });
+      qc.setQueryData(workflowQueryKey(model.id), model);
+    }
   });
 }

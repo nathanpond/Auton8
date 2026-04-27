@@ -60,17 +60,81 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         var payload = await DeserializeAsync<FlowableListResponse<FlowableProcessDefinitionResponse>>(response, cancellationToken);
         var definition = payload.Data.FirstOrDefault();
 
-        return definition is null
-            ? null
-            : new FlowableProcessDefinitionSummary
-            {
-                Id = definition.Id ?? string.Empty,
-                Key = definition.Key ?? string.Empty,
-                Name = definition.Name ?? string.Empty,
-                Version = definition.Version,
-                DeploymentId = definition.DeploymentId ?? string.Empty
-            };
+        return definition is null ? null : ToSummary(definition);
     }
+
+    public async Task<IReadOnlyList<FlowableProcessDefinitionSummary>> GetLatestProcessDefinitionsAsync(CancellationToken cancellationToken = default)
+    {
+        // Page through every latest=true definition. The workflow list page
+        // typically has a handful of workflows so a single page (size=200) is
+        // almost always sufficient, but we loop for completeness.
+        const int pageSize = 200;
+        var results = new List<FlowableProcessDefinitionSummary>();
+        var start = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var url = $"service/repository/process-definitions?latest=true&size={pageSize}&start={start}";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            await EnsureSuccessAsync(response, "list the latest deployed process definitions");
+
+            var payload = await DeserializeAsync<FlowableListResponse<FlowableProcessDefinitionResponse>>(response, cancellationToken);
+            if (payload.Data.Count == 0)
+            {
+                return results;
+            }
+
+            results.AddRange(payload.Data.Select(ToSummary));
+
+            if (payload.Data.Count < pageSize)
+            {
+                return results;
+            }
+
+            start += payload.Data.Count;
+        }
+    }
+
+    public Task SuspendProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default)
+        => SetProcessDefinitionStateAsync(processDefinitionKey, "suspend", cancellationToken);
+
+    public Task ActivateProcessDefinitionAsync(string processDefinitionKey, CancellationToken cancellationToken = default)
+        => SetProcessDefinitionStateAsync(processDefinitionKey, "activate", cancellationToken);
+
+    private async Task SetProcessDefinitionStateAsync(string processDefinitionKey, string action, CancellationToken cancellationToken)
+    {
+        var definition = await GetLatestProcessDefinitionAsync(processDefinitionKey, cancellationToken)
+            ?? throw new InvalidOperationException($"No deployed process definition exists for key '{processDefinitionKey}'.");
+
+        // includeProcessInstances=false leaves running executions alone; only
+        // the definition itself is flipped, blocking new starts (suspend) or
+        // re-allowing them (activate).
+        var payload = new
+        {
+            action,
+            includeProcessInstances = false
+        };
+
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(definition.Id)}",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"{action} the process definition '{processDefinitionKey}'");
+    }
+
+    private static FlowableProcessDefinitionSummary ToSummary(FlowableProcessDefinitionResponse definition)
+        => new()
+        {
+            Id = definition.Id ?? string.Empty,
+            Key = definition.Key ?? string.Empty,
+            Name = definition.Name ?? string.Empty,
+            Version = definition.Version,
+            DeploymentId = definition.DeploymentId ?? string.Empty,
+            Suspended = definition.Suspended
+        };
 
     public async Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(string processDefinitionKey, string? name = null, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default)
     {
@@ -967,6 +1031,8 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public string? DeploymentId { get; init; }
 
         public bool GraphicalNotationDefined { get; init; }
+
+        public bool Suspended { get; init; }
     }
 
     private sealed class FlowableProcessInstanceResponse

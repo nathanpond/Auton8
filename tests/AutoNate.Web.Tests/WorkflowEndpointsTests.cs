@@ -219,6 +219,115 @@ public sealed class WorkflowEndpointsTests
         Assert.DoesNotContain(factory.FlowableStub.Calls, c => c.StartsWith("CountByDefinitionKey:"));
     }
 
+    [Fact]
+    public async Task PauseWorkflow_OnUnpublished_Returns400()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        (await client.PostAsJsonAsync("/api/workflows/", new WorkflowModel
+        {
+            Id = id,
+            Name = "Unpublished",
+            ProcessKey = "unpublished",
+            BpmnXml = SimpleBpmn
+        })).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsync($"/api/workflows/{id}/pause", null);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(factory.FlowableStub.Calls, c => c.StartsWith("SuspendDefinition:"));
+    }
+
+    [Fact]
+    public async Task PauseWorkflow_OnMissing_Returns404()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var response = await client.PostAsync($"/api/workflows/{Guid.NewGuid()}/pause", null);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PauseAndResumeWorkflow_ToggleFlowableSuspendedState()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel
+        {
+            Id = id,
+            Name = "Pausable",
+            ProcessKey = "pausable",
+            BpmnXml = SimpleBpmn
+        };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model)).EnsureSuccessStatusCode();
+
+        // Seed the stub so GetLatestProcessDefinitionAsync (used by pause/resume
+        // and the IsSuspended augmentation) returns a real definition.
+        factory.FlowableStub.ProcessDefinitionsByKey["pausable"] = new Models.FlowableProcessDefinitionSummary
+        {
+            Id = "pd-pausable",
+            Key = "pausable",
+            Version = 1,
+            DeploymentId = "dep-pausable",
+            Suspended = false
+        };
+
+        var pauseResponse = await client.PostAsync($"/api/workflows/{id}/pause", null);
+        pauseResponse.EnsureSuccessStatusCode();
+        var paused = await pauseResponse.Content.ReadFromJsonAsync<WorkflowModel>();
+        Assert.NotNull(paused);
+        Assert.True(paused.IsSuspended);
+        Assert.Contains("SuspendDefinition:pausable", factory.FlowableStub.Calls);
+
+        var resumeResponse = await client.PostAsync($"/api/workflows/{id}/resume", null);
+        resumeResponse.EnsureSuccessStatusCode();
+        var resumed = await resumeResponse.Content.ReadFromJsonAsync<WorkflowModel>();
+        Assert.NotNull(resumed);
+        Assert.False(resumed.IsSuspended);
+        Assert.Contains("ActivateDefinition:pausable", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task ListWorkflows_PopulatesIsSuspendedFromFlowable()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel
+        {
+            Id = id,
+            Name = "Listed",
+            ProcessKey = "listed",
+            BpmnXml = SimpleBpmn
+        };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model)).EnsureSuccessStatusCode();
+
+        factory.FlowableStub.ProcessDefinitionsByKey["listed"] = new Models.FlowableProcessDefinitionSummary
+        {
+            Id = "pd-listed",
+            Key = "listed",
+            Version = 1,
+            DeploymentId = "dep-listed",
+            Suspended = true
+        };
+
+        var listed = await client.GetFromJsonAsync<WorkflowModel[]>("/api/workflows/");
+        Assert.NotNull(listed);
+        var found = Assert.Single(listed);
+        Assert.True(found.IsSuspended);
+    }
+
     private static async Task PrimeAuthAsync(HttpClient client)
     {
         (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();

@@ -106,6 +106,16 @@ export async function startInstance(
   return data;
 }
 
+export async function pauseWorkflow(id: string): Promise<WorkflowModel> {
+  const { data } = await api.post<WorkflowModel>(`/api/workflows/${id}/pause`);
+  return data;
+}
+
+export async function resumeWorkflow(id: string): Promise<WorkflowModel> {
+  const { data } = await api.post<WorkflowModel>(`/api/workflows/${id}/resume`);
+  return data;
+}
+
 function isNotFound(error: unknown): boolean {
   const response = (error as { response?: { status?: number } } | undefined)?.response;
   return response?.status === 404;

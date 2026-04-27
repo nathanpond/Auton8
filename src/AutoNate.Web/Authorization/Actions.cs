@@ -26,6 +26,7 @@ public static class Actions
 
     public const string Publish = "publish";
     public const string Start = "start";
+    public const string Pause = "pause";
 
     public const string Cancel = "cancel";
     public const string Signal = "signal";
