@@ -91,7 +91,7 @@ public static class ExecutionEndpoints
             await flowable.DeleteWorkflowExecutionAsync(processInstanceId, cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
-          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Cancel, "processInstanceId");
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Delete, "processInstanceId");
 
         var tasks = app.MapGroup("/api/tasks")
             .RequireAuthorization();

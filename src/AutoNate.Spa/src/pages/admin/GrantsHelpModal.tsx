@@ -286,6 +286,31 @@ Effect:         allow`}</pre>
 
               <p className="mb-1">
                 <strong>
+                  Workflow Operators can cancel running executions, but only
+                  Admins can delete the historical record.
+                </strong>{" "}
+                On a workflow execution, <code>cancel</code> halts a running
+                process and marks it cancelled (history kept), while{" "}
+                <code>delete</code> wipes the execution from Flowable entirely
+                — both runtime and history. Treat them as separate
+                permissions.
+              </p>
+              <pre className="bg-light p-2 small">{`# Operators can cancel any execution
+Principal kind: role
+Principal:      WorkflowOperator
+Action:         cancel
+Selector:       /workflowexecution/*
+Effect:         allow
+
+# Only Admins can wipe the historical record
+Principal kind: role
+Principal:      Admin
+Action:         delete
+Selector:       /workflowexecution/*
+Effect:         allow`}</pre>
+
+              <p className="mb-1">
+                <strong>
                   Managers see records and executions attributed to the people
                   they supervise.
                 </strong>

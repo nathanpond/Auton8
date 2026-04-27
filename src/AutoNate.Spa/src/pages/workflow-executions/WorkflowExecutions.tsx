@@ -37,17 +37,16 @@ export default function WorkflowExecutions() {
   const deleteExecution = useDeleteExecution();
   const cancelExecution = useCancelExecution();
 
-  // Batched cancel-permission lookups, one per row.
-  const cancelChecks = useMemo(
+  // Batched per-row permission lookups for the row-action buttons.
+  const rowActionChecks = useMemo(
     () =>
-      executions.map((execution) => ({
-        kind: "workflowexecution",
-        action: "cancel",
-        id: execution.id
-      })),
+      executions.flatMap((execution) => [
+        { kind: "workflowexecution", action: "cancel", id: execution.id },
+        { kind: "workflowexecution", action: "delete", id: execution.id }
+      ]),
     [executions]
   );
-  const { data: cancelPermissions } = usePermissionChecks(cancelChecks);
+  const { data: rowActionPermissions } = usePermissionChecks(rowActionChecks);
 
   const onBusMessage = useCallback(
     (msg: { topic: string; payload: string }) => {
@@ -160,8 +159,12 @@ export default function WorkflowExecutions() {
               <tbody>
                 {executions.map((execution) => {
                   const canCancel =
-                    cancelPermissions?.get(
+                    rowActionPermissions?.get(
                       permissionKey({ kind: "workflowexecution", action: "cancel", id: execution.id })
+                    ) ?? false;
+                  const canDelete =
+                    rowActionPermissions?.get(
+                      permissionKey({ kind: "workflowexecution", action: "delete", id: execution.id })
                     ) ?? false;
                   const isRunning = execution.status === "Running";
                   const cancelInFlight =
@@ -202,19 +205,21 @@ export default function WorkflowExecutions() {
                             <span>Cancel</span>
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
-                          title="Delete execution"
-                          aria-label={`Delete execution ${execution.id}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(execution);
-                          }}
-                          disabled={deleteExecution.isPending && deleteExecution.variables === execution.id}
-                        >
-                          <span>Delete</span>
-                        </button>
+                        {canDelete && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
+                            title="Delete execution"
+                            aria-label={`Delete execution ${execution.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(execution);
+                            }}
+                            disabled={deleteExecution.isPending && deleteExecution.variables === execution.id}
+                          >
+                            <span>Delete</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

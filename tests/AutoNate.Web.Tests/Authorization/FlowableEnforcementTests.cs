@@ -100,8 +100,8 @@ public sealed class FlowableEnforcementTests
             var roleStore = scope.ServiceProvider.GetRequiredService<IRoleStore>();
             var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
             var assignments = scope.ServiceProvider.GetRequiredService<IRoleAssignmentStore>();
-            var role = await roleStore.CreateAsync(new CreateRoleInput("LeadCanceler", null), AdminUserId);
-            await grants.CreateAsync(new CreatePermissionGrantInput(EntityKinds.Role, role.Id.ToString(), Actions.Cancel, "/workflowexecution/*[processkey=lead]", "allow", 0), AdminUserId);
+            var role = await roleStore.CreateAsync(new CreateRoleInput("LeadDeleter", null), AdminUserId);
+            await grants.CreateAsync(new CreatePermissionGrantInput(EntityKinds.Role, role.Id.ToString(), Actions.Delete, "/workflowexecution/*[processkey=lead]", "allow", 0), AdminUserId);
             await assignments.AssignAsync(new CreateRoleAssignmentInput(
                 role.Id, EntityKinds.User, AdminUserId.ToString(), null), AdminUserId);
         }
@@ -131,7 +131,7 @@ public sealed class FlowableEnforcementTests
             var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
             var assignments = scope.ServiceProvider.GetRequiredService<IRoleAssignmentStore>();
             var role = await roleStore.CreateAsync(new CreateRoleInput("LeadOnly", null), AdminUserId);
-            await grants.CreateAsync(new CreatePermissionGrantInput(EntityKinds.Role, role.Id.ToString(), Actions.Cancel, "/workflowexecution/*[processkey=lead]", "allow", 0), AdminUserId);
+            await grants.CreateAsync(new CreatePermissionGrantInput(EntityKinds.Role, role.Id.ToString(), Actions.Delete, "/workflowexecution/*[processkey=lead]", "allow", 0), AdminUserId);
             await assignments.AssignAsync(new CreateRoleAssignmentInput(
                 role.Id, EntityKinds.User, AdminUserId.ToString(), null), AdminUserId);
         }
@@ -185,7 +185,7 @@ public sealed class FlowableEnforcementTests
 
             await grants.CreateAsync(new CreatePermissionGrantInput(
                 EntityKinds.User, AdminUserId.ToString(),
-                Actions.Cancel,
+                Actions.Delete,
                 "/workflowexecution/*[startedby=user[supervisor=user]]",
                 "allow", 0), AdminUserId);
         }
@@ -217,7 +217,7 @@ public sealed class FlowableEnforcementTests
             var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
             await grants.CreateAsync(new CreatePermissionGrantInput(
                 EntityKinds.User, AdminUserId.ToString(),
-                Actions.Cancel,
+                Actions.Delete,
                 "/workflowexecution/*[startedby=user[supervisor=user]]",
                 "allow", 0), AdminUserId);
         }
