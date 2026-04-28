@@ -1089,6 +1089,62 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // Add the System Health page to the Site Information group of the
+    // site-config left-nav. Runs after PageTemplatesSeedSql so the
+    // configSystemHealth template row exists. Idempotent via auth_seed_state
+    // and a content guard so the menu item isn't double-inserted on reseed.
+    private const string SiteConfigSystemHealthSql =
+        """
+        DO $$
+        DECLARE
+            site_id UUID := '00000000-0000-0000-0001-000000000004';
+            site_information_group_id UUID;
+            next_sort INT;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'site_config_system_health_v1') THEN
+                IF EXISTS (SELECT 1 FROM menus WHERE id = site_id) THEN
+                    SELECT id INTO site_information_group_id
+                    FROM menu_items
+                    WHERE menu_id = site_id
+                      AND parent_id IS NULL
+                      AND display_name = 'Site Information'
+                      AND item_type = 'group'
+                    LIMIT 1;
+
+                    IF site_information_group_id IS NOT NULL
+                       AND NOT EXISTS (
+                           SELECT 1 FROM menu_items
+                           WHERE menu_id = site_id
+                             AND parent_id = site_information_group_id
+                             AND config->>'templateKey' = 'configSystemHealth'
+                       )
+                    THEN
+                        SELECT COALESCE(MAX(sort_order), -1) + 1 INTO next_sort
+                        FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id = site_information_group_id;
+
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            gen_random_uuid(), site_id, site_information_group_id, next_sort,
+                            'System Health', 'fa fa-heart-pulse',
+                            'template', '{{"templateKey":"configSystemHealth"}}'::jsonb,
+                            TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('site_config_system_health_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
     private const string SiteConfigStatusAppearanceSql =
         """
         DO $$
@@ -1177,6 +1233,7 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configPagesMenus', 'Pages / Menus (Site Config)', 'Pages and menus admin.', '/admin/config/pages-menus', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configBusWatcher', 'Bus Watcher (Site Config)', 'Bus watcher mounted inside Site Config.', '/admin/config/bus-watcher', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configEvents', 'Events (Site Config)', 'Event subscriptions and topics.', '/admin/config/events', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSystemHealth', 'System Health (Site Config)', 'Live status of every component and its connections.', '/admin/config/system-health', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityUsers', 'Manage Users (Site Config)', 'User management mounted inside Site Config.', '/admin/config/users', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityGroups', 'Manage Groups (Site Config)', 'Group management mounted inside Site Config.', '/admin/config/groups', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityRoles', 'Manage Roles (Site Config)', 'Role management mounted inside Site Config.', '/admin/config/roles', TRUE, NOW(), NOW()),
@@ -1217,6 +1274,7 @@ internal static class DatabaseSchemaInitializer
               ('/admin/config/pages-menus', 'configPagesMenus'),
               ('/admin/config/bus-watcher', 'configBusWatcher'),
               ('/admin/config/events', 'configEvents'),
+              ('/admin/config/system-health', 'configSystemHealth'),
               ('/admin/config/users', 'configSecurityUsers'),
               ('/admin/config/groups', 'configSecurityGroups'),
               ('/admin/config/roles', 'configSecurityRoles'),
@@ -1334,6 +1392,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsMenuItemSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSeedSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Services.ApplicationEvents;
@@ -27,30 +28,68 @@ public sealed class DaprStreamingSubscriber(
     IWorkflowSignalRegistry registry,
     BusWatcherStreamService busWatcher,
     WorkflowSignalDispatcher signalDispatcher,
+    IHttpClientFactory httpClientFactory,
     IOptions<DaprOptions> daprOptions,
     ILogger<DaprStreamingSubscriber> logger) : IHostedService, IDaprStreamingSubscriber
 {
+    // How often the watchdog checks the pub/sub component. 15s is a
+    // tradeoff: short enough that recovery feels prompt after Dapr's NATS
+    // socket reconnects, long enough that an idle dev box isn't burning
+    // cycles on probes.
+    private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(15);
+
+    // How long pub/sub has to stay unhealthy before the watchdog escalates
+    // and restarts the sidecar. The Dapr NATS Go client is supposed to
+    // reconnect on its own, but in practice it sometimes lands in a
+    // "connection closed" state it never crawls out of. Give it a fair
+    // window first so we don't punish a transient blip.
+    private static readonly TimeSpan UnhealthyEscalationThreshold = TimeSpan.FromSeconds(45);
+
+    // Minimum gap between sidecar restarts. Restarting daprd churns every
+    // pub/sub subscription, so we don't want to do it on every tick if
+    // NATS itself is genuinely down.
+    private static readonly TimeSpan RestartCooldown = TimeSpan.FromSeconds(120);
+
     private readonly DaprPublishSubscribeClient _pubSubClient = pubSubClient;
     private readonly IWorkflowSignalRegistry _registry = registry;
     private readonly BusWatcherStreamService _busWatcher = busWatcher;
     private readonly WorkflowSignalDispatcher _signalDispatcher = signalDispatcher;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly DaprOptions _daprOptions = daprOptions.Value;
     private readonly ILogger<DaprStreamingSubscriber> _logger = logger;
 
     private readonly Dictionary<string, IAsyncDisposable> _subscriptions = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _syncLock = new(1, 1);
     private CancellationTokenSource? _lifetimeCts;
+    private Task? _watchdogTask;
+    // Tracks the previous probe outcome so we only re-subscribe on the
+    // Down→Up edge instead of churning on every successful tick.
+    private bool _lastProbeHealthy = true;
+    private DateTimeOffset? _firstUnhealthyAt;
+    private DateTimeOffset? _lastRestartAt;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _lifetimeCts = new CancellationTokenSource();
         await _registry.RefreshAsync(cancellationToken);
         await SyncAsync(cancellationToken);
+        _watchdogTask = Task.Run(() => RunWatchdogAsync(_lifetimeCts.Token), CancellationToken.None);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _lifetimeCts?.Cancel();
+
+        if (_watchdogTask is not null)
+        {
+            try
+            {
+                await _watchdogTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
 
         await _syncLock.WaitAsync(cancellationToken);
         try
@@ -64,6 +103,258 @@ public sealed class DaprStreamingSubscriber(
                 catch (Exception exception)
                 {
                     _logger.LogWarning(exception, "Failed to dispose subscription for {Topic}.", topic);
+                }
+            }
+            _subscriptions.Clear();
+        }
+        finally
+        {
+            _syncLock.Release();
+        }
+    }
+
+    // Periodically probe the pub/sub component. When NATS bounces (or any
+    // peer like the flowable-dapr sidecar churns enough to drop our
+    // sidecar's NATS socket), Dapr returns "nats: connection closed" on
+    // every publish/subscribe. Even after Dapr's NATS client reconnects
+    // (configured via `maxReconnects: -1` on the component), the JetStream
+    // consumers Dapr created for our streaming subscriptions are ephemeral
+    // and may not be re-created. Force a resubscribe on the Down→Up edge.
+    private async Task RunWatchdogAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(WatchdogInterval, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            bool healthy;
+            try
+            {
+                healthy = await ProbePubSubAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Pub/sub watchdog probe threw.");
+                healthy = false;
+            }
+
+            if (healthy)
+            {
+                if (!_lastProbeHealthy)
+                {
+                    _logger.LogInformation(
+                        "Dapr pub/sub component recovered; tearing down stale subscriptions and re-syncing.");
+                    await ResetSubscriptionsAsync(cancellationToken);
+                    try
+                    {
+                        await SyncAsync(cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to re-sync subscriptions after pub/sub recovery.");
+                        healthy = false;
+                    }
+                }
+
+                if (healthy)
+                {
+                    _firstUnhealthyAt = null;
+                }
+            }
+            else
+            {
+                _firstUnhealthyAt ??= DateTimeOffset.UtcNow;
+                if (_lastProbeHealthy)
+                {
+                    _logger.LogWarning(
+                        "Dapr pub/sub component reports unhealthy; will escalate to a sidecar restart if it stays down for {ThresholdSeconds}s.",
+                        (int)UnhealthyEscalationThreshold.TotalSeconds);
+                }
+
+                var unhealthyDuration = DateTimeOffset.UtcNow - _firstUnhealthyAt.Value;
+                var sinceLastRestart = _lastRestartAt is null
+                    ? TimeSpan.MaxValue
+                    : DateTimeOffset.UtcNow - _lastRestartAt.Value;
+
+                if (unhealthyDuration >= UnhealthyEscalationThreshold
+                    && sinceLastRestart >= RestartCooldown)
+                {
+                    _lastRestartAt = DateTimeOffset.UtcNow;
+                    _logger.LogWarning(
+                        "Dapr pub/sub component has been unhealthy for {DurationSeconds}s; restarting the sidecar.",
+                        (int)unhealthyDuration.TotalSeconds);
+                    var restarted = await TryRestartSidecarAsync(cancellationToken);
+                    if (restarted)
+                    {
+                        // Reset the unhealthy timer so the threshold is
+                        // measured again from the restart attempt — the
+                        // cooldown still prevents another restart for two
+                        // minutes regardless.
+                        _firstUnhealthyAt = DateTimeOffset.UtcNow;
+                    }
+                }
+            }
+
+            _lastProbeHealthy = healthy;
+        }
+    }
+
+    // Shells out to the existing restart-autonate-web-sidecar.sh script.
+    // It's the only safe way to recover Dapr from a permanent
+    // "nats: connection closed" state without component-yaml changes,
+    // because Dapr exposes no API to reload the pub/sub component.
+    private async Task<bool> TryRestartSidecarAsync(CancellationToken cancellationToken)
+    {
+        var scriptPath = ResolveRestartScriptPath();
+        if (scriptPath is null)
+        {
+            _logger.LogError(
+                "Cannot restart sidecar: restart-autonate-web-sidecar.sh not found relative to {AppContextBaseDirectory}.",
+                AppContext.BaseDirectory);
+            return false;
+        }
+
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "/bin/bash",
+            ArgumentList = { scriptPath },
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process is null)
+            {
+                _logger.LogError("Failed to spawn sidecar restart process for {ScriptPath}.", scriptPath);
+                return false;
+            }
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
+
+            await process.WaitForExitAsync(timeoutCts.Token);
+            var stdout = await process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var stderr = await process.StandardError.ReadToEndAsync(CancellationToken.None);
+            if (process.ExitCode == 0)
+            {
+                _logger.LogInformation(
+                    "Sidecar restart succeeded.\nstdout:\n{Stdout}",
+                    stdout.Trim());
+                // Re-sync subscriptions immediately so we don't have to
+                // wait for the next watchdog tick. The next probe will then
+                // confirm pub/sub is healthy and clear _firstUnhealthyAt.
+                await ResetSubscriptionsAsync(cancellationToken);
+                try
+                {
+                    await SyncAsync(cancellationToken);
+                }
+                catch (Exception syncEx)
+                {
+                    _logger.LogError(syncEx, "Failed to re-sync subscriptions after sidecar restart.");
+                }
+                return true;
+            }
+
+            _logger.LogError(
+                "Sidecar restart exited with code {ExitCode}.\nstdout:\n{Stdout}\nstderr:\n{Stderr}",
+                process.ExitCode, stdout.Trim(), stderr.Trim());
+            return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Sidecar restart threw.");
+            return false;
+        }
+    }
+
+    // The script lives next to the repo, but the running binary is in
+    // bin/Debug/net{N}.0. Walk up looking for the infra/ directory so this
+    // works in both a Rider run and a published app.
+    private static string? ResolveRestartScriptPath()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "infra", "restart-autonate-web-sidecar.sh");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    // Round-trip publish to a dedicated probe topic. The topic must live
+    // under one of the JetStream subjects the stream provisioner covers
+    // (here: `application.>`) so a healthy sidecar accepts it cleanly.
+    private async Task<bool> ProbePubSubAsync(CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(_daprOptions.HttpEndpoint, UriKind.Absolute, out var endpoint)
+            || string.IsNullOrWhiteSpace(_daprOptions.PubSubName))
+        {
+            return false;
+        }
+
+        var pubsub = Uri.EscapeDataString(_daprOptions.PubSubName);
+        var probeTopic = Uri.EscapeDataString($"{DaprApplicationEventPublisher.TopicRoot}.healthprobe");
+        var probeUri = new Uri(endpoint, $"/v1.0/publish/{pubsub}/{probeTopic}?metadata.rawPayload=true");
+
+        try
+        {
+            using var content = new ByteArrayContent("{}"u8.ToArray());
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(3);
+            using var response = await httpClient.PostAsync(probeUri, content, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // Dispose every active subscription handle so SyncAsync rebuilds them
+    // from scratch. Used after a Down→Up transition because the SDK's
+    // existing handles are pinned to JetStream consumers that no longer
+    // exist after the NATS socket bounce.
+    private async Task ResetSubscriptionsAsync(CancellationToken cancellationToken)
+    {
+        await _syncLock.WaitAsync(cancellationToken);
+        try
+        {
+            foreach (var (topic, handle) in _subscriptions)
+            {
+                try
+                {
+                    await handle.DisposeAsync();
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogWarning(exception,
+                        "Failed to dispose stale subscription for {Topic} during recovery.", topic);
                 }
             }
             _subscriptions.Clear();

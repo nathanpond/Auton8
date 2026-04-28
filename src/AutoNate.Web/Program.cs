@@ -81,6 +81,7 @@ builder.Services.AddOptions<NatsOptions>()
 builder.Services.AddSingleton<NatsStreamProvisioner>();
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddSingleton<DaprSidecarProbe>();
+builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.SystemHealthService>();
 builder.Services.AddSingleton<IWorkflowSignalRegistry, EfCoreWorkflowSignalRegistry>();
 builder.Services.AddSingleton<WorkflowSignalDispatcher>();
 builder.Services.AddDaprPubSubClient((sp, b) =>

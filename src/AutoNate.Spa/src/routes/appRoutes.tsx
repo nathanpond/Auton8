@@ -71,6 +71,7 @@ export const APP_ROUTES: AppRoute[] = [
       { path: "pages-menus", element: template("configPagesMenus") },
       { path: "bus-watcher", element: template("configBusWatcher") },
       { path: "events", element: template("configEvents") },
+      { path: "system-health", element: template("configSystemHealth") },
       { path: "users", element: template("configSecurityUsers") },
       { path: "groups", element: template("configSecurityGroups") },
       { path: "roles", element: template("configSecurityRoles") },
