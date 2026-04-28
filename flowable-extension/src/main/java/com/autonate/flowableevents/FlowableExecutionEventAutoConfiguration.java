@@ -64,9 +64,16 @@ public class FlowableExecutionEventAutoConfiguration {
     WorkflowExecutionEventListener workflowExecutionEventListener(
         WorkflowExecutionEventMapper eventMapper,
         DaprWorkflowEventPublisher publisher,
-        ObjectProvider<org.flowable.engine.RepositoryService> repositoryServiceProvider
+        ObjectProvider<org.flowable.engine.RepositoryService> repositoryServiceProvider,
+        ObjectProvider<org.flowable.engine.RuntimeService> runtimeServiceProvider,
+        WorkflowDefinitionMetadataResolver definitionMetadataResolver
     ) {
-        return new WorkflowExecutionEventListener(eventMapper, publisher, repositoryServiceProvider);
+        return new WorkflowExecutionEventListener(
+            eventMapper,
+            publisher,
+            repositoryServiceProvider,
+            runtimeServiceProvider,
+            definitionMetadataResolver);
     }
 
     @Bean
