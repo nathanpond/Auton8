@@ -16,19 +16,67 @@ public static class ExecutionEndpoints
         var executions = app.MapGroup("/api/executions")
             .RequireAuthorization();
 
-        executions.MapGet("/", async (IFlowableClient flowable, CancellationToken cancellationToken) =>
+        executions.MapGet("/", async (
+            IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            CancellationToken cancellationToken) =>
         {
             var list = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
-            return Results.Ok(list);
+            if (list.Count == 0)
+            {
+                return Results.Ok(list);
+            }
+
+            // List<string> (not string[]) so EF Core's expression interpreter
+            // binds to List<T>.Contains instead of the newer ReadOnlySpan<T>
+            // Contains overload, which the funcletizer can't translate.
+            var ids = list.Select(execution => execution.Id).ToList();
+
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            var erroredInstanceIds = await db.WorkflowExecutionErrors.AsNoTracking()
+                .Where(e => ids.Contains(e.ProcessInstanceId))
+                .Select(e => e.ProcessInstanceId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (erroredInstanceIds.Count == 0)
+            {
+                return Results.Ok(list);
+            }
+
+            // "Errored" wins over Running/Complete in the UI: a process with any
+            // failed job is still actionable but no longer healthy. Cancelled
+            // wins over Errored — operator intent supersedes a stale failure.
+            var erroredSet = new HashSet<string>(erroredInstanceIds, StringComparer.Ordinal);
+            var projected = list
+                .Select(execution => execution.Status == "Cancelled" || !erroredSet.Contains(execution.Id)
+                    ? execution
+                    : execution with { Status = "Errored" })
+                .ToArray();
+            return Results.Ok(projected);
         });
 
         executions.MapGet("/{processInstanceId}/diagram", async (
             string processInstanceId,
             IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
             CancellationToken cancellationToken) =>
         {
             var detail = await flowable.GetWorkflowExecutionDiagramDetailAsync(processInstanceId, cancellationToken);
-            return Results.Ok(detail);
+
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            var failedActivityIds = await db.WorkflowExecutionErrors.AsNoTracking()
+                .Where(e => e.ProcessInstanceId == processInstanceId)
+                .Select(e => e.ActivityId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (failedActivityIds.Count == 0)
+            {
+                return Results.Ok(detail);
+            }
+
+            return Results.Ok(detail with { FailedActivityIds = failedActivityIds });
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
         executions.MapGet("/{processInstanceId}/tasks", async (

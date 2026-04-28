@@ -1419,20 +1419,23 @@ export function highlightExecutionState(
   viewerHandle,
   completedActivityIds,
   currentActivityIds,
-  cancelledActivityIds
+  cancelledActivityIds,
+  failedActivityIds
 ) {
   clearExecutionState(viewerHandle);
 
   console.log("[AutoNate viewer] highlightExecutionState", {
     completed: completedActivityIds,
     current: currentActivityIds,
-    cancelled: cancelledActivityIds
+    cancelled: cancelledActivityIds,
+    failed: failedActivityIds
   });
 
   viewerHandle?.setCurrentActivityIds?.(currentActivityIds);
   addMarkers(viewerHandle, completedActivityIds, "execution-step-completed");
   addMarkers(viewerHandle, currentActivityIds, "execution-step-current");
   addMarkers(viewerHandle, cancelledActivityIds, "execution-step-cancelled");
+  addMarkers(viewerHandle, failedActivityIds, "execution-step-failed");
 }
 
 // `options` carries thunks that are read on every right-click so React state

@@ -159,6 +159,38 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Equal("execution.setVariable(\"total\", 42);", task.Element(bpmn + "script")?.Value);
     }
 
+    // Script tasks must serialize as flowable:async="true" so a thrown error
+    // in the script becomes a job.execution.failed event instead of synchronously
+    // 500ing the start-process API call.
+    [Fact]
+    public void ApplyProcessMetadata_ForcesScriptTasksAsync()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                                             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                                             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="async_script_flow" name="Async Script Flow" isExecutable="true">
+                               <bpmn:scriptTask id="ScriptTask_1" name="Boom" scriptFormat="javascript">
+                                 <bpmn:script>throw new Error("boom");</bpmn:script>
+                               </bpmn:scriptTask>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(xml, "async_script_flow", "Async Script Flow");
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+        var task = document.Descendants(bpmn + "scriptTask").Single();
+
+        Assert.Equal("true", task.Attribute(flowable + "async")?.Value);
+    }
+
     [Fact]
     public void ApplyProcessMetadata_EmitsFlowableUserTaskAssignmentAttributes()
     {

@@ -108,6 +108,10 @@ public sealed record class WorkflowExecutionDiagramDetail
     // so the diagram doesn't pretend they finished normally.
     public IReadOnlyList<string> CancelledActivityIds { get; init; } = [];
 
+    // Activities that produced a job.execution.failed event for this process
+    // instance. Populated from the workflow_execution_errors table.
+    public IReadOnlyList<string> FailedActivityIds { get; init; } = [];
+
     public IReadOnlyList<FlowableProcessVariable> Variables { get; init; } = [];
 }
 

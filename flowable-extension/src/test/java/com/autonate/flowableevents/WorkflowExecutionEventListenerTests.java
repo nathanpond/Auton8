@@ -1,12 +1,37 @@
 package com.autonate.flowableevents;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import org.flowable.common.engine.impl.cfg.TransactionState;
 import org.junit.jupiter.api.Test;
 
 class WorkflowExecutionEventListenerTests {
+
+    // JOB_EXECUTION_FAILURE is dispatched in the failing job's work transaction,
+    // which then rolls back. WorkflowFailureEventListener must NOT filter on
+    // a transaction state, otherwise the event is silently dropped.
+    @Test
+    void failureListenerHasNoTransactionStateFilter() {
+        var listener = new WorkflowFailureEventListener(null, null, null);
+
+        assertNull(listener.getOnTransaction(),
+            "WorkflowFailureEventListener must not call setOnTransaction; "
+                + "JOB_EXECUTION_FAILURE fires in the rolling-back work transaction.");
+    }
+
+    // The main listener intentionally filters on COMMITTED so happy-path events
+    // (process.started, activity.started, etc.) only fire for transactions that
+    // actually persisted. Pinning this in a test so a future refactor doesn't
+    // accidentally relax it and create double-publish on rollback.
+    @Test
+    void mainListenerFiltersOnCommittedTransaction() {
+        var listener = new WorkflowExecutionEventListener(null, null, null, null, null);
+
+        assertEquals(TransactionState.COMMITTED.name(), listener.getOnTransaction());
+    }
 
     @Test
     void formatAutoStartedNameUsesGivenZone() {

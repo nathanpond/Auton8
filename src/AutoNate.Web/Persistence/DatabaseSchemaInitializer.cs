@@ -1370,11 +1370,28 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    private const string WorkflowExecutionErrorsSql =
+        """
+        CREATE TABLE IF NOT EXISTS workflow_execution_errors (
+            id UUID PRIMARY KEY,
+            process_instance_id TEXT NOT NULL,
+            activity_id TEXT NOT NULL,
+            activity_name TEXT NULL,
+            error_message TEXT NULL,
+            raw_flowable_event_type TEXT NULL,
+            occurred_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_errors_process_instance_id
+            ON workflow_execution_errors (process_instance_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AutoNateDbContext>();
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowVersioningSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(WorkflowExecutionErrorsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsDataSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsEdgesSchemaSql, cancellationToken);

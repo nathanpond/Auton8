@@ -41,6 +41,8 @@ export type WorkflowExecutionDiagramDetail = {
   // Populated only for cancelled executions: activities that were in flight
   // when cancellation halted the process.
   cancelledActivityIds: string[];
+  // Activities that produced a job.execution.failed event for this run.
+  failedActivityIds: string[];
   variables: FlowableProcessVariable[];
 };
 

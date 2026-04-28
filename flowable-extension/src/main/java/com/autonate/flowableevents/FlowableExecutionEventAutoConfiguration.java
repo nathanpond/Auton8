@@ -77,14 +77,25 @@ public class FlowableExecutionEventAutoConfiguration {
     }
 
     @Bean
+    WorkflowFailureEventListener workflowFailureEventListener(
+        WorkflowExecutionEventMapper eventMapper,
+        DaprWorkflowEventPublisher publisher,
+        ObjectProvider<org.flowable.engine.RepositoryService> repositoryServiceProvider
+    ) {
+        return new WorkflowFailureEventListener(eventMapper, publisher, repositoryServiceProvider);
+    }
+
+    @Bean
     EngineConfigurationConfigurer<SpringProcessEngineConfiguration> workflowExecutionListenerConfigurer(
-        WorkflowExecutionEventListener listener
+        WorkflowExecutionEventListener listener,
+        WorkflowFailureEventListener failureListener
     ) {
         return engineConfiguration -> {
             var eventListeners = new ArrayList<FlowableEventListener>();
             eventListeners.add(listener);
+            eventListeners.add(failureListener);
             engineConfiguration.setEventListeners(eventListeners);
-            logger.info("Registered AutoNate workflow execution event listener with the Flowable process engine.");
+            logger.info("Registered AutoNate workflow execution event listeners with the Flowable process engine.");
         };
     }
 }

@@ -442,12 +442,14 @@ export function ExecutionContent({
     completedActivityIds: detail?.completedActivityIds ?? [],
     currentActivityIds: detail?.currentActivityIds ?? [],
     cancelledActivityIds: detail?.cancelledActivityIds ?? [],
+    failedActivityIds: detail?.failedActivityIds ?? [],
     callbacks: viewerCallbacks,
     enableContextMenu: true,
     contextMenu: contextMenuOptions
   });
 
   const hasCancelledActivities = (detail?.cancelledActivityIds?.length ?? 0) > 0;
+  const hasFailedActivities = (detail?.failedActivityIds?.length ?? 0) > 0;
 
   const errorMessage = error
     ? describeError(error)
@@ -500,6 +502,12 @@ export function ExecutionContent({
               <span>
                 <span className="workflow-execution-swatch workflow-execution-swatch-cancelled"></span>{" "}
                 Cancelled
+              </span>
+            )}
+            {hasFailedActivities && (
+              <span>
+                <span className="workflow-execution-swatch workflow-execution-swatch-failed"></span>{" "}
+                Errored
               </span>
             )}
             <span>

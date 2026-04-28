@@ -36,6 +36,9 @@ export type UseBpmnReadonlyViewerOptions = {
   // Activities that were halted in flight when the execution was cancelled.
   // Optional — empty/undefined means no cancellation overlay is drawn.
   cancelledActivityIds?: readonly string[];
+  // Activities that produced a job.execution.failed event for this run.
+  // Optional — empty/undefined means no failure overlay is drawn.
+  failedActivityIds?: readonly string[];
   callbacks?: Pick<
     WorkflowCallbacks,
     "CompleteTaskFromContextMenu" | "CompleteAllTasksFromContextMenu"
@@ -58,6 +61,7 @@ export function useBpmnReadonlyViewer(
     completedActivityIds,
     currentActivityIds,
     cancelledActivityIds,
+    failedActivityIds,
     callbacks,
     enableContextMenu,
     contextMenu
@@ -118,7 +122,8 @@ export function useBpmnReadonlyViewer(
           viewerRef.current,
           completedActivityIds,
           currentActivityIds,
-          cancelledActivityIds ?? []
+          cancelledActivityIds ?? [],
+          failedActivityIds ?? []
         );
       } catch (err) {
         if (!cancelled) {
@@ -149,12 +154,13 @@ export function useBpmnReadonlyViewer(
         viewerRef.current,
         completedActivityIds,
         currentActivityIds,
-        cancelledActivityIds ?? []
+        cancelledActivityIds ?? [],
+        failedActivityIds ?? []
       );
     } catch {
       // Re-highlight can fail if called after dispose; not fatal.
     }
-  }, [completedActivityIds, currentActivityIds, cancelledActivityIds]);
+  }, [completedActivityIds, currentActivityIds, cancelledActivityIds, failedActivityIds]);
 
   // Dispose on unmount.
   useEffect(() => {

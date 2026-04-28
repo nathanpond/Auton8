@@ -125,11 +125,24 @@ public static partial class WorkflowBpmnXml
             }
         }
 
+        ForceAsyncScriptTasks(document);
+
         var declaration = document.Declaration is null
             ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
             : $"{document.Declaration}\n";
 
         return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    // Script tasks always run on Flowable's job executor so a thrown error becomes
+    // a job failure (visible via job.execution.failed) instead of synchronously
+    // 500ing the start-process API call.
+    private static void ForceAsyncScriptTasks(XDocument document)
+    {
+        foreach (var scriptTask in document.Descendants(BpmnNamespace + "scriptTask"))
+        {
+            scriptTask.SetAttributeValue(FlowableNamespace + "async", "true");
+        }
     }
 
     public static WorkflowBpmnValidationResult ValidateProcess(string xml)

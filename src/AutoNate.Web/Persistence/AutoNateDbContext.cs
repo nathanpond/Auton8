@@ -18,6 +18,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<WorkflowModelVersion> WorkflowModelVersions { get; set; }
 
+    public virtual DbSet<WorkflowExecutionError> WorkflowExecutionErrors { get; set; }
+
     public virtual DbSet<RecordType> RecordTypes { get; set; }
 
     public virtual DbSet<RecordTypeField> RecordTypeFields { get; set; }
@@ -146,6 +148,25 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.PublishedAtUtc).HasColumnName("published_at_utc");
             entity.Property(e => e.VersionNumber).HasColumnName("version_number");
             entity.Property(e => e.WorkflowModelId).HasColumnName("workflow_model_id");
+        });
+
+        modelBuilder.Entity<WorkflowExecutionError>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("workflow_execution_errors_pkey");
+
+            entity.ToTable("workflow_execution_errors");
+
+            entity.HasIndex(e => e.ProcessInstanceId, "ix_workflow_execution_errors_process_instance_id");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.ProcessInstanceId).HasColumnName("process_instance_id");
+            entity.Property(e => e.ActivityId).HasColumnName("activity_id");
+            entity.Property(e => e.ActivityName).HasColumnName("activity_name");
+            entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
+            entity.Property(e => e.RawFlowableEventType).HasColumnName("raw_flowable_event_type");
+            entity.Property(e => e.OccurredAtUtc).HasColumnName("occurred_at_utc");
         });
 
         modelBuilder.Entity<RecordType>(entity =>
