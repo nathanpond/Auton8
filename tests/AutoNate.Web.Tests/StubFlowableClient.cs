@@ -115,6 +115,32 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(new WorkflowExecutionDiagramDetail());
     }
 
+    // Tests can seed this to drive the history endpoint response. Defaults to
+    // an empty list when not set.
+    public Dictionary<string, List<WorkflowExecutionHistoryEvent>> HistoryByInstance { get; } = new();
+
+    public Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"History:{processInstanceId}");
+        HistoryByInstance.TryGetValue(processInstanceId, out var events);
+        IReadOnlyList<WorkflowExecutionHistoryEvent> list =
+            events?.AsReadOnly() ?? (IReadOnlyList<WorkflowExecutionHistoryEvent>)Array.Empty<WorkflowExecutionHistoryEvent>();
+        return Task.FromResult(list);
+    }
+
+    public Dictionary<string, List<WorkflowExecutionLogEntry>> LogByInstance { get; } = new();
+
+    public Task<IReadOnlyList<WorkflowExecutionLogEntry>> GetWorkflowExecutionLogAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"Log:{processInstanceId}");
+        LogByInstance.TryGetValue(processInstanceId, out var entries);
+        IReadOnlyList<WorkflowExecutionLogEntry> list =
+            entries?.AsReadOnly() ?? (IReadOnlyList<WorkflowExecutionLogEntry>)Array.Empty<WorkflowExecutionLogEntry>();
+        return Task.FromResult(list);
+    }
+
     public Task DeleteWorkflowExecutionAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {

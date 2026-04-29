@@ -100,6 +100,7 @@ builder.Services.AddSingleton<DaprStreamingSubscriber>();
 builder.Services.AddSingleton<IDaprStreamingSubscriber>(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
 builder.Services.AddHostedService<AutoNate.Web.Services.Workflow.WorkflowExecutionErrorRecorder>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Workflow.WorkflowTaskCompletionRecorder>();
 builder.Services.AddDbContextFactory<AutoNateDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("Default")

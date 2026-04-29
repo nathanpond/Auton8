@@ -459,6 +459,139 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         };
     }
 
+    public async Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"service/history/historic-activity-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}&sort=startTime&order=asc&size={WorkflowExecutionActivityQuerySize}",
+            cancellationToken);
+        await EnsureSuccessAsync(response, "query historic activity instances");
+
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(response, cancellationToken);
+
+        return payload.Data
+            .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId))
+            .Select(activity => new WorkflowExecutionHistoryEvent
+            {
+                ActivityId = activity.ActivityId!,
+                ActivityName = string.IsNullOrWhiteSpace(activity.ActivityName) ? null : activity.ActivityName,
+                ActivityType = string.IsNullOrWhiteSpace(activity.ActivityType) ? null : activity.ActivityType,
+                StartedAtUtc = activity.StartTime,
+                EndedAtUtc = activity.EndTime,
+                DurationMs = activity.DurationInMillis,
+                Assignee = string.IsNullOrWhiteSpace(activity.Assignee) ? null : activity.Assignee,
+                TaskId = string.IsNullOrWhiteSpace(activity.TaskId) ? null : activity.TaskId,
+                DeleteReason = string.IsNullOrWhiteSpace(activity.DeleteReason) ? null : activity.DeleteReason
+            })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<WorkflowExecutionLogEntry>> GetWorkflowExecutionLogAsync(string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        var encodedId = Uri.EscapeDataString(processInstanceId);
+
+        // Variable updates — Flowable's "selectOnlyVariableUpdates=true" filters
+        // out form-property records so we only get state changes.
+        using var detailResponse = await _httpClient.GetAsync(
+            $"service/history/historic-detail?processInstanceId={encodedId}&selectOnlyVariableUpdates=true&size={WorkflowExecutionActivityQuerySize}",
+            cancellationToken);
+        await EnsureSuccessAsync(detailResponse, "query historic detail (variable updates)");
+
+        // User task lifecycle — start, claim, end with assignee/owner/dueDate.
+        using var taskResponse = await _httpClient.GetAsync(
+            $"service/history/historic-task-instances?processInstanceId={encodedId}&size={WorkflowExecutionActivityQuerySize}",
+            cancellationToken);
+        await EnsureSuccessAsync(taskResponse, "query historic task instances");
+
+        var detailPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricDetailResponse>>(detailResponse, cancellationToken);
+        var taskPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricTaskResponse>>(taskResponse, cancellationToken);
+
+        var entries = new List<WorkflowExecutionLogEntry>(detailPayload.Data.Count + taskPayload.Data.Count * 3);
+
+        foreach (var detail in detailPayload.Data)
+        {
+            var variable = detail.Variable;
+            if (variable is null || string.IsNullOrWhiteSpace(variable.Name))
+            {
+                continue;
+            }
+
+            entries.Add(new WorkflowExecutionLogEntry
+            {
+                Kind = "variable-update",
+                OccurredAtUtc = detail.Time,
+                VariableUpdate = new WorkflowExecutionLogVariableUpdate
+                {
+                    Name = variable.Name!,
+                    Type = string.IsNullOrWhiteSpace(variable.Type) ? null : variable.Type,
+                    Value = FormatVariableValue(variable.Value),
+                    Revision = detail.Revision,
+                    TaskId = string.IsNullOrWhiteSpace(detail.TaskId) ? null : detail.TaskId,
+                    ActivityInstanceId = string.IsNullOrWhiteSpace(detail.ActivityInstanceId) ? null : detail.ActivityInstanceId
+                }
+            });
+        }
+
+        foreach (var task in taskPayload.Data)
+        {
+            if (string.IsNullOrWhiteSpace(task.Id))
+            {
+                continue;
+            }
+
+            var taskInfo = new WorkflowExecutionLogTask
+            {
+                TaskId = task.Id!,
+                Name = string.IsNullOrWhiteSpace(task.Name) ? null : task.Name,
+                TaskDefinitionKey = string.IsNullOrWhiteSpace(task.TaskDefinitionKey) ? null : task.TaskDefinitionKey,
+                Assignee = string.IsNullOrWhiteSpace(task.Assignee) ? null : task.Assignee,
+                Owner = string.IsNullOrWhiteSpace(task.Owner) ? null : task.Owner,
+                FormKey = string.IsNullOrWhiteSpace(task.FormKey) ? null : task.FormKey,
+                Priority = task.Priority,
+                DueAtUtc = task.DueDate,
+                DeleteReason = string.IsNullOrWhiteSpace(task.DeleteReason) ? null : task.DeleteReason
+            };
+
+            if (task.StartTime is not null)
+            {
+                entries.Add(new WorkflowExecutionLogEntry
+                {
+                    Kind = "task-created",
+                    OccurredAtUtc = task.StartTime,
+                    Task = taskInfo
+                });
+            }
+
+            // Only emit "claimed" if the claim happened distinct from the
+            // task's creation. Tasks pre-assigned via BPMN often have
+            // ClaimTime equal to (or absent vs.) StartTime.
+            if (task.ClaimTime is not null
+                && task.StartTime is not null
+                && (task.ClaimTime.Value - task.StartTime.Value).Duration() > TimeSpan.FromSeconds(1))
+            {
+                entries.Add(new WorkflowExecutionLogEntry
+                {
+                    Kind = "task-claimed",
+                    OccurredAtUtc = task.ClaimTime,
+                    Task = taskInfo
+                });
+            }
+
+            if (task.EndTime is not null)
+            {
+                entries.Add(new WorkflowExecutionLogEntry
+                {
+                    Kind = string.IsNullOrWhiteSpace(task.DeleteReason) ? "task-completed" : "task-cancelled",
+                    OccurredAtUtc = task.EndTime,
+                    Task = taskInfo
+                });
+            }
+        }
+
+        return entries
+            .OrderBy(e => e.OccurredAtUtc ?? DateTimeOffset.MinValue)
+            .ToArray();
+    }
+
     private static string? FormatVariableValue(JsonElement? value)
     {
         if (value is null || value.Value.ValueKind == JsonValueKind.Undefined || value.Value.ValueKind == JsonValueKind.Null)
@@ -1072,11 +1205,24 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     {
         public string? ActivityId { get; init; }
 
+        public string? ActivityName { get; init; }
+
+        // BPMN element type — userTask, serviceTask, startEvent, endEvent,
+        // exclusiveGateway, etc. Used by the Execution Log tab.
+        public string? ActivityType { get; init; }
+
         public string? ProcessInstanceId { get; init; }
 
         public DateTimeOffset? StartTime { get; init; }
 
         public DateTimeOffset? EndTime { get; init; }
+
+        public long? DurationInMillis { get; init; }
+
+        // Set on userTask rows.
+        public string? Assignee { get; init; }
+
+        public string? TaskId { get; init; }
 
         // Flowable propagates the process-level delete reason to every
         // activity instance that was in flight at cancellation time. This is
@@ -1129,11 +1275,46 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     {
         public string? Id { get; init; }
 
+        public string? Name { get; init; }
+
         public string? Assignee { get; init; }
+
+        public string? Owner { get; init; }
 
         public string? TaskDefinitionKey { get; init; }
 
+        public DateTimeOffset? StartTime { get; init; }
+
         public DateTimeOffset? EndTime { get; init; }
+
+        public DateTimeOffset? ClaimTime { get; init; }
+
+        public DateTimeOffset? DueDate { get; init; }
+
+        public string? FormKey { get; init; }
+
+        public int? Priority { get; init; }
+
+        public string? DeleteReason { get; init; }
+    }
+
+    private sealed class FlowableHistoricDetailResponse
+    {
+        // "variableUpdate" — Flowable nests it as `detailType` on the wire,
+        // not `type` (which is the variable's data type, inside `variable`).
+        public string? DetailType { get; init; }
+
+        public string? TaskId { get; init; }
+
+        public string? ActivityInstanceId { get; init; }
+
+        public DateTimeOffset? Time { get; init; }
+
+        // Variable name / type / value are nested under `variable` — same
+        // shape as historic-variable-instances. Reuse that DTO.
+        public FlowableHistoricVariableResponse? Variable { get; init; }
+
+        public int? Revision { get; init; }
     }
 
     private sealed class FlowableScriptTaskSupportResponse

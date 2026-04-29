@@ -34,3 +34,19 @@ export function userDisplayName(user: LocalUser | null): string | null {
   const fullName = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim();
   return fullName.length > 0 ? fullName : user.username;
 }
+
+/**
+ * "Full Name (username)" — used in places (e.g. the workflow execution log)
+ * where we want both the human name and the login id visible on the same
+ * line. Falls back to whichever of name/username is set, then to the raw
+ * fallbackId, then to "unknown".
+ */
+export function userFullDisplay(user: LocalUser | null, fallbackId?: string | null): string {
+  if (!user) return fallbackId ?? "unknown";
+  const fullName = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim();
+  if (fullName.length > 0 && user.username && fullName !== user.username) {
+    return `${fullName} (${user.username})`;
+  }
+  if (fullName.length > 0) return fullName;
+  return user.username ?? fallbackId ?? "unknown";
+}

@@ -4,7 +4,9 @@ using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
@@ -79,6 +81,215 @@ public static class ExecutionEndpoints
             return Results.Ok(detail with { FailedActivityIds = failedActivityIds });
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
+        executions.MapGet("/{processInstanceId}/history", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            CancellationToken cancellationToken) =>
+        {
+            var history = await flowable.GetWorkflowExecutionHistoryAsync(processInstanceId, cancellationToken);
+
+            var completedTaskIds = history
+                .Where(e => !string.IsNullOrWhiteSpace(e.TaskId) && e.EndedAtUtc is not null)
+                .Select(e => e.TaskId!)
+                .Distinct()
+                .ToList();
+
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+            var completions = completedTaskIds.Count == 0
+                ? new Dictionary<string, WorkflowTaskCompletion>()
+                : await db.WorkflowTaskCompletions.AsNoTracking()
+                    .Where(c => completedTaskIds.Contains(c.TaskId))
+                    .ToDictionaryAsync(c => c.TaskId, cancellationToken);
+
+            // Group errors by activityId — multiple retries collapse into a
+            // count + latest message stamped onto the matching activity row.
+            var errorRows = await db.WorkflowExecutionErrors.AsNoTracking()
+                .Where(e => e.ProcessInstanceId == processInstanceId)
+                .OrderBy(e => e.OccurredAtUtc)
+                .ToListAsync(cancellationToken);
+
+            var errorsByActivity = errorRows
+                .GroupBy(e => e.ActivityId, StringComparer.Ordinal)
+                .ToDictionary(
+                    g => g.Key,
+                    g => new
+                    {
+                        Count = g.Count(),
+                        // Latest non-empty message wins. Today these are
+                        // mostly null until the Java-side capture lands.
+                        LatestMessage = g.Reverse()
+                            .Select(e => e.ErrorMessage)
+                            .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
+                    },
+                    StringComparer.Ordinal);
+
+            if (completions.Count == 0 && errorsByActivity.Count == 0)
+            {
+                return Results.Ok(history);
+            }
+
+            var enriched = history
+                .Select(e =>
+                {
+                    var updated = e;
+
+                    if (!string.IsNullOrWhiteSpace(e.TaskId)
+                        && completions.TryGetValue(e.TaskId!, out var completion))
+                    {
+                        updated = updated with
+                        {
+                            CompletedByUserId = completion.CompletedByUserId,
+                            IsOverride = completion.WasOverride
+                        };
+                    }
+
+                    if (errorsByActivity.TryGetValue(e.ActivityId, out var errorAgg))
+                    {
+                        updated = updated with
+                        {
+                            IsErrored = true,
+                            ErrorCount = errorAgg.Count,
+                            ErrorMessage = errorAgg.LatestMessage
+                        };
+                    }
+
+                    return updated;
+                })
+                .ToList();
+
+            // Flowable rolls back the failing transaction including its
+            // historic-activity-instances write — synchronous script/service
+            // tasks that throw never appear in `history`. Synthesize a row
+            // for each errored activityId that's missing so the History tab
+            // surfaces the failure.
+            var historyActivityIds = new HashSet<string>(
+                history.Select(e => e.ActivityId),
+                StringComparer.Ordinal);
+
+            foreach (var errorRow in errorRows.GroupBy(e => e.ActivityId, StringComparer.Ordinal))
+            {
+                if (historyActivityIds.Contains(errorRow.Key))
+                {
+                    continue;
+                }
+
+                var first = errorRow.OrderBy(e => e.OccurredAtUtc).First();
+                var latestMessage = errorRow.Reverse()
+                    .Select(e => e.ErrorMessage)
+                    .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
+                var nameFromRow = errorRow
+                    .Select(e => e.ActivityName)
+                    .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+
+                enriched.Add(new WorkflowExecutionHistoryEvent
+                {
+                    ActivityId = errorRow.Key,
+                    ActivityName = nameFromRow,
+                    ActivityType = null,
+                    StartedAtUtc = new DateTimeOffset(DateTime.SpecifyKind(first.OccurredAtUtc, DateTimeKind.Utc)),
+                    EndedAtUtc = null,
+                    DurationMs = null,
+                    Assignee = null,
+                    TaskId = null,
+                    DeleteReason = null,
+                    IsErrored = true,
+                    ErrorCount = errorRow.Count(),
+                    ErrorMessage = latestMessage
+                });
+            }
+
+            var sorted = enriched
+                .OrderBy(e => e.StartedAtUtc ?? DateTimeOffset.MinValue)
+                .ToArray();
+
+            return Results.Ok(sorted);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        executions.MapGet("/{processInstanceId}/log", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            CancellationToken cancellationToken) =>
+        {
+            var log = await flowable.GetWorkflowExecutionLogAsync(processInstanceId, cancellationToken);
+
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+            // Completer enrichment for task-completed entries.
+            var completedTaskIds = log
+                .Where(e => e.Kind == "task-completed" && e.Task is not null)
+                .Select(e => e.Task!.TaskId)
+                .Distinct()
+                .ToList();
+
+            var completions = completedTaskIds.Count == 0
+                ? new Dictionary<string, WorkflowTaskCompletion>()
+                : await db.WorkflowTaskCompletions.AsNoTracking()
+                    .Where(c => completedTaskIds.Contains(c.TaskId))
+                    .ToDictionaryAsync(c => c.TaskId, cancellationToken);
+
+            // Pull every recorded failure for this process and project each
+            // as a chronological "error" log entry — one per retry attempt.
+            var errorRows = await db.WorkflowExecutionErrors.AsNoTracking()
+                .Where(e => e.ProcessInstanceId == processInstanceId)
+                .OrderBy(e => e.OccurredAtUtc)
+                .ToListAsync(cancellationToken);
+
+            // Resolve activity names from Flowable's historic-activity-instances
+            // — the workflow_execution_errors row often has an empty
+            // activity_name (the Flowable extension doesn't reliably populate
+            // it today).
+            var activityNames = new Dictionary<string, string?>(StringComparer.Ordinal);
+            if (errorRows.Count > 0)
+            {
+                var history = await flowable.GetWorkflowExecutionHistoryAsync(processInstanceId, cancellationToken);
+                foreach (var h in history)
+                {
+                    if (!string.IsNullOrWhiteSpace(h.ActivityId) && !activityNames.ContainsKey(h.ActivityId))
+                    {
+                        activityNames[h.ActivityId] = h.ActivityName;
+                    }
+                }
+            }
+
+            var errorEntries = errorRows.Select(row => new WorkflowExecutionLogEntry
+            {
+                Kind = "error",
+                OccurredAtUtc = new DateTimeOffset(DateTime.SpecifyKind(row.OccurredAtUtc, DateTimeKind.Utc)),
+                Error = new WorkflowExecutionLogError
+                {
+                    ActivityId = row.ActivityId,
+                    ActivityName = !string.IsNullOrWhiteSpace(row.ActivityName)
+                        ? row.ActivityName
+                        : activityNames.GetValueOrDefault(row.ActivityId),
+                    ErrorMessage = string.IsNullOrWhiteSpace(row.ErrorMessage) ? null : row.ErrorMessage,
+                    RawFlowableEventType = string.IsNullOrWhiteSpace(row.RawFlowableEventType) ? null : row.RawFlowableEventType
+                }
+            });
+
+            var merged = log
+                .Select(entry =>
+                {
+                    if (entry.Kind != "task-completed" || entry.Task is null) return entry;
+                    if (!completions.TryGetValue(entry.Task.TaskId, out var completion)) return entry;
+                    return entry with
+                    {
+                        Task = entry.Task with
+                        {
+                            CompletedByUserId = completion.CompletedByUserId,
+                            IsOverride = completion.WasOverride
+                        }
+                    };
+                })
+                .Concat(errorEntries)
+                .OrderBy(e => e.OccurredAtUtc ?? DateTimeOffset.MinValue)
+                .ToArray();
+
+            return Results.Ok(merged);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
         executions.MapGet("/{processInstanceId}/tasks", async (
             string processInstanceId,
             IFlowableClient flowable,
@@ -113,10 +324,18 @@ public static class ExecutionEndpoints
             string processInstanceId,
             string taskId,
             CompleteTaskRequest? request,
+            HttpContext http,
             IFlowableClient flowable,
+            WorkflowTaskCompletionRecorder completionRecorder,
             CancellationToken cancellationToken) =>
         {
             await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
+
+            var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!string.IsNullOrWhiteSpace(actorId))
+            {
+                await completionRecorder.RecordAsync(taskId, actorId, wasOverride: true, cancellationToken);
+            }
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -206,10 +425,18 @@ public static class ExecutionEndpoints
         tasks.MapPost("/{taskId}/complete", async (
             string taskId,
             CompleteTaskRequest? request,
+            HttpContext http,
             IFlowableClient flowable,
+            WorkflowTaskCompletionRecorder completionRecorder,
             CancellationToken cancellationToken) =>
         {
             await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
+
+            var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!string.IsNullOrWhiteSpace(actorId))
+            {
+                await completionRecorder.RecordAsync(taskId, actorId, wasOverride: false, cancellationToken);
+            }
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowTask, Actions.Complete, "taskId");

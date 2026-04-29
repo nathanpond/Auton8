@@ -3,6 +3,8 @@ import {
   FlowableTaskSummary,
   ProcessVariableUpdate,
   WorkflowExecutionDiagramDetail,
+  WorkflowExecutionHistoryEvent,
+  WorkflowExecutionLogEntry,
   WorkflowExecutionSummary
 } from "@/types/flowable";
 
@@ -17,6 +19,28 @@ export async function getExecutionDiagram(
 ): Promise<WorkflowExecutionDiagramDetail> {
   const { data } = await api.get<WorkflowExecutionDiagramDetail>(
     `/api/executions/${encodeURIComponent(processInstanceId)}/diagram`,
+    { signal }
+  );
+  return data;
+}
+
+export async function getExecutionHistory(
+  processInstanceId: string,
+  signal?: AbortSignal
+): Promise<WorkflowExecutionHistoryEvent[]> {
+  const { data } = await api.get<WorkflowExecutionHistoryEvent[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/history`,
+    { signal }
+  );
+  return data;
+}
+
+export async function getExecutionLog(
+  processInstanceId: string,
+  signal?: AbortSignal
+): Promise<WorkflowExecutionLogEntry[]> {
+  const { data } = await api.get<WorkflowExecutionLogEntry[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/log`,
     { signal }
   );
   return data;

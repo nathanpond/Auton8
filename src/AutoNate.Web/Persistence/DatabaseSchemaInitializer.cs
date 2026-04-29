@@ -1386,12 +1386,29 @@ internal static class DatabaseSchemaInitializer
             ON workflow_execution_errors (process_instance_id);
         """;
 
+    // Tracks who actually triggered task completion. Flowable's historic
+    // task only records the assignee, so without this an admin override
+    // is indistinguishable from the assignee completing the task.
+    private const string WorkflowTaskCompletionsSql =
+        """
+        CREATE TABLE IF NOT EXISTS workflow_task_completions (
+            task_id TEXT PRIMARY KEY,
+            completed_by_user_id TEXT NOT NULL,
+            completed_at_utc TIMESTAMPTZ NOT NULL,
+            was_override BOOLEAN NOT NULL DEFAULT FALSE
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_completions_completed_by
+            ON workflow_task_completions (completed_by_user_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AutoNateDbContext>();
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowVersioningSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowExecutionErrorsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(WorkflowTaskCompletionsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsDataSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsEdgesSchemaSql, cancellationToken);

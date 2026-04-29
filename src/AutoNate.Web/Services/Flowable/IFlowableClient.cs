@@ -32,6 +32,15 @@ public interface IFlowableClient
 
     Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
+    // Chronological per-activity history for a process instance, ascending by
+    // start time. Drives the History tab on the workflow execution modal.
+    Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
+    // Variable updates + task lifecycle events (created/claimed/completed/
+    // cancelled) merged and sorted ascending by occurrence. Drives the
+    // Execution Log tab on the workflow execution modal.
+    Task<IReadOnlyList<WorkflowExecutionLogEntry>> GetWorkflowExecutionLogAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     Task DeleteWorkflowExecutionAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
     // Wipes every process instance in Flowable — runtime + history. Used by

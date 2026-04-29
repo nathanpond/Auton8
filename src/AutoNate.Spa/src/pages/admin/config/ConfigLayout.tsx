@@ -20,7 +20,9 @@ export default function ConfigLayout() {
       const next = { ...prev };
       for (const group of items) {
         if (next[group.id] === undefined) {
-          next[group.id] = containsActive(group, location.pathname, templates);
+          next[group.id] =
+            containsActive(group, location.pathname, templates) ||
+            Boolean(group.config?.startsExpanded);
         }
       }
       // Open the first group by default when nothing matches.

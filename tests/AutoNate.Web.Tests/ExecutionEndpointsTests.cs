@@ -36,6 +36,60 @@ public sealed class ExecutionEndpointsTests
     }
 
     [Fact]
+    public async Task GetHistory_DelegatesToFlowableClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        factory.FlowableStub.HistoryByInstance["inst-hist"] = new List<WorkflowExecutionHistoryEvent>
+        {
+            new() { ActivityId = "startEvent_1", ActivityType = "startEvent", StartedAtUtc = DateTimeOffset.UtcNow },
+            new() { ActivityId = "userTask_review", ActivityName = "Review", ActivityType = "userTask", Assignee = "alice" }
+        };
+        var client = factory.CreateClient();
+
+        var events = await client.GetFromJsonAsync<WorkflowExecutionHistoryEvent[]>(
+            "/api/executions/inst-hist/history");
+
+        Assert.NotNull(events);
+        Assert.Equal(2, events!.Length);
+        Assert.Equal("startEvent_1", events[0].ActivityId);
+        Assert.Equal("alice", events[1].Assignee);
+        Assert.Contains("History:inst-hist", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task GetLog_DelegatesToFlowableClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        factory.FlowableStub.LogByInstance["inst-log"] = new List<WorkflowExecutionLogEntry>
+        {
+            new()
+            {
+                Kind = "variable-update",
+                OccurredAtUtc = DateTimeOffset.UtcNow,
+                VariableUpdate = new WorkflowExecutionLogVariableUpdate { Name = "amount", Value = "200", Revision = 2 }
+            },
+            new()
+            {
+                Kind = "task-completed",
+                OccurredAtUtc = DateTimeOffset.UtcNow.AddMinutes(1),
+                Task = new WorkflowExecutionLogTask { TaskId = "t-1", Name = "Approve", Assignee = "alice" }
+            }
+        };
+        var client = factory.CreateClient();
+
+        var entries = await client.GetFromJsonAsync<WorkflowExecutionLogEntry[]>(
+            "/api/executions/inst-log/log");
+
+        Assert.NotNull(entries);
+        Assert.Equal(2, entries!.Length);
+        Assert.Equal("variable-update", entries[0].Kind);
+        Assert.Equal("amount", entries[0].VariableUpdate?.Name);
+        Assert.Equal("task-completed", entries[1].Kind);
+        Assert.Equal("alice", entries[1].Task?.Assignee);
+        Assert.Contains("Log:inst-log", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
     public async Task GetTasksByInstance_DelegatesToFlowableClient()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();

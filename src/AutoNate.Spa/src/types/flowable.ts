@@ -46,6 +46,88 @@ export type WorkflowExecutionDiagramDetail = {
   variables: FlowableProcessVariable[];
 };
 
+// One row in an execution's chronological history. Mirror of
+// AutoNate.Web.Models.WorkflowExecutionHistoryEvent. Sourced from Flowable's
+// historic-activity-instances endpoint sorted ascending by start time.
+export type WorkflowExecutionHistoryEvent = {
+  activityId: string;
+  activityName: string | null;
+  activityType: string | null;
+  startedAtUtc: string | null;
+  endedAtUtc: string | null;
+  durationMs: number | null;
+  assignee: string | null;
+  taskId: string | null;
+  deleteReason: string | null;
+  // Set on userTask rows when AutoNate recorded who triggered completion
+  // (workflow_task_completions). Null when Flowable was completed out of
+  // band (no AutoNate audit row for the task id).
+  completedByUserId: string | null;
+  // True when CompletedByUserId came from the override endpoint.
+  isOverride: boolean | null;
+  // True when at least one workflow_execution_errors row exists for this
+  // activityId in this process.
+  isErrored: boolean | null;
+  // Latest captured error message (may be null while the Java extension
+  // doesn't capture exception messages).
+  errorMessage: string | null;
+  // Number of recorded failures for this activity in this process.
+  errorCount: number | null;
+};
+
+// One row in the Execution Log tab. Mirror of
+// AutoNate.Web.Models.WorkflowExecutionLogEntry. Discriminator-driven —
+// `kind` picks which of the nested objects is populated.
+export type WorkflowExecutionLogKind =
+  | "variable-update"
+  | "task-created"
+  | "task-claimed"
+  | "task-completed"
+  | "task-cancelled"
+  | "error";
+
+export type WorkflowExecutionLogVariableUpdate = {
+  name: string;
+  type: string | null;
+  value: string | null;
+  revision: number | null;
+  taskId: string | null;
+  activityInstanceId: string | null;
+};
+
+export type WorkflowExecutionLogTask = {
+  taskId: string;
+  name: string | null;
+  taskDefinitionKey: string | null;
+  assignee: string | null;
+  owner: string | null;
+  formKey: string | null;
+  priority: number | null;
+  dueAtUtc: string | null;
+  deleteReason: string | null;
+  // Set on task-completed entries when AutoNate recorded who actually
+  // triggered the completion. Null when Flowable was completed out of
+  // band (no AutoNate audit row for the task id).
+  completedByUserId: string | null;
+  // True when CompletedByUserId came from the override endpoint.
+  isOverride: boolean | null;
+};
+
+export type WorkflowExecutionLogError = {
+  activityId: string;
+  activityName: string | null;
+  errorMessage: string | null;
+  rawFlowableEventType: string | null;
+};
+
+export type WorkflowExecutionLogEntry = {
+  kind: WorkflowExecutionLogKind;
+  occurredAtUtc: string | null;
+  variableUpdate: WorkflowExecutionLogVariableUpdate | null;
+  task: WorkflowExecutionLogTask | null;
+  error: WorkflowExecutionLogError | null;
+};
+
 export type FlowableTaskSummary = {
   id: string;
   name: string;

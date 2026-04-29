@@ -20,6 +20,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<WorkflowExecutionError> WorkflowExecutionErrors { get; set; }
 
+    public virtual DbSet<WorkflowTaskCompletion> WorkflowTaskCompletions { get; set; }
+
     public virtual DbSet<RecordType> RecordTypes { get; set; }
 
     public virtual DbSet<RecordTypeField> RecordTypeFields { get; set; }
@@ -167,6 +169,18 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
             entity.Property(e => e.RawFlowableEventType).HasColumnName("raw_flowable_event_type");
             entity.Property(e => e.OccurredAtUtc).HasColumnName("occurred_at_utc");
+        });
+
+        modelBuilder.Entity<WorkflowTaskCompletion>(entity =>
+        {
+            entity.HasKey(e => e.TaskId).HasName("workflow_task_completions_pkey");
+
+            entity.ToTable("workflow_task_completions");
+
+            entity.Property(e => e.TaskId).HasColumnName("task_id");
+            entity.Property(e => e.CompletedByUserId).HasColumnName("completed_by_user_id");
+            entity.Property(e => e.CompletedAtUtc).HasColumnName("completed_at_utc");
+            entity.Property(e => e.WasOverride).HasColumnName("was_override");
         });
 
         modelBuilder.Entity<RecordType>(entity =>

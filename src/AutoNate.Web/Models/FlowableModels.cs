@@ -124,6 +124,145 @@ public sealed record class FlowableProcessVariable
     public string? Value { get; init; }
 }
 
+// One row in an execution's chronological history. Sourced from Flowable's
+// historic-activity-instances endpoint sorted ascending by start time. The
+// SPA renders this list in the History tab on the workflow execution modal.
+public sealed record class WorkflowExecutionHistoryEvent
+{
+    public string ActivityId { get; init; } = string.Empty;
+
+    public string? ActivityName { get; init; }
+
+    // Flowable's BPMN element type — userTask, serviceTask, startEvent,
+    // endEvent, exclusiveGateway, etc.
+    public string? ActivityType { get; init; }
+
+    public DateTimeOffset? StartedAtUtc { get; init; }
+
+    public DateTimeOffset? EndedAtUtc { get; init; }
+
+    public long? DurationMs { get; init; }
+
+    // Populated for userTask rows.
+    public string? Assignee { get; init; }
+
+    public string? TaskId { get; init; }
+
+    // Set by Flowable when the row was halted by a process-level cancel
+    // (or other delete) rather than completing through normal flow.
+    public string? DeleteReason { get; init; }
+
+    // Populated only on userTask rows where AutoNate has a record of who
+    // triggered the completion (workflow_task_completions). Distinct from
+    // Assignee when an admin force-completed someone else's task.
+    public string? CompletedByUserId { get; init; }
+
+    // True when CompletedByUserId came from the override endpoint.
+    public bool? IsOverride { get; init; }
+
+    // True when at least one workflow_execution_errors row exists for this
+    // activityId in this process — i.e. the node failed at least once.
+    public bool? IsErrored { get; init; }
+
+    // Latest captured error message from workflow_execution_errors for this
+    // activityId. Often null today (the Flowable extension doesn't yet
+    // capture exception messages — see followup task).
+    public string? ErrorMessage { get; init; }
+
+    // Number of recorded failures for this activity in this process.
+    // Useful when an activity errored, retried, then succeeded — the row
+    // looks "completed" but the retry count tells the real story.
+    public int? ErrorCount { get; init; }
+}
+
+// One row in the Execution Log tab. Either a variable change or a task
+// lifecycle event (created / claimed / completed / cancelled). The Kind
+// discriminator picks which nested record is populated.
+public sealed record class WorkflowExecutionLogEntry
+{
+    // Discriminator: "variable-update", "task-created", "task-claimed",
+    // "task-completed", "task-cancelled", "error".
+    public string Kind { get; init; } = string.Empty;
+
+    public DateTimeOffset? OccurredAtUtc { get; init; }
+
+    // Populated when Kind == "variable-update".
+    public WorkflowExecutionLogVariableUpdate? VariableUpdate { get; init; }
+
+    // Populated when Kind starts with "task-".
+    public WorkflowExecutionLogTask? Task { get; init; }
+
+    // Populated when Kind == "error".
+    public WorkflowExecutionLogError? Error { get; init; }
+}
+
+public sealed record class WorkflowExecutionLogVariableUpdate
+{
+    public string Name { get; init; } = string.Empty;
+
+    public string? Type { get; init; }
+
+    // Flattened display value (FormatVariableValue handles json/number/bool).
+    public string? Value { get; init; }
+
+    public int? Revision { get; init; }
+
+    // Task that drove the update, when the change happened inside one.
+    public string? TaskId { get; init; }
+
+    public string? ActivityInstanceId { get; init; }
+}
+
+public sealed record class WorkflowExecutionLogTask
+{
+    public string TaskId { get; init; } = string.Empty;
+
+    public string? Name { get; init; }
+
+    public string? TaskDefinitionKey { get; init; }
+
+    public string? Assignee { get; init; }
+
+    public string? Owner { get; init; }
+
+    public string? FormKey { get; init; }
+
+    public int? Priority { get; init; }
+
+    public DateTimeOffset? DueAtUtc { get; init; }
+
+    // Set on the task-cancelled entry from the historic task's deleteReason.
+    public string? DeleteReason { get; init; }
+
+    // Populated only on task-completed entries when AutoNate has a record of
+    // who triggered the completion (workflow_task_completions). Distinct
+    // from Assignee, which is what Flowable stored — they differ when an
+    // admin force-completes someone else's task.
+    public string? CompletedByUserId { get; init; }
+
+    // True when CompletedByUserId came from the override endpoint.
+    public bool? IsOverride { get; init; }
+}
+
+// One log entry per recorded JOB_EXECUTION_FAILURE row. Each retry of a
+// failing service task produces a separate row in workflow_execution_errors,
+// so the log shows the full retry timeline.
+public sealed record class WorkflowExecutionLogError
+{
+    public string ActivityId { get; init; } = string.Empty;
+
+    // Resolved from Flowable's historic-activity-instances at read time —
+    // the Flowable event payload doesn't reliably carry the activity name,
+    // so we look it up alongside the diagram/history fetch.
+    public string? ActivityName { get; init; }
+
+    public string? ErrorMessage { get; init; }
+
+    // Flowable engine event type, e.g. "JOB_EXECUTION_FAILURE". Useful for
+    // distinguishing job failures from other future error sources.
+    public string? RawFlowableEventType { get; init; }
+}
+
 // Override-write payload for a single process variable. The diagram-detail GET
 // flattens Flowable's typed values (json/number/bool) to a string via
 // FormatVariableValue; the SPA parses the string back into a runtime value

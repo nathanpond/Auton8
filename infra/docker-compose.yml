@@ -31,6 +31,10 @@ services:
       AUTONATE_FLOWABLE_EVENTS_PUBSUB_NAME: pubsub
       AUTONATE_FLOWABLE_EVENTS_TOPIC_ROOT: workflow.execution.events
       AUTONATE_FLOWABLE_EVENTS_SOURCE_APP_ID: flowable
+      # Record per-update variable history (historic-detail rows). Default
+      # `audit` only stores the latest value of each variable; `full` keeps
+      # the change log we render in the Execution Log tab.
+      FLOWABLE_PROCESS_HISTORY_LEVEL: full
       SERVER_PORT: 8080
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flowable

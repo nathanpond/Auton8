@@ -4,6 +4,8 @@ import { useBusConnection } from "@/hooks/useBusConnection";
 import {
   EXECUTIONS_QUERY_KEY,
   executionDiagramQueryKey,
+  executionHistoryQueryKey,
+  executionLogQueryKey,
   executionTasksQueryKey,
   useCancelExecution,
   useExecutionDiagram,
@@ -24,7 +26,10 @@ import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance"
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { FlowableTaskSummary, WorkflowExecutionSummary } from "@/types/flowable";
 import ConfirmModal from "@/components/ConfirmModal";
+import ExecutionHistory from "./ExecutionHistory";
+import ExecutionLog from "./ExecutionLog";
 import ProcessVariablesPanel from "./ProcessVariablesPanel";
+import { describeError as describeErrorUtil, formatTimestamp as formatTimestampUtil } from "./utils";
 import "./WorkflowExecutions.css";
 
 const WORKFLOW_EXECUTION_TOPIC_PREFIX = "workflow.execution";
@@ -75,6 +80,8 @@ export default function WorkflowExecutions() {
       qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
       if (selectedId) {
         qc.invalidateQueries({ queryKey: executionDiagramQueryKey(selectedId) });
+        qc.invalidateQueries({ queryKey: executionHistoryQueryKey(selectedId) });
+        qc.invalidateQueries({ queryKey: executionLogQueryKey(selectedId) });
         qc.invalidateQueries({ queryKey: executionTasksQueryKey(selectedId) });
       }
     },
@@ -369,12 +376,15 @@ type ExecutionContentProps = {
   onError: (message: string) => void;
 };
 
+type ExecutionTab = "diagram" | "history" | "log";
+
 export function ExecutionContent({
   processInstanceId,
   onClose,
   onTaskCompleted,
   onError
 }: ExecutionContentProps) {
+  const [tab, setTab] = useState<ExecutionTab>("diagram");
   const { data: detail, isLoading: detailLoading, error } = useExecutionDiagram(processInstanceId);
   const { data: tasks = [] } = useExecutionTasks(processInstanceId);
   const forceCompleteTask = useForceCompleteTask(processInstanceId);
@@ -460,18 +470,7 @@ export function ExecutionContent({
   return (
     <>
       <div className="workflow-execution-modal-header">
-        <div>
-          <h2>{detail?.name ?? `Execution ${processInstanceId}`}</h2>
-          {detail?.name && (
-            <p className="workflow-execution-modal-id">
-              <code>{processInstanceId}</code>
-            </p>
-          )}
-          <p className="workflow-execution-modal-copy">
-            Read-only execution view with completed, current, and future steps highlighted.
-            {canOverride && " Right-click an active step to override-complete its task."}
-          </p>
-        </div>
+        <h2>{detail?.name ?? `Execution ${processInstanceId}`}</h2>
         {onClose && (
           <button type="button" className="btn btn-outline-secondary" onClick={onClose} title="Close">
             Close
@@ -479,62 +478,127 @@ export function ExecutionContent({
         )}
       </div>
 
-      {errorMessage && (
-        <div className="alert alert-danger" role="alert">
-          {errorMessage}
+      <ul className="nav nav-tabs workflow-execution-modal-tabs">
+        <li className="nav-item">
+          <a
+            href="#workflow-execution-diagram-tab"
+            onClick={(e) => {
+              e.preventDefault();
+              setTab("diagram");
+            }}
+            className={`nav-link ${tab === "diagram" ? "active" : ""}`}
+          >
+            Diagram
+          </a>
+        </li>
+        <li className="nav-item">
+          <a
+            href="#workflow-execution-history-tab"
+            onClick={(e) => {
+              e.preventDefault();
+              setTab("history");
+            }}
+            className={`nav-link ${tab === "history" ? "active" : ""}`}
+          >
+            History
+          </a>
+        </li>
+        <li className="nav-item">
+          <a
+            href="#workflow-execution-log-tab"
+            onClick={(e) => {
+              e.preventDefault();
+              setTab("log");
+            }}
+            className={`nav-link ${tab === "log" ? "active" : ""}`}
+          >
+            Execution Log
+          </a>
+        </li>
+      </ul>
+
+      <div className="workflow-execution-modal-body">
+        <div className="tab-content panel rounded-0 p-3 m-0">
+          {/* Diagram pane stays mounted so the BPMN viewer doesn't
+              reinitialize on every tab switch — Bootstrap's tab-pane
+              CSS hides the inactive pane via display:none. */}
+          <div
+            id="workflow-execution-diagram-tab"
+            className={`tab-pane fade ${tab === "diagram" ? "active show" : ""}`}
+          >
+            {errorMessage && (
+              <div className="alert alert-danger" role="alert">
+                {errorMessage}
+              </div>
+            )}
+
+            {detailLoading ? (
+              <p className="workflow-executions-loading">Loading execution diagram...</p>
+            ) : detail ? (
+              <>
+                <div className="workflow-execution-legend">
+                  <span>
+                    <span className="workflow-execution-swatch workflow-execution-swatch-completed"></span>{" "}
+                    Completed
+                  </span>
+                  <span>
+                    <span className="workflow-execution-swatch workflow-execution-swatch-current"></span>{" "}
+                    Current
+                  </span>
+                  {hasCancelledActivities && (
+                    <span>
+                      <span className="workflow-execution-swatch workflow-execution-swatch-cancelled"></span>{" "}
+                      Cancelled
+                    </span>
+                  )}
+                  {hasFailedActivities && (
+                    <span>
+                      <span className="workflow-execution-swatch workflow-execution-swatch-failed"></span>{" "}
+                      Errored
+                    </span>
+                  )}
+                  <span>
+                    <span className="workflow-execution-swatch workflow-execution-swatch-future"></span>{" "}
+                    Future
+                  </span>
+                </div>
+
+                <div className="workflow-execution-body">
+                  <div className="workflow-execution-viewer-shell">
+                    <div
+                      ref={containerRef}
+                      className="workflow-execution-viewer-canvas"
+                      aria-label="Read-only BPMN execution diagram"
+                    ></div>
+                  </div>
+
+                  <ProcessVariablesPanel
+                    processInstanceId={processInstanceId}
+                    variables={detail.variables}
+                    canOverride={canOverride}
+                    onError={onError}
+                    onSaved={() => onTaskCompleted("Process variables updated.")}
+                  />
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          <div
+            id="workflow-execution-history-tab"
+            className={`tab-pane fade ${tab === "history" ? "active show" : ""}`}
+          >
+            {tab === "history" && <ExecutionHistory processInstanceId={processInstanceId} />}
+          </div>
+
+          <div
+            id="workflow-execution-log-tab"
+            className={`tab-pane fade ${tab === "log" ? "active show" : ""}`}
+          >
+            {tab === "log" && <ExecutionLog processInstanceId={processInstanceId} />}
+          </div>
         </div>
-      )}
-
-      {detailLoading ? (
-        <p className="workflow-executions-loading">Loading execution diagram...</p>
-      ) : detail ? (
-        <>
-          <div className="workflow-execution-legend">
-            <span>
-              <span className="workflow-execution-swatch workflow-execution-swatch-completed"></span>{" "}
-              Completed
-            </span>
-            <span>
-              <span className="workflow-execution-swatch workflow-execution-swatch-current"></span>{" "}
-              Current
-            </span>
-            {hasCancelledActivities && (
-              <span>
-                <span className="workflow-execution-swatch workflow-execution-swatch-cancelled"></span>{" "}
-                Cancelled
-              </span>
-            )}
-            {hasFailedActivities && (
-              <span>
-                <span className="workflow-execution-swatch workflow-execution-swatch-failed"></span>{" "}
-                Errored
-              </span>
-            )}
-            <span>
-              <span className="workflow-execution-swatch workflow-execution-swatch-future"></span>{" "}
-              Future
-            </span>
-          </div>
-
-          <div className="workflow-execution-body">
-            <div className="workflow-execution-viewer-shell">
-              <div
-                ref={containerRef}
-                className="workflow-execution-viewer-canvas"
-                aria-label="Read-only BPMN execution diagram"
-              ></div>
-            </div>
-
-            <ProcessVariablesPanel
-              processInstanceId={processInstanceId}
-              variables={detail.variables}
-              canOverride={canOverride}
-              onError={onError}
-              onSaved={() => onTaskCompleted("Process variables updated.")}
-            />
-          </div>
-        </>
-      ) : null}
+      </div>
     </>
   );
 }
@@ -592,17 +656,7 @@ function browserStatusLabel(status: string): string {
   return `Browser stream ${status.toLowerCase()}`;
 }
 
-function formatTimestamp(iso: string | null): string {
-  if (!iso) return "Not available";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString();
-}
-
-export function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    const response = (error as { response?: { data?: { message?: string } } }).response;
-    return response?.data?.message ?? error.message;
-  }
-  return String(error);
-}
+// Re-exported from ./utils so callers (ExecutionPage, etc.) that already
+// imported these from this file keep working without an import-path churn.
+export const formatTimestamp = formatTimestampUtil;
+export const describeError = describeErrorUtil;

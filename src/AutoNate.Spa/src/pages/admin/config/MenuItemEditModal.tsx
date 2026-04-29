@@ -144,28 +144,52 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
               )}
 
               {draft.itemType === "group" && (
-                <div className="col-12">
-                  <label className="form-label">Dynamic children source</label>
-                  <select
-                    className="form-select"
-                    value={String(config.dynamicChildren ?? "")}
-                    onChange={(e) =>
-                      setConfigField(
-                        "dynamicChildren",
-                        e.target.value === "" ? undefined : e.target.value
-                      )
-                    }
-                  >
-                    {DYNAMIC_CHILDREN_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <small className="text-muted">
-                    Appends auto-generated children at runtime (e.g. one entry per record type).
-                  </small>
-                </div>
+                <>
+                  <div className="col-12">
+                    <label className="form-label">Dynamic children source</label>
+                    <select
+                      className="form-select"
+                      value={String(config.dynamicChildren ?? "")}
+                      onChange={(e) =>
+                        setConfigField(
+                          "dynamicChildren",
+                          e.target.value === "" ? undefined : e.target.value
+                        )
+                      }
+                    >
+                      {DYNAMIC_CHILDREN_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <small className="text-muted">
+                      Appends auto-generated children at runtime (e.g. one entry per record type).
+                    </small>
+                  </div>
+                  <div className="col-12">
+                    <div className="form-check">
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        id="group-starts-expanded"
+                        checked={Boolean(config.startsExpanded)}
+                        onChange={(e) =>
+                          setConfigField(
+                            "startsExpanded",
+                            e.target.checked ? true : undefined
+                          )
+                        }
+                      />
+                      <label className="form-check-label" htmlFor="group-starts-expanded">
+                        Starts expanded
+                      </label>
+                    </div>
+                    <small className="text-muted">
+                      When checked, the group opens by default. Otherwise it starts collapsed.
+                    </small>
+                  </div>
+                </>
               )}
 
               {draft.itemType === "route" && (
