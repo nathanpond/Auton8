@@ -132,7 +132,17 @@ export default function MenuTreeEditor({
       return next;
     });
 
-  const applyEdit = async (next: MenuItem) => {
+  const toggleVisible = async (id: string) => {
+    const previous = items.find((i) => i.id === id);
+    if (!previous) return;
+    const nextVisible = !previous.isVisible;
+    setItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, isVisible: nextVisible } : item))
+    );
+    await onEditItem(id, { isVisible: nextVisible });
+  };
+
+  const applyEdit = async (next: MenuItem, options?: { keepOpen?: boolean }) => {
     const previous = items.find((i) => i.id === next.id);
     setItems((prev) =>
       prev.map((item) =>
@@ -149,7 +159,7 @@ export default function MenuTreeEditor({
           : item
       )
     );
-    setEditing(null);
+    if (!options?.keepOpen) setEditing(null);
     await onEditItem(next.id, {
       displayName: next.displayName !== previous?.displayName ? next.displayName : null,
       icon: next.icon ?? null,
@@ -216,6 +226,9 @@ export default function MenuTreeEditor({
                     const fresh = items.find((i) => i.id === item.id);
                     if (fresh) setEditing(toMenuItem(fresh, items));
                   }}
+                  onToggleVisible={() => {
+                    void toggleVisible(item.id);
+                  }}
                   onDelete={() => {
                     if (confirm(`Delete '${item.displayName}' and any children?`)) {
                       const ids = new Set([item.id, ...getDescendantIds(items, item.id)]);
@@ -255,6 +268,7 @@ type RowProps = {
   onToggleCollapsed: () => void;
   onSelect: () => void;
   onEdit: () => void;
+  onToggleVisible: () => void;
   onDelete: () => void;
 };
 
@@ -267,6 +281,7 @@ function SortableRow({
   onToggleCollapsed,
   onSelect,
   onEdit,
+  onToggleVisible,
   onDelete
 }: RowProps) {
   const {
@@ -312,6 +327,18 @@ function SortableRow({
         </button>
         <hr className="flex-grow-1 my-0" />
         <span className="badge bg-light text-dark text-uppercase">separator</span>
+        <button
+          type="button"
+          className={`btn btn-sm ${item.isVisible ? "btn-outline-secondary" : "btn-warning"}`}
+          title={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
+          aria-pressed={item.isVisible}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleVisible();
+          }}
+        >
+          <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
+        </button>
         <button
           type="button"
           className="btn btn-sm btn-link p-0 text-danger"
@@ -365,6 +392,18 @@ function SortableRow({
         {!item.isVisible && <span className="badge bg-warning text-dark ms-2">hidden</span>}
       </span>
       <span className="badge bg-light text-dark text-uppercase">{item.itemType}</span>
+      <button
+        type="button"
+        className={`btn btn-sm ${item.isVisible ? "btn-outline-secondary" : "btn-warning"}`}
+        title={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
+        aria-pressed={item.isVisible}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleVisible();
+        }}
+      >
+        <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
+      </button>
       <button
         type="button"
         className="btn btn-sm btn-outline-secondary"

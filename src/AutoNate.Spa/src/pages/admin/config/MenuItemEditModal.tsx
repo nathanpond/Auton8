@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import CodeMirror from "@uiw/react-codemirror";
+import { html } from "@codemirror/lang-html";
+import { javascript } from "@codemirror/lang-javascript";
 import { MenuItem, MenuItemType } from "@/types/menus";
 import IconPicker from "@/components/IconPicker";
 import { findIcon } from "@/lib/faIcons";
@@ -17,7 +20,7 @@ function extractIconName(stored: string | null | undefined): string {
 
 type Props = {
   item: MenuItem;
-  onSave: (next: MenuItem) => void;
+  onSave: (next: MenuItem, options?: { keepOpen?: boolean }) => void;
   onCancel: () => void;
 };
 
@@ -142,9 +145,14 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
   }, [draft, pages]);
 
   const hasErrors = Object.keys(errors).length > 0;
+  const isPage = draft.itemType === "page";
+  const isSeparator = draft.itemType === "separator";
+  // Page type uses a flex column layout so the content textarea can grow to
+  // fill the dialog. Other types stack form fields normally and let the body
+  // scroll if needed.
+  const topColClass = isPage ? "col-md-3" : "col-md-6";
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const persist = (options?: { keepOpen?: boolean }) => {
     if (hasErrors) return;
 
     const trimmedConfig: Record<string, unknown> = { ...config };
@@ -154,11 +162,22 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
       }
     }
 
-    onSave({
-      ...draft,
-      displayName: draft.displayName.trim(),
-      config: trimmedConfig
-    });
+    onSave(
+      {
+        ...draft,
+        displayName: draft.displayName.trim(),
+        config: trimmedConfig
+      },
+      options
+    );
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // For the Page type the form's implicit submit (Enter inside an input)
+    // saves without closing so authors keep editing; the explicit "Save and
+    // close" button passes keepOpen: false.
+    persist(isPage ? { keepOpen: true } : undefined);
   };
 
   return (
@@ -166,19 +185,64 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
       className="modal show d-block"
       tabIndex={-1}
       style={{ background: "rgba(0,0,0,0.5)" }}
-      onClick={onCancel}
     >
-      <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
-        <form className="modal-content" onSubmit={submit} noValidate>
-          <div className="modal-header">
+      <div
+        className="modal-dialog"
+        style={{
+          maxWidth: "none",
+          width: "calc(100vw - 30px)",
+          height: "calc(100vh - 30px)",
+          margin: "15px"
+        }}
+      >
+        <form
+          className="modal-content"
+          onSubmit={submit}
+          noValidate
+          style={{ height: "100%", display: "flex", flexDirection: "column" }}
+        >
+          <div className="modal-header" style={{ flex: "0 0 auto" }}>
             <h5 className="modal-title">Edit menu item</h5>
             <button type="button" className="btn-close" onClick={onCancel} aria-label="Close" />
           </div>
 
-          <div className="modal-body">
-            <div className="row g-3">
-              {draft.itemType !== "separator" && (
-                <div className="col-md-6">
+          <div
+            className="modal-body"
+            style={{
+              flex: 1,
+              overflowY: isPage ? "hidden" : "auto",
+              display: isPage ? "flex" : undefined,
+              flexDirection: isPage ? "column" : undefined,
+              gap: isPage ? "0.75rem" : undefined,
+              minHeight: 0
+            }}
+          >
+            <div
+              className="row g-3"
+              style={isPage ? { flex: "0 0 auto", margin: 0 } : undefined}
+            >
+              <div className={isSeparator ? "col-12" : topColClass}>
+                <label className="form-label">Item type</label>
+                <select
+                  className="form-select"
+                  value={draft.itemType}
+                  onChange={(e) => setDraft({ ...draft, itemType: e.target.value as MenuItemType })}
+                >
+                  {ITEM_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+                {!isPage && (
+                  <small className="text-muted">
+                    {ITEM_TYPES.find((t) => t.value === draft.itemType)?.description}
+                  </small>
+                )}
+              </div>
+
+              {!isSeparator && (
+                <div className={topColClass}>
                   <label className="form-label">
                     Display name <span className="text-danger">*</span>
                   </label>
@@ -193,8 +257,8 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                   )}
                 </div>
               )}
-              {draft.itemType !== "separator" && (
-                <div className="col-md-6">
+              {!isSeparator && (
+                <div className={topColClass}>
                   <label className="form-label">Icon</label>
                   <IconPicker
                     value={iconQuery}
@@ -204,26 +268,8 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                 </div>
               )}
 
-              <div className={draft.itemType === "separator" ? "col-12" : "col-md-6"}>
-                <label className="form-label">Item type</label>
-                <select
-                  className="form-select"
-                  value={draft.itemType}
-                  onChange={(e) => setDraft({ ...draft, itemType: e.target.value as MenuItemType })}
-                >
-                  {ITEM_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-                <small className="text-muted">
-                  {ITEM_TYPES.find((t) => t.value === draft.itemType)?.description}
-                </small>
-              </div>
-
-              {draft.itemType !== "separator" && (
-              <div className="col-md-6">
+              {!isSeparator && (
+              <div className={topColClass}>
                 <label className="form-label">Permission required</label>
                 <input
                   className="form-control font-monospace"
@@ -233,9 +279,11 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                     setDraft({ ...draft, permissionRequired: e.target.value || null })
                   }
                 />
-                <small className="text-muted">
-                  Optional — when set, the item is hidden from users without this permission.
-                </small>
+                {!isPage && (
+                  <small className="text-muted">
+                    Optional — when set, the item is hidden from users without this permission.
+                  </small>
+                )}
               </div>
               )}
 
@@ -370,9 +418,9 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                 </>
               )}
 
-              {draft.itemType === "page" && (
+              {isPage && (
                 <>
-                  <div className="col-md-8">
+                  <div className="col-md-9">
                     <label className="form-label">
                       Page path <span className="text-danger">*</span>
                     </label>
@@ -383,15 +431,11 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                       onChange={(e) => setConfigField("path", e.target.value)}
                       required
                     />
-                    {errors.path ? (
+                    {errors.path && (
                       <div className="invalid-feedback">{errors.path}</div>
-                    ) : (
-                      <small className="text-muted">
-                        A new app route. Must not collide with built-in routes.
-                      </small>
                     )}
                   </div>
-                  <div className="col-md-4">
+                  <div className="col-md-3">
                     <label className="form-label">Content type</label>
                     <select
                       className="form-select"
@@ -401,54 +445,6 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                       <option value="html">HTML</option>
                       <option value="jsx">JSX (full React component)</option>
                     </select>
-                  </div>
-                  <div className="col-12">
-                    <label className="form-label">
-                      Content <span className="text-danger">*</span>
-                    </label>
-                    <textarea
-                      className={`form-control font-monospace${errors.content ? " is-invalid" : ""}`}
-                      rows={14}
-                      placeholder={
-                        String(config.contentType ?? "html") === "jsx"
-                          ? "function Page() {\n" +
-                            "  const [name, setName] = useState('');\n" +
-                            "  return <div>Hello {name}</div>;\n" +
-                            "}"
-                          : '<div class="alert alert-info">Hello world</div>\n' +
-                            "<script>console.log('runs on mount');</script>"
-                      }
-                      value={String(config.content ?? "")}
-                      onChange={(e) => setConfigField("content", e.target.value)}
-                      required
-                    />
-                    {errors.content && (
-                      <div className="invalid-feedback">{errors.content}</div>
-                    )}
-                    {String(config.contentType ?? "html") === "jsx" ? (
-                      <small className="text-muted">
-                        Define <code>function Page()</code> that returns JSX —
-                        TypeScript syntax is allowed. In scope:{" "}
-                        <code>React</code>, <code>useState</code>,{" "}
-                        <code>useEffect</code>, <code>useMemo</code>,{" "}
-                        <code>useCallback</code>, <code>useRef</code>,{" "}
-                        <code>navigate</code>, <code>Link</code>,{" "}
-                        <code>NavLink</code>, the <code>api</code> client, and{" "}
-                        <code>logout</code>. Use browser globals (
-                        <code>fetch</code>, <code>window</code>, etc.) directly.
-                        Don't use <code>import</code>/<code>export</code> —
-                        the page is evaluated as a single function body.
-                      </small>
-                    ) : (
-                      <small className="text-muted">
-                        Plain HTML. Any <code>&lt;script&gt;</code> tags
-                        (inline or <code>src=</code>) execute on mount, so
-                        third-party widget snippets work as pasted. Inline{" "}
-                        <code>onclick=&quot;…&quot;</code> handlers run too,
-                        but they call functions on <code>window</code> — for
-                        anything stateful, use the JSX content type.
-                      </small>
-                    )}
                   </div>
                 </>
               )}
@@ -546,32 +542,114 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                 </div>
               )}
 
-              {draft.itemType !== "separator" && (
-                <div className="col-12">
-                  <div className="form-check form-switch">
-                    <input
-                      type="checkbox"
-                      className="form-check-input"
-                      id="visible-toggle"
-                      checked={draft.isVisible}
-                      onChange={(e) => setDraft({ ...draft, isVisible: e.target.checked })}
-                    />
-                    <label className="form-check-label" htmlFor="visible-toggle">
-                      Visible
-                    </label>
-                  </div>
-                </div>
-              )}
             </div>
+
+            {isPage && (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0
+                }}
+              >
+                <label className="form-label">
+                  Content <span className="text-danger">*</span>
+                </label>
+                <div
+                  className={errors.content ? "is-invalid" : ""}
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    border: "1px solid var(--bs-border-color)",
+                    borderRadius: "var(--bs-border-radius)",
+                    overflow: "hidden"
+                  }}
+                >
+                  <CodeMirror
+                    value={String(config.content ?? "")}
+                    onChange={(v) => setConfigField("content", v)}
+                    height="100%"
+                    style={{ height: "100%" }}
+                    autoFocus={false}
+                    placeholder={
+                      String(config.contentType ?? "html") === "jsx"
+                        ? "function Page() {\n" +
+                          "  const [name, setName] = useState('');\n" +
+                          "  return <div>Hello {name}</div>;\n" +
+                          "}"
+                        : '<div class="alert alert-info">Hello world</div>\n' +
+                          "<script>console.log('runs on mount');</script>"
+                    }
+                    extensions={[
+                      String(config.contentType ?? "html") === "jsx"
+                        ? javascript({ jsx: true, typescript: true })
+                        : html()
+                    ]}
+                    basicSetup={{
+                      lineNumbers: true,
+                      highlightActiveLineGutter: true,
+                      highlightSpecialChars: true,
+                      history: true,
+                      foldGutter: true,
+                      drawSelection: true,
+                      dropCursor: true,
+                      allowMultipleSelections: true,
+                      indentOnInput: true,
+                      syntaxHighlighting: true,
+                      bracketMatching: true,
+                      closeBrackets: true,
+                      autocompletion: true,
+                      rectangularSelection: true,
+                      crosshairCursor: true,
+                      highlightActiveLine: true,
+                      highlightSelectionMatches: true,
+                      closeBracketsKeymap: true,
+                      defaultKeymap: true,
+                      searchKeymap: true,
+                      historyKeymap: true,
+                      foldKeymap: true,
+                      completionKeymap: true,
+                      lintKeymap: true
+                    }}
+                  />
+                </div>
+                {errors.content && (
+                  <div className="invalid-feedback d-block">{errors.content}</div>
+                )}
+              </div>
+            )}
+
           </div>
 
-          <div className="modal-footer">
+          <div className="modal-footer" style={{ flex: "0 0 auto" }}>
             <button type="button" className="btn btn-outline-secondary" onClick={onCancel}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={hasErrors}>
-              Apply
-            </button>
+            {isPage ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-outline-primary"
+                  disabled={hasErrors}
+                  onClick={() => persist({ keepOpen: true })}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={hasErrors}
+                  onClick={() => persist()}
+                >
+                  Save and Close
+                </button>
+              </>
+            ) : (
+              <button type="submit" className="btn btn-primary" disabled={hasErrors}>
+                Apply
+              </button>
+            )}
           </div>
         </form>
       </div>
