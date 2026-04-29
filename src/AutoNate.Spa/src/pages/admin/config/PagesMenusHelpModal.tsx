@@ -98,9 +98,9 @@ export default function PagesMenusHelpModal({ onClose }: Props) {
 
                 <dt className="col-sm-3">Page</dt>
                 <dd className="col-sm-9">
-                  Defines a brand new URL with custom HTML or whitelisted JSX content
-                  inline. Useful for one-off informational pages without writing
-                  React code.
+                  Defines a brand new URL with custom content. Use HTML for
+                  static markup, or JSX to write a full React component
+                  (hooks, state, API calls) — inline, no rebuild required.
                 </dd>
 
                 <dt className="col-sm-3">Link</dt>

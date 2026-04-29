@@ -1,14 +1,10 @@
+import { useEffect, useRef } from "react";
 import { Routes, useLocation } from "react-router-dom";
-import JsxParser from "react-jsx-parser";
 import { usePage, usePages } from "@/hooks/usePages";
 import NotFound from "@/pages/not-found/NotFound";
 import { renderAppRoutes } from "@/routes/appRoutes";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
-import {
-  JSX_BLACKLISTED_ATTRS,
-  JSX_BLACKLISTED_TAGS,
-  JSX_COMPONENTS
-} from "./jsxWhitelist";
+import { JsxPage } from "./JsxPage";
 
 export default function DynamicPageRoute() {
   const location = useLocation();
@@ -59,22 +55,40 @@ export default function DynamicPageRoute() {
   return (
     <div className="dynamic-page p-4">
       {page.contentType === "jsx" ? (
-        <JsxParser
-          jsx={page.content}
-          // react-jsx-parser ships an outdated @types/react that conflicts
-          // with React 19's types; the runtime behavior is fine, so cast.
-          components={JSX_COMPONENTS as Record<string, never>}
-          blacklistedAttrs={JSX_BLACKLISTED_ATTRS}
-          blacklistedTags={JSX_BLACKLISTED_TAGS}
-          renderError={({ error }) => (
-            <div className="alert alert-danger">
-              <strong>Page render error:</strong> {error}
-            </div>
-          )}
-        />
+        <JsxPage source={page.content} />
       ) : (
-        <div dangerouslySetInnerHTML={{ __html: page.content }} />
+        <HtmlPage html={page.content} />
       )}
     </div>
   );
+}
+
+// Renders admin-authored HTML and re-creates any <script> tags so they
+// actually execute. Browser spec: scripts inserted via innerHTML (which
+// dangerouslySetInnerHTML uses) silently no-op. Scripts created via
+// document.createElement and appended *do* run, so after the markup is in
+// the DOM we walk it once and swap each <script> for an equivalent one we
+// build ourselves.
+function HtmlPage({ html }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const originals = Array.from(root.querySelectorAll("script"));
+    for (const original of originals) {
+      const replacement = document.createElement("script");
+      for (const attr of Array.from(original.attributes)) {
+        replacement.setAttribute(attr.name, attr.value);
+      }
+      // createElement-built scripts default to async=true, which breaks
+      // ordered dependencies (load A then run B). Preserve original document
+      // order unless the author explicitly opted into async.
+      if (!original.hasAttribute("async")) replacement.async = false;
+      if (original.textContent) replacement.textContent = original.textContent;
+      original.parentNode?.replaceChild(replacement, original);
+    }
+  }, [html]);
+
+  return <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} />;
 }

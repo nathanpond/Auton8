@@ -1,5 +1,5 @@
 import { Fragment, ReactElement, ReactNode } from "react";
-import { Route } from "react-router-dom";
+import { Route, matchPath } from "react-router-dom";
 import ProtectedRoute from "@/shell/ProtectedRoute";
 
 import WorkflowExecutions from "@/pages/workflow-executions/WorkflowExecutions";
@@ -95,4 +95,34 @@ export function renderAppRoutes(routes: AppRoute[] = APP_ROUTES): ReactNode {
       )}
     </Fragment>
   );
+}
+
+// Flattens APP_ROUTES into absolute path patterns (with parameters intact like
+// "/records/:typeShortCode") so admin-authored paths can be checked against
+// the static routing table for collisions.
+function flattenAppRoutes(
+  routes: AppRoute[] = APP_ROUTES,
+  prefix = ""
+): string[] {
+  const out: string[] = [];
+  for (const r of routes) {
+    if (r.index || !r.path) continue;
+    const full = `/${prefix}/${r.path}`.replace(/\/+/g, "/");
+    out.push(full);
+    if (r.children) {
+      const childPrefix = `${prefix}/${r.path}`.replace(/\/+/g, "/");
+      out.push(...flattenAppRoutes(r.children, childPrefix));
+    }
+  }
+  return out;
+}
+
+// Returns the colliding route pattern (e.g. "/records/:typeShortCode") if the
+// given admin path would be shadowed by a built-in route, or null otherwise.
+// Uses react-router's matcher so parameterized routes are evaluated correctly.
+export function findCollidingAppRoute(path: string): string | null {
+  for (const pattern of flattenAppRoutes()) {
+    if (matchPath({ path: pattern, end: true }, path)) return pattern;
+  }
+  return null;
 }
