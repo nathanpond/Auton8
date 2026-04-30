@@ -151,6 +151,17 @@ export default function WorkflowExecutions() {
     (pendingAction?.kind === "cancel" && cancelExecution.isPending) ||
     (pendingAction?.kind === "delete-all" && deleteAllExecutions.isPending);
 
+  const statusCounts = useMemo(() => {
+    const counts = { running: 0, complete: 0, cancelled: 0, errored: 0 };
+    for (const e of executions) {
+      if (e.status === "Running") counts.running++;
+      else if (e.status === "Complete") counts.complete++;
+      else if (e.status === "Cancelled") counts.cancelled++;
+      else if (e.status === "Errored") counts.errored++;
+    }
+    return counts;
+  }, [executions]);
+
   return (
     <>
       <div className="page-head">
@@ -161,6 +172,33 @@ export default function WorkflowExecutions() {
             anything still in progress.
           </p>
         </div>
+      </div>
+
+      <div className="row g-3 mb-4">
+        <StatusStatCard
+          color="bg-blue"
+          icon="fa-circle-play"
+          title="RUNNING"
+          count={statusCounts.running}
+        />
+        <StatusStatCard
+          color="bg-teal"
+          icon="fa-circle-check"
+          title="COMPLETED"
+          count={statusCounts.complete}
+        />
+        <StatusStatCard
+          color="workflow-executions-stat-cancelled"
+          icon="fa-ban"
+          title="CANCELLED"
+          count={statusCounts.cancelled}
+        />
+        <StatusStatCard
+          color="bg-red"
+          icon="fa-triangle-exclamation"
+          title="ERRORED"
+          count={statusCounts.errored}
+        />
       </div>
 
       {flash && (
@@ -840,6 +878,29 @@ function resolveTasksForActivity(
   }
 
   return tasks.length === 1 ? [tasks[0]] : [];
+}
+
+type StatusStatCardProps = {
+  color: string;
+  icon: string;
+  title: string;
+  count: number;
+};
+
+function StatusStatCard({ color, icon, title, count }: StatusStatCardProps) {
+  return (
+    <div className="col-xl-3 col-md-6">
+      <div className={`widget widget-stats workflow-executions-stat ${color}`}>
+        <div className="workflow-executions-stat-left">
+          <div className="stats-title">{title}</div>
+          <div className="stats-icon stats-icon-lg">
+            <i className={`fa ${icon} fa-fw`}></i>
+          </div>
+        </div>
+        <div className="stats-number">{count.toLocaleString()}</div>
+      </div>
+    </div>
+  );
 }
 
 function statusBadgeStyle(

@@ -3,6 +3,71 @@
     color: #4b5563;
 }
 
+.widget.widget-stats.workflow-executions-stat {
+    display: flex;
+    align-items: stretch;
+    gap: 1rem;
+    padding: 1.25rem 1.5rem;
+    min-height: 9rem;
+}
+
+.widget.widget-stats.workflow-executions-stat .workflow-executions-stat-left {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.widget.widget-stats.workflow-executions-stat .stats-title {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin: 0;
+    text-align: start;
+}
+
+.widget.widget-stats.workflow-executions-stat .stats-icon.stats-icon-lg {
+    position: static;
+    margin-top: auto;
+    align-self: flex-start;
+    width: auto;
+    height: auto;
+    line-height: 1;
+    font-size: 56px;
+    color: #fff;
+    opacity: 0.85;
+    text-shadow: none;
+}
+
+.widget.widget-stats.workflow-executions-stat .stats-icon.stats-icon-lg .fa-fw {
+    width: auto;
+    text-align: start;
+}
+
+.widget.widget-stats.workflow-executions-stat .stats-number {
+    flex: 0 0 auto;
+    align-self: center;
+    font-size: 96px;
+    line-height: 1;
+    font-weight: 700;
+    margin: 0 0.75rem 0 0;
+    letter-spacing: 0;
+}
+
+.widget.widget-stats.workflow-executions-stat-cancelled {
+    background: #fef3c7 !important;
+    color: #78350f !important;
+}
+
+.widget.widget-stats.workflow-executions-stat-cancelled .stats-title,
+.widget.widget-stats.workflow-executions-stat-cancelled .stats-number {
+    color: #78350f !important;
+}
+
+.widget.widget-stats.workflow-executions-stat-cancelled .stats-icon {
+    color: #b45309 !important;
+}
+
 .workflow-executions-toolbar {
     display: flex;
     align-items: center;
