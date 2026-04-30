@@ -321,6 +321,25 @@ Effect:         allow`}</pre>
 
               <p className="mb-1">
                 <strong>
+                  Admins can move a running execution to a different BPMN step.
+                </strong>{" "}
+                The <code>movestate</code> action gates the "Move Execution
+                Here" right-click option on the workflow executions diagram.
+                It cancels every active token on the run and starts a fresh
+                token at the chosen node — process variables persist, but
+                pending user/service tasks at the cancelled nodes are
+                discarded. Keep this separate from <code>override</code> so
+                admins can grant variable / reassign overrides without
+                granting state moves.
+              </p>
+              <pre className="bg-light p-2 small">{`Principal kind: role
+Principal:      Admin
+Action:         movestate
+Selector:       /workflowexecution/*
+Effect:         allow`}</pre>
+
+              <p className="mb-1">
+                <strong>
                   Managers see records and executions attributed to the people
                   they supervise.
                 </strong>

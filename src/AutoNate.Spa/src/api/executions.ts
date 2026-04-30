@@ -106,6 +106,18 @@ export async function updateExecutionVariables(
   });
 }
 
+// Create new process variables. Flowable rejects POST against an existing
+// name (409), so the SPA partitions adds vs. edits before calling this.
+// Gated on workflowexecution/override.
+export async function addExecutionVariables(
+  processInstanceId: string,
+  variables: ProcessVariableUpdate[]
+): Promise<void> {
+  await api.post(`/api/executions/${encodeURIComponent(processInstanceId)}/variables`, {
+    variables
+  });
+}
+
 // Override-complete a runtime task at a specific node, regardless of assignee.
 // Gated on workflowexecution/override.
 export async function forceCompleteTaskAtNode(
@@ -116,6 +128,44 @@ export async function forceCompleteTaskAtNode(
   await api.post(
     `/api/executions/${encodeURIComponent(processInstanceId)}/tasks/${encodeURIComponent(taskId)}/force-complete`,
     { variables: variables ?? null }
+  );
+}
+
+// Override-reassign a runtime task. Pass null/empty assignee to clear it.
+// Gated on workflowexecution/override.
+export async function reassignTaskAtNode(
+  processInstanceId: string,
+  taskId: string,
+  assignee: string | null
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/tasks/${encodeURIComponent(taskId)}/reassign`,
+    { assignee: assignee && assignee.length > 0 ? assignee : null }
+  );
+}
+
+// Override-set a task's due date. Pass null to clear. ISO 8601 string expected.
+// Gated on workflowexecution/override.
+export async function updateTaskDueDateAtNode(
+  processInstanceId: string,
+  taskId: string,
+  dueDate: string | null
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/tasks/${encodeURIComponent(taskId)}/due-date`,
+    { dueDate: dueDate && dueDate.length > 0 ? dueDate : null }
+  );
+}
+
+// Cancels every in-flight token on the execution and starts a fresh one at
+// the target BPMN activity id. Gated on workflowexecution/movestate.
+export async function moveExecutionState(
+  processInstanceId: string,
+  targetActivityId: string
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/move-state`,
+    { targetActivityId }
   );
 }
 

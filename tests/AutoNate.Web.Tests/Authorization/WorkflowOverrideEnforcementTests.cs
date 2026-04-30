@@ -45,6 +45,56 @@ public sealed class WorkflowOverrideEnforcementTests
     }
 
     [Fact]
+    public async Task AddVariables_WithoutGrant_Returns403()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-add"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-add",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-add/variables",
+            new ExecutionEndpoints.UpdateProcessVariablesRequest(new[]
+            {
+                new ProcessVariableUpdate { Name = "newX", Value = 1, Type = "integer" }
+            }));
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddVariables_WithOverrideGrant_Returns204()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-add-ok"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-add-ok",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "VariableAdder",
+            "/workflowexecution/*", Actions.Override);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-add-ok/variables",
+            new ExecutionEndpoints.UpdateProcessVariablesRequest(new[]
+            {
+                new ProcessVariableUpdate { Name = "newY", Value = 2, Type = "integer" }
+            }));
+
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+        Assert.Contains("AddVariables:pi-add-ok", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
     public async Task ForceCompleteTask_WithoutGrant_Returns403()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
@@ -113,6 +163,164 @@ public sealed class WorkflowOverrideEnforcementTests
 
         Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
         Assert.Contains("CompleteTask:task-7", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task ReassignTask_WithoutGrant_Returns403()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-rs"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-rs",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-rs/tasks/task-99/reassign",
+            new ExecutionEndpoints.ReassignTaskRequest("alice"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReassignTask_WithOverrideGrant_Returns204()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-rs-ok"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-rs-ok",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "Reassigner",
+            "/workflowexecution/*", Actions.Override);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-rs-ok/tasks/task-7/reassign",
+            new ExecutionEndpoints.ReassignTaskRequest("alice"));
+
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+        Assert.Contains("UpdateTaskAssignee:task-7:alice", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task UpdateTaskDueDate_WithoutGrant_Returns403()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-dd"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-dd",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-dd/tasks/task-99/due-date",
+            new ExecutionEndpoints.UpdateTaskDueDateRequest(DateTimeOffset.UtcNow));
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateTaskDueDate_WithOverrideGrant_Returns204()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-dd-ok"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-dd-ok",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "DueDateSetter",
+            "/workflowexecution/*", Actions.Override);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-dd-ok/tasks/task-7/due-date",
+            new ExecutionEndpoints.UpdateTaskDueDateRequest(
+                new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero)));
+
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+        Assert.Contains(factory.FlowableStub.Calls, c => c.StartsWith("UpdateTaskDueDate:task-7:"));
+    }
+
+    [Fact]
+    public async Task MoveExecutionState_WithoutGrant_Returns403()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-mv"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-mv",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-mv/move-state",
+            new ExecutionEndpoints.MoveExecutionStateRequest("userTask_review"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task MoveExecutionState_WithOverrideGrantOnly_StillReturns403()
+    {
+        // Sanity check: movestate is intentionally separate from override so
+        // admins can grant the lighter overrides without unlocking state moves.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-mv-ovr"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-mv-ovr",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "OverrideOnly",
+            "/workflowexecution/*", Actions.Override);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-mv-ovr/move-state",
+            new ExecutionEndpoints.MoveExecutionStateRequest("userTask_review"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task MoveExecutionState_WithMoveStateGrant_Returns204()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfigNoBackfill());
+        factory.FlowableStub.InstancesById["pi-mv-ok"] = new FlowableProcessInstanceSummary
+        {
+            Id = "pi-mv-ok",
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await SeedRoleAndGrantAsync(factory, "ExecutionMover",
+            "/workflowexecution/*", Actions.MoveState);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/executions/pi-mv-ok/move-state",
+            new ExecutionEndpoints.MoveExecutionStateRequest("userTask_review"));
+
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+        Assert.Contains("MoveExecutionState:pi-mv-ok:userTask_review", factory.FlowableStub.Calls);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  addExecutionVariables,
   cancelExecution,
   completeTask,
   deleteAllExecutions,
@@ -13,7 +14,10 @@ import {
   listExecutions,
   listMyAssignedTasks,
   listTasksVisibleToMe,
-  updateExecutionVariables
+  moveExecutionState,
+  reassignTaskAtNode,
+  updateExecutionVariables,
+  updateTaskDueDateAtNode
 } from "@/api/executions";
 import {
   FlowableTaskSummary,
@@ -146,11 +150,69 @@ export function useUpdateExecutionVariables(processInstanceId: string) {
   });
 }
 
+export function useAddExecutionVariables(processInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (variables: ProcessVariableUpdate[]) =>
+      addExecutionVariables(processInstanceId, variables),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: executionDiagramQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
+    }
+  });
+}
+
 export function useForceCompleteTask(processInstanceId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ taskId, variables }: { taskId: string; variables?: Record<string, unknown> }) =>
       forceCompleteTaskAtNode(processInstanceId, taskId, variables),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: executionDiagramQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionHistoryQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+    }
+  });
+}
+
+export function useReassignTask(processInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, assignee }: { taskId: string; assignee: string | null }) =>
+      reassignTaskAtNode(processInstanceId, taskId, assignee),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+    }
+  });
+}
+
+export function useUpdateTaskDueDate(processInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, dueDate }: { taskId: string; dueDate: string | null }) =>
+      updateTaskDueDateAtNode(processInstanceId, taskId, dueDate),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
+      qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+    }
+  });
+}
+
+export function useMoveExecutionState(processInstanceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (targetActivityId: string) =>
+      moveExecutionState(processInstanceId, targetActivityId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: executionDiagramQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: executionHistoryQueryKey(processInstanceId) });

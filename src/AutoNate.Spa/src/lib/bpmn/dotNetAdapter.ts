@@ -19,6 +19,29 @@ export type WorkflowCallbacks = {
     activityName: string | null,
     taskIds: string[]
   ) => void | Promise<void>;
+  // Admin override: open a picker to reassign a single runtime task. The
+  // current assignee (or null) is forwarded so the React modal can pre-select.
+  ReassignTaskFromContextMenu?: (
+    activityId: string,
+    activityName: string | null,
+    taskId: string,
+    currentAssignee: string | null
+  ) => void | Promise<void>;
+  // Admin override: open a picker to set/clear a task's due date. The current
+  // due date (ISO string or null) is forwarded so the modal can pre-fill.
+  ChangeDueDateFromContextMenu?: (
+    activityId: string,
+    activityName: string | null,
+    taskId: string,
+    currentDueDate: string | null
+  ) => void | Promise<void>;
+  // Admin override: forcibly move the running execution to the right-clicked
+  // activity. Drastic — every in-flight token gets cancelled. The React layer
+  // confirms with the operator before issuing the change-state call.
+  MoveExecutionHereFromContextMenu?: (
+    activityId: string,
+    activityName: string | null
+  ) => void | Promise<void>;
 };
 
 export type DotNetLikeRef = {

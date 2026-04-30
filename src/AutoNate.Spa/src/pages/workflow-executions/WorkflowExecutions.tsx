@@ -9,26 +9,38 @@ import {
   executionTasksQueryKey,
   useCancelExecution,
   useExecutionDiagram,
+  useExecutionHistory,
   useExecutionTasks,
   useExecutions,
   useDeleteAllExecutions,
   useDeleteExecution,
-  useForceCompleteTask
+  useForceCompleteTask,
+  useMoveExecutionState,
+  useReassignTask,
+  useUpdateTaskDueDate
 } from "@/hooks/useExecutions";
 import {
   ContextMenuActiveTask,
+  UserTaskHoverInfo,
   useBpmnReadonlyViewer
 } from "@/hooks/useBpmnReadonlyViewer";
+import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { usePermissionChecks, permissionKey } from "@/hooks/usePermissionChecks";
 import { getCompletedAssigneesForActivity } from "@/api/executions";
 import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
-import { FlowableTaskSummary, WorkflowExecutionSummary } from "@/types/flowable";
+import {
+  FlowableTaskSummary,
+  WorkflowExecutionHistoryEvent,
+  WorkflowExecutionSummary
+} from "@/types/flowable";
 import ConfirmModal from "@/components/ConfirmModal";
+import ChangeDueDateModal from "./ChangeDueDateModal";
 import ExecutionHistory from "./ExecutionHistory";
 import ExecutionLog from "./ExecutionLog";
 import ProcessVariablesPanel from "./ProcessVariablesPanel";
+import ReassignTaskModal from "./ReassignTaskModal";
 import { describeError as describeErrorUtil, formatTimestamp as formatTimestampUtil } from "./utils";
 import "./WorkflowExecutions.css";
 
@@ -387,14 +399,45 @@ export function ExecutionContent({
   const [tab, setTab] = useState<ExecutionTab>("diagram");
   const { data: detail, isLoading: detailLoading, error } = useExecutionDiagram(processInstanceId);
   const { data: tasks = [] } = useExecutionTasks(processInstanceId);
+  // Lifted from the History tab so the diagram-tab hover tooltip can show
+  // assignees on user-task nodes that have already completed without waiting
+  // for the user to click into History first.
+  const { data: history = [] } = useExecutionHistory(processInstanceId);
+  const directory = useUserDirectory();
   const forceCompleteTask = useForceCompleteTask(processInstanceId);
+  const reassignTask = useReassignTask(processInstanceId);
+  const updateTaskDueDate = useUpdateTaskDueDate(processInstanceId);
+  const moveExecutionState = useMoveExecutionState(processInstanceId);
 
-  const overrideCheck = useMemo(
-    () => [{ kind: "workflowexecution", action: "override", id: processInstanceId }],
+  // Set when the operator picks "Move Execution Here" from the context menu.
+  // The confirmation modal renders off this and clears it on confirm/cancel.
+  const [pendingMove, setPendingMove] = useState<
+    | { activityId: string; activityName: string | null }
+    | null
+  >(null);
+
+  // The reassign and due-date pickers need their own state because the BPMN
+  // context menu fires-and-forgets — it can't render React UI itself, so it
+  // hands the chosen task off to us and we open the modal here.
+  const [pendingTaskEdit, setPendingTaskEdit] = useState<
+    | { kind: "reassign"; taskId: string; taskLabel: string; currentAssignee: string | null }
+    | { kind: "due-date"; taskId: string; taskLabel: string; currentDueDate: string | null }
+    | null
+  >(null);
+
+  const adminChecks = useMemo(
+    () => [
+      { kind: "workflowexecution", action: "override", id: processInstanceId },
+      { kind: "workflowexecution", action: "movestate", id: processInstanceId }
+    ],
     [processInstanceId]
   );
-  const { data: permissions } = usePermissionChecks(overrideCheck);
-  const canOverride = permissions?.get(permissionKey(overrideCheck[0])) ?? false;
+  const { data: permissions } = usePermissionChecks(adminChecks);
+  const canOverride = permissions?.get(permissionKey(adminChecks[0])) ?? false;
+  const canMoveState = permissions?.get(permissionKey(adminChecks[1])) ?? false;
+  // Move-here is only meaningful while the run is in flight — once there are
+  // no current activity tokens, Flowable's change-state has nothing to cancel.
+  const isRunning = (detail?.currentActivityIds?.length ?? 0) > 0;
 
   const onCompleteTaskFromContextMenu = useCallback(
     async (activityId: string, _activityName: string | null, taskId: string) => {
@@ -422,29 +465,114 @@ export function ExecutionContent({
     [forceCompleteTask, onError, onTaskCompleted]
   );
 
+  const onReassignTaskFromContextMenu = useCallback(
+    (
+      activityId: string,
+      activityName: string | null,
+      taskId: string,
+      currentAssignee: string | null
+    ) => {
+      setPendingTaskEdit({
+        kind: "reassign",
+        taskId,
+        taskLabel: activityName ?? activityId,
+        currentAssignee
+      });
+    },
+    []
+  );
+
+  const onChangeDueDateFromContextMenu = useCallback(
+    (
+      activityId: string,
+      activityName: string | null,
+      taskId: string,
+      currentDueDate: string | null
+    ) => {
+      setPendingTaskEdit({
+        kind: "due-date",
+        taskId,
+        taskLabel: activityName ?? activityId,
+        currentDueDate
+      });
+    },
+    []
+  );
+
+  const onMoveExecutionHereFromContextMenu = useCallback(
+    (activityId: string, activityName: string | null) => {
+      setPendingMove({ activityId, activityName });
+    },
+    []
+  );
+
   const viewerCallbacks = useMemo(
     () => ({
       CompleteTaskFromContextMenu: onCompleteTaskFromContextMenu,
-      CompleteAllTasksFromContextMenu: onCompleteAllTasksFromContextMenu
+      CompleteAllTasksFromContextMenu: onCompleteAllTasksFromContextMenu,
+      ReassignTaskFromContextMenu: onReassignTaskFromContextMenu,
+      ChangeDueDateFromContextMenu: onChangeDueDateFromContextMenu,
+      MoveExecutionHereFromContextMenu: onMoveExecutionHereFromContextMenu
     }),
-    [onCompleteTaskFromContextMenu, onCompleteAllTasksFromContextMenu]
+    [
+      onCompleteTaskFromContextMenu,
+      onCompleteAllTasksFromContextMenu,
+      onReassignTaskFromContextMenu,
+      onChangeDueDateFromContextMenu,
+      onMoveExecutionHereFromContextMenu
+    ]
   );
 
   const contextMenuOptions = useMemo(
     () => ({
       getCanOverride: () => canOverride,
+      getCanMoveState: () => canMoveState && isRunning,
       getActiveTasksAtActivity: (
         activityId: string,
         activityName: string | null
       ): ContextMenuActiveTask[] =>
         resolveTasksForActivity(tasks, activityId, activityName).map((t) => ({
           id: t.id,
-          assignee: t.assignee
+          assignee: t.assignee,
+          dueDate: t.dueDate
         })),
       getCompletedAssignees: (activityId: string) =>
         getCompletedAssigneesForActivity(processInstanceId, activityId)
     }),
-    [canOverride, tasks, processInstanceId]
+    [canOverride, canMoveState, isRunning, tasks, processInstanceId]
+  );
+
+  const resolveAssigneeLabel = useCallback(
+    (raw: string | null | undefined): string => {
+      if (!raw) return "Unassigned";
+      // Flowable's assignee fields can hold a literal user id, a username, or
+      // an unevaluated expression like ${initiator}. Pass expressions through
+      // verbatim — the runtime hasn't resolved them yet — and otherwise try
+      // the user directory before falling back to the raw value.
+      if (raw.startsWith("${")) return raw;
+      const u = directory.get(raw);
+      return userDisplayName(u) ?? raw;
+    },
+    [directory]
+  );
+
+  const hoverTooltipOptions = useMemo(
+    () => ({
+      getInfo: (
+        activityId: string,
+        activityName: string | null,
+        bpmn: { assignee: string | null; dueDate: string | null }
+      ): UserTaskHoverInfo | null =>
+        buildUserTaskHoverInfo({
+          activityId,
+          activityName,
+          bpmn,
+          tasks,
+          history,
+          resolveAssigneeLabel
+        })
+    }),
+    [tasks, history, resolveAssigneeLabel]
   );
 
   const { containerRef, error: viewerError } = useBpmnReadonlyViewer({
@@ -455,7 +583,9 @@ export function ExecutionContent({
     failedActivityIds: detail?.failedActivityIds ?? [],
     callbacks: viewerCallbacks,
     enableContextMenu: true,
-    contextMenu: contextMenuOptions
+    contextMenu: contextMenuOptions,
+    enableHoverTooltip: true,
+    hoverTooltip: hoverTooltipOptions
   });
 
   const hasCancelledActivities = (detail?.cancelledActivityIds?.length ?? 0) > 0;
@@ -599,6 +729,87 @@ export function ExecutionContent({
           </div>
         </div>
       </div>
+
+      {pendingTaskEdit?.kind === "reassign" && (
+        <ReassignTaskModal
+          taskLabel={pendingTaskEdit.taskLabel}
+          currentAssignee={pendingTaskEdit.currentAssignee}
+          busy={reassignTask.isPending}
+          onCancel={() => setPendingTaskEdit(null)}
+          onConfirm={async (assignee) => {
+            try {
+              await reassignTask.mutateAsync({
+                taskId: pendingTaskEdit.taskId,
+                assignee
+              });
+              setPendingTaskEdit(null);
+              onTaskCompleted(`Reassigned task at step '${pendingTaskEdit.taskLabel}'.`);
+            } catch (err) {
+              setPendingTaskEdit(null);
+              onError(describeError(err));
+            }
+          }}
+        />
+      )}
+
+      {pendingTaskEdit?.kind === "due-date" && (
+        <ChangeDueDateModal
+          taskLabel={pendingTaskEdit.taskLabel}
+          currentDueDate={pendingTaskEdit.currentDueDate}
+          busy={updateTaskDueDate.isPending}
+          onCancel={() => setPendingTaskEdit(null)}
+          onConfirm={async (dueDateIso) => {
+            try {
+              await updateTaskDueDate.mutateAsync({
+                taskId: pendingTaskEdit.taskId,
+                dueDate: dueDateIso
+              });
+              setPendingTaskEdit(null);
+              onTaskCompleted(`Updated due date for task at step '${pendingTaskEdit.taskLabel}'.`);
+            } catch (err) {
+              setPendingTaskEdit(null);
+              onError(describeError(err));
+            }
+          }}
+        />
+      )}
+
+      {pendingMove && (
+        <ConfirmModal
+          title="Move execution to this step?"
+          message={
+            <>
+              <p>
+                Move the running execution to{" "}
+                <strong>{pendingMove.activityName ?? pendingMove.activityId}</strong>?
+              </p>
+              <p className="mb-0">
+                Every currently active step on this run will be cancelled and
+                a fresh execution token will start at the selected node. Process
+                variables are preserved, but the new step may depend on values
+                that aren't set yet — review variables after moving and adjust
+                them as needed before this run continues.
+              </p>
+            </>
+          }
+          confirmLabel="Move execution"
+          cancelLabel="Keep"
+          variant="warning"
+          busy={moveExecutionState.isPending}
+          onCancel={() => setPendingMove(null)}
+          onConfirm={async () => {
+            const { activityId, activityName } = pendingMove;
+            try {
+              await moveExecutionState.mutateAsync(activityId);
+              setPendingMove(null);
+              onTaskCompleted(`Moved execution to '${activityName ?? activityId}'.`);
+            } catch (err) {
+              setPendingMove(null);
+              onError(describeError(err));
+            }
+          }}
+        />
+      )}
     </>
   );
 }
@@ -660,3 +871,132 @@ function browserStatusLabel(status: string): string {
 // imported these from this file keep working without an import-path churn.
 export const formatTimestamp = formatTimestampUtil;
 export const describeError = describeErrorUtil;
+
+// Builds the data the BPMN hover tooltip shows on a UserTask element.
+// Resolution order, in priority:
+//   1. Active runtime tasks (taskDefinitionKey match) — show actual assignee
+//      and the absolute dueDate Flowable computed at task-creation time.
+//   2. Most-recent historic record for the activity — completed assignee.
+//   3. Design-time BPMN attributes — assignee may be a literal or a
+//      ${expression}; dueDate may be a literal date OR an ISO 8601 duration
+//      like "P3D" / "PT3H" which Flowable evaluates relative to task start.
+//      The duration case renders as "+3 days" so the diagram makes the
+//      relative semantics obvious before the task ever runs.
+function buildUserTaskHoverInfo(args: {
+  activityId: string;
+  activityName: string | null;
+  bpmn: { assignee: string | null; dueDate: string | null };
+  tasks: readonly FlowableTaskSummary[];
+  history: readonly WorkflowExecutionHistoryEvent[];
+  resolveAssigneeLabel: (raw: string | null | undefined) => string;
+}): UserTaskHoverInfo {
+  const { activityId, activityName, bpmn, tasks, history, resolveAssigneeLabel } = args;
+
+  const title = activityName ?? activityId;
+  const rows: Array<{ label: string; value: string }> = [];
+
+  const activeMatches = tasks.filter((t) => t.taskDefinitionKey === activityId);
+  if (activeMatches.length > 0) {
+    if (activeMatches.length === 1) {
+      const t = activeMatches[0];
+      rows.push({ label: "Assignee", value: resolveAssigneeLabel(t.assignee) });
+      rows.push({ label: "Due", value: formatAbsoluteDueDate(t.dueDate) });
+    } else {
+      // Multi-instance / parallel: list each runtime instance's assignee + due.
+      rows.push({
+        label: "Assignees",
+        value: activeMatches.map((t) => resolveAssigneeLabel(t.assignee)).join(", ")
+      });
+      const dueValues = activeMatches
+        .map((t) => formatAbsoluteDueDate(t.dueDate))
+        .filter((v, i, arr) => arr.indexOf(v) === i);
+      rows.push({ label: "Due", value: dueValues.join(", ") });
+    }
+    rows.push({ label: "Status", value: "In progress" });
+    return { title, rows };
+  }
+
+  const historicMatches = history
+    .filter((e) => e.activityId === activityId && e.activityType === "userTask" && e.endedAtUtc)
+    .sort((a, b) => (b.endedAtUtc ?? "").localeCompare(a.endedAtUtc ?? ""));
+  if (historicMatches.length > 0) {
+    const latest = historicMatches[0];
+    rows.push({ label: "Assignee", value: resolveAssigneeLabel(latest.assignee) });
+    rows.push({ label: "Completed", value: formatAbsoluteDueDate(latest.endedAtUtc) });
+    return { title, rows };
+  }
+
+  // Future / never-reached: fall back to design-time BPMN attributes.
+  rows.push({ label: "Assignee", value: resolveAssigneeLabel(bpmn.assignee) });
+  rows.push({ label: "Due", value: formatBpmnDueDate(bpmn.dueDate) });
+  return { title, rows };
+}
+
+function formatAbsoluteDueDate(iso: string | null | undefined): string {
+  if (!iso) return "No due date";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString();
+}
+
+// Renders a BPMN-design-time dueDate string. Recognized shapes, in priority:
+//   - AutoNate helper expression "${dueDateHelper.fromProcessStart(execution,
+//     N)}" — N days from process start (see DueDateHelper.java in the
+//     flowable-extension). Rendered as "+N days from process start".
+//   - ISO 8601 duration ("P3D", "PT3H", "P1W") — relative to task start.
+//     Rendered as "+3 days from task start".
+//   - Plain date/datetime — formatted via toLocaleDateString.
+//   - Any other ${expression} — passed through verbatim; the runtime will
+//     evaluate it at task creation time.
+function formatBpmnDueDate(raw: string | null | undefined): string {
+  if (!raw) return "No due date";
+  const trimmed = raw.trim();
+  if (!trimmed) return "No due date";
+
+  const helperLabel = parseDueDateHelperExpression(trimmed);
+  if (helperLabel) return helperLabel;
+
+  const relative = parseIso8601DurationLabel(trimmed);
+  if (relative) return `${relative} from task start`;
+
+  if (trimmed.startsWith("${")) return trimmed;
+
+  const d = new Date(trimmed);
+  if (!Number.isNaN(d.getTime())) return d.toLocaleDateString();
+
+  return trimmed;
+}
+
+// Parses ${dueDateHelper.fromProcessStart(execution, N)} (with optional
+// whitespace) into a "+N days from process start" label. Returns null when
+// the expression doesn't match, so the caller can fall through to other
+// formats. Currently the helper only exposes fromProcessStart; future helper
+// methods would need their own clauses here.
+function parseDueDateHelperExpression(raw: string): string | null {
+  const match = /^\$\{\s*dueDateHelper\.fromProcessStart\s*\(\s*execution\s*,\s*(\d+)\s*\)\s*\}$/i.exec(raw);
+  if (!match) return null;
+  const days = Number(match[1]);
+  return `+${days} day${days === 1 ? "" : "s"} from process start`;
+}
+
+// Parses an ISO 8601 duration into a "+N units" label without any "from X"
+// suffix — the caller adds the appropriate anchor wording. Returns null when
+// the string isn't a recognized duration.
+function parseIso8601DurationLabel(raw: string): string | null {
+  const match = /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/i.exec(raw);
+  if (!match) return null;
+
+  const weeks = match[1] ? Number(match[1]) : 0;
+  const days = match[2] ? Number(match[2]) : 0;
+  const hours = match[3] ? Number(match[3]) : 0;
+  const minutes = match[4] ? Number(match[4]) : 0;
+
+  const totalDays = weeks * 7 + days;
+  const parts: string[] = [];
+  if (totalDays > 0) parts.push(`${totalDays} day${totalDays === 1 ? "" : "s"}`);
+  if (hours > 0) parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
+  if (minutes > 0) parts.push(`${minutes} minute${minutes === 1 ? "" : "s"}`);
+  if (parts.length === 0) return null;
+
+  return `+${parts.join(" ")}`;
+}

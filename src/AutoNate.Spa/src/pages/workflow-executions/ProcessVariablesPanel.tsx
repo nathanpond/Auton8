@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useUpdateExecutionVariables } from "@/hooks/useExecutions";
+import {
+  useAddExecutionVariables,
+  useUpdateExecutionVariables
+} from "@/hooks/useExecutions";
 import {
   FlowableProcessVariable,
   ProcessVariableUpdate
@@ -13,22 +16,308 @@ type Props = {
   onSaved?: () => void;
 };
 
-type VariableKind = "string" | "number" | "boolean" | "json";
+// Wire types we expose in the type dropdown for *new* variables. Mirrors the
+// scalar types Flowable's variable type registry ships with — see
+// org.flowable.variable.service.impl.types.* in the Flowable source. Binary
+// kinds (bytes, serializable) are intentionally omitted because we have no
+// way to enter them in a text UI; bigjson piggybacks on json server-side.
+const ADDABLE_TYPES = [
+  "string",
+  "short",
+  "integer",
+  "long",
+  "double",
+  "boolean",
+  "date",
+  "instant",
+  "localdate",
+  "localdatetime",
+  "json",
+  "uuid"
+] as const;
+type AddableType = (typeof ADDABLE_TYPES)[number];
 
-// Decide the editor input type based on Flowable's reported variable type plus
-// the rendered value as a fallback. The diagram-detail GET flattens typed
-// values to a string via FormatVariableValue (FlowableClient.cs:333) so we use
-// the type hint where possible and sniff the value text otherwise.
-function classifyVariable(variable: FlowableProcessVariable): VariableKind {
-  const t = (variable.type ?? "").toLowerCase();
+// Editor kind drives which input element renders. Every Flowable type maps to
+// one of these; unknown / unrecognised types fall back to "text" so the
+// admin can still hand-edit the value while we preserve the original wire
+// type on save.
+type EditorKind = "text" | "integer" | "decimal" | "boolean" | "date-utc" | "local-date" | "local-datetime" | "json";
+
+function editorKindFor(type: string | null | undefined): EditorKind {
+  const t = (type ?? "").toLowerCase();
   if (t === "boolean") return "boolean";
-  if (t === "integer" || t === "long" || t === "double" || t === "short" || t === "number") return "number";
-  if (t === "json") return "json";
-  if (variable.value !== null && variable.value !== undefined) {
-    const trimmed = variable.value.trim();
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) return "json";
+  if (t === "integer" || t === "long" || t === "short") return "integer";
+  if (t === "double" || t === "float" || t === "number") return "decimal";
+  // `date` and `instant` carry full UTC timestamps — render via datetime-local
+  // and round-trip through ISO 8601. `localdate` is calendar-day only;
+  // `localdatetime` is wall-clock with no zone.
+  if (t === "date" || t === "instant") return "date-utc";
+  if (t === "localdate") return "local-date";
+  if (t === "localdatetime") return "local-datetime";
+  if (t === "json" || t === "bigjson") return "json";
+  return "text";
+}
+
+// Sniff a JSON-shaped value so legacy variables that arrived without a `type`
+// hint still get a sensible editor. Used only when classifyVariable falls
+// through to the default branch.
+function looksLikeJson(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
+}
+
+// Normalize what we display in the existing-variable input. The diagram-detail
+// GET serializes typed values to a string via FormatVariableValue
+// (FlowableClient.cs), so the value string is always editable text — we just
+// reformat date strings into the YYYY-MM-DDTHH:mm shape <input type="datetime-
+// local"> wants when the value would otherwise reject.
+function formatForDateTimeLocalInput(raw: string): string {
+  if (!raw) return "";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  // datetime-local wants local-zone "YYYY-MM-DDTHH:mm". Build manually rather
+  // than slicing toISOString so we honor the user's local zone offset.
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatForDateInput(raw: string): string {
+  if (!raw) return "";
+  // Either an ISO date "2024-05-06" passes through, or a full ISO timestamp
+  // gets sliced down to the date portion in local time.
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+// Validate + serialize a typed value for a Flowable update/create payload.
+// Returns either { value: <json-serializable>, type } on success or
+// { error: <message> } so the UI can surface the failure inline. `allowNull`
+// controls whether an empty input clears the variable (used during edit) or
+// rejects (used during add — Flowable's create endpoint requires a value).
+type SerializeOk = { value: unknown; type: string };
+type SerializeErr = { error: string };
+type SerializeResult = SerializeOk | SerializeErr;
+
+function serializeValue(
+  type: string,
+  rawText: string,
+  options: { allowNull: boolean }
+): SerializeResult {
+  const trimmed = rawText.trim();
+  const lower = type.toLowerCase();
+
+  if (trimmed === "" && options.allowNull) {
+    return { value: null, type };
   }
+  if (trimmed === "" && !options.allowNull) {
+    return { error: "Value is required." };
+  }
+
+  if (lower === "boolean") {
+    if (trimmed !== "true" && trimmed !== "false") {
+      return { error: "Must be true or false." };
+    }
+    return { value: trimmed === "true", type };
+  }
+
+  if (lower === "integer" || lower === "long" || lower === "short") {
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+      return { error: "Must be a whole number." };
+    }
+    return { value: parsed, type };
+  }
+
+  if (lower === "double" || lower === "float" || lower === "number") {
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      return { error: "Must be a number." };
+    }
+    return { value: parsed, type };
+  }
+
+  if (lower === "json" || lower === "bigjson") {
+    try {
+      return { value: JSON.parse(trimmed), type };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Invalid JSON." };
+    }
+  }
+
+  if (lower === "date" || lower === "instant") {
+    // datetime-local emits "YYYY-MM-DDTHH:mm[:ss]" without zone — interpret
+    // as local time and convert to UTC ISO 8601. Flowable's REST layer
+    // accepts ISO 8601 timestamps with explicit zone.
+    const date = new Date(trimmed);
+    if (Number.isNaN(date.getTime())) {
+      return { error: "Must be a valid date / time." };
+    }
+    return { value: date.toISOString(), type };
+  }
+
+  if (lower === "localdate") {
+    // Calendar day, no time / zone. Pass through if it already matches the
+    // expected shape; otherwise reformat from any parseable input.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return { value: trimmed, type };
+    }
+    const date = new Date(trimmed);
+    if (Number.isNaN(date.getTime())) {
+      return { error: "Must be YYYY-MM-DD." };
+    }
+    return { value: formatForDateInput(trimmed), type };
+  }
+
+  if (lower === "localdatetime") {
+    // Wall-clock, no zone. datetime-local already emits this shape; pass it
+    // through as-is so the engine doesn't shift the wall-clock value.
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) {
+      return { value: trimmed, type };
+    }
+    return { error: "Must be YYYY-MM-DDTHH:MM." };
+  }
+
+  // Default branch covers string / uuid / and any unrecognised type — we
+  // forward the text verbatim and let Flowable's variable type registry
+  // validate. UUID gets a light shape check so the operator gets immediate
+  // feedback for a typo.
+  if (lower === "uuid") {
+    if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(trimmed)) {
+      return { error: "Must be a UUID (8-4-4-4-12 hex digits)." };
+    }
+    return { value: trimmed, type };
+  }
+
+  return { value: rawText, type };
+}
+
+// Used by the Add row's name validation. Flowable accepts any string, but
+// we keep the SPA-side rule tight enough to avoid surprising EL collisions.
+const NEW_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+// Local row for the Add UX. Each new variable is unsaved until the panel's
+// Save button POSTs the batch.
+type NewVariableDraft = {
+  // Stable client id so React rendering is independent of the (mutable) name.
+  clientId: string;
+  name: string;
+  type: AddableType;
+  value: string;
+};
+
+let newVariableCounter = 0;
+function newDraftId(): string {
+  newVariableCounter += 1;
+  return `new-var-${newVariableCounter}`;
+}
+
+// Decide the type for an existing variable. We trust Flowable's reported type
+// where available so an integer stays an integer (and a double stays a double)
+// across save round-trips. Sniff JSON only as a last resort.
+function classifyVariable(variable: FlowableProcessVariable): string {
+  const t = (variable.type ?? "").trim();
+  if (t) return t;
+  if (looksLikeJson(variable.value)) return "json";
   return "string";
+}
+
+// Renders a value-input element appropriate for the given editor kind. The
+// existing-variable and new-variable UIs both use this so the two surfaces
+// can't drift.
+function renderValueInput(args: {
+  kind: EditorKind;
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  const { kind, value, onChange, placeholder } = args;
+  const cls = "form-control form-control-sm";
+  switch (kind) {
+    case "boolean":
+      return (
+        <select
+          className="form-select form-select-sm"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">(unset)</option>
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      );
+    case "integer":
+      return (
+        <input
+          type="number"
+          step={1}
+          className={cls}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+      );
+    case "decimal":
+      return (
+        <input
+          type="number"
+          step="any"
+          className={cls}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+      );
+    case "date-utc":
+      return (
+        <input
+          type="datetime-local"
+          className={cls}
+          value={formatForDateTimeLocalInput(value)}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+    case "local-date":
+      return (
+        <input
+          type="date"
+          className={cls}
+          value={formatForDateInput(value)}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+    case "local-datetime":
+      return (
+        <input
+          type="datetime-local"
+          className={cls}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+    case "json":
+      return (
+        <textarea
+          className="form-control form-control-sm font-monospace"
+          rows={Math.min(8, Math.max(2, value.split("\n").length))}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+      );
+    default:
+      return (
+        <input
+          type="text"
+          className={cls}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+      );
+  }
 }
 
 export default function ProcessVariablesPanel({
@@ -42,8 +331,13 @@ export default function ProcessVariablesPanel({
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Unsaved "new variable" rows. Keyed by clientId because the user-typed
+  // name is mutable and may collide with an existing row mid-edit.
+  const [newDrafts, setNewDrafts] = useState<NewVariableDraft[]>([]);
+  const [newDraftErrors, setNewDraftErrors] = useState<Record<string, string>>({});
 
   const updateVariables = useUpdateExecutionVariables(processInstanceId);
+  const addVariables = useAddExecutionVariables(processInstanceId);
 
   // Re-snapshot the draft from the live variables whenever editing starts or
   // the variables list refreshes while we're not editing.
@@ -54,10 +348,12 @@ export default function ProcessVariablesPanel({
     setDraft(snapshot);
     setDirty(new Set());
     setErrors({});
+    setNewDrafts([]);
+    setNewDraftErrors({});
   }, [variables, editing]);
 
-  const kindByName = useMemo(() => {
-    const map = new Map<string, VariableKind>();
+  const typeByName = useMemo(() => {
+    const map = new Map<string, string>();
     for (const v of variables) map.set(v.name, classifyVariable(v));
     return map;
   }, [variables]);
@@ -83,6 +379,8 @@ export default function ProcessVariablesPanel({
     setDraft(snapshot);
     setDirty(new Set());
     setErrors({});
+    setNewDrafts([]);
+    setNewDraftErrors({});
     setEditing(true);
   };
 
@@ -90,6 +388,35 @@ export default function ProcessVariablesPanel({
     setEditing(false);
     setDirty(new Set());
     setErrors({});
+    setNewDrafts([]);
+    setNewDraftErrors({});
+  };
+
+  const addEmptyDraft = () => {
+    setNewDrafts((rows) => [
+      ...rows,
+      { clientId: newDraftId(), name: "", type: "string", value: "" }
+    ]);
+  };
+
+  const removeDraft = (clientId: string) => {
+    setNewDrafts((rows) => rows.filter((r) => r.clientId !== clientId));
+    setNewDraftErrors((e) => {
+      if (!e[clientId]) return e;
+      const { [clientId]: _omit, ...rest } = e;
+      return rest;
+    });
+  };
+
+  const updateDraftField = (clientId: string, patch: Partial<NewVariableDraft>) => {
+    setNewDrafts((rows) =>
+      rows.map((r) => (r.clientId === clientId ? { ...r, ...patch } : r))
+    );
+    setNewDraftErrors((e) => {
+      if (!e[clientId]) return e;
+      const { [clientId]: _omit, ...rest } = e;
+      return rest;
+    });
   };
 
   const saveEdits = async () => {
@@ -97,88 +424,107 @@ export default function ProcessVariablesPanel({
     const localErrors: Record<string, string> = {};
 
     for (const name of dirty) {
-      const kind = kindByName.get(name) ?? "string";
+      const wireType = typeByName.get(name) ?? "string";
       const text = draft[name] ?? "";
-      const trimmed = text.trim();
 
-      if (kind === "boolean") {
-        if (trimmed === "") {
-          updates.push({ name, value: null, type: "boolean" });
-          continue;
-        }
-        if (trimmed !== "true" && trimmed !== "false") {
-          localErrors[name] = "Must be true or false.";
-          continue;
-        }
-        updates.push({ name, value: trimmed === "true", type: "boolean" });
+      const result = serializeValue(wireType, text, { allowNull: true });
+      if ("error" in result) {
+        localErrors[name] = result.error;
         continue;
       }
-
-      if (kind === "number") {
-        if (trimmed === "") {
-          updates.push({ name, value: null, type: variables.find((v) => v.name === name)?.type ?? "integer" });
-          continue;
-        }
-        const parsed = Number(trimmed);
-        if (Number.isNaN(parsed)) {
-          localErrors[name] = "Must be a number.";
-          continue;
-        }
-        updates.push({
-          name,
-          value: parsed,
-          type: variables.find((v) => v.name === name)?.type ?? "integer"
-        });
-        continue;
-      }
-
-      if (kind === "json") {
-        if (trimmed === "") {
-          updates.push({ name, value: null, type: "json" });
-          continue;
-        }
-        try {
-          updates.push({ name, value: JSON.parse(trimmed), type: "json" });
-        } catch (err) {
-          localErrors[name] = err instanceof Error ? err.message : "Invalid JSON.";
-        }
-        continue;
-      }
-
-      // String. Empty input clears the variable.
-      updates.push({ name, value: text === "" ? null : text, type: "string" });
+      updates.push({ name, value: result.value, type: result.type });
     }
 
-    if (Object.keys(localErrors).length > 0) {
+    // Validate and collect creates from the new-variable rows.
+    const additions: ProcessVariableUpdate[] = [];
+    const localNewErrors: Record<string, string> = {};
+    const existingNames = new Set(variables.map((v) => v.name));
+    const seenInDrafts = new Set<string>();
+
+    for (const row of newDrafts) {
+      const name = row.name.trim();
+
+      if (name === "") {
+        localNewErrors[row.clientId] = "Name is required.";
+        continue;
+      }
+      if (!NEW_VARIABLE_NAME.test(name)) {
+        localNewErrors[row.clientId] =
+          "Names must start with a letter or underscore and use letters, digits, or underscores.";
+        continue;
+      }
+      if (existingNames.has(name)) {
+        localNewErrors[row.clientId] = "A variable with this name already exists — edit it above instead.";
+        continue;
+      }
+      if (seenInDrafts.has(name)) {
+        localNewErrors[row.clientId] = "Two new rows share this name.";
+        continue;
+      }
+      seenInDrafts.add(name);
+
+      // String / uuid: empty value is allowed for string (creates an empty
+      // string), rejected for everything else. allowNull: false achieves the
+      // latter; we special-case string up here so an empty new string row
+      // doesn't get rejected.
+      if (row.type === "string") {
+        additions.push({ name, value: row.value, type: "string" });
+        continue;
+      }
+
+      const result = serializeValue(row.type, row.value, { allowNull: false });
+      if ("error" in result) {
+        localNewErrors[row.clientId] = result.error;
+        continue;
+      }
+      additions.push({ name, value: result.value, type: result.type });
+    }
+
+    if (Object.keys(localErrors).length > 0 || Object.keys(localNewErrors).length > 0) {
       setErrors(localErrors);
+      setNewDraftErrors(localNewErrors);
       return;
     }
 
     try {
-      await updateVariables.mutateAsync(updates);
+      // Order matters: do creates first so an "edit existing then add new"
+      // round-trip can't end up with the new variable visible-before-edit
+      // if the second call fails. If creates succeed but updates fail, the
+      // user retries Save and the create is already there (POST is not
+      // re-attempted because newDrafts is cleared on success).
+      if (additions.length > 0) {
+        await addVariables.mutateAsync(additions);
+      }
+      if (updates.length > 0) {
+        await updateVariables.mutateAsync(updates);
+      }
       setEditing(false);
       setDirty(new Set());
       setErrors({});
+      setNewDrafts([]);
+      setNewDraftErrors({});
       onSaved?.();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  const hasErrors = Object.keys(errors).length > 0;
-  const saving = updateVariables.isPending;
+  const hasErrors =
+    Object.keys(errors).length > 0 || Object.keys(newDraftErrors).length > 0;
+  const saving = updateVariables.isPending || addVariables.isPending;
+  const hasPendingChanges = dirty.size > 0 || newDrafts.length > 0;
 
   return (
     <aside className="workflow-execution-variables-panel" aria-label="Process variables">
       <div className="workflow-execution-variables-header">
         <h3 className="workflow-execution-variables-title">Process Variables</h3>
-        {!editing && canOverride && variables.length > 0 && (
+        {!editing && canOverride && (
           <button
             type="button"
             className="btn btn-sm btn-outline-primary"
             onClick={beginEdit}
           >
-            Edit
+            {variables.length > 0 ? "Edit" : "Add Variable"}
           </button>
         )}
         {editing && (
@@ -195,7 +541,7 @@ export default function ProcessVariablesPanel({
               type="button"
               className="btn btn-sm btn-primary"
               onClick={saveEdits}
-              disabled={saving || hasErrors || dirty.size === 0}
+              disabled={saving || hasErrors || !hasPendingChanges}
             >
               {saving ? "Saving…" : "Save"}
             </button>
@@ -203,14 +549,17 @@ export default function ProcessVariablesPanel({
         )}
       </div>
 
-      {variables.length === 0 ? (
+      {variables.length === 0 && !editing && (
         <p className="workflow-execution-variables-empty">
           No variables have been set on this execution.
         </p>
-      ) : (
+      )}
+
+      {variables.length > 0 && (
         <ul className="workflow-execution-variables-list">
           {variables.map((variable) => {
-            const kind = kindByName.get(variable.name) ?? "string";
+            const wireType = typeByName.get(variable.name) ?? "string";
+            const editorKind = editorKindFor(wireType);
             const value = draft[variable.name] ?? variable.value ?? "";
             const error = errors[variable.name];
             return (
@@ -223,38 +572,11 @@ export default function ProcessVariablesPanel({
                 </div>
                 {editing ? (
                   <>
-                    {kind === "boolean" ? (
-                      <select
-                        className="form-select form-select-sm"
-                        value={value}
-                        onChange={(e) => handleFieldChange(variable.name, e.target.value)}
-                      >
-                        <option value="">(unset)</option>
-                        <option value="true">true</option>
-                        <option value="false">false</option>
-                      </select>
-                    ) : kind === "number" ? (
-                      <input
-                        type="number"
-                        className="form-control form-control-sm"
-                        value={value}
-                        onChange={(e) => handleFieldChange(variable.name, e.target.value)}
-                      />
-                    ) : kind === "json" ? (
-                      <textarea
-                        className="form-control form-control-sm font-monospace"
-                        rows={Math.min(8, Math.max(2, value.split("\n").length))}
-                        value={value}
-                        onChange={(e) => handleFieldChange(variable.name, e.target.value)}
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        value={value}
-                        onChange={(e) => handleFieldChange(variable.name, e.target.value)}
-                      />
-                    )}
+                    {renderValueInput({
+                      kind: editorKind,
+                      value,
+                      onChange: (next) => handleFieldChange(variable.name, next)
+                    })}
                     {error && <div className="invalid-feedback d-block small">{error}</div>}
                   </>
                 ) : (
@@ -266,6 +588,83 @@ export default function ProcessVariablesPanel({
             );
           })}
         </ul>
+      )}
+
+      {editing && (
+        <div className="workflow-execution-variables-add">
+          {newDrafts.length > 0 && (
+            <ul className="workflow-execution-variables-list workflow-execution-variables-new-list">
+              {newDrafts.map((row) => {
+                const error = newDraftErrors[row.clientId];
+                const editorKind = editorKindFor(row.type);
+                return (
+                  <li key={row.clientId} className="workflow-execution-variable workflow-execution-variable--new">
+                    <div className="workflow-execution-variable-header">
+                      <input
+                        type="text"
+                        className="form-control form-control-sm workflow-execution-variable-new-name"
+                        placeholder="Variable name"
+                        value={row.name}
+                        onChange={(e) => updateDraftField(row.clientId, { name: e.target.value })}
+                      />
+                      <select
+                        className="form-select form-select-sm workflow-execution-variable-new-type"
+                        value={row.type}
+                        onChange={(e) => {
+                          const nextType = e.target.value as AddableType;
+                          // Reset the value when the editor element changes
+                          // shape (boolean / date* / json) so the previous
+                          // text doesn't render as an invalid selection.
+                          const previousKind = editorKindFor(row.type);
+                          const nextKind = editorKindFor(nextType);
+                          const valueChanges =
+                            previousKind !== nextKind &&
+                            (nextKind === "boolean"
+                              || nextKind === "date-utc"
+                              || nextKind === "local-date"
+                              || nextKind === "local-datetime");
+                          updateDraftField(row.clientId, {
+                            type: nextType,
+                            ...(valueChanges ? { value: "" } : {})
+                          });
+                        }}
+                      >
+                        {ADDABLE_TYPES.map((type) => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => removeDraft(row.clientId)}
+                        aria-label={`Remove variable ${row.name || "(unnamed)"}`}
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    {renderValueInput({
+                      kind: editorKind,
+                      value: row.value,
+                      onChange: (next) => updateDraftField(row.clientId, { value: next }),
+                      placeholder: editorKind === "json" ? '{ "example": true }' : undefined
+                    })}
+                    {error && <div className="invalid-feedback d-block small">{error}</div>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary workflow-execution-variables-add-button"
+            onClick={addEmptyDraft}
+            disabled={saving}
+          >
+            + Add Variable
+          </button>
+        </div>
       )}
     </aside>
   );

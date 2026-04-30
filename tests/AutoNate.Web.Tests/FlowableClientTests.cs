@@ -467,6 +467,103 @@ public sealed class FlowableClientTests
         Assert.Contains("task already completed", ex.Message);
     }
 
+    // --- UpdateTaskAssigneeAsync ---------------------------------------------
+
+    [Fact]
+    public async Task UpdateTaskAssigneeAsync_PutsAssignee_WhenAssigneeSet()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-1", HttpStatusCode.OK);
+
+        await client.UpdateTaskAssigneeAsync("t-1", "alice");
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Put, sent.Method);
+        Assert.Contains("\"assignee\":\"alice\"", sent.Body);
+    }
+
+    [Fact]
+    public async Task UpdateTaskAssigneeAsync_PutsNullAssignee_WhenCleared()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-2", HttpStatusCode.OK);
+
+        await client.UpdateTaskAssigneeAsync("t-2", null);
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Put, sent.Method);
+        Assert.Contains("\"assignee\":null", sent.Body);
+    }
+
+    [Fact]
+    public async Task UpdateTaskAssigneeAsync_PutsNullAssignee_WhenBlank()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-2b", HttpStatusCode.OK);
+
+        await client.UpdateTaskAssigneeAsync("t-2b", "   ");
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Put, sent.Method);
+        Assert.Contains("\"assignee\":null", sent.Body);
+    }
+
+    [Fact]
+    public async Task UpdateTaskAssigneeAsync_ThrowsOnNon2xx()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-3",
+            HttpStatusCode.BadRequest, "no such user");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.UpdateTaskAssigneeAsync("t-3", "ghost"));
+        Assert.Contains("Flowable could not reassign the user task", ex.Message);
+    }
+
+    // --- UpdateTaskDueDateAsync ---------------------------------------------
+
+    [Fact]
+    public async Task UpdateTaskDueDateAsync_PutsDueDate_WhenSet()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-1", HttpStatusCode.OK);
+
+        var due = new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        await client.UpdateTaskDueDateAsync("t-1", due);
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Put, sent.Method);
+        // System.Text.Json uses ISO 8601 with fractional seconds + offset.
+        // We only assert the leading date/time substring so the test isn't
+        // tied to the exact suffix shape.
+        Assert.Contains("\"dueDate\":\"2030-01-02T03:04:05", sent.Body);
+    }
+
+    [Fact]
+    public async Task UpdateTaskDueDateAsync_PutsNullDueDate_WhenCleared()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-2", HttpStatusCode.OK);
+
+        await client.UpdateTaskDueDateAsync("t-2", null);
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Put, sent.Method);
+        Assert.Contains("\"dueDate\":null", sent.Body);
+    }
+
+    [Fact]
+    public async Task UpdateTaskDueDateAsync_ThrowsOnNon2xx()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-3",
+            HttpStatusCode.BadRequest, "task already completed");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.UpdateTaskDueDateAsync("t-3", DateTimeOffset.UtcNow));
+        Assert.Contains("Flowable could not update the user task due date", ex.Message);
+    }
+
     // --- UpdateProcessVariablesAsync -----------------------------------------
 
     [Fact]

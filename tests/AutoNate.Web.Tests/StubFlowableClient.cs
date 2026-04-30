@@ -208,6 +208,30 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    public Dictionary<string, string?> TaskAssigneesByTaskId { get; } = new();
+
+    public Task UpdateTaskAssigneeAsync(
+        string taskId,
+        string? assignee,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"UpdateTaskAssignee:{taskId}:{assignee ?? "(null)"}");
+        TaskAssigneesByTaskId[taskId] = assignee;
+        return Task.CompletedTask;
+    }
+
+    public Dictionary<string, DateTimeOffset?> TaskDueDatesByTaskId { get; } = new();
+
+    public Task UpdateTaskDueDateAsync(
+        string taskId,
+        DateTimeOffset? dueDate,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"UpdateTaskDueDate:{taskId}:{dueDate?.ToString("O") ?? "(null)"}");
+        TaskDueDatesByTaskId[taskId] = dueDate;
+        return Task.CompletedTask;
+    }
+
     public Dictionary<string, List<ProcessVariableUpdate>> VariableUpdatesByInstance { get; } = new();
 
     public Dictionary<(string ProcessInstanceId, string ActivityId), List<string>> CompletedAssigneesByActivity { get; } = new();
@@ -245,6 +269,44 @@ internal sealed class StubFlowableClient : IFlowableClient
             VariableUpdatesByInstance[processInstanceId] = list;
         }
         list.AddRange(updates);
+        return Task.CompletedTask;
+    }
+
+    public Dictionary<string, List<ProcessVariableUpdate>> VariableAdditionsByInstance { get; } = new();
+
+    public Task AddProcessVariablesAsync(
+        string processInstanceId,
+        IReadOnlyList<ProcessVariableUpdate> additions,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AddVariables:{processInstanceId}");
+        if (!VariableAdditionsByInstance.TryGetValue(processInstanceId, out var list))
+        {
+            list = new List<ProcessVariableUpdate>();
+            VariableAdditionsByInstance[processInstanceId] = list;
+        }
+        list.AddRange(additions);
+        return Task.CompletedTask;
+    }
+
+    public List<(string ProcessInstanceId, string TargetActivityId)> MoveExecutionStateCalls { get; } = new();
+
+    // Set to make MoveWorkflowExecutionStateAsync throw — tests for the
+    // "no active activities" guard case use this to simulate Flowable
+    // rejecting an empty cancel list without seeding history rows.
+    public Exception? MoveExecutionStateThrows { get; set; }
+
+    public Task MoveWorkflowExecutionStateAsync(
+        string processInstanceId,
+        string targetActivityId,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"MoveExecutionState:{processInstanceId}:{targetActivityId}");
+        MoveExecutionStateCalls.Add((processInstanceId, targetActivityId));
+        if (MoveExecutionStateThrows is not null)
+        {
+            throw MoveExecutionStateThrows;
+        }
         return Task.CompletedTask;
     }
 

@@ -66,7 +66,28 @@ public interface IFlowableClient
 
     Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
 
+    // Reassigns a runtime user task. Pass null to clear the assignee. Used by
+    // the executions admin override surface alongside force-complete.
+    Task UpdateTaskAssigneeAsync(string taskId, string? assignee, CancellationToken cancellationToken = default);
+
+    // Sets or clears the due date on a runtime user task. Pass null to clear.
+    Task UpdateTaskDueDateAsync(string taskId, DateTimeOffset? dueDate, CancellationToken cancellationToken = default);
+
     Task UpdateProcessVariablesAsync(string processInstanceId, IReadOnlyList<ProcessVariableUpdate> updates, CancellationToken cancellationToken = default);
+
+    // Creates one or more new variables on the running instance. Flowable's
+    // REST API splits create vs. update — POST .../variables 409s if any
+    // entry already exists, and PUT .../variables 4xxs when one doesn't —
+    // so the SPA's "Add Variable" UX routes new names through this method
+    // and existing names through UpdateProcessVariablesAsync.
+    Task AddProcessVariablesAsync(string processInstanceId, IReadOnlyList<ProcessVariableUpdate> additions, CancellationToken cancellationToken = default);
+
+    // Cancels every in-flight activity on the instance and starts execution at
+    // `targetActivityId` instead. Implements the admin "Move Execution Here"
+    // action — drastic and unguarded: variables persist, but any pending
+    // user/service tasks at the cancelled nodes are discarded. Caller is
+    // responsible for confirming the move with the operator.
+    Task MoveWorkflowExecutionStateAsync(string processInstanceId, string targetActivityId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<string>> GetCompletedAssigneesForActivityAsync(string processInstanceId, string activityId, CancellationToken cancellationToken = default);
 

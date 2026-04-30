@@ -39,5 +39,7 @@ public static class Actions
 
     public const string Override = "override";
 
+    public const string MoveState = "movestate";
+
     public const string Manage = "manage";
 }

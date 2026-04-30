@@ -320,6 +320,17 @@ public static class ExecutionEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
 
+        executions.MapPost("/{processInstanceId}/variables", async (
+            string processInstanceId,
+            UpdateProcessVariablesRequest request,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            await flowable.AddProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
         executions.MapPost("/{processInstanceId}/tasks/{taskId}/force-complete", async (
             string processInstanceId,
             string taskId,
@@ -339,6 +350,46 @@ public static class ExecutionEndpoints
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/tasks/{taskId}/reassign", async (
+            string processInstanceId,
+            string taskId,
+            ReassignTaskRequest request,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            await flowable.UpdateTaskAssigneeAsync(taskId, request.Assignee, cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/tasks/{taskId}/due-date", async (
+            string processInstanceId,
+            string taskId,
+            UpdateTaskDueDateRequest request,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            await flowable.UpdateTaskDueDateAsync(taskId, request.DueDate, cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/move-state", async (
+            string processInstanceId,
+            MoveExecutionStateRequest request,
+            IFlowableClient flowable,
+            CancellationToken cancellationToken) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.TargetActivityId))
+            {
+                return Results.BadRequest(new { error = "targetActivityId is required." });
+            }
+
+            await flowable.MoveWorkflowExecutionStateAsync(processInstanceId, request.TargetActivityId, cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.MoveState, "processInstanceId");
 
         executions.MapPost("/{processInstanceId}/cancel", async (
             string processInstanceId,
@@ -447,4 +498,10 @@ public static class ExecutionEndpoints
     public sealed record CompleteTaskRequest(Dictionary<string, object?>? Variables);
 
     public sealed record UpdateProcessVariablesRequest(IReadOnlyList<ProcessVariableUpdate> Variables);
+
+    public sealed record ReassignTaskRequest(string? Assignee);
+
+    public sealed record UpdateTaskDueDateRequest(DateTimeOffset? DueDate);
+
+    public sealed record MoveExecutionStateRequest(string TargetActivityId);
 }

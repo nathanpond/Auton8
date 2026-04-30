@@ -11,11 +11,20 @@ export type ReadonlyViewerHandle = unknown;
 export type ContextMenuActiveTask = {
   id: string;
   assignee: string | null;
+  // ISO 8601 string. Forwarded into the change-due-date modal so it can
+  // pre-fill the date input. Null when the task has no due date.
+  dueDate?: string | null;
 };
 
 export type ContextMenuOptions = {
-  // Called on every right-click. Returning false suppresses the menu entirely.
+  // Called on every right-click. Returning false suppresses the override-only
+  // task actions (Complete, Reassign, Change Due Date) on current-activity
+  // nodes. Move Execution Here is gated separately via getCanMoveState.
   getCanOverride: () => boolean;
+  // Called on every right-click on a non-current activity. Returning true
+  // unlocks the "Move Execution Here" entry. The React layer also factors in
+  // whether the run is still in flight before returning true.
+  getCanMoveState: () => boolean;
   // Returns the active runtime tasks at a BPMN activity. Empty array → no menu.
   // activityName is the BPMN element's display label, used as a fallback when
   // taskDefinitionKey doesn't match (some Flowable deployments key tasks
@@ -27,6 +36,23 @@ export type ContextMenuOptions = {
   // Lazily fetched on submenu open. Drives the disabled state of completed
   // entries in "Complete Task For…".
   getCompletedAssignees: (activityId: string) => Promise<string[]>;
+};
+
+export type UserTaskHoverInfo = {
+  title: string;
+  rows: Array<{ label: string; value: string }>;
+};
+
+export type HoverTooltipOptions = {
+  // Called on every UserTask hover. Return null to suppress (e.g. while data
+  // is still loading). bpmn carries the raw flowable:assignee/flowable:dueDate
+  // attributes from the BPMN model so the resolver can fall back to design-
+  // time values for tasks that haven't been instantiated yet.
+  getInfo: (
+    activityId: string,
+    activityName: string | null,
+    bpmn: { assignee: string | null; dueDate: string | null }
+  ) => UserTaskHoverInfo | null;
 };
 
 export type UseBpmnReadonlyViewerOptions = {
@@ -41,10 +67,16 @@ export type UseBpmnReadonlyViewerOptions = {
   failedActivityIds?: readonly string[];
   callbacks?: Pick<
     WorkflowCallbacks,
-    "CompleteTaskFromContextMenu" | "CompleteAllTasksFromContextMenu"
+    | "CompleteTaskFromContextMenu"
+    | "CompleteAllTasksFromContextMenu"
+    | "ReassignTaskFromContextMenu"
+    | "ChangeDueDateFromContextMenu"
+    | "MoveExecutionHereFromContextMenu"
   >;
   enableContextMenu?: boolean;
   contextMenu?: ContextMenuOptions;
+  enableHoverTooltip?: boolean;
+  hoverTooltip?: HoverTooltipOptions;
 };
 
 export type UseBpmnReadonlyViewerReturn = {
@@ -64,7 +96,9 @@ export function useBpmnReadonlyViewer(
     failedActivityIds,
     callbacks,
     enableContextMenu,
-    contextMenu
+    contextMenu,
+    enableHoverTooltip,
+    hoverTooltip
   } = options;
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,6 +113,8 @@ export function useBpmnReadonlyViewer(
   // change. The thunks closed over below always read .current.
   const contextMenuRef = useRef<ContextMenuOptions | undefined>(contextMenu);
   contextMenuRef.current = contextMenu;
+  const hoverTooltipRef = useRef<HoverTooltipOptions | undefined>(hoverTooltip);
+  hoverTooltipRef.current = hoverTooltip;
 
   // Mount + unmount on container / xml-identity change.
   useEffect(() => {
@@ -110,10 +146,21 @@ export function useBpmnReadonlyViewer(
             const dotNetLike = createDotNetAdapter(callbacksRef.current);
             workflow.enableCurrentStepContextMenu(created, dotNetLike, {
               getCanOverride: () => contextMenuRef.current?.getCanOverride() ?? true,
+              getCanMoveState: () => contextMenuRef.current?.getCanMoveState() ?? false,
               getActiveTasksAtActivity: (activityId: string, activityName: string | null) =>
                 contextMenuRef.current?.getActiveTasksAtActivity(activityId, activityName) ?? [],
               getCompletedAssignees: (activityId: string) =>
                 contextMenuRef.current?.getCompletedAssignees(activityId) ?? Promise.resolve([])
+            });
+          }
+
+          if (enableHoverTooltip) {
+            workflow.enableUserTaskHoverTooltip(created, {
+              getInfo: (
+                activityId: string,
+                activityName: string | null,
+                bpmn: { assignee: string | null; dueDate: string | null }
+              ) => hoverTooltipRef.current?.getInfo(activityId, activityName, bpmn) ?? null
             });
           }
         }
@@ -141,7 +188,7 @@ export function useBpmnReadonlyViewer(
     return () => {
       cancelled = true;
     };
-  }, [container, xml, enableContextMenu]);
+  }, [container, xml, enableContextMenu, enableHoverTooltip]);
 
   // Re-highlight on activity changes without rebuilding the viewer.
   useEffect(() => {

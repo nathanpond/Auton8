@@ -912,6 +912,42 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(response, "complete the user task");
     }
 
+    public async Task UpdateTaskAssigneeAsync(string taskId, string? assignee, CancellationToken cancellationToken = default)
+    {
+        // Flowable's PUT /runtime/tasks/{id} updates whatever fields appear in
+        // the body, with explicit null clearing the field. We do NOT use the
+        // POST .../{id} actions endpoint: Flowable's RestActionRequest only
+        // recognizes complete/claim/delegate/resolve, so an "assign" verb
+        // either errors or silently no-ops depending on the build.
+        var normalized = string.IsNullOrWhiteSpace(assignee) ? null : assignee;
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"service/runtime/tasks/{Uri.EscapeDataString(taskId)}")
+        {
+            Content = JsonContent.Create(new { assignee = normalized })
+        };
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, "reassign the user task");
+    }
+
+    public async Task UpdateTaskDueDateAsync(string taskId, DateTimeOffset? dueDate, CancellationToken cancellationToken = default)
+    {
+        // PUT /runtime/tasks/{id} replaces the task representation. Flowable
+        // serializes a null dueDate as an explicit clear, which matches what
+        // the SPA sends when the admin empties the date field.
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"service/runtime/tasks/{Uri.EscapeDataString(taskId)}")
+        {
+            Content = JsonContent.Create(new { dueDate })
+        };
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, "update the user task due date");
+    }
+
     public async Task UpdateProcessVariablesAsync(
         string processInstanceId,
         IReadOnlyList<ProcessVariableUpdate> updates,
@@ -935,6 +971,79 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, "update the process variables");
+    }
+
+    public async Task AddProcessVariablesAsync(
+        string processInstanceId,
+        IReadOnlyList<ProcessVariableUpdate> additions,
+        CancellationToken cancellationToken = default)
+    {
+        if (additions.Count == 0)
+        {
+            return;
+        }
+
+        var payload = additions.Select(addition => addition.Type is null
+            ? (object)new { name = addition.Name, value = addition.Value }
+            : new { name = addition.Name, value = addition.Value, type = addition.Type }).ToArray();
+
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/variables",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, "create the process variables");
+    }
+
+    public async Task MoveWorkflowExecutionStateAsync(
+        string processInstanceId,
+        string targetActivityId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(targetActivityId))
+        {
+            throw new ArgumentException("Target activity id must be provided.", nameof(targetActivityId));
+        }
+
+        // Cancel everything currently in flight (no end time on the historic
+        // activity row) and start a fresh execution token at the target.
+        // Flowable's change-state API requires both lists in one call so the
+        // move happens atomically — partial moves leak runtime tokens.
+        var activitiesUrl =
+            $"service/history/historic-activity-instances?processInstanceId={Uri.EscapeDataString(processInstanceId)}&finished=false&size={WorkflowExecutionActivityQuerySize}";
+        using var activitiesResponse = await _httpClient.GetAsync(activitiesUrl, cancellationToken);
+        await EnsureSuccessAsync(activitiesResponse, "list active activities for change-state");
+
+        var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(
+            activitiesResponse, cancellationToken);
+
+        var cancelActivityIds = activitiesPayload.Data
+            .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId) && activity.EndTime is null)
+            .Select(activity => activity.ActivityId!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (cancelActivityIds.Length == 0)
+        {
+            // No tokens to move — Flowable's change-state would 400 on an
+            // empty cancel list. Surface a useful message; the SPA only
+            // exposes this action while a run is in flight, so reaching here
+            // means the runtime state changed under the operator.
+            throw new InvalidOperationException(
+                $"Execution '{processInstanceId}' has no active activities to move — the run may have already finished.");
+        }
+
+        var payload = new
+        {
+            cancelActivityIds,
+            startActivityIds = new[] { targetActivityId }
+        };
+
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/change-state",
+            payload,
+            cancellationToken);
+        await EnsureSuccessAsync(response, $"move execution '{processInstanceId}' to activity '{targetActivityId}'");
     }
 
     public async Task BroadcastSignalAsync(

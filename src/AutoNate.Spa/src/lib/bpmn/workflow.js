@@ -554,6 +554,8 @@ export async function createReadonlyViewer(container, xml) {
   await viewer.importXML(xml);
   fitAndCenter(viewer);
 
+  let hoverTooltip = null;
+
   return {
     viewer,
     activeMarkers: [],
@@ -567,8 +569,12 @@ export async function createReadonlyViewer(container, xml) {
     setContextMenu(nextContextMenu) {
       contextMenu = nextContextMenu;
     },
+    setHoverTooltip(nextHoverTooltip) {
+      hoverTooltip = nextHoverTooltip;
+    },
     dispose() {
       contextMenu?.dispose?.();
+      hoverTooltip?.dispose?.();
       viewer.destroy();
     }
   };
@@ -1441,9 +1447,18 @@ export function highlightExecutionState(
 // `options` carries thunks that are read on every right-click so React state
 // (notably the override permission check) can change without rebuilding the
 // viewer. All thunks are optional with sensible defaults.
-//   - getCanOverride()                — boolean. Menu is suppressed when false.
-//   - getActiveTasksAtActivity(id)    — array of { id, assignee } for runtime
-//                                       tasks at this BPMN activity.
+//   - getCanOverride()                — boolean. Suppresses the override-only
+//                                       task actions (Complete, Reassign,
+//                                       Change Due Date) on current-activity
+//                                       nodes when false.
+//   - getCanMoveState()               — boolean. Unlocks "Move Execution Here"
+//                                       on non-current activity nodes when
+//                                       true. The React layer also gates this
+//                                       on whether the run is still in flight.
+//   - getActiveTasksAtActivity(id)    — array of { id, assignee, dueDate? }
+//                                       for runtime tasks at this BPMN
+//                                       activity. dueDate is forwarded into
+//                                       the change-due-date callback.
 //   - getCompletedAssignees(id)       — Promise resolving to assignees that
 //                                       already completed an instance (used to
 //                                       gray out submenu entries for parallel
@@ -1455,6 +1470,7 @@ export function enableCurrentStepContextMenu(viewerHandle, dotNetRef, options) {
 
   const opts = options || {};
   const getCanOverride = typeof opts.getCanOverride === "function" ? opts.getCanOverride : () => true;
+  const getCanMoveState = typeof opts.getCanMoveState === "function" ? opts.getCanMoveState : () => false;
   const getActiveTasksAtActivity = typeof opts.getActiveTasksAtActivity === "function"
     ? opts.getActiveTasksAtActivity
     : () => [];
@@ -1476,20 +1492,45 @@ export function enableCurrentStepContextMenu(viewerHandle, dotNetRef, options) {
       return;
     }
 
+    const businessObject = element.businessObject;
+    if (!businessObject || typeof businessObject.$type !== "string") {
+      contextMenu.hide();
+      return;
+    }
+
+    // The root process / pool / participant rectangles aren't activity nodes.
+    // Right-clicking the canvas itself shouldn't surface admin actions.
+    const $type = businessObject.$type;
+    if ($type === "bpmn:Process"
+      || $type === "bpmn:Collaboration"
+      || $type === "bpmn:Participant"
+      || $type === "bpmn:Lane"
+      || $type === "bpmn:LaneSet"
+      || $type === "bpmn:TextAnnotation"
+      || $type === "bpmn:Group") {
+      contextMenu.hide();
+      return;
+    }
+
     const currentActivityIds = viewerHandle.getCurrentActivityIds?.() || [];
-    if (!currentActivityIds.includes(element.id)) {
-      contextMenu.hide();
-      return;
+    const isCurrentActivity = currentActivityIds.includes(element.id);
+    const activityName = businessObject.name || null;
+
+    let activeTasks = [];
+    const showTaskActions = isCurrentActivity && getCanOverride();
+    if (showTaskActions) {
+      activeTasks = getActiveTasksAtActivity(element.id, activityName) || [];
     }
 
-    if (!getCanOverride()) {
-      contextMenu.hide();
-      return;
-    }
+    // Move-here is meaningful only on a *different* node from the current
+    // activity, and only while the run is still in flight (some current
+    // activities exist to cancel and replace).
+    const showMoveHere = !isCurrentActivity
+      && getCanMoveState()
+      && currentActivityIds.length > 0;
 
-    const activityName = element.businessObject?.name || null;
-    const activeTasks = getActiveTasksAtActivity(element.id, activityName) || [];
-    if (activeTasks.length === 0) {
+    const hasTaskActionsToShow = showTaskActions && activeTasks.length > 0;
+    if (!hasTaskActionsToShow && !showMoveHere) {
       contextMenu.hide();
       return;
     }
@@ -1504,6 +1545,7 @@ export function enableCurrentStepContextMenu(viewerHandle, dotNetRef, options) {
       activityId: element.id,
       activityName,
       tasks: activeTasks,
+      showMoveHere,
       x: originalEvent.clientX,
       y: originalEvent.clientY
     });
@@ -1524,6 +1566,178 @@ export function enableCurrentStepContextMenu(viewerHandle, dotNetRef, options) {
       eventBus.off("canvas.viewbox.changed", onViewboxChanged);
     }
   });
+}
+
+// Enables a small floating tooltip that appears when the cursor hovers any
+// bpmn:UserTask element in a read-only execution viewer. The React layer
+// supplies the tooltip body via a getInfo thunk; this layer only knows about
+// hover events, BPMN type filtering, and DOM positioning. Returns nothing —
+// disposal is wired through viewerHandle.setHoverTooltip so the viewer's own
+// dispose() call cleans us up.
+//
+// options.getInfo(activityId, activityName, bpmn) → { title, rows } | null
+//   Where bpmn is { assignee, dueDate } pulled from flowable:* attributes.
+//   Returning null suppresses the tooltip for that element (useful when the
+//   React side has no data yet, e.g. tasks query still loading).
+export function enableUserTaskHoverTooltip(viewerHandle, options) {
+  if (!viewerHandle?.viewer) {
+    return;
+  }
+
+  const opts = options || {};
+  const getInfo = typeof opts.getInfo === "function" ? opts.getInfo : null;
+  if (!getInfo) {
+    return;
+  }
+
+  const eventBus = viewerHandle.viewer.get("eventBus");
+  const tooltip = createUserTaskHoverTooltip(viewerHandle.cssScopeAttribute);
+
+  const onHover = (event) => {
+    const element = event?.element;
+    if (!element || element.waypoints) {
+      return;
+    }
+    const businessObject = element.businessObject;
+    if (!businessObject || businessObject.$type !== "bpmn:UserTask") {
+      return;
+    }
+
+    const activityName = typeof businessObject.name === "string" ? businessObject.name : null;
+    const bpmn = {
+      assignee: readFlowableString(businessObject, "assignee"),
+      dueDate: readFlowableString(businessObject, "dueDate")
+    };
+
+    const info = getInfo(element.id, activityName, bpmn);
+    if (!info) {
+      tooltip.hide();
+      return;
+    }
+
+    const gfx = event?.gfx;
+    const rect = gfx?.getBoundingClientRect?.();
+    if (!rect) {
+      return;
+    }
+    tooltip.show(info, rect);
+  };
+
+  const onOut = (event) => {
+    const element = event?.element;
+    if (!element || element.businessObject?.$type !== "bpmn:UserTask") {
+      return;
+    }
+    tooltip.hide();
+  };
+
+  const onCanvasClick = () => tooltip.hide();
+  const onViewboxChanged = () => tooltip.hide();
+
+  eventBus.on("element.hover", onHover);
+  eventBus.on("element.out", onOut);
+  eventBus.on("canvas.click", onCanvasClick);
+  eventBus.on("canvas.viewbox.changed", onViewboxChanged);
+
+  viewerHandle.setHoverTooltip({
+    dispose() {
+      tooltip.dispose();
+      eventBus.off("element.hover", onHover);
+      eventBus.off("element.out", onOut);
+      eventBus.off("canvas.click", onCanvasClick);
+      eventBus.off("canvas.viewbox.changed", onViewboxChanged);
+    }
+  });
+}
+
+function createUserTaskHoverTooltip(cssScopeAttribute) {
+  const root = document.createElement("div");
+  root.className = "workflow-execution-task-tooltip";
+  root.style.position = "fixed";
+  // Above the BPMN context menu wrapper (1080) so it stacks correctly when
+  // a right-click menu is also being prepared, but below modal dialogs.
+  root.style.zIndex = "1075";
+  root.style.pointerEvents = "none";
+  root.style.display = "none";
+  if (cssScopeAttribute) {
+    root.setAttribute(cssScopeAttribute, "");
+  }
+  document.body.appendChild(root);
+
+  let isDisposed = false;
+
+  const setScope = (el) => {
+    if (cssScopeAttribute) {
+      el.setAttribute(cssScopeAttribute, "");
+    }
+  };
+
+  return {
+    show(info, anchorRect) {
+      if (isDisposed) {
+        return;
+      }
+
+      root.replaceChildren();
+
+      const title = document.createElement("div");
+      title.className = "workflow-execution-task-tooltip__title";
+      title.textContent = info?.title ?? "";
+      setScope(title);
+      root.appendChild(title);
+
+      const rows = Array.isArray(info?.rows) ? info.rows : [];
+      for (const row of rows) {
+        const r = document.createElement("div");
+        r.className = "workflow-execution-task-tooltip__row";
+        setScope(r);
+
+        const label = document.createElement("span");
+        label.className = "workflow-execution-task-tooltip__label";
+        label.textContent = `${row.label}: `;
+        setScope(label);
+
+        const value = document.createElement("span");
+        value.className = "workflow-execution-task-tooltip__value";
+        value.textContent = row.value;
+        setScope(value);
+
+        r.appendChild(label);
+        r.appendChild(value);
+        root.appendChild(r);
+      }
+
+      // Two-pass position: render off-screen first to measure, then place
+      // above the element — flipping below if there isn't room — and clamp
+      // horizontally so the tip never overflows the viewport.
+      root.style.display = "block";
+      root.style.left = "-9999px";
+      root.style.top = "-9999px";
+      const tipRect = root.getBoundingClientRect();
+      const margin = 8;
+      let x = anchorRect.left + anchorRect.width / 2 - tipRect.width / 2;
+      let y = anchorRect.top - tipRect.height - margin;
+      if (y < margin) {
+        y = anchorRect.bottom + margin;
+      }
+      x = Math.max(margin, Math.min(x, window.innerWidth - tipRect.width - margin));
+      root.style.left = `${x}px`;
+      root.style.top = `${y}px`;
+    },
+    hide() {
+      if (isDisposed) {
+        return;
+      }
+      root.style.display = "none";
+    },
+    dispose() {
+      if (isDisposed) {
+        return;
+      }
+      isDisposed = true;
+      root.remove();
+    }
+  };
 }
 
 export function disposeModeler(modelerHandle) {
@@ -1681,7 +1895,7 @@ function createExecutionContextMenu(dotNetRef, cssScopeAttribute, contextOptions
   window.addEventListener("keydown", onKeyDown);
 
   return {
-    show({ activityId, activityName, tasks, x, y }) {
+    show({ activityId, activityName, tasks, showMoveHere, x, y }) {
       if (isDisposed) {
         return;
       }
@@ -1689,18 +1903,31 @@ function createExecutionContextMenu(dotNetRef, cssScopeAttribute, contextOptions
       list.replaceChildren();
       closeSubmenu();
 
-      if (!tasks || tasks.length === 0) {
+      const hasTasks = Array.isArray(tasks) && tasks.length > 0;
+      if (!hasTasks && !showMoveHere) {
         return;
       }
 
-      if (tasks.length === 1) {
+      if (hasTasks && tasks.length === 1) {
         const onlyTask = tasks[0];
         list.appendChild(buildItem("Complete Task", async () => {
           hide();
           await dotNetRef.invokeMethodAsync(
             "CompleteTaskFromContextMenu", activityId, activityName, onlyTask.id);
         }));
-      } else {
+        list.appendChild(buildItem("Reassign Task…", async () => {
+          hide();
+          await dotNetRef.invokeMethodAsync(
+            "ReassignTaskFromContextMenu",
+            activityId, activityName, onlyTask.id, onlyTask.assignee ?? null);
+        }));
+        list.appendChild(buildItem("Change Due Date…", async () => {
+          hide();
+          await dotNetRef.invokeMethodAsync(
+            "ChangeDueDateFromContextMenu",
+            activityId, activityName, onlyTask.id, onlyTask.dueDate ?? null);
+        }));
+      } else if (hasTasks) {
         const taskIds = tasks.map((t) => t.id);
         const taskCount = tasks.length;
         list.appendChild(buildItem(`Complete Task (all ${taskCount})`, async () => {
@@ -1724,6 +1951,35 @@ function createExecutionContextMenu(dotNetRef, cssScopeAttribute, contextOptions
             await dotNetRef.invokeMethodAsync(
               "CompleteTaskFromContextMenu", activityId, activityName, task.id);
           });
+        }));
+
+        // Per-instance reassign + due-date submenus mirror "Complete Task For…":
+        // pick which parallel instance to act on, then the React layer opens
+        // the picker modal for that one task.
+        list.appendChild(buildSubmenuItem("Reassign Task For…", (anchorRect) => {
+          renderSubmenu(anchorRect, tasks, [], async (task) => {
+            hide();
+            await dotNetRef.invokeMethodAsync(
+              "ReassignTaskFromContextMenu",
+              activityId, activityName, task.id, task.assignee ?? null);
+          });
+        }));
+
+        list.appendChild(buildSubmenuItem("Change Due Date For…", (anchorRect) => {
+          renderSubmenu(anchorRect, tasks, [], async (task) => {
+            hide();
+            await dotNetRef.invokeMethodAsync(
+              "ChangeDueDateFromContextMenu",
+              activityId, activityName, task.id, task.dueDate ?? null);
+          });
+        }));
+      }
+
+      if (showMoveHere) {
+        list.appendChild(buildItem("Move Execution Here", async () => {
+          hide();
+          await dotNetRef.invokeMethodAsync(
+            "MoveExecutionHereFromContextMenu", activityId, activityName);
         }));
       }
 

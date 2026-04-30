@@ -201,6 +201,29 @@ public sealed class ExecutionEndpointsTests
     }
 
     [Fact]
+    public async Task AddProcessVariables_Returns204AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-add/variables",
+            new ExecutionEndpoints.UpdateProcessVariablesRequest(new[]
+            {
+                new ProcessVariableUpdate { Name = "newAmount", Value = 7, Type = "integer" },
+                new ProcessVariableUpdate { Name = "newLabel", Value = "hello", Type = "string" }
+            }));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("AddVariables:inst-add", factory.FlowableStub.Calls);
+        Assert.True(factory.FlowableStub.VariableAdditionsByInstance.TryGetValue("inst-add", out var captured));
+        Assert.Equal(2, captured!.Count);
+        Assert.Equal("newAmount", captured[0].Name);
+        Assert.Equal("integer", captured[0].Type);
+    }
+
+    [Fact]
     public async Task ForceCompleteTask_Returns204AndCallsClient()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
@@ -213,6 +236,103 @@ public sealed class ExecutionEndpointsTests
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Contains("CompleteTask:task-fc", factory.FlowableStub.Calls);
+    }
+
+    [Fact]
+    public async Task ReassignTask_Returns204AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-rs/tasks/task-rs/reassign",
+            new ExecutionEndpoints.ReassignTaskRequest("alice"));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("UpdateTaskAssignee:task-rs:alice", factory.FlowableStub.Calls);
+        Assert.Equal("alice", factory.FlowableStub.TaskAssigneesByTaskId["task-rs"]);
+    }
+
+    [Fact]
+    public async Task ReassignTask_NullAssignee_DelegatesAsClear()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-clr/tasks/task-clr/reassign",
+            new ExecutionEndpoints.ReassignTaskRequest(null));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("UpdateTaskAssignee:task-clr:(null)", factory.FlowableStub.Calls);
+        Assert.Null(factory.FlowableStub.TaskAssigneesByTaskId["task-clr"]);
+    }
+
+    [Fact]
+    public async Task UpdateTaskDueDate_Returns204AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var due = new DateTimeOffset(2030, 5, 6, 7, 8, 9, TimeSpan.Zero);
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-dd/tasks/task-dd/due-date",
+            new ExecutionEndpoints.UpdateTaskDueDateRequest(due));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains(factory.FlowableStub.Calls, c => c.StartsWith("UpdateTaskDueDate:task-dd:"));
+        Assert.Equal(due, factory.FlowableStub.TaskDueDatesByTaskId["task-dd"]);
+    }
+
+    [Fact]
+    public async Task UpdateTaskDueDate_NullDate_DelegatesAsClear()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-dd2/tasks/task-dd2/due-date",
+            new ExecutionEndpoints.UpdateTaskDueDateRequest(null));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("UpdateTaskDueDate:task-dd2:(null)", factory.FlowableStub.Calls);
+        Assert.Null(factory.FlowableStub.TaskDueDatesByTaskId["task-dd2"]);
+    }
+
+    [Fact]
+    public async Task MoveExecutionState_Returns204AndCallsClient()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-mv/move-state",
+            new ExecutionEndpoints.MoveExecutionStateRequest("userTask_review"));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains("MoveExecutionState:inst-mv:userTask_review", factory.FlowableStub.Calls);
+        Assert.Contains(factory.FlowableStub.MoveExecutionStateCalls,
+            c => c.ProcessInstanceId == "inst-mv" && c.TargetActivityId == "userTask_review");
+    }
+
+    [Fact]
+    public async Task MoveExecutionState_EmptyTarget_Returns400()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-mv2/move-state",
+            new ExecutionEndpoints.MoveExecutionStateRequest(""));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(factory.FlowableStub.Calls, c => c.StartsWith("MoveExecutionState:"));
     }
 
     [Fact]
