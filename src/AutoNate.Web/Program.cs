@@ -11,10 +11,12 @@ using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Plugins;
 using AutoNate.Web.Services.ApplicationEvents;
+using AutoNate.Web.Services.Audit;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Menus;
 using AutoNate.Web.Services.Nats;
@@ -98,6 +100,30 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     });
 builder.Services.AddAuthorization();
 builder.Services.AddAntiforgery();
+builder.Services.AddHttpContextAccessor();
+// IRequestContext is a thin facade over IHttpContextAccessor (singleton) — no
+// per-request state of its own, so it's safe as a singleton and avoids
+// lifetime-mismatch errors with the singleton event publishers.
+builder.Services.AddSingleton<IRequestContext, RequestContext>();
+builder.Services.AddSingleton<IAuditEventPublisher, DaprAuditEventPublisher>();
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ViewEventCoalescer>();
+builder.Services.AddOptions<AuditOutboxOptions>()
+    .BindConfiguration(AuditOutboxOptions.SectionName);
+// Phase 5 of the audit-events plan: live publishers go through the outbox.
+// EfCoreAuditEventOutbox writes a row, AuditOutboxDispatcher polls + posts to
+// Dapr. When AuditOutbox:Enabled = false, the publishers fall back to direct
+// posting via DirectPublishAuditEventOutbox (the pre-Phase-5 behavior).
+builder.Services.AddSingleton<EfCoreAuditEventOutbox>();
+builder.Services.AddSingleton<DirectPublishAuditEventOutbox>();
+builder.Services.AddSingleton<IAuditEventOutbox>(sp =>
+{
+    var enabled = sp.GetRequiredService<IOptions<AuditOutboxOptions>>().Value.Enabled;
+    return enabled
+        ? sp.GetRequiredService<EfCoreAuditEventOutbox>()
+        : sp.GetRequiredService<DirectPublishAuditEventOutbox>();
+});
+builder.Services.AddHostedService<AuditOutboxDispatcher>();
 builder.Services.AddOptions<DevelopmentAutoLoginOptions>()
     .BindConfiguration(DevelopmentAutoLoginOptions.SectionName);
 builder.Services.AddOptions<FlowableOptions>()
@@ -414,6 +440,7 @@ app.MapPost(
         async Task<IResult> (
             HttpContext context,
             ILocalUserStore localUserStore,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -423,12 +450,26 @@ app.MapPost(
 
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
+                await auditPublisher.PublishAsync(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.LoginFailed,
+                    AuthEventTopic.ResourceKind,
+                    resource: new { username },
+                    details: new { reason = "missing_credentials" },
+                    cancellationToken);
                 return Results.Redirect(BuildLoginRedirect(returnUrl, "invalid", username));
             }
 
             var user = await localUserStore.ValidateCredentialsAsync(username, password, cancellationToken);
             if (user is null)
             {
+                await auditPublisher.PublishAsync(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.LoginFailed,
+                    AuthEventTopic.ResourceKind,
+                    resource: new { username },
+                    details: new { reason = "invalid_credentials" },
+                    cancellationToken);
                 return Results.Redirect(BuildLoginRedirect(returnUrl, "invalid", username));
             }
 
@@ -444,15 +485,31 @@ app.MapPost(
                     IssuedUtc = DateTimeOffset.UtcNow
                 });
 
+            await auditPublisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.LoginSucceeded,
+                AuthEventTopic.ResourceKind,
+                resource: new { userId = user.UserId, username = user.Username },
+                details: new { authSource = ManualAuthenticationSource },
+                cancellationToken);
+
             return Results.LocalRedirect(GetSafeReturnUrl(returnUrl));
         })
     .DisableAntiforgery();
 
 app.MapPost(
         "/account/logout",
-        async Task<IResult> (HttpContext context) =>
+        async Task<IResult> (HttpContext context, IAuditEventPublisher auditPublisher) =>
         {
+            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var username = context.User.FindFirstValue(ClaimTypes.Name);
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            await auditPublisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.Logout,
+                AuthEventTopic.ResourceKind,
+                resource: new { userId, username },
+                details: null);
             return Results.Redirect("/");
         })
     .DisableAntiforgery();

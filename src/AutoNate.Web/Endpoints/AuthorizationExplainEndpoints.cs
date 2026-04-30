@@ -1,5 +1,7 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Events;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -17,6 +19,7 @@ public static class AuthorizationExplainEndpoints
         group.MapPost("/", async (
             ExplainRequest request,
             IAuthorizer authorizer,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (!Guid.TryParse(request.AsUserId, out var userId))
@@ -36,6 +39,13 @@ public static class AuthorizationExplainEndpoints
 
             var target = new EntityRef(request.TargetKind, request.TargetId ?? string.Empty);
             var explanation = await authorizer.ExplainAsync(userId, request.Action, target, ct);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.AuthorizationExplained,
+                "authorization.explanation",
+                resource: new { asUserId = userId, action = request.Action, targetKind = request.TargetKind, targetId = request.TargetId },
+                details: new { effect = explanation.Effect.ToString().ToLowerInvariant(), grantCount = explanation.Grants.Count },
+                ct);
 
             return Results.Ok(new ExplainResponse(
                 explanation.Effect.ToString().ToLowerInvariant(),

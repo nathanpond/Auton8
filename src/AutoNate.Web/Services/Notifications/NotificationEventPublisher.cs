@@ -1,7 +1,8 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models.Notifications;
+using AutoNate.Web.Services.Audit;
+using AutoNate.Web.Services.Events;
 using Microsoft.Extensions.Options;
 
 namespace AutoNate.Web.Services.Notifications;
@@ -9,6 +10,19 @@ namespace AutoNate.Web.Services.Notifications;
 public static class NotificationEventTypes
 {
     public const string Created = "notification.created";
+    public const string Read = "notification.read";
+    public const string AllRead = "notification.all.read";
+
+    // View events (Phase 4)
+    public const string ListViewed = "notification.list.viewed";
+    // Per-user 60-second coalesce window — see ViewEventCoalescer.
+    public const string UnreadCountViewed = "notification.unread.count.viewed";
+}
+
+public static class NotificationResourceKinds
+{
+    public const string Notification = "notification";
+    public const string NotificationCollection = "notification.collection";
 }
 
 public sealed record class NotificationEventEnvelope(
@@ -23,7 +37,8 @@ public sealed record class NotificationEventEnvelope(
     string? RelatedEntityKind,
     string? RelatedEntityId,
     string? LinkPath,
-    string SourceAppId);
+    string SourceAppId,
+    AuditContext? AuditContext = null);
 
 public interface INotificationEventPublisher
 {
@@ -37,8 +52,9 @@ public interface INotificationEventPublisher
 // operation — the persisted row in the notifications table is the source of
 // truth, and the SPA picks it up on next REST refresh.
 public sealed class DaprNotificationEventPublisher(
-    IHttpClientFactory httpClientFactory,
     IOptions<DaprOptions> daprOptions,
+    IRequestContext requestContext,
+    IAuditEventOutbox outbox,
     ILogger<DaprNotificationEventPublisher> logger) : INotificationEventPublisher
 {
     public const string TopicRoot = "notification";
@@ -46,7 +62,8 @@ public sealed class DaprNotificationEventPublisher(
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
-        WriteIndented = false
+        WriteIndented = false,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
     };
 
     private readonly DaprOptions _daprOptions = daprOptions.Value;
@@ -59,26 +76,11 @@ public sealed class DaprNotificationEventPublisher(
     {
         ArgumentNullException.ThrowIfNull(notification);
 
-        if (!Uri.TryCreate(_daprOptions.HttpEndpoint, UriKind.Absolute, out var endpoint))
-        {
-            logger.LogWarning(
-                "Skipping notification event {NotificationId}: Dapr HTTP endpoint is not configured.",
-                notification.Id);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_daprOptions.PubSubName))
-        {
-            logger.LogWarning(
-                "Skipping notification event {NotificationId}: Dapr PubSubName is not configured.",
-                notification.Id);
-            return;
-        }
-
+        var occurredAt = DateTimeOffset.UtcNow;
         var envelope = new NotificationEventEnvelope(
             EventId: Guid.NewGuid(),
             EventType: NotificationEventTypes.Created,
-            OccurredAtUtc: DateTimeOffset.UtcNow,
+            OccurredAtUtc: occurredAt,
             NotificationId: notification.Id,
             UserId: notification.UserId,
             Kind: notification.Kind,
@@ -87,37 +89,24 @@ public sealed class DaprNotificationEventPublisher(
             RelatedEntityKind: notification.RelatedEntityKind,
             RelatedEntityId: notification.RelatedEntityId,
             LinkPath: notification.LinkPath,
-            SourceAppId: SourceAppId);
-
-        var pubsub = Uri.EscapeDataString(_daprOptions.PubSubName);
-        var topic = Uri.EscapeDataString(TopicName);
-        var publishUri = new Uri(endpoint, $"/v1.0/publish/{pubsub}/{topic}?metadata.rawPayload=true");
+            SourceAppId: SourceAppId,
+            AuditContext: requestContext.BuildAuditContext(
+                occurredAtUtc: occurredAt,
+                sourceAppId: SourceAppId));
 
         try
         {
-            var payload = JsonSerializer.SerializeToUtf8Bytes(envelope, SerializerOptions);
-            using var content = new ByteArrayContent(payload);
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-
-            var httpClient = httpClientFactory.CreateClient();
-            using var response = await httpClient.PostAsync(publishUri, content, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                logger.LogWarning(
-                    "Dapr publish returned HTTP {StatusCode} for notification {NotificationId}.",
-                    (int)response.StatusCode, notification.Id);
-            }
-            else
-            {
-                logger.LogInformation(
-                    "Published notification.created for {NotificationId} (user {UserId}) to topic {Topic}.",
-                    notification.Id, notification.UserId, TopicName);
-            }
+            var payloadJson = JsonSerializer.Serialize(envelope, SerializerOptions);
+            await outbox.EnqueueAsync(TopicName, envelope.EventType, payloadJson, cancellationToken);
+            logger.LogInformation(
+                "Enqueued notification.created for {NotificationId} (user {UserId}) to topic {Topic}.",
+                notification.Id, notification.UserId, TopicName);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex)
         {
-            logger.LogWarning(ex,
-                "Failed to publish notification event for {NotificationId}.", notification.Id);
+            logger.LogError(ex,
+                "Failed to enqueue notification event for {NotificationId}.", notification.Id);
+            AuditEventPublishMetrics.RecordFailure(TopicName, ex.GetType().Name);
         }
     }
 }

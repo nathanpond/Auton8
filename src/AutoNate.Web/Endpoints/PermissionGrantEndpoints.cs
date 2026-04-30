@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Events;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -13,20 +14,38 @@ public static class PermissionGrantEndpoints
             string? principalKind,
             string? principalId,
             IPermissionGrantStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (!string.IsNullOrEmpty(principalKind) && !string.IsNullOrEmpty(principalId))
             {
-                return Results.Ok(await store.ListForPrincipalAsync(principalKind, principalId, ct));
+                var scoped = await store.ListForPrincipalAsync(principalKind, principalId, ct);
+                await auditPublisher.PublishAsync(
+                    IamEventTopic.TopicName,
+                    IamEventTypes.PermissionGrantListViewed,
+                    IamResourceKinds.PermissionGrant,
+                    resource: null,
+                    details: new { resultCount = scoped.Count, scope = "by-principal", principalKind, principalId },
+                    ct);
+                return Results.Ok(scoped);
             }
 
-            return Results.Ok(await store.ListAsync(ct));
+            var all = await store.ListAsync(ct);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.PermissionGrantListViewed,
+                IamResourceKinds.PermissionGrant,
+                resource: null,
+                details: new { resultCount = all.Count, scope = "all" },
+                ct);
+            return Results.Ok(all);
         });
 
         group.MapPost("/", async (
             CreateGrantRequest request,
             HttpContext http,
             IPermissionGrantStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -40,6 +59,20 @@ public static class PermissionGrantEndpoints
                         request.Effect,
                         request.Priority),
                     ActorId(http), ct);
+                await auditPublisher.PublishAsync(
+                    IamEventTopic.TopicName,
+                    IamEventTypes.PermissionGrantCreated,
+                    IamResourceKinds.PermissionGrant,
+                    resource: new
+                    {
+                        id = grant.Id,
+                        principalKind = request.PrincipalKind,
+                        principalId = request.PrincipalId,
+                        action = request.Action,
+                        effect = request.Effect
+                    },
+                    details: new { selectorString = request.SelectorString, priority = request.Priority },
+                    ct);
                 return Results.Created($"/api/admin/grants/{grant.Id}", grant);
             }
             catch (PermissionGrantValidationException ex)
@@ -48,10 +81,20 @@ public static class PermissionGrantEndpoints
             }
         }).DisableAntiforgery();
 
-        group.MapDelete("/{id:guid}", async (Guid id, IPermissionGrantStore store, CancellationToken ct) =>
+        group.MapDelete("/{id:guid}", async (
+            Guid id, IPermissionGrantStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var deleted = await store.DeleteAsync(id, ct);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            if (!deleted) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.PermissionGrantDeleted,
+                IamResourceKinds.PermissionGrant,
+                resource: new { id },
+                details: null,
+                ct);
+            return Results.NoContent();
         }).DisableAntiforgery();
 
         return app;

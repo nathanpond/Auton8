@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Events;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -19,6 +21,7 @@ public static class AuthEndpoints
             IRoleStore roleStore,
             IRoleAssignmentStore assignments,
             IGroupStore groupStore,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var user = context.User;
@@ -65,6 +68,14 @@ public static class AuthEndpoints
 
             var isSuperAdmin = roleIds.Contains(SystemRoles.SuperAdminId);
 
+            await auditPublisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.MeViewed,
+                AuthEventTopic.ResourceKind,
+                resource: new { userId = userIdRaw, username = user.FindFirstValue(ClaimTypes.Name) },
+                details: new { roleCount = roleSummaries.Length, groupCount = groups.Length, isSuperAdmin },
+                ct);
+
             return Results.Json(new
             {
                 authenticated = true,
@@ -81,9 +92,19 @@ public static class AuthEndpoints
             });
         });
 
-        group.MapPost("/logout", async (HttpContext context) =>
+        group.MapPost("/logout", async (
+            HttpContext context,
+            IAuditEventPublisher auditPublisher) =>
         {
+            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var username = context.User.FindFirstValue(ClaimTypes.Name);
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            await auditPublisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.Logout,
+                AuthEventTopic.ResourceKind,
+                resource: new { userId, username },
+                details: null);
             return Results.Ok();
         })
         .DisableAntiforgery();
@@ -96,6 +117,7 @@ public static class AuthEndpoints
             CheckPermissionsRequest request,
             HttpContext http,
             IAuthorizer authorizer,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (http.User.Identity?.IsAuthenticated != true)
@@ -105,11 +127,14 @@ public static class AuthEndpoints
 
             var checks = request.Checks ?? Array.Empty<CheckPermissionItem>();
             var results = new List<object>(checks.Count);
+            var allowedCount = 0;
+            var deniedCount = 0;
             foreach (var c in checks)
             {
                 var decision = await authorizer.AuthorizeAsync(
                     http.User, c.Action ?? string.Empty,
                     new EntityRef(c.Kind ?? string.Empty, c.Id ?? string.Empty), ct);
+                if (decision.IsAllowed) allowedCount++; else deniedCount++;
                 results.Add(new
                 {
                     kind = c.Kind,
@@ -118,6 +143,14 @@ public static class AuthEndpoints
                     allowed = decision.IsAllowed
                 });
             }
+
+            await auditPublisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.PermissionChecked,
+                AuthEventTopic.ResourceKind,
+                resource: null,
+                details: new { checkCount = checks.Count, allowedCount, deniedCount },
+                ct);
 
             return Results.Json(new { authenticated = true, results });
         }).DisableAntiforgery();

@@ -1,4 +1,6 @@
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Records;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -33,6 +35,12 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
     public PostgresTestDatabase Database => _database;
 
     public StubFlowableClient FlowableStub => Services.GetRequiredService<StubFlowableClient>();
+
+    public RecordingAuditEventPublisher RecordedAuditEvents =>
+        (RecordingAuditEventPublisher)Services.GetRequiredService<IAuditEventPublisher>();
+
+    public RecordingRecordEventPublisher RecordedRecordEvents =>
+        (RecordingRecordEventPublisher)Services.GetRequiredService<IRecordEventPublisher>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -76,6 +84,14 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
             services.RemoveAll<FlowableClient>();
             services.AddSingleton<StubFlowableClient>();
             services.AddSingleton<IFlowableClient>(sp => sp.GetRequiredService<StubFlowableClient>());
+
+            // Replace the live Dapr publisher with a recording one so endpoint
+            // tests can assert on every audit event published. Phase 1 of the
+            // audit-events plan introduced this fixture.
+            services.RemoveAll<IAuditEventPublisher>();
+            services.AddSingleton<IAuditEventPublisher>(_ => new RecordingAuditEventPublisher());
+            services.RemoveAll<IRecordEventPublisher>();
+            services.AddSingleton<IRecordEventPublisher>(_ => new RecordingRecordEventPublisher());
         });
     }
 

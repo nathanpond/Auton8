@@ -5,6 +5,8 @@ using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Events;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,15 +19,25 @@ public static class UserEndpoints
         var group = app.MapGroup("/api/users")
             .RequireAuthorization();
 
-        group.MapGet("/", async (ILocalUserStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/", async (
+            ILocalUserStore store, IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
         {
             var users = await store.ListAsync(cancellationToken);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.UserListViewed,
+                IamResourceKinds.User,
+                resource: null,
+                details: new { resultCount = users.Count },
+                cancellationToken);
             return Results.Ok(users);
         });
 
         group.MapPost("/", async (
             CreateUserRequest request,
             ILocalUserStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var user = await store.CreateAsync(
@@ -35,6 +47,13 @@ public static class UserEndpoints
                 request.Password,
                 request.Email,
                 cancellationToken);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.UserCreated,
+                IamResourceKinds.User,
+                resource: new { id = user.Id, userId = user.UserId, username = user.Username },
+                details: null,
+                cancellationToken);
             return Results.Created($"/api/users/{user.Id}", user);
         }).DisableAntiforgery();
 
@@ -42,6 +61,7 @@ public static class UserEndpoints
             long id,
             UpdateUserRequest request,
             ILocalUserStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var updated = await store.UpdateAsync(
@@ -51,26 +71,52 @@ public static class UserEndpoints
                 request.LastName,
                 request.Email,
                 cancellationToken);
-            return updated is null ? Results.NotFound() : Results.Ok(updated);
+            if (updated is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.UserUpdated,
+                IamResourceKinds.User,
+                resource: new { id = updated.Id, userId = updated.UserId, username = updated.Username },
+                details: null,
+                cancellationToken);
+            return Results.Ok(updated);
         }).DisableAntiforgery();
 
         group.MapPost("/{id:long}/password", async (
             long id,
             ResetPasswordRequest request,
             ILocalUserStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var ok = await store.ResetPasswordAsync(id, request.Password, cancellationToken);
-            return ok ? Results.NoContent() : Results.NotFound();
+            if (!ok) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.UserPasswordReset,
+                IamResourceKinds.User,
+                resource: new { id },
+                details: null,
+                cancellationToken);
+            return Results.NoContent();
         }).DisableAntiforgery();
 
         group.MapDelete("/{id:long}", async (
             long id,
             ILocalUserStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var ok = await store.DeleteAsync(id, cancellationToken);
-            return ok ? Results.NoContent() : Results.NotFound();
+            if (!ok) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.UserDeleted,
+                IamResourceKinds.User,
+                resource: new { id },
+                details: null,
+                cancellationToken);
+            return Results.NoContent();
         }).DisableAntiforgery();
 
         // Supervisor edges. The hierarchy is modeled as entity_edges with
@@ -80,6 +126,7 @@ public static class UserEndpoints
         // PUT replaces it (passing null clears).
         group.MapGet("/supervisors", async (
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -98,12 +145,20 @@ public static class UserEndpoints
                 })
                 .Where(x => x.userId != Guid.Empty && x.supervisorUserId != Guid.Empty)
                 .ToArray();
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.SupervisorsListViewed,
+                IamResourceKinds.Supervisor,
+                resource: null,
+                details: new { resultCount = result.Length },
+                ct);
             return Results.Ok(result);
         });
 
         group.MapGet("/{userId:guid}/supervisor", async (
             Guid userId,
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -116,11 +171,15 @@ public static class UserEndpoints
                 .Select(e => e.FromId)
                 .FirstOrDefaultAsync(ct);
 
-            return Results.Ok(new
-            {
-                userId,
-                supervisorUserId = supervisorIdString is null ? (Guid?)null : Guid.Parse(supervisorIdString)
-            });
+            var supervisorUserId = supervisorIdString is null ? (Guid?)null : Guid.Parse(supervisorIdString);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.SupervisorViewed,
+                IamResourceKinds.Supervisor,
+                resource: new { userId, supervisorUserId },
+                details: null,
+                ct);
+            return Results.Ok(new { userId, supervisorUserId });
         });
 
         group.MapPut("/{userId:guid}/supervisor", async (
@@ -130,6 +189,7 @@ public static class UserEndpoints
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IEntityEdgeWriter writer,
             AuthCacheBumper bumper,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (request.SupervisorUserId == userId)
@@ -166,6 +226,15 @@ public static class UserEndpoints
 
             await db.SaveChangesAsync(ct);
             await bumper.BumpAsync(ct);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                request.SupervisorUserId is null
+                    ? IamEventTypes.SupervisorCleared
+                    : IamEventTypes.SupervisorSet,
+                IamResourceKinds.Supervisor,
+                resource: new { userId, supervisorUserId = request.SupervisorUserId },
+                details: null,
+                ct);
             return Results.NoContent();
         }).DisableAntiforgery();
 

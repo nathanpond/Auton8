@@ -1,8 +1,12 @@
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Services.ApplicationEvents;
+using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
+using AutoNate.Web.Services.SiteSettings;
+using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.Options;
 using NATS.Client.Core;
 using NATS.Client.JetStream;
@@ -46,7 +50,12 @@ public sealed class NatsStreamProvisioner(
             $"{BusWatcherStreamService.TopicRoot}.>",
             $"{DaprRecordEventPublisher.TopicRoot}.>",
             $"{DaprApplicationEventPublisher.TopicRoot}.>",
-            $"{DaprNotificationEventPublisher.TopicRoot}.>"
+            $"{DaprNotificationEventPublisher.TopicRoot}.>",
+            $"{AuthEventTopic.TopicRoot}.>",
+            $"{IamEventTopic.TopicRoot}.>",
+            $"{RecordSchemaEventTopic.TopicRoot}.>",
+            $"{SiteEventTopic.TopicRoot}.>",
+            $"{WorkflowAdminEventTopic.TopicRoot}.>"
         })
         {
             MaxAge = StreamMaxAge

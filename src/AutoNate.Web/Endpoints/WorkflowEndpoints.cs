@@ -1,6 +1,7 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
 
@@ -22,42 +23,86 @@ public static class WorkflowEndpoints
         var group = app.MapGroup("/api/workflows")
             .RequireAuthorization();
 
-        group.MapGet("/", async (IWorkflowModelStore store, IFlowableClient flowable, CancellationToken cancellationToken) =>
+        group.MapGet("/", async (
+            IWorkflowModelStore store, IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var models = await store.ListAsync(cancellationToken);
             var suspendedByKey = await BuildSuspendedMapAsync(flowable, cancellationToken);
             var augmented = models.Select(model => WithRuntimeState(model, suspendedByKey)).ToArray();
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelListViewed,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: null,
+                details: new { resultCount = augmented.Length },
+                cancellationToken);
             return Results.Ok(augmented);
         });
 
-        group.MapGet("/latest", async (IWorkflowModelStore store, IFlowableClient flowable, CancellationToken cancellationToken) =>
+        group.MapGet("/latest", async (
+            IWorkflowModelStore store, IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var model = await store.GetMostRecentAsync(cancellationToken);
             if (model is null) return Results.NotFound();
             var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelLatestViewed,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = augmented.Id, name = augmented.Name, processKey = augmented.ProcessKey },
+                details: null,
+                cancellationToken);
             return Results.Ok(augmented);
         });
 
-        group.MapGet("/{id:guid}", async (Guid id, IWorkflowModelStore store, IFlowableClient flowable, CancellationToken cancellationToken) =>
+        group.MapGet("/{id:guid}", async (
+            Guid id, IWorkflowModelStore store, IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var model = await store.GetAsync(id, cancellationToken);
             if (model is null) return Results.NotFound();
             var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelViewed,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = augmented.Id, name = augmented.Name, processKey = augmented.ProcessKey },
+                details: null,
+                cancellationToken);
             return Results.Ok(augmented);
         });
 
-        group.MapGet("/{id:guid}/versions", async (Guid id, IWorkflowModelStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/{id:guid}/versions", async (
+            Guid id, IWorkflowModelStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var versions = await store.ListVersionsAsync(id, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelVersionsViewed,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id },
+                details: new { resultCount = versions.Count },
+                cancellationToken);
             return Results.Ok(versions);
         });
 
         group.MapPost("/", async (
             WorkflowModel model,
             IWorkflowModelStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var saved = await store.SaveAsync(model, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelSaved,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = saved.Id, name = saved.Name, processKey = saved.ProcessKey },
+                details: null,
+                cancellationToken);
             return Results.Ok(saved);
         }).DisableAntiforgery();
 
@@ -104,6 +149,7 @@ public static class WorkflowEndpoints
             WorkflowModel model,
             IWorkflowModelStore store,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             if (model.Id != id)
@@ -116,6 +162,13 @@ public static class WorkflowEndpoints
             // A fresh deployment is always active in Flowable — null out any
             // stale suspended flag so the SPA shows "Pause" rather than "Resume".
             var augmented = published with { IsSuspended = false };
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelPublished,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = published.Id, name = published.Name, processKey = published.ProcessKey },
+                details: new { deploymentId = deployment.DeploymentId, processDefinitionId = deployment.ProcessDefinitionId },
+                cancellationToken);
             return Results.Ok(new PublishResponse(augmented, deployment));
         }).DisableAntiforgery();
 
@@ -124,6 +177,7 @@ public static class WorkflowEndpoints
             StartInstanceRequest? request,
             IFlowableClient flowable,
             IWorkflowModelStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             // Caller can pass an explicit Name (richer call sites will). When
@@ -142,6 +196,13 @@ public static class WorkflowEndpoints
                 name,
                 request?.Variables,
                 cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelStarted,
+                WorkflowResourceKinds.Execution,
+                resource: new { processKey, processInstanceId = instance.Id, name },
+                details: new { hadVariables = request?.Variables is { Count: > 0 } },
+                cancellationToken);
             return Results.Ok(instance);
         }).DisableAntiforgery();
 
@@ -149,6 +210,7 @@ public static class WorkflowEndpoints
             Guid id,
             IWorkflowModelStore store,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var model = await store.GetAsync(id, cancellationToken);
@@ -160,6 +222,13 @@ public static class WorkflowEndpoints
 
             await flowable.SuspendProcessDefinitionAsync(model.LastDeployment.ProcessDefinitionKey, cancellationToken);
             var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelPaused,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = model.Id, name = model.Name, processKey = model.ProcessKey },
+                details: null,
+                cancellationToken);
             return Results.Ok(augmented);
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowModel, Actions.Pause, "id");
@@ -168,6 +237,7 @@ public static class WorkflowEndpoints
             Guid id,
             IWorkflowModelStore store,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var model = await store.GetAsync(id, cancellationToken);
@@ -179,6 +249,13 @@ public static class WorkflowEndpoints
 
             await flowable.ActivateProcessDefinitionAsync(model.LastDeployment.ProcessDefinitionKey, cancellationToken);
             var augmented = await WithRuntimeStateAsync(flowable, model, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelResumed,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = model.Id, name = model.Name, processKey = model.ProcessKey },
+                details: null,
+                cancellationToken);
             return Results.Ok(augmented);
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowModel, Actions.Pause, "id");

@@ -1,7 +1,6 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
-using AutoNate.Web.Configuration;
-using Microsoft.Extensions.Options;
+using AutoNate.Web.Services.Audit;
+using AutoNate.Web.Services.Events;
 
 namespace AutoNate.Web.Services.Records;
 
@@ -10,7 +9,23 @@ public static class RecordEventTypes
     public const string Created = "record.created";
     public const string Updated = "record.updated";
     public const string Deleted = "record.deleted";
+    public const string Restored = "record.restored";
     public const string StatusChanged = "record.status.changed";
+    public const string AssigneesChanged = "record.assignees.changed";
+
+    // View events (Phase 4). Published from the cross-cutting
+    // IAuditEventPublisher rather than the typed IRecordEventPublisher —
+    // they don't carry the rich record envelope; just resource refs +
+    // summary metadata.
+    public const string Viewed = "record.viewed";
+    public const string ListViewed = "record.list.viewed";
+    public const string Searched = "record.searched";
+    public const string HistoryViewed = "record.history.viewed";
+}
+
+public static class RecordResourceKinds
+{
+    public const string Record = "record";
 }
 
 public sealed record class RecordEventEnvelope(
@@ -27,7 +42,12 @@ public sealed record class RecordEventEnvelope(
     IReadOnlyList<Guid> AssigneeIds,
     bool IsArchived,
     Guid ActorId,
-    string SourceAppId);
+    string SourceAppId,
+    // Phase 1 of the audit-events plan: every envelope carries the shared
+    // AuditContext. Nullable while consumers migrate; populated automatically
+    // by DaprRecordEventPublisher from IRequestContext when callers don't
+    // pre-fill it.
+    AuditContext? AuditContext = null);
 
 public interface IRecordEventPublisher
 {
@@ -41,8 +61,8 @@ public interface IRecordEventPublisher
 // originating store operation — durability is best-effort, like the workflow
 // telemetry topic.
 public sealed class DaprRecordEventPublisher(
-    IHttpClientFactory httpClientFactory,
-    IOptions<DaprOptions> daprOptions,
+    IRequestContext requestContext,
+    IAuditEventOutbox outbox,
     ILogger<DaprRecordEventPublisher> logger) : IRecordEventPublisher
 {
     // Subject prefix shared by every record event topic; the JetStream stream
@@ -52,59 +72,40 @@ public sealed class DaprRecordEventPublisher(
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
-        WriteIndented = false
+        WriteIndented = false,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
     };
-
-    private readonly DaprOptions _daprOptions = daprOptions.Value;
 
     public async Task PublishAsync(RecordEventEnvelope envelope, CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(_daprOptions.HttpEndpoint, UriKind.Absolute, out var endpoint))
-        {
-            logger.LogWarning(
-                "Skipping record event {EventType} for record {RecordId}: Dapr HTTP endpoint is not configured.",
-                envelope.EventType, envelope.RecordId);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_daprOptions.PubSubName))
-        {
-            logger.LogWarning(
-                "Skipping record event {EventType} for record {RecordId}: Dapr PubSubName is not configured.",
-                envelope.EventType, envelope.RecordId);
-            return;
-        }
-
-        var pubsub = Uri.EscapeDataString(_daprOptions.PubSubName);
-        var topic = Uri.EscapeDataString(TopicName);
-        var publishUri = new Uri(endpoint, $"/v1.0/publish/{pubsub}/{topic}?metadata.rawPayload=true");
+        // Stamp the audit context unless the caller has already supplied one.
+        // ActorId from the existing call signature wins over what's in the
+        // claims, so background-service callers that pass a system-actor
+        // sentinel keep that identity.
+        var enriched = envelope.AuditContext is null
+            ? envelope with
+            {
+                AuditContext = requestContext.BuildAuditContext(
+                    actorIdOverride: envelope.ActorId,
+                    occurredAtUtc: envelope.OccurredAtUtc,
+                    sourceAppId: envelope.SourceAppId)
+            }
+            : envelope;
 
         try
         {
-            var payload = JsonSerializer.SerializeToUtf8Bytes(envelope, SerializerOptions);
-            using var content = new ByteArrayContent(payload);
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-
-            var httpClient = httpClientFactory.CreateClient();
-            using var response = await httpClient.PostAsync(publishUri, content, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                logger.LogWarning(
-                    "Dapr publish returned HTTP {StatusCode} for record event {EventType} ({RecordId}).",
-                    (int)response.StatusCode, envelope.EventType, envelope.RecordId);
-            }
-            else
-            {
-                logger.LogInformation(
-                    "Published record event {EventType} for record {RecordId} ({Key}) to topic {Topic}.",
-                    envelope.EventType, envelope.RecordId, envelope.Key, TopicName);
-            }
+            var payloadJson = JsonSerializer.Serialize(enriched, SerializerOptions);
+            await outbox.EnqueueAsync(TopicName, enriched.EventType, payloadJson, cancellationToken);
+            logger.LogInformation(
+                "Enqueued record event {EventType} for record {RecordId} ({Key}) to topic {Topic}.",
+                enriched.EventType, enriched.RecordId, enriched.Key, TopicName);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex)
         {
-            logger.LogWarning(ex,
-                "Failed to publish record event {EventType} for {RecordId}.",
-                envelope.EventType, envelope.RecordId);
+            logger.LogError(ex,
+                "Failed to enqueue record event {EventType} for {RecordId}.",
+                enriched.EventType, enriched.RecordId);
+            AuditEventPublishMetrics.RecordFailure(TopicName, ex.GetType().Name);
         }
     }
 }

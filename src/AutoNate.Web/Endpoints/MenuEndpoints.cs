@@ -2,7 +2,9 @@ using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Menus;
+using AutoNate.Web.Services.SiteSettings;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -18,29 +20,60 @@ public static class MenuEndpoints
             string key,
             HttpContext http,
             IMenuStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var menu = await store.GetMenuTreeForActorAsync(key, http.User, ct);
-            return menu is null ? Results.NotFound() : Results.Ok(menu);
+            if (menu is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.MenuViewed,
+                SiteResourceKinds.Menu,
+                resource: new { key },
+                details: new { scope = "actor" },
+                ct);
+            return Results.Ok(menu);
         });
 
         // Admin write group: only users with site-config edit permissions.
         var adminGroup = app.MapGroup("/api/admin/menus").RequireAuthorization();
 
-        adminGroup.MapGet("/", async (IMenuStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListMenusAsync(ct)))
+        adminGroup.MapGet("/", async (
+            IMenuStore store, IAuditEventPublisher auditPublisher, CancellationToken ct) =>
+            {
+                var menus = await store.ListMenusAsync(ct);
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuListViewed,
+                    SiteResourceKinds.Menu,
+                    resource: null,
+                    details: new { resultCount = menus.Count },
+                    ct);
+                return Results.Ok(menus);
+            })
             .RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
-        adminGroup.MapGet("/{key}", async (string key, IMenuStore store, CancellationToken ct) =>
+        adminGroup.MapGet("/{key}", async (
+            string key, IMenuStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var menu = await store.GetMenuTreeAsync(key, ct);
-            return menu is null ? Results.NotFound() : Results.Ok(menu);
+            if (menu is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.MenuViewed,
+                SiteResourceKinds.Menu,
+                resource: new { key },
+                details: new { scope = "admin" },
+                ct);
+            return Results.Ok(menu);
         }).RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
         adminGroup.MapPost("/", async (
             CreateMenuRequest request,
             HttpContext http,
             IMenuStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -48,6 +81,13 @@ public static class MenuEndpoints
                 var menu = await store.CreateMenuAsync(
                     new CreateMenuInput(request.Key, request.Name, request.Description),
                     ActorId(http), ct);
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuCreated,
+                    SiteResourceKinds.Menu,
+                    resource: new { id = menu.Id, key = menu.Key, name = menu.Name },
+                    details: null,
+                    ct);
                 return Results.Created($"/api/admin/menus/{menu.Key}", menu);
             }
             catch (MenuValidationException ex)
@@ -62,6 +102,7 @@ public static class MenuEndpoints
             UpdateMenuRequest request,
             HttpContext http,
             IMenuStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -69,6 +110,13 @@ public static class MenuEndpoints
                 var menu = await store.UpdateMenuAsync(
                     id, new UpdateMenuInput(request.Name, request.Description),
                     ActorId(http), ct);
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuUpdated,
+                    SiteResourceKinds.Menu,
+                    resource: new { id = menu.Id, key = menu.Key, name = menu.Name },
+                    details: null,
+                    ct);
                 return Results.Ok(menu);
             }
             catch (MenuNotFoundException) { return Results.NotFound(); }
@@ -76,12 +124,22 @@ public static class MenuEndpoints
         }).DisableAntiforgery()
           .RequireKindPermission(EntityKinds.SiteConfig, Actions.Edit);
 
-        adminGroup.MapDelete("/{id:guid}", async (Guid id, IMenuStore store, CancellationToken ct) =>
+        adminGroup.MapDelete("/{id:guid}", async (
+            Guid id, IMenuStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             try
             {
                 var deleted = await store.DeleteMenuAsync(id, ct);
-                return deleted ? Results.NoContent() : Results.NotFound();
+                if (!deleted) return Results.NotFound();
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuDeleted,
+                    SiteResourceKinds.Menu,
+                    resource: new { id },
+                    details: null,
+                    ct);
+                return Results.NoContent();
             }
             catch (MenuValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }).DisableAntiforgery()
@@ -91,6 +149,7 @@ public static class MenuEndpoints
             string key,
             CreateMenuItemRequest request,
             IMenuStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -104,6 +163,13 @@ public static class MenuEndpoints
                     request.Config,
                     request.PermissionRequired,
                     request.IsVisible ?? true), ct);
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuItemCreated,
+                    SiteResourceKinds.MenuItem,
+                    resource: new { id = item.Id, menuKey = key, displayName = item.DisplayName },
+                    details: null,
+                    ct);
                 return Results.Created($"/api/admin/menus/items/{item.Id}", item);
             }
             catch (MenuNotFoundException) { return Results.NotFound(); }
@@ -115,6 +181,7 @@ public static class MenuEndpoints
             Guid id,
             UpdateMenuItemRequest request,
             IMenuStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -133,6 +200,13 @@ public static class MenuEndpoints
                     ClearPermissionRequired = request.ClearPermissionRequired
                 };
                 var item = await store.UpdateItemAsync(id, input, ct);
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuItemUpdated,
+                    SiteResourceKinds.MenuItem,
+                    resource: new { id = item.Id, displayName = item.DisplayName },
+                    details: null,
+                    ct);
                 return Results.Ok(item);
             }
             catch (MenuItemNotFoundException) { return Results.NotFound(); }
@@ -140,12 +214,22 @@ public static class MenuEndpoints
         }).DisableAntiforgery()
           .RequireKindPermission(EntityKinds.SiteConfig, Actions.Edit);
 
-        adminGroup.MapDelete("/items/{id:guid}", async (Guid id, IMenuStore store, CancellationToken ct) =>
+        adminGroup.MapDelete("/items/{id:guid}", async (
+            Guid id, IMenuStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             try
             {
                 var deleted = await store.DeleteItemAsync(id, ct);
-                return deleted ? Results.NoContent() : Results.NotFound();
+                if (!deleted) return Results.NotFound();
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuItemDeleted,
+                    SiteResourceKinds.MenuItem,
+                    resource: new { id },
+                    details: null,
+                    ct);
+                return Results.NoContent();
             }
             catch (MenuValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }).DisableAntiforgery()
@@ -155,6 +239,7 @@ public static class MenuEndpoints
             string key,
             ReplaceTreeRequest request,
             IMenuStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -163,6 +248,13 @@ public static class MenuEndpoints
                     .Select(n => new TreeNodeInput(n.Id, n.ParentId, n.SortOrder))
                     .ToList();
                 await store.ReplaceTreeAsync(key, nodes, ct);
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.MenuTreeReplaced,
+                    SiteResourceKinds.MenuTree,
+                    resource: new { menuKey = key },
+                    details: new { nodeCount = nodes.Count },
+                    ct);
                 return Results.NoContent();
             }
             catch (MenuNotFoundException) { return Results.NotFound(); }

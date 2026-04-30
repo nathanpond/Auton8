@@ -70,6 +70,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<SiteSetting> SiteSettings { get; set; }
 
+    public virtual DbSet<AuditOutboxEntry> AuditOutbox { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -778,6 +780,27 @@ public partial class AutoNateDbContext : DbContext
                 .HasColumnType("jsonb");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<AuditOutboxEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("audit_outbox_pkey");
+            entity.ToTable("audit_outbox");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Topic).HasColumnName("topic");
+            entity.Property(e => e.EventType).HasColumnName("event_type");
+            entity.Property(e => e.PayloadJson).HasColumnName("payload_json");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.DispatchedAtUtc).HasColumnName("dispatched_at_utc");
+            entity.Property(e => e.AttemptCount).HasColumnName("attempt_count");
+            entity.Property(e => e.LastError).HasColumnName("last_error");
+            entity.Property(e => e.NextAttemptAfterUtc).HasColumnName("next_attempt_after_utc");
+
+            // Filtered index for the dispatcher's hot path: only undispatched
+            // rows whose backoff has expired.
+            entity.HasIndex(e => new { e.NextAttemptAfterUtc }, "ix_audit_outbox_pending")
+                .HasFilter("dispatched_at_utc IS NULL");
         });
 
         OnModelCreatingPartial(modelBuilder);

@@ -1,4 +1,6 @@
 using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Events;
 using Microsoft.AspNetCore.Http;
 
 namespace AutoNate.Web.Authorization.EndpointFilters;
@@ -39,6 +41,14 @@ public sealed class RequireKindPermissionFilter : IEndpointFilter
 
         if (!decision.IsAllowed)
         {
+            var auditPublisher = http.RequestServices.GetRequiredService<IAuditEventPublisher>();
+            await auditPublisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.AccessDenied,
+                AuthEventTopic.ResourceKind,
+                resource: new { kind = _kind, id = "*", action = _action },
+                details: new { reason = decision.Reason, scope = "kind" },
+                http.RequestAborted);
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 

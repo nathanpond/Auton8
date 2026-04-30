@@ -3,6 +3,7 @@ using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Records;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 
@@ -79,19 +80,39 @@ public static class RecordEndpoints
             string? sort,
             HttpContext http,
             IRecordStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
             {
+                var resolvedPage = page ?? 0;
+                var resolvedPageSize = pageSize ?? 25;
                 var result = await store.SearchAsync(new RecordSearchInput(
                     recordTypeId,
                     Filters: null,
                     AssigneeId: assigneeId,
                     IncludeArchived: includeArchived ?? false,
-                    Page: page ?? 0,
-                    PageSize: pageSize ?? 25,
+                    Page: resolvedPage,
+                    PageSize: resolvedPageSize,
                     Sort: sort),
                     http.User,
+                    cancellationToken);
+                await auditPublisher.PublishAsync(
+                    DaprRecordEventPublisher.TopicName,
+                    RecordEventTypes.ListViewed,
+                    RecordResourceKinds.Record,
+                    resource: null,
+                    details: new
+                    {
+                        recordTypeId,
+                        page = resolvedPage,
+                        pageSize = resolvedPageSize,
+                        resultCount = result.Records.Count,
+                        totalCount = result.TotalCount,
+                        assigneeId,
+                        includeArchived = includeArchived ?? false,
+                        sort
+                    },
                     cancellationToken);
                 return Results.Ok(ToPageDto(result));
             }
@@ -108,6 +129,7 @@ public static class RecordEndpoints
             string? sort,
             HttpContext http,
             IRecordStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var actorId = GetActorId(http);
@@ -116,27 +138,65 @@ public static class RecordEndpoints
                 return Results.Unauthorized();
             }
 
+            var resolvedPage = page ?? 0;
+            var resolvedPageSize = pageSize ?? 25;
             var result = await store.SearchAssignedAsync(
                 actorId,
-                page ?? 0,
-                pageSize ?? 25,
+                resolvedPage,
+                resolvedPageSize,
                 includeArchived ?? false,
                 sort,
                 http.User,
                 cancellationToken);
+            await auditPublisher.PublishAsync(
+                DaprRecordEventPublisher.TopicName,
+                RecordEventTypes.ListViewed,
+                RecordResourceKinds.Record,
+                resource: null,
+                details: new
+                {
+                    scope = "assigned-to-me",
+                    page = resolvedPage,
+                    pageSize = resolvedPageSize,
+                    resultCount = result.Records.Count,
+                    totalCount = result.TotalCount,
+                    includeArchived = includeArchived ?? false,
+                    sort
+                },
+                cancellationToken);
             return Results.Ok(ToPageDto(result));
         });
 
-        group.MapGet("/{id:guid}", async (Guid id, IRecordStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/{id:guid}", async (
+            Guid id, IRecordStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var record = await store.GetAsync(id, cancellationToken);
-            return record is null ? Results.NotFound() : Results.Ok(ToDto(record));
+            if (record is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                DaprRecordEventPublisher.TopicName,
+                RecordEventTypes.Viewed,
+                RecordResourceKinds.Record,
+                resource: new { recordId = record.Id, key = record.Key, recordTypeId = record.RecordTypeId },
+                details: null,
+                cancellationToken);
+            return Results.Ok(ToDto(record));
         }).RequirePermission(EntityKinds.Record, Actions.View);
 
-        group.MapGet("/by-key/{key}", async (string key, IRecordStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/by-key/{key}", async (
+            string key, IRecordStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var record = await store.GetByKeyAsync(key, cancellationToken);
-            return record is null ? Results.NotFound() : Results.Ok(ToDto(record));
+            if (record is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                DaprRecordEventPublisher.TopicName,
+                RecordEventTypes.Viewed,
+                RecordResourceKinds.Record,
+                resource: new { recordId = record.Id, key = record.Key, recordTypeId = record.RecordTypeId },
+                details: new { lookupBy = "key" },
+                cancellationToken);
+            return Results.Ok(ToDto(record));
         });
 
         group.MapPost("/", async (
@@ -259,9 +319,17 @@ public static class RecordEndpoints
             string? fieldKey,
             int? take,
             IRecordHistoryStore history,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var rows = await history.ListAsync(id, fieldKey, take ?? 100, cancellationToken);
+            await auditPublisher.PublishAsync(
+                DaprRecordEventPublisher.TopicName,
+                RecordEventTypes.HistoryViewed,
+                RecordResourceKinds.Record,
+                resource: new { recordId = id },
+                details: new { fieldKey, take = take ?? 100, resultCount = rows.Count },
+                cancellationToken);
             return Results.Ok(rows.Select(ToDto).ToArray());
         });
 
@@ -269,6 +337,7 @@ public static class RecordEndpoints
             SearchRecordsRequest request,
             HttpContext http,
             IRecordStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
@@ -280,15 +349,40 @@ public static class RecordEndpoints
                         c.Value))
                     .ToList();
 
+                var resolvedPageSize = request.PageSize == 0 ? 25 : request.PageSize;
                 var result = await store.SearchAsync(new RecordSearchInput(
                     request.RecordTypeId,
                     Filters: clauses,
                     AssigneeId: request.AssigneeId,
                     IncludeArchived: request.IncludeArchived,
                     Page: request.Page,
-                    PageSize: request.PageSize == 0 ? 25 : request.PageSize,
+                    PageSize: resolvedPageSize,
                     Sort: request.Sort),
                     http.User,
+                    cancellationToken);
+
+                var (filterHash, filterPreview) = ViewEventFilterHash.Compute(new
+                {
+                    request.Filters,
+                    request.AssigneeId,
+                    request.IncludeArchived,
+                    request.Sort
+                });
+                await auditPublisher.PublishAsync(
+                    DaprRecordEventPublisher.TopicName,
+                    RecordEventTypes.Searched,
+                    RecordResourceKinds.Record,
+                    resource: null,
+                    details: new
+                    {
+                        recordTypeId = request.RecordTypeId,
+                        page = request.Page,
+                        pageSize = resolvedPageSize,
+                        resultCount = result.Records.Count,
+                        totalCount = result.TotalCount,
+                        filterHash,
+                        filterPreview
+                    },
                     cancellationToken);
                 return Results.Ok(ToPageDto(result));
             }

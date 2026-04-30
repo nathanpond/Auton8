@@ -896,3 +896,23 @@ BEGIN
             TRUE, TRUE, NOW(), NOW());
     END IF;
 END $$;
+
+-- Phase 5 of the audit-events plan: durable outbox between event publishers
+-- and the bus. EfCoreAuditEventOutbox writes one row per published event;
+-- AuditOutboxDispatcher polls undispatched rows and posts to Dapr. Mirrored
+-- in DatabaseSchemaInitializer for incremental migrations on existing DBs.
+CREATE TABLE IF NOT EXISTS audit_outbox (
+    id BIGSERIAL PRIMARY KEY,
+    topic TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    dispatched_at_utc TIMESTAMPTZ NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    next_attempt_after_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS ix_audit_outbox_pending
+    ON audit_outbox (next_attempt_after_utc)
+    WHERE dispatched_at_utc IS NULL;

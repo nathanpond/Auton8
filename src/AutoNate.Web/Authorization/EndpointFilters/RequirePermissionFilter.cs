@@ -1,4 +1,6 @@
 using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Events;
 using Microsoft.AspNetCore.Http;
 
 namespace AutoNate.Web.Authorization.EndpointFilters;
@@ -29,6 +31,7 @@ public sealed class RequirePermissionFilter : IEndpointFilter
     {
         var http = invocation.HttpContext;
         var authorizer = http.RequestServices.GetRequiredService<IAuthorizer>();
+        var auditPublisher = http.RequestServices.GetRequiredService<IAuditEventPublisher>();
 
         var id = _idFrom(invocation);
         if (string.IsNullOrEmpty(id))
@@ -36,6 +39,7 @@ public sealed class RequirePermissionFilter : IEndpointFilter
             // Without a target id we can only safely refuse to evaluate.
             // Endpoints that don't carry an id should use a kind-level filter
             // that doesn't reach AuthorizeAsync at all.
+            await PublishDenied(auditPublisher, "*", "missing_target_id", http.RequestAborted);
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
@@ -47,9 +51,23 @@ public sealed class RequirePermissionFilter : IEndpointFilter
 
         if (!decision.IsAllowed)
         {
+            await PublishDenied(auditPublisher, id, decision.Reason, http.RequestAborted);
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
         return await next(invocation);
     }
+
+    private Task PublishDenied(
+        IAuditEventPublisher auditPublisher,
+        string id,
+        string reason,
+        CancellationToken cancellationToken) =>
+        auditPublisher.PublishAsync(
+            AuthEventTopic.TopicName,
+            AuthEventTypes.AccessDenied,
+            AuthEventTopic.ResourceKind,
+            resource: new { kind = _kind, id, action = _action },
+            details: new { reason },
+            cancellationToken);
 }

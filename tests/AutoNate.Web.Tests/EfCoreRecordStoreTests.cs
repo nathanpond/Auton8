@@ -590,10 +590,11 @@ public sealed class EfCoreRecordStoreTests
         Assert.True(deleted.IsArchived);
         Assert.Equal(new[] { "isArchived" }, deleted.ChangedFields);
 
-        // Unarchive → record.updated again (not deleted).
+        // Unarchive → record.restored (Phase 3 of audit-events plan: this used
+        // to fire record.updated; restore now has a distinct event type).
         await store.SetArchivedAsync(created.Id, archived: false, Actor);
         var unarchive = publisher.Events.Last();
-        Assert.Equal(RecordEventTypes.Updated, unarchive.EventType);
+        Assert.Equal(RecordEventTypes.Restored, unarchive.EventType);
         Assert.False(unarchive.IsArchived);
 
         Assert.All(publisher.Events, e =>

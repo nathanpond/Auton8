@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Models.Records;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
 
 namespace AutoNate.Web.Endpoints;
@@ -94,21 +95,40 @@ public static class RecordEdgeEndpoints
         typeGroup.MapGet("/", async (
             bool? includeArchived,
             IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var types = await store.ListAsync(includeArchived ?? false, ct);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordEdgeTypeListViewed,
+                RecordSchemaResourceKinds.RecordEdgeType,
+                resource: null,
+                details: new { resultCount = types.Count, includeArchived = includeArchived ?? false },
+                ct);
             return Results.Ok(types.Select(ToDto).ToList());
         });
 
-        typeGroup.MapGet("/{id:guid}", async (Guid id, IRecordEdgeTypeStore store, CancellationToken ct) =>
+        typeGroup.MapGet("/{id:guid}", async (
+            Guid id, IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var type = await store.GetAsync(id, ct);
-            return type is null ? Results.NotFound() : Results.Ok(ToDto(type));
+            if (type is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordEdgeTypeViewed,
+                RecordSchemaResourceKinds.RecordEdgeType,
+                resource: new { id = type.Id, shortCode = type.ShortCode, name = type.Name },
+                details: null,
+                ct);
+            return Results.Ok(ToDto(type));
         });
 
         typeGroup.MapPost("/", async (
             CreateEdgeTypeRequest request,
             IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -122,6 +142,13 @@ public static class RecordEdgeEndpoints
                     request.Cardinality,
                     request.FromRecordTypeIds,
                     request.ToRecordTypeIds), ct);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordEdgeTypeCreated,
+                    RecordSchemaResourceKinds.RecordEdgeType,
+                    resource: new { id = created.Id, shortCode = created.ShortCode, name = created.Name },
+                    details: null,
+                    ct);
                 return Results.Created($"/api/record-edge-types/{created.Id}", ToDto(created));
             }
             catch (RecordEdgeValidationException ex)
@@ -134,6 +161,7 @@ public static class RecordEdgeEndpoints
             Guid id,
             UpdateEdgeTypeRequest request,
             IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -146,6 +174,13 @@ public static class RecordEdgeEndpoints
                     request.Cardinality,
                     request.FromRecordTypeIds,
                     request.ToRecordTypeIds), ct);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordEdgeTypeUpdated,
+                    RecordSchemaResourceKinds.RecordEdgeType,
+                    resource: new { id = updated.Id, shortCode = updated.ShortCode, name = updated.Name },
+                    details: null,
+                    ct);
                 return Results.Ok(ToDto(updated));
             }
             catch (RecordEdgeTypeNotFoundException)
@@ -158,29 +193,56 @@ public static class RecordEdgeEndpoints
             }
         }).DisableAntiforgery();
 
-        typeGroup.MapDelete("/{id:guid}", async (Guid id, IRecordEdgeTypeStore store, CancellationToken ct) =>
+        typeGroup.MapDelete("/{id:guid}", async (
+            Guid id, IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             try
             {
                 var archived = await store.SetArchivedAsync(id, true, ct);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordEdgeTypeArchived,
+                    RecordSchemaResourceKinds.RecordEdgeType,
+                    resource: new { id = archived.Id, shortCode = archived.ShortCode, name = archived.Name },
+                    details: null,
+                    ct);
                 return Results.Ok(ToDto(archived));
             }
             catch (RecordEdgeTypeNotFoundException) { return Results.NotFound(); }
         }).DisableAntiforgery();
 
-        typeGroup.MapPost("/{id:guid}/restore", async (Guid id, IRecordEdgeTypeStore store, CancellationToken ct) =>
+        typeGroup.MapPost("/{id:guid}/restore", async (
+            Guid id, IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             try
             {
                 var restored = await store.SetArchivedAsync(id, false, ct);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordEdgeTypeRestored,
+                    RecordSchemaResourceKinds.RecordEdgeType,
+                    resource: new { id = restored.Id, shortCode = restored.ShortCode, name = restored.Name },
+                    details: null,
+                    ct);
                 return Results.Ok(ToDto(restored));
             }
             catch (RecordEdgeTypeNotFoundException) { return Results.NotFound(); }
         }).DisableAntiforgery();
 
-        typeGroup.MapGet("/{id:guid}/fields", async (Guid id, IRecordEdgeTypeStore store, CancellationToken ct) =>
+        typeGroup.MapGet("/{id:guid}/fields", async (
+            Guid id, IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var fields = await store.ListFieldsAsync(id, ct);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordEdgeTypeFieldListViewed,
+                RecordSchemaResourceKinds.RecordEdgeTypeField,
+                resource: new { edgeTypeId = id },
+                details: new { resultCount = fields.Count },
+                ct);
             return Results.Ok(fields.Select(ToDto).ToList());
         });
 
@@ -188,6 +250,7 @@ public static class RecordEdgeEndpoints
             Guid id,
             CreateEdgeFieldRequest request,
             IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -199,6 +262,13 @@ public static class RecordEdgeEndpoints
                     request.Config,
                     request.IsRequired,
                     request.SortOrder), ct);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordEdgeTypeFieldCreated,
+                    RecordSchemaResourceKinds.RecordEdgeTypeField,
+                    resource: new { id = created.Id, edgeTypeId = id, fieldKey = created.FieldKey, dataType = created.DataType },
+                    details: null,
+                    ct);
                 return Results.Created($"/api/record-edge-types/{id}/fields/{created.Id}", ToDto(created));
             }
             catch (RecordEdgeTypeNotFoundException) { return Results.NotFound(); }
@@ -210,6 +280,7 @@ public static class RecordEdgeEndpoints
             Guid fieldId,
             UpdateEdgeFieldRequest request,
             IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -219,6 +290,13 @@ public static class RecordEdgeEndpoints
                     request.Config,
                     request.IsRequired,
                     request.SortOrder), ct);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordEdgeTypeFieldUpdated,
+                    RecordSchemaResourceKinds.RecordEdgeTypeField,
+                    resource: new { id = updated.Id, edgeTypeId = id, fieldKey = updated.FieldKey },
+                    details: null,
+                    ct);
                 return Results.Ok(ToDto(updated));
             }
             catch (RecordEdgeValidationException ex) { return Results.BadRequest(new { message = ex.Message }); }
@@ -228,9 +306,17 @@ public static class RecordEdgeEndpoints
             Guid id,
             Guid fieldId,
             IRecordEdgeTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             await store.DeleteFieldAsync(id, fieldId, ct);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordEdgeTypeFieldDeleted,
+                RecordSchemaResourceKinds.RecordEdgeTypeField,
+                resource: new { id = fieldId, edgeTypeId = id },
+                details: null,
+                ct);
             return Results.NoContent();
         }).DisableAntiforgery();
 
@@ -241,6 +327,7 @@ public static class RecordEdgeEndpoints
             CreateEdgeRequest request,
             HttpContext http,
             IRecordEdgeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             try
@@ -250,15 +337,37 @@ public static class RecordEdgeEndpoints
                     request.FromRecordId,
                     request.ToRecordId,
                     request.Data), GetActorId(http), ct);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordEdgeCreated,
+                    RecordSchemaResourceKinds.RecordEdge,
+                    resource: new
+                    {
+                        id = created.Id,
+                        edgeTypeId = created.EdgeTypeId,
+                        fromRecordId = created.FromRecordId,
+                        toRecordId = created.ToRecordId
+                    },
+                    details: null,
+                    ct);
                 return Results.Created($"/api/record-edges/{created.Id}", ToDto(created));
             }
             catch (RecordEdgeTypeNotFoundException) { return Results.NotFound(); }
             catch (RecordEdgeValidationException ex) { return Results.BadRequest(new { message = ex.Message }); }
         }).DisableAntiforgery();
 
-        edgeGroup.MapDelete("/{id:guid}", async (Guid id, IRecordEdgeStore store, CancellationToken ct) =>
+        edgeGroup.MapDelete("/{id:guid}", async (
+            Guid id, IRecordEdgeStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             await store.DeleteAsync(id, ct);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordEdgeDeleted,
+                RecordSchemaResourceKinds.RecordEdge,
+                resource: new { id },
+                details: null,
+                ct);
             return Results.NoContent();
         }).DisableAntiforgery();
 
@@ -271,10 +380,18 @@ public static class RecordEdgeEndpoints
             string? direction,
             Guid? edgeTypeId,
             IRecordEdgeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var dir = ParseDirection(direction);
             var edges = await store.ListForRecordAsync(id, dir, edgeTypeId, ct);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordEdgeListViewed,
+                RecordSchemaResourceKinds.RecordEdge,
+                resource: new { recordId = id },
+                details: new { direction = dir.ToString(), edgeTypeId, resultCount = edges.Count },
+                ct);
             return Results.Ok(edges.Select(ToDto).ToArray());
         });
 
@@ -282,6 +399,7 @@ public static class RecordEdgeEndpoints
             Guid id,
             TraverseHttpRequest request,
             IRecordEdgeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var startIds = request.StartRecordIds is { Length: > 0 }
@@ -293,6 +411,20 @@ public static class RecordEdgeEndpoints
                 request.EdgeTypeIds,
                 dir,
                 request.MaxHops ?? 1), ct);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordEdgeTraversed,
+                RecordSchemaResourceKinds.RecordEdge,
+                resource: new { recordId = id },
+                details: new
+                {
+                    startCount = startIds.Length,
+                    edgeTypeIds = request.EdgeTypeIds,
+                    direction = dir.ToString(),
+                    maxHops = request.MaxHops ?? 1,
+                    resultCount = rows.Count
+                },
+                ct);
             return Results.Ok(rows.Select(r => new TraverseResultDto(r.RecordId, r.Hops)).ToArray());
         }).DisableAntiforgery();
 

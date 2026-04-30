@@ -23,6 +23,8 @@ Add a `const string` to `RecordEventTypes`. Use the dotted convention: `record.<
 ### 2. Update the envelope if the schema is changing
 Same file: extend `RecordEventEnvelope` with the new field. Keep ordering positional — every existing call site uses positional args. Field naming on the wire is camelCase via `JsonSerializerDefaults.Web`; pick a C# PascalCase name that maps cleanly.
 
+**Don't re-add audit-context fields**: every event already carries a nested `auditContext` (actorId, ipAddress, userAgent, requestId, correlationId, httpMethod, routePath, authOutcome, etc.) populated automatically by `DaprRecordEventPublisher` via `IRequestContext`. New top-level fields should be record-domain payload, not request-context.
+
 ### 3. Document the event in the catalog
 File: `src/AutoNate.Web/Services/Events/EventCatalog.cs`
 
@@ -38,7 +40,7 @@ File: `src/AutoNate.Web/Services/Records/EfCoreRecordStore.cs`
 
 Search for existing `await eventPublisher.PublishAsync(new RecordEventEnvelope(...))` calls — there are four (Created, Updated, StatusChanged, Deleted/Updated-on-restore). Add the new emit *after the EF transaction commits*, not before. Failures inside `PublishAsync` are logged but don't roll back; do not change that contract.
 
-The `ActorId` should come from the same `ClaimsPrincipal`-derived id the surrounding method uses; `SourceAppId` is `_sourceAppId` (the field on the store, derived from `DaprOptions.AppId`).
+The `ActorId` should come from the same `ClaimsPrincipal`-derived id the surrounding method uses; `SourceAppId` is `_sourceAppId` (the field on the store, derived from `DaprOptions.AppId`). Leave the `AuditContext` parameter as default — `DaprRecordEventPublisher` fills it in from `IRequestContext`.
 
 ### 5. Add tests
 - Unit test the emit path with a fake `IRecordEventPublisher` (look at the existing record store tests for the pattern; they capture envelopes into a list).

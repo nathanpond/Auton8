@@ -1,4 +1,6 @@
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Events;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -11,7 +13,7 @@ public static class RegistryEndpoints
     {
         var group = app.MapGroup("/api/admin/registry").RequireAuthorization();
 
-        group.MapGet("/", (IEntityRegistry registry) =>
+        group.MapGet("/", async (IEntityRegistry registry, IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var kinds = registry.All
                 .OrderBy(t => t.Kind, StringComparer.Ordinal)
@@ -22,6 +24,13 @@ public static class RegistryEndpoints
                     tags = t.Tags.OrderBy(g => g, StringComparer.Ordinal).ToArray()
                 })
                 .ToArray();
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.RegistryViewed,
+                "registry",
+                resource: null,
+                details: new { kindCount = kinds.Length },
+                ct);
             return Results.Ok(new { kinds });
         });
 

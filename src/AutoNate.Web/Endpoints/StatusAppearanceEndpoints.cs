@@ -3,6 +3,8 @@ using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
+using AutoNate.Web.Services.Events;
+using AutoNate.Web.Services.SiteSettings;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
@@ -13,7 +15,8 @@ public static class StatusAppearanceEndpoints
     {
         var group = app.MapGroup("/api/admin/status-appearance").RequireAuthorization();
 
-        group.MapGet("/", async (AutoNateDbContext db, CancellationToken ct) =>
+        group.MapGet("/", async (
+            AutoNateDbContext db, IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var entries = await db.StatusAppearanceEntries
                 .AsNoTracking()
@@ -26,6 +29,13 @@ public static class StatusAppearanceEndpoints
                     x.CreatedAtUtc,
                     x.UpdatedAtUtc))
                 .ToListAsync(ct);
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.StatusAppearanceListViewed,
+                SiteResourceKinds.StatusAppearance,
+                resource: null,
+                details: new { resultCount = entries.Count },
+                ct);
             return Results.Ok(entries);
         }).RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
@@ -33,6 +43,7 @@ public static class StatusAppearanceEndpoints
             CreateStatusAppearanceRequest request,
             HttpContext http,
             AutoNateDbContext db,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var status = request.Status.Trim();
@@ -69,6 +80,13 @@ public static class StatusAppearanceEndpoints
 
             db.StatusAppearanceEntries.Add(entry);
             await db.SaveChangesAsync(ct);
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.StatusAppearanceCreated,
+                SiteResourceKinds.StatusAppearance,
+                resource: new { id = entry.Id, status = entry.Status, color = entry.Color },
+                details: null,
+                ct);
 
             return Results.Created($"/api/admin/status-appearance/{entry.Id}", new StatusAppearanceDto(
                 entry.Id,
@@ -84,6 +102,7 @@ public static class StatusAppearanceEndpoints
             UpdateStatusAppearanceRequest request,
             HttpContext http,
             AutoNateDbContext db,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var entry = await db.StatusAppearanceEntries.FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -114,6 +133,13 @@ public static class StatusAppearanceEndpoints
             entry.UpdatedAtUtc = DateTime.UtcNow;
             entry.UpdatedBy = ActorId(http);
             await db.SaveChangesAsync(ct);
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.StatusAppearanceUpdated,
+                SiteResourceKinds.StatusAppearance,
+                resource: new { id = entry.Id, status = entry.Status, color = entry.Color },
+                details: null,
+                ct);
 
             return Results.Ok(new StatusAppearanceDto(
                 entry.Id,
@@ -124,13 +150,22 @@ public static class StatusAppearanceEndpoints
         }).DisableAntiforgery()
           .RequireKindPermission(EntityKinds.SiteConfig, Actions.Edit);
 
-        group.MapDelete("/{id:guid}", async (Guid id, AutoNateDbContext db, CancellationToken ct) =>
+        group.MapDelete("/{id:guid}", async (
+            Guid id, AutoNateDbContext db,
+            IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var entry = await db.StatusAppearanceEntries.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (entry is null) return Results.NotFound();
 
             db.StatusAppearanceEntries.Remove(entry);
             await db.SaveChangesAsync(ct);
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.StatusAppearanceDeleted,
+                SiteResourceKinds.StatusAppearance,
+                resource: new { id, status = entry.Status },
+                details: null,
+                ct);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequireKindPermission(EntityKinds.SiteConfig, Actions.Delete);

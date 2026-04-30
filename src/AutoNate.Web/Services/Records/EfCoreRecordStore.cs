@@ -629,6 +629,25 @@ public sealed class EfCoreRecordStore(
                 SourceAppId: _sourceAppId), cancellationToken);
         }
 
+        if (changedFields.Contains("assigneeIds"))
+        {
+            await eventPublisher.PublishAsync(new RecordEventEnvelope(
+                EventId: Guid.NewGuid(),
+                EventType: RecordEventTypes.AssigneesChanged,
+                OccurredAtUtc: now,
+                RecordId: entity.Id,
+                Key: entity.Key,
+                RecordTypeId: entity.RecordTypeId,
+                Name: entity.Name,
+                Status: entity.Status,
+                PreviousStatus: null,
+                ChangedFields: new[] { "assigneeIds" },
+                AssigneeIds: entity.AssigneeIds,
+                IsArchived: entity.IsArchived,
+                ActorId: actorId,
+                SourceAppId: _sourceAppId), cancellationToken);
+        }
+
         if (assigneeEdgeOld is not null && assigneeEdgeNew is not null)
         {
             var addedAssignees = assigneeEdgeNew.Except(assigneeEdgeOld).ToArray();
@@ -675,7 +694,7 @@ public sealed class EfCoreRecordStore(
 
         await eventPublisher.PublishAsync(new RecordEventEnvelope(
             EventId: Guid.NewGuid(),
-            EventType: archived ? RecordEventTypes.Deleted : RecordEventTypes.Updated,
+            EventType: archived ? RecordEventTypes.Deleted : RecordEventTypes.Restored,
             OccurredAtUtc: now,
             RecordId: entity.Id,
             Key: entity.Key,

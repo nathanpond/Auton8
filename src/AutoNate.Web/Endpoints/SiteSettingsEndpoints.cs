@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.SiteSettings;
 
 namespace AutoNate.Web.Endpoints;
@@ -39,12 +40,20 @@ public static class SiteSettingsEndpoints
 
         var adminGroup = app.MapGroup("/api/admin/site-settings").RequireAuthorization();
 
-        adminGroup.MapGet("/", async (ISiteSettingsStore store, CancellationToken ct) =>
+        adminGroup.MapGet("/", async (
+            ISiteSettingsStore store, IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
             var values = await store.GetAllAsync(ct);
             var dto = new AdminSiteSettingsDto(
                 SiteSettingsRegistry.All.Select(ToDto).ToArray(),
                 values.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.SettingsListViewed,
+                SiteResourceKinds.Settings,
+                resource: null,
+                details: new { settingCount = values.Count },
+                ct);
             return Results.Ok(dto);
         }).RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
@@ -52,6 +61,7 @@ public static class SiteSettingsEndpoints
             UpdateSiteSettingsRequest request,
             HttpContext http,
             ISiteSettingsStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (request?.Updates is null || request.Updates.Count == 0)
@@ -78,6 +88,13 @@ public static class SiteSettingsEndpoints
             }
 
             await store.ApplyUpdatesAsync(validated, GetActorId(http), ct);
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.SettingsUpdated,
+                SiteResourceKinds.Settings,
+                resource: null,
+                details: new { keys = validated.Keys.ToArray(), count = validated.Count },
+                ct);
 
             var values = await store.GetAllAsync(ct);
             return Results.Ok(new AdminSiteSettingsDto(

@@ -4,6 +4,8 @@ using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
+using AutoNate.Web.Services.Events;
+using AutoNate.Web.Services.SiteSettings;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
@@ -21,14 +23,26 @@ public static partial class SiteAppearanceEndpoints
 
         var adminGroup = app.MapGroup("/api/admin/appearance").RequireAuthorization();
 
-        adminGroup.MapGet("/", async (AutoNateDbContext db, CancellationToken ct) =>
-            Results.Ok(await GetDtoAsync(db, ct)))
+        adminGroup.MapGet("/", async (
+            AutoNateDbContext db, IAuditEventPublisher auditPublisher, CancellationToken ct) =>
+            {
+                var dto = await GetDtoAsync(db, ct);
+                await auditPublisher.PublishAsync(
+                    SiteEventTopic.TopicName,
+                    SiteEventTypes.AppearanceViewed,
+                    SiteResourceKinds.Appearance,
+                    resource: new { siteName = dto.SiteName, logoMode = dto.LogoMode },
+                    details: null,
+                    ct);
+                return Results.Ok(dto);
+            })
             .RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
         adminGroup.MapPatch("/", async (
             UpdateSiteAppearanceRequest request,
             HttpContext http,
             AutoNateDbContext db,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             var validationError = Validate(request);
@@ -49,6 +63,13 @@ public static partial class SiteAppearanceEndpoints
 
             Apply(entity, request, GetActorId(http));
             await db.SaveChangesAsync(ct);
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.AppearanceUpdated,
+                SiteResourceKinds.Appearance,
+                resource: new { siteName = entity.SiteName, logoMode = entity.LogoMode },
+                details: null,
+                ct);
             return Results.Ok(ToDto(entity));
         }).DisableAntiforgery()
           .RequireKindPermission(EntityKinds.SiteConfig, Actions.Edit);

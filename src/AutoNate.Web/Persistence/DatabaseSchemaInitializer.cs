@@ -1442,6 +1442,30 @@ internal static class DatabaseSchemaInitializer
             ON notifications (user_id, is_read);
         """;
 
+    // Phase 5 of the audit-events plan: durable outbox between event publishers
+    // and Dapr/NATS. EfCoreAuditEventOutbox writes one row per published event
+    // in its own transaction (post-domain-commit, no atomic enqueue today —
+    // that's a future refactor). AuditOutboxDispatcher polls undispatched rows
+    // with FOR UPDATE SKIP LOCKED, posts to Dapr, and marks them dispatched.
+    private const string AuditOutboxSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS audit_outbox (
+            id BIGSERIAL PRIMARY KEY,
+            topic TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            dispatched_at_utc TIMESTAMPTZ NULL,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT NULL,
+            next_attempt_after_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_audit_outbox_pending
+            ON audit_outbox (next_attempt_after_utc)
+            WHERE dispatched_at_utc IS NULL;
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -1469,6 +1493,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

@@ -5,6 +5,7 @@ using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
@@ -21,9 +22,17 @@ public static class ExecutionEndpoints
         executions.MapGet("/", async (
             IFlowableClient flowable,
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var list = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionListViewed,
+                WorkflowResourceKinds.Execution,
+                resource: null,
+                details: new { resultCount = list.Count },
+                cancellationToken);
             if (list.Count == 0)
             {
                 return Results.Ok(list);
@@ -62,6 +71,7 @@ public static class ExecutionEndpoints
             string processInstanceId,
             IFlowableClient flowable,
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var detail = await flowable.GetWorkflowExecutionDiagramDetailAsync(processInstanceId, cancellationToken);
@@ -72,6 +82,14 @@ public static class ExecutionEndpoints
                 .Select(e => e.ActivityId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionDiagramViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { failedActivityCount = failedActivityIds.Count },
+                cancellationToken);
 
             if (failedActivityIds.Count == 0)
             {
@@ -85,9 +103,17 @@ public static class ExecutionEndpoints
             string processInstanceId,
             IFlowableClient flowable,
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var history = await flowable.GetWorkflowExecutionHistoryAsync(processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionHistoryViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = history.Count },
+                cancellationToken);
 
             var completedTaskIds = history
                 .Where(e => !string.IsNullOrWhiteSpace(e.TaskId) && e.EndedAtUtc is not null)
@@ -211,9 +237,17 @@ public static class ExecutionEndpoints
             string processInstanceId,
             IFlowableClient flowable,
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var log = await flowable.GetWorkflowExecutionLogAsync(processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionLogViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = log.Count },
+                cancellationToken);
 
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -293,9 +327,17 @@ public static class ExecutionEndpoints
         executions.MapGet("/{processInstanceId}/tasks", async (
             string processInstanceId,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var tasks = await flowable.GetTasksByProcessInstanceAsync(processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionTasksViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = tasks.Count },
+                cancellationToken);
             return Results.Ok(tasks);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
@@ -303,9 +345,17 @@ public static class ExecutionEndpoints
             string processInstanceId,
             string activityId,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var assignees = await flowable.GetCompletedAssigneesForActivityAsync(processInstanceId, activityId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionCompletedAssigneesViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId, activityId },
+                details: new { resultCount = assignees.Count },
+                cancellationToken);
             return Results.Ok(assignees);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
@@ -313,9 +363,17 @@ public static class ExecutionEndpoints
             string processInstanceId,
             UpdateProcessVariablesRequest request,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.UpdateProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionVariablesSet,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { variableCount = request.Variables.Count, names = request.Variables.Select(v => v.Name).ToArray() },
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -324,9 +382,17 @@ public static class ExecutionEndpoints
             string processInstanceId,
             UpdateProcessVariablesRequest request,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.AddProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionVariablesAdded,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { variableCount = request.Variables.Count, names = request.Variables.Select(v => v.Name).ToArray() },
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -338,6 +404,7 @@ public static class ExecutionEndpoints
             HttpContext http,
             IFlowableClient flowable,
             WorkflowTaskCompletionRecorder completionRecorder,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
@@ -347,6 +414,13 @@ public static class ExecutionEndpoints
             {
                 await completionRecorder.RecordAsync(taskId, actorId, wasOverride: true, cancellationToken);
             }
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.TaskForceCompleted,
+                WorkflowResourceKinds.Task,
+                resource: new { processInstanceId, taskId },
+                details: new { hadVariables = request?.Variables is { Count: > 0 } },
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -356,9 +430,17 @@ public static class ExecutionEndpoints
             string taskId,
             ReassignTaskRequest request,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.UpdateTaskAssigneeAsync(taskId, request.Assignee, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.TaskReassigned,
+                WorkflowResourceKinds.Task,
+                resource: new { processInstanceId, taskId, assignee = request.Assignee },
+                details: null,
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -368,9 +450,17 @@ public static class ExecutionEndpoints
             string taskId,
             UpdateTaskDueDateRequest request,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.UpdateTaskDueDateAsync(taskId, request.DueDate, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.TaskDueDateChanged,
+                WorkflowResourceKinds.Task,
+                resource: new { processInstanceId, taskId, dueDate = request.DueDate },
+                details: null,
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
@@ -379,6 +469,7 @@ public static class ExecutionEndpoints
             string processInstanceId,
             MoveExecutionStateRequest request,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.TargetActivityId))
@@ -387,6 +478,13 @@ public static class ExecutionEndpoints
             }
 
             await flowable.MoveWorkflowExecutionStateAsync(processInstanceId, request.TargetActivityId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionStateMoved,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId, targetActivityId = request.TargetActivityId },
+                details: null,
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.MoveState, "processInstanceId");
@@ -394,9 +492,17 @@ public static class ExecutionEndpoints
         executions.MapPost("/{processInstanceId}/cancel", async (
             string processInstanceId,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.CancelWorkflowExecutionAsync(processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionCancelled,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: null,
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Cancel, "processInstanceId");
@@ -404,9 +510,17 @@ public static class ExecutionEndpoints
         executions.MapDelete("/{processInstanceId}", async (
             string processInstanceId,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.DeleteWorkflowExecutionAsync(processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionDeleted,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: null,
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Delete, "processInstanceId");
@@ -415,9 +529,17 @@ public static class ExecutionEndpoints
         // admin page to clear noise during signal-event debugging.
         executions.MapPost("/delete-all", async (
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var deleted = await flowable.DeleteAllWorkflowExecutionsAsync(cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionsBulkDeleted,
+                WorkflowResourceKinds.Execution,
+                resource: null,
+                details: new { deletedCount = deleted },
+                cancellationToken);
             return Results.Ok(new { deleted });
         }).DisableAntiforgery()
           .RequireKindPermission(EntityKinds.WorkflowExecution, Actions.DeleteAll);
@@ -428,6 +550,7 @@ public static class ExecutionEndpoints
         tasks.MapGet("/assigned-to-me", async (
             HttpContext http,
             IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -437,6 +560,13 @@ public static class ExecutionEndpoints
             }
 
             var list = await flowable.GetTasksAssignedToUserAsync(actorId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.TasksAssignedToMeViewed,
+                WorkflowResourceKinds.Task,
+                resource: null,
+                details: new { resultCount = list.Count },
+                cancellationToken);
             return Results.Ok(list);
         });
 
@@ -449,6 +579,7 @@ public static class ExecutionEndpoints
             HttpContext http,
             IFlowableClient flowable,
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var actorId = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -470,6 +601,13 @@ public static class ExecutionEndpoints
             users.AddRange(supervisees);
 
             var list = await flowable.GetTasksAssignedToUsersAsync(users, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.TasksVisibleToMeViewed,
+                WorkflowResourceKinds.Task,
+                resource: null,
+                details: new { resultCount = list.Count, includesSupervisedCount = supervisees.Count },
+                cancellationToken);
             return Results.Ok(list);
         });
 
@@ -479,6 +617,7 @@ public static class ExecutionEndpoints
             HttpContext http,
             IFlowableClient flowable,
             WorkflowTaskCompletionRecorder completionRecorder,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             await flowable.CompleteTaskAsync(taskId, request?.Variables, cancellationToken);
@@ -488,6 +627,13 @@ public static class ExecutionEndpoints
             {
                 await completionRecorder.RecordAsync(taskId, actorId, wasOverride: false, cancellationToken);
             }
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.TaskCompleted,
+                WorkflowResourceKinds.Task,
+                resource: new { taskId },
+                details: new { hadVariables = request?.Variables is { Count: > 0 } },
+                cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowTask, Actions.Complete, "taskId");

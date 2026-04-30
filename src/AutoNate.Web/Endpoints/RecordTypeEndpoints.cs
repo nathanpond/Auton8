@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Models.Records;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 
@@ -87,22 +88,42 @@ public static class RecordTypeEndpoints
             return Results.Ok(items);
         });
 
-        group.MapGet("/", async (bool? includeArchived, IRecordTypeStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/", async (
+            bool? includeArchived, IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var types = await store.ListAsync(includeArchived ?? false, cancellationToken);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordTypeListViewed,
+                RecordSchemaResourceKinds.RecordType,
+                resource: null,
+                details: new { resultCount = types.Count, includeArchived = includeArchived ?? false },
+                cancellationToken);
             return Results.Ok(types.Select(ToDto).ToList());
         });
 
-        group.MapGet("/{id:guid}", async (Guid id, IRecordTypeStore store, CancellationToken cancellationToken) =>
+        group.MapGet("/{id:guid}", async (
+            Guid id, IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var model = await store.GetAsync(id, cancellationToken);
-            return model is null ? Results.NotFound() : Results.Ok(ToDto(model));
+            if (model is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordTypeViewed,
+                RecordSchemaResourceKinds.RecordType,
+                resource: new { id = model.Id, shortCode = model.ShortCode, name = model.Name },
+                details: null,
+                cancellationToken);
+            return Results.Ok(ToDto(model));
         });
 
         group.MapPost("/", async (
             CreateRecordTypeRequest request,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
@@ -110,6 +131,13 @@ public static class RecordTypeEndpoints
                 var created = await store.CreateAsync(
                     new CreateRecordTypeInput(request.ShortCode, request.Name, request.Description, request.Icon, request.Color),
                     GetActorId(http),
+                    cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeCreated,
+                    RecordSchemaResourceKinds.RecordType,
+                    resource: new { id = created.Id, shortCode = created.ShortCode, name = created.Name },
+                    details: null,
                     cancellationToken);
                 return Results.Created($"/api/record-types/{created.Id}", ToDto(created));
             }
@@ -124,6 +152,7 @@ public static class RecordTypeEndpoints
             UpdateRecordTypeRequest request,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
@@ -132,6 +161,13 @@ public static class RecordTypeEndpoints
                     id,
                     new UpdateRecordTypeInput(request.Name, request.Description, request.Icon, request.Color),
                     GetActorId(http),
+                    cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeUpdated,
+                    RecordSchemaResourceKinds.RecordType,
+                    resource: new { id = updated.Id, shortCode = updated.ShortCode, name = updated.Name },
+                    details: null,
                     cancellationToken);
                 return Results.Ok(ToDto(updated));
             }
@@ -149,11 +185,19 @@ public static class RecordTypeEndpoints
             Guid id,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var archived = await store.SetArchivedAsync(id, archived: true, GetActorId(http), cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeArchived,
+                    RecordSchemaResourceKinds.RecordType,
+                    resource: new { id = archived.Id, shortCode = archived.ShortCode, name = archived.Name },
+                    details: null,
+                    cancellationToken);
                 return Results.Ok(ToDto(archived));
             }
             catch (RecordTypeNotFoundException)
@@ -166,11 +210,19 @@ public static class RecordTypeEndpoints
             Guid id,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var restored = await store.SetArchivedAsync(id, archived: false, GetActorId(http), cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeRestored,
+                    RecordSchemaResourceKinds.RecordType,
+                    resource: new { id = restored.Id, shortCode = restored.ShortCode, name = restored.Name },
+                    details: null,
+                    cancellationToken);
                 return Results.Ok(ToDto(restored));
             }
             catch (RecordTypeNotFoundException)
@@ -183,9 +235,17 @@ public static class RecordTypeEndpoints
             Guid id,
             bool? includeArchived,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var fields = await store.ListFieldsAsync(id, includeArchived ?? false, cancellationToken);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordTypeFieldListViewed,
+                RecordSchemaResourceKinds.RecordTypeField,
+                resource: new { recordTypeId = id },
+                details: new { resultCount = fields.Count, includeArchived = includeArchived ?? false },
+                cancellationToken);
             return Results.Ok(fields.Select(ToDto).ToList());
         });
 
@@ -193,10 +253,19 @@ public static class RecordTypeEndpoints
             Guid id,
             Guid fieldId,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var field = await store.GetFieldAsync(id, fieldId, cancellationToken);
-            return field is null ? Results.NotFound() : Results.Ok(ToDto(field));
+            if (field is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordTypeFieldViewed,
+                RecordSchemaResourceKinds.RecordTypeField,
+                resource: new { id = field.Id, recordTypeId = id, fieldKey = field.FieldKey },
+                details: null,
+                cancellationToken);
+            return Results.Ok(ToDto(field));
         });
 
         group.MapPost("/{id:guid}/fields", async (
@@ -204,6 +273,7 @@ public static class RecordTypeEndpoints
             CreateFieldRequest request,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
@@ -218,6 +288,13 @@ public static class RecordTypeEndpoints
                         request.IsRequired,
                         request.SortOrder),
                     GetActorId(http),
+                    cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeFieldCreated,
+                    RecordSchemaResourceKinds.RecordTypeField,
+                    resource: new { id = created.Id, recordTypeId = id, fieldKey = created.FieldKey, dataType = created.DataType },
+                    details: null,
                     cancellationToken);
                 return Results.Created($"/api/record-types/{id}/fields/{created.Id}", ToDto(created));
             }
@@ -237,6 +314,7 @@ public static class RecordTypeEndpoints
             UpdateFieldRequest request,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
@@ -250,6 +328,13 @@ public static class RecordTypeEndpoints
                         request.IsRequired,
                         request.SortOrder),
                     GetActorId(http),
+                    cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeFieldUpdated,
+                    RecordSchemaResourceKinds.RecordTypeField,
+                    resource: new { id = updated.Id, recordTypeId = id, fieldKey = updated.FieldKey },
+                    details: null,
                     cancellationToken);
                 return Results.Ok(ToDto(updated));
             }
@@ -272,11 +357,19 @@ public static class RecordTypeEndpoints
             Guid fieldId,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var archived = await store.SetFieldArchivedAsync(id, fieldId, archived: true, GetActorId(http), cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeFieldArchived,
+                    RecordSchemaResourceKinds.RecordTypeField,
+                    resource: new { id = archived.Id, recordTypeId = id, fieldKey = archived.FieldKey },
+                    details: null,
+                    cancellationToken);
                 return Results.Ok(ToDto(archived));
             }
             catch (RecordTypeNotFoundException)
@@ -294,11 +387,19 @@ public static class RecordTypeEndpoints
             Guid fieldId,
             HttpContext http,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var restored = await store.SetFieldArchivedAsync(id, fieldId, archived: false, GetActorId(http), cancellationToken);
+                await auditPublisher.PublishAsync(
+                    RecordSchemaEventTopic.TopicName,
+                    RecordSchemaEventTypes.RecordTypeFieldRestored,
+                    RecordSchemaResourceKinds.RecordTypeField,
+                    resource: new { id = restored.Id, recordTypeId = id, fieldKey = restored.FieldKey },
+                    details: null,
+                    cancellationToken);
                 return Results.Ok(ToDto(restored));
             }
             catch (RecordTypeNotFoundException)
@@ -315,9 +416,17 @@ public static class RecordTypeEndpoints
             Guid id,
             int? take,
             IRecordTypeStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
             var audit = await store.ListAuditAsync(id, take ?? 100, cancellationToken);
+            await auditPublisher.PublishAsync(
+                RecordSchemaEventTopic.TopicName,
+                RecordSchemaEventTypes.RecordTypeAuditViewed,
+                RecordSchemaResourceKinds.RecordType,
+                resource: new { recordTypeId = id },
+                details: new { take = take ?? 100, resultCount = audit.Count },
+                cancellationToken);
             return Results.Ok(audit.Select(ToDto).ToList());
         });
 

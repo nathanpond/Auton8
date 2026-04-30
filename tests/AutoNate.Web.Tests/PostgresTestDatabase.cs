@@ -303,7 +303,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         }
     }
 
-    private IDbContextFactory<AutoNateDbContext> CreateDbContextFactory()
+    public IDbContextFactory<AutoNateDbContext> CreateDbContextFactory()
     {
         var options = new DbContextOptionsBuilder<AutoNateDbContext>()
             .UseNpgsql(ConnectionString)

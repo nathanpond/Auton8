@@ -2,6 +2,8 @@ using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Plugins;
+using AutoNate.Web.Services.ApplicationEvents;
+using AutoNate.Web.Services.Events;
 using Microsoft.AspNetCore.Http;
 
 namespace AutoNate.Web.Endpoints;
@@ -12,14 +14,39 @@ public static class AdminPluginsEndpoints
     {
         var group = app.MapGroup("/api/admin/plugins").RequireAuthorization();
 
-        group.MapGet("/", async (IPluginManagementService svc, CancellationToken ct) =>
-                Results.Ok(await svc.ListAsync(ct)))
+        group.MapGet("/", async (
+                IPluginManagementService svc,
+                IAuditEventPublisher auditPublisher,
+                CancellationToken ct) =>
+            {
+                var plugins = await svc.ListAsync(ct);
+                await auditPublisher.PublishAsync(
+                    DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginListViewed,
+                    ApplicationResourceKinds.Plugin,
+                    resource: null,
+                    details: new { resultCount = plugins.Count },
+                    ct);
+                return Results.Ok(plugins);
+            })
             .RequireKindPermission(EntityKinds.Plugin, Actions.Manage);
 
-        group.MapGet("/{id:guid}", async (Guid id, IPluginManagementService svc, CancellationToken ct) =>
+        group.MapGet("/{id:guid}", async (
+                Guid id,
+                IPluginManagementService svc,
+                IAuditEventPublisher auditPublisher,
+                CancellationToken ct) =>
             {
                 var p = await svc.GetAsync(id, ct);
-                return p is null ? Results.NotFound() : Results.Ok(p);
+                if (p is null) return Results.NotFound();
+                await auditPublisher.PublishAsync(
+                    DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginViewed,
+                    ApplicationResourceKinds.Plugin,
+                    resource: new { id = p.Id, name = p.Name, version = p.Version },
+                    details: null,
+                    ct);
+                return Results.Ok(p);
             })
             .RequireKindPermission(EntityKinds.Plugin, Actions.Manage);
 
