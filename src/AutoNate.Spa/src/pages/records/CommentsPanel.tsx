@@ -20,6 +20,8 @@ export default function CommentsPanel({ recordId }: Props) {
   const edit = useEditComment(recordId);
   const del = useDeleteComment(recordId);
 
+  const ordered = [...comments].sort((a, b) => a.createdAtUtc.localeCompare(b.createdAtUtc));
+
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState("");
@@ -65,8 +67,7 @@ export default function CommentsPanel({ recordId }: Props) {
 
   return (
     <>
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h5 className="mb-0">Comments</h5>
+      <div className="d-flex justify-content-end mb-3">
         <div className="form-check form-switch mb-0">
           <input
             type="checkbox"
@@ -90,35 +91,14 @@ export default function CommentsPanel({ recordId }: Props) {
         </div>
       )}
 
-      <form onSubmit={submitNew} className="mb-4">
-        <div className="mb-2">
-          <textarea
-            className="form-control"
-            rows={3}
-            placeholder="Add a comment..."
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-        </div>
-        <div className="text-end">
-          <button
-            type="submit"
-            className="btn btn-primary btn-sm"
-            disabled={create.isPending || draft.trim().length === 0}
-          >
-            <i className="fa fa-comment me-2"></i>Post comment
-          </button>
-        </div>
-      </form>
+      {isLoading && <p className="text-body text-opacity-50 mb-3">Loading comments...</p>}
 
-      {isLoading && <p className="text-body text-opacity-50 mb-0">Loading comments...</p>}
-
-      {!isLoading && comments.length === 0 && (
-        <p className="text-body text-opacity-50 mb-0">No comments yet.</p>
+      {!isLoading && ordered.length === 0 && (
+        <p className="text-body text-opacity-50 mb-3">No comments yet.</p>
       )}
 
-      <ul className="list-unstyled mb-0">
-        {comments.map((c) => {
+      <ul className="list-unstyled mb-3">
+        {ordered.map((c) => {
           const isEditing = editingId === c.id;
           return (
             <li
@@ -208,6 +188,27 @@ export default function CommentsPanel({ recordId }: Props) {
           );
         })}
       </ul>
+
+      <form onSubmit={submitNew}>
+        <div className="mb-2">
+          <textarea
+            className="form-control"
+            rows={3}
+            placeholder="Add a comment..."
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        </div>
+        <div className="text-end">
+          <button
+            type="submit"
+            className="btn btn-primary btn-sm"
+            disabled={create.isPending || draft.trim().length === 0}
+          >
+            <i className="fa fa-comment me-2"></i>Post comment
+          </button>
+        </div>
+      </form>
 
       {revisionsTarget && (
         <CommentRevisionsDialog

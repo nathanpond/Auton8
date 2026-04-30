@@ -13,7 +13,7 @@ import EdgesPanel from "./EdgesPanel";
 import RecordForm from "./RecordForm";
 import RecordHistoryPanel from "./RecordHistoryPanel";
 
-type Tab = "details" | "edges" | "comments" | "history";
+type Tab = "details" | "edges" | "history";
 
 export default function RecordDetail() {
   const { typeShortCode, key = "" } = useParams<{ typeShortCode?: string; key: string }>();
@@ -120,15 +120,6 @@ export default function RecordDetail() {
         <li className="nav-item">
           <button
             type="button"
-            className={`nav-link ${tab === "comments" ? "active" : ""}`}
-            onClick={() => setTab("comments")}
-          >
-            Comments
-          </button>
-        </li>
-        <li className="nav-item">
-          <button
-            type="button"
             className={`nav-link ${tab === "history" ? "active" : ""}`}
             onClick={() => setTab("history")}
           >
@@ -160,8 +151,16 @@ export default function RecordDetail() {
             />
           )}
           {tab === "edges" && <EdgesPanel record={record} />}
-          {tab === "comments" && <CommentsPanel recordId={record.id} />}
           {tab === "history" && <RecordHistoryPanel recordId={record.id} fields={fields} />}
+        </div>
+      </div>
+
+      <div className="panel panel-inverse">
+        <div className="panel-heading">
+          <h4 className="panel-title">Comments</h4>
+        </div>
+        <div className="panel-body">
+          <CommentsPanel recordId={record.id} />
         </div>
       </div>
     </>
