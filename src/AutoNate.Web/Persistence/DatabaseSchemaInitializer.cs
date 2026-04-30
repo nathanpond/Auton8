@@ -1402,6 +1402,46 @@ internal static class DatabaseSchemaInitializer
             ON workflow_task_completions (completed_by_user_id);
         """;
 
+    // Generic key-value store backing the admin "Site Configuration" pages.
+    // Sparse on purpose: missing rows mean "use the default value declared in
+    // the SiteSettingsRegistry." Adding a new feature flag or option is just a
+    // registry entry on the C# side + a UI control; no schema change.
+    private const string SiteSettingsSql =
+        """
+        CREATE TABLE IF NOT EXISTS site_settings (
+            key TEXT PRIMARY KEY,
+            value_json JSONB NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        """;
+
+    // Per-user notification feed for in-app alerts (record assigned, user task
+    // assigned, etc). Notifications are owned by the recipient — the bell icon
+    // and /notifications page each filter to user_id = current user.
+    private const string NotificationsSql =
+        """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            related_entity_kind TEXT NULL,
+            related_entity_id TEXT NULL,
+            link_path TEXT NULL,
+            is_read BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            read_at_utc TIMESTAMPTZ NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_notifications_user_created
+            ON notifications (user_id, created_at_utc DESC);
+
+        CREATE INDEX IF NOT EXISTS ix_notifications_user_unread
+            ON notifications (user_id, is_read);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -1427,6 +1467,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(PluginsMenuItemSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

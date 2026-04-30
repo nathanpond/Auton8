@@ -14,6 +14,7 @@ import EdgeTypeList from "@/pages/edge-types/EdgeTypeList";
 import EdgeTypeEditor from "@/pages/edge-types/EdgeTypeEditor";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import { ConfigIndex } from "@/pages/admin/config/sections";
+import Notifications from "@/pages/notifications/Notifications";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
 
 export type AppRoute = {
@@ -54,6 +55,9 @@ export const APP_ROUTES: AppRoute[] = [
   // Record edge-types domain (mirrors record-types)
   { path: "record-edge-types", element: protect(<EdgeTypeList />) },
   { path: "record-edge-types/:id", element: protect(<EdgeTypeEditor />) },
+
+  // Notifications inbox (per-user; not a configurable page template)
+  { path: "notifications", element: protect(<Notifications />) },
 
   // Site Configuration shell — children are page templates rendered inside the
   // layout's <Outlet />. Mounted at the templates' default_path so the URL

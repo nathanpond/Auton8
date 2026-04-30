@@ -3,12 +3,15 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useMe } from "@/hooks/useMe";
 import { usePublicMenu } from "@/hooks/useMenus";
 import { usePageTemplates } from "@/hooks/usePageTemplates";
+import { useNotificationLiveUpdates } from "@/hooks/useNotifications";
+import { SITE_SETTING_KEYS, usePublicSiteSettings } from "@/hooks/useSiteSettings";
 import { useSiteAppearance } from "@/providers/SiteAppearanceProvider";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { MenuItem } from "@/types/menus";
 import { PageTemplateInfo } from "@/api/pageTemplates";
 import { resolveItemPath } from "@/menus/resolveItemPath";
 import SiteBrand from "@/components/SiteBrand";
+import NotificationBell from "@/components/notifications/NotificationBell";
 
 type RecordTypeChild = { key: string; path: string; label: string; shortCode: string };
 
@@ -21,6 +24,16 @@ export default function NavMenu() {
   const { data: recordTypes = [] } = useRecordTypes(false);
   const { data: pageTemplates } = usePageTemplates();
   const { effectiveAppearance } = useSiteAppearance();
+
+  const publicSettings = usePublicSiteSettings();
+  const notificationsEnabled = publicSettings.getBool(
+    SITE_SETTING_KEYS.notificationsHeaderEnabled
+  );
+
+  // Subscribe once at the shell level so notification badge stays current
+  // whatever page the user is on. Skip when notifications are admin-disabled
+  // so we don't open a websocket for a feature the user can't see.
+  useNotificationLiveUpdates(me?.authenticated === true && notificationsEnabled);
 
   const recordTypeChildren: RecordTypeChild[] = useMemo(
     () =>
@@ -224,10 +237,12 @@ export default function NavMenu() {
           />
         ))}
 
+        {me?.authenticated === true && notificationsEnabled && <NotificationBell />}
+
         <div className="menu-item dropdown">
           <a
             href="#"
-            className="menu-link dropdown-toggle d-flex align-items-center gap-2"
+            className="menu-link menu-link-tight dropdown-toggle d-flex align-items-center gap-2"
             data-bs-toggle="dropdown"
             aria-expanded="false"
             onClick={preventDefault}
@@ -276,7 +291,7 @@ function IconMenuTopItem({
       <div className={`${wrapperClass} dropdown`}>
         <a
           href="#"
-          className="menu-link dropdown-toggle d-flex align-items-center"
+          className="menu-link menu-link-tight dropdown-toggle d-flex align-items-center"
           data-bs-toggle="dropdown"
           aria-expanded="false"
           title={item.displayName}
@@ -304,7 +319,7 @@ function IconMenuTopItem({
       <div className={wrapperClass}>
         <a
           href={href}
-          className="menu-link"
+          className="menu-link menu-link-tight"
           title={item.displayName}
           target={newTab ? "_blank" : undefined}
           rel={newTab ? "noopener noreferrer" : undefined}
@@ -321,7 +336,7 @@ function IconMenuTopItem({
     if (!path) return null;
     return (
       <div className={wrapperClass}>
-        <NavLink to={path} className="menu-link" title={item.displayName}>
+        <NavLink to={path} className="menu-link menu-link-tight" title={item.displayName}>
           <div className="menu-icon">
             <i className={item.icon ?? "fa fa-link"}></i>
           </div>

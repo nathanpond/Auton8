@@ -3,6 +3,7 @@ using System.Text;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Workflow;
 using Dapr.Messaging.PublishSubscribe;
@@ -386,7 +387,8 @@ public sealed class DaprStreamingSubscriber(
             {
                 BusWatcherStreamService.TopicName,
                 DaprRecordEventPublisher.TopicName,
-                DaprApplicationEventPublisher.TopicName
+                DaprApplicationEventPublisher.TopicName,
+                DaprNotificationEventPublisher.TopicName
             };
 
             foreach (var topic in desired)

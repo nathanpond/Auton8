@@ -18,9 +18,11 @@ using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Menus;
 using AutoNate.Web.Services.Nats;
+using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
+using AutoNate.Web.Services.SiteSettings;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.AspNetCore.Http.Features;
 using Dapr.Messaging.PublishSubscribe.Extensions;
@@ -67,6 +69,32 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.AccessDeniedPath = "/";
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
+
+        // Without these overrides the cookie middleware 302-redirects every
+        // unauthenticated request — including AJAX calls — to LoginPath. The
+        // SPA's axios then follows the redirect and parses index.html as the
+        // response body. For /api routes we want plain 401/403 status codes
+        // so the SPA's response interceptor can do the right thing.
+        options.Events.OnRedirectToLogin = context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return Task.CompletedTask;
+            }
+            context.Response.Redirect(context.RedirectUri);
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            }
+            context.Response.Redirect(context.RedirectUri);
+            return Task.CompletedTask;
+        };
     });
 builder.Services.AddAuthorization();
 builder.Services.AddAntiforgery();
@@ -158,6 +186,10 @@ builder.Services.AddSingleton<IFieldType, BooleanFieldType>();
 builder.Services.AddSingleton<IFieldTypeRegistry, FieldTypeRegistry>();
 builder.Services.AddSingleton<IRecordEventPublisher, DaprRecordEventPublisher>();
 builder.Services.AddSingleton<IApplicationEventPublisher, DaprApplicationEventPublisher>();
+builder.Services.AddSingleton<INotificationEventPublisher, DaprNotificationEventPublisher>();
+builder.Services.AddScoped<INotificationStore, EfCoreNotificationStore>();
+builder.Services.AddScoped<ISiteSettingsStore, EfCoreSiteSettingsStore>();
+builder.Services.AddHostedService<WorkflowTaskNotificationListener>();
 
 // Hook system: HookRegistrar is the singleton root that owns both hubs.
 // Plugins receive IHookRegistrar (write surface); host services consume
@@ -435,6 +467,7 @@ app.MapRecordTypeEndpoints();
 app.MapRecordEndpoints();
 app.MapRecordEdgeEndpoints();
 app.MapRecordCommentEndpoints();
+app.MapNotificationEndpoints();
 app.MapRoleEndpoints();
 app.MapGroupEndpoints();
 app.MapRoleAssignmentEndpoints();
@@ -446,6 +479,7 @@ app.MapPageEndpoints();
 app.MapPageTemplateEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
+app.MapSiteSettingsEndpoints();
 app.MapAdminPluginsEndpoints();
 
 app.MapStaticAssets();

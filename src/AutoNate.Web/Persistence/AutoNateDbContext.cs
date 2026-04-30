@@ -66,6 +66,10 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<PageTemplate> PageTemplates { get; set; }
 
+    public virtual DbSet<Notification> Notifications { get; set; }
+
+    public virtual DbSet<SiteSetting> SiteSettings { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -735,6 +739,45 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.IsEnabled).HasColumnName("is_enabled");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("notifications_pkey");
+
+            entity.ToTable("notifications");
+
+            entity.HasIndex(e => new { e.UserId, e.CreatedAtUtc }, "ix_notifications_user_created")
+                .IsDescending(false, true);
+            entity.HasIndex(e => new { e.UserId, e.IsRead }, "ix_notifications_user_unread");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Body).HasColumnName("body");
+            entity.Property(e => e.RelatedEntityKind).HasColumnName("related_entity_kind");
+            entity.Property(e => e.RelatedEntityId).HasColumnName("related_entity_id");
+            entity.Property(e => e.LinkPath).HasColumnName("link_path");
+            entity.Property(e => e.IsRead).HasColumnName("is_read");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.ReadAtUtc).HasColumnName("read_at_utc");
+        });
+
+        modelBuilder.Entity<SiteSetting>(entity =>
+        {
+            entity.HasKey(e => e.Key).HasName("site_settings_pkey");
+
+            entity.ToTable("site_settings");
+
+            entity.Property(e => e.Key).HasColumnName("key");
+            entity.Property(e => e.ValueJson)
+                .HasColumnName("value_json")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         OnModelCreatingPartial(modelBuilder);

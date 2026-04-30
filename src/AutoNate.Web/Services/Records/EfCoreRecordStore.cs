@@ -5,8 +5,10 @@ using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Configuration;
+using AutoNate.Web.Models.Notifications;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records.Fields;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -24,11 +26,48 @@ public sealed class EfCoreRecordStore(
     IEntityEdgeWriter entityEdgeWriter,
     IAuthorizer authorizer,
     IRecordEventPublisher eventPublisher,
+    INotificationStore notificationStore,
+    ILogger<EfCoreRecordStore> logger,
     IOptions<DaprOptions> daprOptions) : IRecordStore
 {
     private readonly string _sourceAppId = string.IsNullOrWhiteSpace(daprOptions.Value.AppId)
         ? "autonate.web"
         : daprOptions.Value.AppId;
+
+    private async Task EmitAssignmentNotificationsAsync(
+        Guid recordId,
+        string recordKey,
+        string recordName,
+        IEnumerable<Guid> newlyAssignedUserIds,
+        Guid actorId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var userId in newlyAssignedUserIds)
+        {
+            // Don't notify the actor when they assigned the record to themselves.
+            if (userId == actorId) continue;
+            try
+            {
+                await notificationStore.CreateAsync(new CreateNotificationInput(
+                    UserId: userId,
+                    Kind: NotificationKinds.RecordAssigned,
+                    Title: "Record assigned to you",
+                    Body: $"{recordKey} — {recordName}",
+                    RelatedEntityKind: NotificationEntityKinds.Record,
+                    RelatedEntityId: recordId.ToString(),
+                    LinkPath: $"/record/{recordKey}"),
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Notification fan-out is best-effort; the record write already
+                // committed and is the source of truth for assignment.
+                logger.LogWarning(ex,
+                    "Failed to create record-assignment notification for user {UserId} on record {RecordId}.",
+                    userId, recordId);
+            }
+        }
+    }
 
     public async Task<Record?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -401,6 +440,9 @@ public sealed class EfCoreRecordStore(
             ActorId: actorId,
             SourceAppId: _sourceAppId), cancellationToken);
 
+        await EmitAssignmentNotificationsAsync(
+            entity.Id, entity.Key, entity.Name, assigneeIds, actorId, cancellationToken);
+
         return entity.ToModel();
     }
 
@@ -585,6 +627,16 @@ public sealed class EfCoreRecordStore(
                 IsArchived: entity.IsArchived,
                 ActorId: actorId,
                 SourceAppId: _sourceAppId), cancellationToken);
+        }
+
+        if (assigneeEdgeOld is not null && assigneeEdgeNew is not null)
+        {
+            var addedAssignees = assigneeEdgeNew.Except(assigneeEdgeOld).ToArray();
+            if (addedAssignees.Length > 0)
+            {
+                await EmitAssignmentNotificationsAsync(
+                    entity.Id, entity.Key, entity.Name, addedAssignees, actorId, cancellationToken);
+            }
         }
 
         return entity.ToModel();

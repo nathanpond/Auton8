@@ -6,8 +6,10 @@ using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Hooks;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Models.Notifications;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
@@ -88,7 +90,8 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     public EfCoreRecordStore CreateRecordStore(
         bool authorizationEnabled,
         string enforcement = AuthorizationEnforcement.Off,
-        IRecordEventPublisher? eventPublisher = null)
+        IRecordEventPublisher? eventPublisher = null,
+        INotificationStore? notificationStore = null)
     {
         var authorizer = CreateAuthorizer(authorizationEnabled, enforcement);
         var daprOptions = Options.Create(new DaprOptions { AppId = "autonate.web.tests" });
@@ -98,7 +101,54 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             new EntityEdgeWriter(),
             authorizer,
             eventPublisher ?? new NoopRecordEventPublisher(),
+            notificationStore ?? new RecordingNotificationStore(),
+            NullLogger<EfCoreRecordStore>.Instance,
             daprOptions);
+    }
+
+    // Captures notifications so tests can assert assignment-driven creation
+    // without going through the EF store. The real INotificationStore writes
+    // to its own table; tests typically don't care.
+    public sealed class RecordingNotificationStore : INotificationStore
+    {
+        private readonly List<Notification> _notifications = new();
+
+        public IReadOnlyList<Notification> Notifications => _notifications;
+
+        public Task<Notification> CreateAsync(CreateNotificationInput input, CancellationToken cancellationToken = default)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var n = new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = input.UserId,
+                Kind = input.Kind,
+                Title = input.Title,
+                Body = input.Body,
+                RelatedEntityKind = input.RelatedEntityKind,
+                RelatedEntityId = input.RelatedEntityId,
+                LinkPath = input.LinkPath,
+                IsRead = false,
+                CreatedAtUtc = now
+            };
+            _notifications.Add(n);
+            return Task.FromResult(n);
+        }
+
+        public Task<IReadOnlyList<Notification>> ListForUserAsync(Guid userId, int? limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Notification>>(_notifications
+                .Where(n => n.UserId == userId)
+                .OrderByDescending(n => n.CreatedAtUtc)
+                .Take(limit ?? int.MaxValue)
+                .ToList());
+
+        public Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_notifications.Count(n => n.UserId == userId && !n.IsRead));
+
+        public Task<Notification?> MarkReadAsync(Guid notificationId, Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Notification?>(_notifications.FirstOrDefault(n => n.Id == notificationId && n.UserId == userId));
+
+        public Task<int> MarkAllReadAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(0);
     }
 
     // Captures every published event so tests can assert publication shape.

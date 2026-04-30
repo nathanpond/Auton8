@@ -1,3 +1,5 @@
+import SiteSettingsForm from "./SiteSettingsForm";
+
 type StubProps = {
   title: string;
   blurb: string;
@@ -43,16 +45,18 @@ export function ConfigIndex() {
 
 export function SitewideGeneral() {
   return (
-    <Stub
+    <SiteSettingsForm
+      group="general"
       title="General"
-      blurb="Core sitewide settings such as site name, time zone, and default locale."
+      blurb="Core sitewide settings and feature flags. Changes apply across the application."
     />
   );
 }
 
 export function SitewideFeatures() {
   return (
-    <Stub
+    <SiteSettingsForm
+      group="features"
       title="Features"
       blurb="Toggle optional features and modules across the application."
     />
