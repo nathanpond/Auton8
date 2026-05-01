@@ -29,4 +29,14 @@
         </None>
     </ItemGroup>
 
+    <!-- A plugin can ship numbered SQL migration files in /migrations. The
+         host's PluginMigrationRunner picks them up at enable time and applies
+         any new ones to the plugin's own schema. -->
+    <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\migrations')">
+        <None Include="migrations\*.sql">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>migrations\%(Filename)%(Extension)</Link>
+        </None>
+    </ItemGroup>
+
 </Project>

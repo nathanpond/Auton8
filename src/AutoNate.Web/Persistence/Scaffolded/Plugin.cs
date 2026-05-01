@@ -23,4 +23,8 @@ public partial class Plugin
     public DateTime? LastDisabledAt { get; set; }
 
     public string? LastError { get; set; }
+
+    public string? Code { get; set; }
+
+    public byte[]? RolePasswordEncrypted { get; set; }
 }

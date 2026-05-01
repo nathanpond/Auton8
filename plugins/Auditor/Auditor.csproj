@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Common settings (TargetFramework, abstractions reference, zip target)
+         come from /plugins/Directory.Build.props and Directory.Build.targets. -->
+
+</Project>

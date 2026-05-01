@@ -29,4 +29,6 @@ public partial class MenuItem
     public DateTime CreatedAtUtc { get; set; }
 
     public DateTime UpdatedAtUtc { get; set; }
+
+    public Guid? CreatedByPluginId { get; set; }
 }

@@ -15,6 +15,7 @@ import SiteAppearancePage from "@/pages/admin/config/SiteAppearance";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
 import Events from "@/pages/admin/config/Events";
 import SystemHealth from "@/pages/admin/config/SystemHealth";
+import PluginDocumentation from "@/pages/admin/config/PluginDocumentation";
 import {
   SecurityManageGroups,
   SecurityManageRoles,
@@ -55,5 +56,7 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configSecurityGroups: <SecurityManageGroups />,
   configSecurityRoles: <SecurityManageRoles />,
   configSecurityPermissions: <SecuritySetPermissions />,
-  configSecurityPermissionChecker: <SecurityPermissionChecker />
+  configSecurityPermissionChecker: <SecurityPermissionChecker />,
+  configPlugins: <AdminPlugins />,
+  configPluginDocumentation: <PluginDocumentation />
 };

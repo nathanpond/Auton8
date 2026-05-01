@@ -18,6 +18,12 @@ internal sealed class PluginAssemblyLoadContext : AssemblyLoadContext
         "AutoNate.Plugin.Abstractions",
         "Microsoft.Extensions.DependencyInjection.Abstractions",
         "Microsoft.Extensions.Logging.Abstractions",
+        // The plugin data API surface (IPluginDataAccess) returns NpgsqlConnection
+        // and uses Dapper extension methods. Both must resolve to the host's
+        // copy so type identity holds across ALCs — otherwise a plugin's
+        // NpgsqlConnection is a different Type than the host's.
+        "Npgsql",
+        "Dapper",
     };
 
     private readonly AssemblyDependencyResolver _resolver;

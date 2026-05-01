@@ -10,9 +10,9 @@ public sealed class SamplePlugin : IAutoNatePlugin
     public string Name => "AutoNate.Web.Tests.SamplePlugin";
     public string Version => "1.0.0";
 
-    public void Configure(IHookRegistrar registrar, IServiceProvider hostServices)
+    public void Configure(IPluginContext context)
     {
-        registrar.AddFilterAsync<AuthorizeFilterContext>(
+        context.Hooks.AddFilterAsync<AuthorizeFilterContext>(
             HookPoints.AuthorizeAuthorize,
             priority: 10,
             (ctx, _, _) => Task.FromResult(ctx with

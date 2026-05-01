@@ -17,6 +17,7 @@ internal sealed class PluginHostedService : IHostedService
     private readonly PluginRuntime _runtime;
     private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
     private readonly PluginOptions _options;
+    private readonly PluginSchemaProvisioner _provisioner;
     private readonly ILogger<PluginHostedService> _log;
 
     public PluginHostedService(
@@ -24,12 +25,14 @@ internal sealed class PluginHostedService : IHostedService
         PluginRuntime runtime,
         IDbContextFactory<AutoNateDbContext> dbFactory,
         IOptions<PluginOptions> options,
+        PluginSchemaProvisioner provisioner,
         ILogger<PluginHostedService> log)
     {
         _services = services;
         _runtime = runtime;
         _dbFactory = dbFactory;
         _options = options.Value;
+        _provisioner = provisioner;
         _log = log;
     }
 
@@ -85,6 +88,22 @@ internal sealed class PluginHostedService : IHostedService
 
         foreach (var row in rows)
         {
+            // Idempotent re-teardown: if the original delete couldn't drop
+            // the schema/role, this catches up. If they're already gone,
+            // IF EXISTS makes it a no-op.
+            if (!string.IsNullOrEmpty(row.Code))
+            {
+                try
+                {
+                    await _provisioner.TeardownAsync(row.Code, ct);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex,
+                        "DeletedPending plugin {Id}: schema teardown retry failed for code {Code}.", row.Id, row.Code);
+                }
+            }
+
             var folder = Path.Combine(_runtime.PluginRoot, row.Id.ToString("D"));
             var canRemove = !Directory.Exists(folder);
             if (!canRemove)

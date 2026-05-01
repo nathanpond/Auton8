@@ -15,6 +15,7 @@ import EdgeTypeEditor from "@/pages/edge-types/EdgeTypeEditor";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import { ConfigIndex } from "@/pages/admin/config/sections";
 import Notifications from "@/pages/notifications/Notifications";
+import DynamicPageRoute from "@/pages/dynamic-page/DynamicPageRoute";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
 
 export type AppRoute = {
@@ -80,7 +81,13 @@ export const APP_ROUTES: AppRoute[] = [
       { path: "groups", element: template("configSecurityGroups") },
       { path: "roles", element: template("configSecurityRoles") },
       { path: "permissions", element: template("configSecurityPermissions") },
-      { path: "permission-checker", element: template("configSecurityPermissionChecker") }
+      { path: "permission-checker", element: template("configSecurityPermissionChecker") },
+      { path: "plugins", element: template("configPlugins") },
+      { path: "plugins/documentation", element: template("configPluginDocumentation") },
+      // Catch-all so menu items added by plugins under /admin/config/* render
+      // inside ConfigLayout's sidebar shell. The dynamic page component reads
+      // the menu_item config (path/content/contentType) and renders it.
+      { path: "*", element: protect(<DynamicPageRoute />) }
     ]
   }
 ];

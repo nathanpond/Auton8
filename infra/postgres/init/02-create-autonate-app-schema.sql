@@ -489,7 +489,9 @@ CREATE TABLE IF NOT EXISTS menu_items (
     is_visible BOOLEAN NOT NULL DEFAULT TRUE,
     is_system BOOLEAN NOT NULL DEFAULT FALSE,
     created_at_utc TIMESTAMPTZ NOT NULL,
-    updated_at_utc TIMESTAMPTZ NOT NULL
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    -- FK to plugins(id) added by DatabaseSchemaInitializer once that table exists.
+    created_by_plugin_id UUID NULL
 );
 
 CREATE INDEX IF NOT EXISTS ix_menu_items_menu_parent_sort

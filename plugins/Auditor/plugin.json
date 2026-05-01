@@ -1,0 +1,6 @@
+{
+  "name": "Auditor",
+  "version": "1.0.0",
+  "entryAssembly": "Auditor.dll",
+  "entryType": "AutoNate.Plugins.Auditor.Auditor"
+}

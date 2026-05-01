@@ -22,6 +22,8 @@
                                $(OutputPath)AutoNate.Plugin.Abstractions.dll;
                                $(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll;
                                $(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll;
+                               $(OutputPath)Npgsql.dll;
+                               $(OutputPath)Dapper.dll;
                                $(OutputPath)plugin-staging\**" />
         </ItemGroup>
 

@@ -226,6 +226,9 @@ builder.Services.AddSingleton<IHookRegistrar>(sp => sp.GetRequiredService<HookRe
 builder.Services.AddSingleton<IActionHub>(sp => sp.GetRequiredService<HookRegistrar>().Actions);
 builder.Services.AddSingleton<IFilterHub>(sp => sp.GetRequiredService<HookRegistrar>().Filters);
 builder.Services.AddSingleton<PluginRuntime>();
+builder.Services.AddSingleton<PluginSchemaProvisioner>();
+builder.Services.AddSingleton<PluginDataAccessRegistry>();
+builder.Services.AddSingleton<PluginMigrationRunner>();
 builder.Services.AddScoped<IPluginManagementService, PluginManagementService>();
 builder.Services.AddHostedService<PluginHostedService>();
 builder.Services.AddHttpClient(); // DaprApplicationEventPublisher needs IHttpClientFactory

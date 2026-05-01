@@ -1238,7 +1238,9 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configSecurityGroups', 'Manage Groups (Site Config)', 'Group management mounted inside Site Config.', '/admin/config/groups', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityRoles', 'Manage Roles (Site Config)', 'Role management mounted inside Site Config.', '/admin/config/roles', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityPermissions', 'Set Permissions (Site Config)', 'Set permissions mounted inside Site Config.', '/admin/config/permissions', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configSecurityPermissionChecker', 'Permission Checker (Site Config)', 'Effective-permission checker.', '/admin/config/permission-checker', TRUE, NOW(), NOW())
+              (gen_random_uuid(), 'configSecurityPermissionChecker', 'Permission Checker (Site Config)', 'Effective-permission checker.', '/admin/config/permission-checker', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configPlugins', 'Manage Plugins (Site Config)', 'Plugin management mounted inside Site Config.', '/admin/config/plugins', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How AutoNate plugins work and the patterns for working within them.', '/admin/config/plugins/documentation', TRUE, NOW(), NOW())
             ON CONFLICT (key) DO NOTHING;
 
             INSERT INTO menus (id, key, name, description, is_system,
@@ -1286,6 +1288,36 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // Track menu items inserted by a plugin via IPluginMenus, so disable/delete
+    // can sweep them. FK CASCADE handles delete; disable runs an explicit
+    // DELETE WHERE created_by_plugin_id = @id (the plugins row stays put).
+    //
+    // Order is important: this block runs *after* PluginsSchemaSql so the
+    // referenced plugins.id column exists. The column is nullable so existing
+    // admin-authored menu items continue to have NULL here.
+    private const string MenuItemsPluginColumnSql =
+        """
+        ALTER TABLE menu_items
+            ADD COLUMN IF NOT EXISTS created_by_plugin_id UUID NULL;
+
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'menu_items_created_by_plugin_id_fkey'
+            ) THEN
+                ALTER TABLE menu_items
+                    ADD CONSTRAINT menu_items_created_by_plugin_id_fkey
+                    FOREIGN KEY (created_by_plugin_id)
+                    REFERENCES plugins (id) ON DELETE CASCADE;
+            END IF;
+        END $$;
+
+        CREATE INDEX IF NOT EXISTS ix_menu_items_created_by_plugin_id
+            ON menu_items (created_by_plugin_id)
+            WHERE created_by_plugin_id IS NOT NULL;
+        """;
+
     private const string PluginsSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS plugins (
@@ -1305,68 +1337,142 @@ internal static class DatabaseSchemaInitializer
         CREATE INDEX IF NOT EXISTS ix_plugins_status ON plugins (status);
         """;
 
-    // Add a "Plugins" entry to the icon menu so admins discover the new admin
-    // page without rebuilding seed data. We don't gate on auth_seed_state — the
-    // NOT EXISTS check on the menu_item itself makes the operation purely
-    // idempotent and resilient to operator-renamed parent groups (we look up
-    // whatever top-level group is in the icon menu rather than hardcoding a
-    // display_name like 'Settings').
-    private const string PluginsMenuItemSql =
+    // Plugin-owned database storage. Each installed plugin is provisioned a
+    // dedicated Postgres LOGIN role and schema (`plg_<code>`); the plugin
+    // connects as that role so the database itself enforces "write only to my
+    // own schema, read-only everywhere else." This block adds the per-plugin
+    // identity columns and bootstraps the shared `plg_readers` group role that
+    // every plugin role inherits read grants from.
+    //
+    // - `code` is the 8-char namespace identifier (`[a-z][a-z0-9]{7}`),
+    //   nullable for forward compatibility with rows uploaded before this
+    //   migration; new uploads always populate it.
+    // - `role_password_encrypted` stores the per-plugin role password,
+    //   protected with IDataProtector. Rotated on plugin re-provisioning.
+    // - `plg_readers` is a NOLOGIN group role granted USAGE on `public` and
+    //   SELECT on all current/future tables/sequences. Per-plugin schemas
+    //   grant USAGE + SELECT-default to this same role at provisioning time,
+    //   which gives every plugin read access to every other plugin's data
+    //   without per-pair grants.
+    private const string PluginDataIsolationSql =
+        """
+        ALTER TABLE plugins
+            ADD COLUMN IF NOT EXISTS code TEXT NULL;
+
+        ALTER TABLE plugins
+            ADD COLUMN IF NOT EXISTS role_password_encrypted BYTEA NULL;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_plugins_code
+            ON plugins (code)
+            WHERE code IS NOT NULL;
+
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plg_readers') THEN
+                CREATE ROLE plg_readers NOLOGIN;
+            END IF;
+        END $$;
+
+        GRANT USAGE ON SCHEMA public TO plg_readers;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO plg_readers;
+        GRANT SELECT, USAGE ON ALL SEQUENCES IN SCHEMA public TO plg_readers;
+
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT ON TABLES TO plg_readers;
+
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, USAGE ON SEQUENCES TO plg_readers;
+        """;
+
+    // The Plugins entry now lives in the Site Configuration menu (see
+    // PluginsSiteConfigMenuSql below); remove any prior icon-menu placement.
+    // Idempotent: a DELETE matching nothing is a no-op on subsequent startups.
+    private const string PluginsIconMenuRemovalSql =
         """
         DO $$
         DECLARE
             icon_menu_id UUID;
-            parent_group_id UUID;
         BEGIN
-            -- Clean up the old seed_state row from the first cut of this seed,
-            -- which marked itself applied even when no work was done. Future
-            -- attempts to re-add this row are no-ops via the menu_item check.
-            DELETE FROM auth_seed_state WHERE key = 'icon_menu_plugins_v1';
-
             SELECT id INTO icon_menu_id FROM menus WHERE key = 'icon' LIMIT 1;
             IF icon_menu_id IS NULL THEN
                 RETURN;
             END IF;
 
-            -- Pick whatever top-level group exists. Prior seeds named it
-            -- 'Settings'; later customizations may have renamed it ('Admin
-            -- Icon' in some envs). We don't care about the name, only that
-            -- there is a group to nest under.
-            SELECT id INTO parent_group_id
-            FROM menu_items
+            DELETE FROM menu_items
             WHERE menu_id = icon_menu_id
-              AND parent_id IS NULL
-              AND item_type = 'group'
-            ORDER BY sort_order, created_at_utc
-            LIMIT 1;
+              AND (config->>'path' = '/admin/plugins'
+                   OR config->>'templateKey' = 'adminPlugins');
+        END $$;
+        """;
 
-            IF parent_group_id IS NULL THEN
+    // Add a "Plugins" group to the Site Configuration menu, with two children:
+    // "Manage Plugins" (the existing admin page mounted inside the config
+    // shell as `configPlugins`) and "Documentation" (a long-form HTML doc
+    // rendered by the `configPluginDocumentation` template).
+    //
+    // Idempotent: gated on whether a Plugins group already exists under
+    // site-config. The site-config menu seed (initial DO block above) only
+    // creates the menu the first time, so this block runs on existing
+    // environments to add the new group without rebuilding any other section.
+    private const string PluginsSiteConfigMenuSql =
+        """
+        DO $$
+        DECLARE
+            site_id UUID;
+            g UUID;
+            next_order INTEGER;
+        BEGIN
+            SELECT id INTO site_id FROM menus WHERE key = 'site-config' LIMIT 1;
+            IF site_id IS NULL THEN
                 RETURN;
             END IF;
 
-            IF NOT EXISTS (
+            IF EXISTS (
                 SELECT 1 FROM menu_items
-                WHERE menu_id = icon_menu_id
-                  AND parent_id = parent_group_id
-                  AND (config->>'path' = '/admin/plugins'
-                       OR config->>'templateKey' = 'adminPlugins')
-            )
-            THEN
-                INSERT INTO menu_items (
-                    id, menu_id, parent_id, sort_order, display_name, icon,
-                    item_type, config, is_visible, is_system,
-                    created_at_utc, updated_at_utc
-                )
-                VALUES (
-                    gen_random_uuid(), icon_menu_id, parent_group_id,
-                    (SELECT COALESCE(MAX(sort_order), 0) + 1
-                     FROM menu_items
-                     WHERE menu_id = icon_menu_id AND parent_id = parent_group_id),
-                    'Plugins', 'fa fa-puzzle-piece',
-                    'template', '{{"templateKey":"adminPlugins"}}'::jsonb,
-                    TRUE, TRUE, NOW(), NOW()
-                );
+                WHERE menu_id = site_id
+                  AND parent_id IS NULL
+                  AND item_type = 'group'
+                  AND display_name = 'Plugins'
+            ) THEN
+                RETURN;
             END IF;
+
+            SELECT COALESCE(MAX(sort_order), -1) + 1 INTO next_order
+            FROM menu_items
+            WHERE menu_id = site_id AND parent_id IS NULL;
+
+            g := gen_random_uuid();
+            INSERT INTO menu_items (
+                id, menu_id, parent_id, sort_order, display_name, icon,
+                item_type, config, is_visible, is_system,
+                created_at_utc, updated_at_utc
+            )
+            VALUES (
+                g, site_id, NULL, next_order, 'Plugins', 'fa fa-puzzle-piece',
+                'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW()
+            );
+
+            INSERT INTO menu_items (
+                id, menu_id, parent_id, sort_order, display_name, icon,
+                item_type, config, is_visible, is_system,
+                created_at_utc, updated_at_utc
+            )
+            VALUES (
+                gen_random_uuid(), site_id, g, 0, 'Manage Plugins', 'fa fa-screwdriver-wrench',
+                'template', '{{"templateKey":"configPlugins"}}'::jsonb,
+                TRUE, TRUE, NOW(), NOW()
+            );
+
+            INSERT INTO menu_items (
+                id, menu_id, parent_id, sort_order, display_name, icon,
+                item_type, config, is_visible, is_system,
+                created_at_utc, updated_at_utc
+            )
+            VALUES (
+                gen_random_uuid(), site_id, g, 1, 'Documentation', 'fa fa-book',
+                'template', '{{"templateKey":"configPluginDocumentation"}}'::jsonb,
+                TRUE, TRUE, NOW(), NOW()
+            );
         END $$;
         """;
 
@@ -1488,8 +1594,11 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigStatusAppearanceSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSiteInformationSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PluginsMenuItemSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PluginDataIsolationSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(MenuItemsPluginColumnSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSeedSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PluginsIconMenuRemovalSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PluginsSiteConfigMenuSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);

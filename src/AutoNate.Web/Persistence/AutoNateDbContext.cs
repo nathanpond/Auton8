@@ -627,6 +627,7 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.IsSystem).HasColumnName("is_system");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedByPluginId).HasColumnName("created_by_plugin_id");
         });
 
         modelBuilder.Entity<SiteAppearanceSettings>(entity =>
@@ -719,6 +720,8 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.LastEnabledAt).HasColumnName("last_enabled_at");
             entity.Property(e => e.LastDisabledAt).HasColumnName("last_disabled_at");
             entity.Property(e => e.LastError).HasColumnName("last_error");
+            entity.Property(e => e.Code).HasColumnName("code");
+            entity.Property(e => e.RolePasswordEncrypted).HasColumnName("role_password_encrypted");
         });
 
         modelBuilder.Entity<PageTemplate>(entity =>

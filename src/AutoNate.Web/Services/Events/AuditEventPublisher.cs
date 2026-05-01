@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Services.Audit;
 
 namespace AutoNate.Web.Services.Events;
@@ -44,6 +45,7 @@ public interface IAuditEventPublisher
 public sealed class DaprAuditEventPublisher(
     IRequestContext requestContext,
     IAuditEventOutbox outbox,
+    IActionHub actionHub,
     ILogger<DaprAuditEventPublisher> logger) : IAuditEventPublisher
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
@@ -77,9 +79,10 @@ public sealed class DaprAuditEventPublisher(
             Details: details,
             AuditContext: requestContext.BuildAuditContext());
 
+        string payloadJson;
         try
         {
-            var payloadJson = JsonSerializer.Serialize(envelope, SerializerOptions);
+            payloadJson = JsonSerializer.Serialize(envelope, SerializerOptions);
             await outbox.EnqueueAsync(topicName, eventType, payloadJson, cancellationToken);
             logger.LogInformation(
                 "Enqueued audit event {EventType} on {Topic}.", eventType, topicName);
@@ -89,8 +92,45 @@ public sealed class DaprAuditEventPublisher(
             logger.LogError(ex,
                 "Failed to enqueue audit event {EventType} on {Topic}.", eventType, topicName);
             AuditEventPublishMetrics.RecordFailure(topicName, ex.GetType().Name);
+            return;
+        }
+
+        // Notify in-process plugin subscribers. ActionHub already isolates
+        // throwing callbacks, so a misbehaving plugin can't break the request.
+        if (actionHub.HasAction(HookPoints.AuditEventPublished))
+        {
+            var notification = BuildNotification(topicName, envelope, payloadJson);
+            await actionHub.DoAsync(HookPoints.AuditEventPublished, cancellationToken, notification);
         }
     }
+
+    private static AuditEventNotification BuildNotification(
+        string topicName, AuditEventEnvelope envelope, string envelopeJson) => new()
+        {
+            EventId = envelope.EventId,
+            EventType = envelope.EventType,
+            TopicName = topicName,
+            ResourceKind = envelope.ResourceKind,
+            EnvelopeJson = envelopeJson,
+            ActorId = envelope.AuditContext.ActorId,
+            ActorUserName = envelope.AuditContext.ActorUserName,
+            OccurredAtUtc = envelope.AuditContext.OccurredAtUtc,
+            RequestId = envelope.AuditContext.RequestId,
+            CorrelationId = envelope.AuditContext.CorrelationId,
+            IpAddress = envelope.AuditContext.IpAddress,
+            UserAgent = envelope.AuditContext.UserAgent,
+            SourceAppId = envelope.AuditContext.SourceAppId,
+            HttpMethod = envelope.AuditContext.HttpMethod,
+            RoutePath = envelope.AuditContext.RoutePath,
+            AuthOutcome = envelope.AuditContext.AuthOutcome switch
+            {
+                AuthOutcome.Allowed => AuditAuthOutcomeDto.Allowed,
+                AuthOutcome.Denied => AuditAuthOutcomeDto.Denied,
+                AuthOutcome.Anonymous => AuditAuthOutcomeDto.Anonymous,
+                _ => AuditAuthOutcomeDto.Allowed,
+            },
+            AuthDecisionReason = envelope.AuditContext.AuthDecisionReason,
+        };
 }
 
 public sealed class NoopAuditEventPublisher : IAuditEventPublisher

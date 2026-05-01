@@ -2,8 +2,11 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Hooks;
+using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace AutoNate.Web.Plugins;
 
@@ -20,6 +23,10 @@ public sealed class PluginRuntime
 {
     private readonly HookRegistrar _registrar;
     private readonly IServiceProvider _hostServices;
+    private readonly PluginDataAccessRegistry? _dataRegistry;
+    private readonly PluginMigrationRunner? _migrationRunner;
+    private readonly IDbContextFactory<AutoNateDbContext>? _dbFactory;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginRuntime> _log;
     private readonly string _pluginRoot;
 
@@ -30,11 +37,18 @@ public sealed class PluginRuntime
         HookRegistrar registrar,
         IServiceProvider hostServices,
         IOptions<PluginOptions> options,
-        ILogger<PluginRuntime> log)
+        ILoggerFactory loggerFactory,
+        PluginDataAccessRegistry? dataRegistry = null,
+        PluginMigrationRunner? migrationRunner = null,
+        IDbContextFactory<AutoNateDbContext>? dbFactory = null)
     {
         _registrar = registrar;
         _hostServices = hostServices;
-        _log = log;
+        _dataRegistry = dataRegistry;
+        _migrationRunner = migrationRunner;
+        _dbFactory = dbFactory;
+        _loggerFactory = loggerFactory;
+        _log = loggerFactory.CreateLogger<PluginRuntime>();
         var configured = options.Value.Folder;
         _pluginRoot = Path.IsPathRooted(configured)
             ? configured
@@ -94,8 +108,55 @@ public sealed class PluginRuntime
                     return new(false, $"Type '{pluginType.FullName}' could not be activated as IAutoNatePlugin.");
                 }
 
+                // Plugins uploaded before the data-storage feature won't have
+                // a code/password. They can still load and use hooks; data
+                // access just throws on use. New uploads always populate both
+                // via PluginSchemaProvisioner, so production rows hit the
+                // provisioned branch.
+                IPluginDataAccess data;
+                string contextCode;
+                if (!string.IsNullOrEmpty(row.Code)
+                    && row.RolePasswordEncrypted is not null
+                    && _dataRegistry is not null
+                    && _migrationRunner is not null)
+                {
+                    var migrationOutcome = await _migrationRunner.RunAsync(
+                        row.Code, row.RolePasswordEncrypted, folder, ct).ConfigureAwait(false);
+                    if (!migrationOutcome.Success)
+                    {
+                        return new(false,
+                            $"Migration '{migrationOutcome.FailedFile}' failed: {migrationOutcome.ErrorMessage}");
+                    }
+
+                    data = _dataRegistry.GetOrCreate(row.Code, row.RolePasswordEncrypted);
+                    contextCode = row.Code;
+                }
+                else
+                {
+                    _log.LogWarning(
+                        "Plugin {Id} has no provisioned schema; IPluginContext.Data will throw on use.", row.Id);
+                    data = new UnprovisionedPluginDataAccess();
+                    contextCode = string.Empty;
+                }
+
+                IPluginMenus menus;
+                if (_dbFactory is not null)
+                {
+                    // Wipe any leftover plugin menu items so Configure() runs
+                    // against a clean slate. Disable already does this — this
+                    // covers the path where the host crashed mid-disable, or
+                    // where rows exist from a prior process.
+                    await DeletePluginMenuItemsAsync(row.Id, ct).ConfigureAwait(false);
+                    menus = new PluginMenus(_dbFactory, row.Id, _loggerFactory.CreateLogger<PluginMenus>());
+                }
+                else
+                {
+                    menus = new NoopPluginMenus();
+                }
+
                 scoped = new ScopedHookRegistrar(_registrar);
-                instance.Configure(scoped, _hostServices);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, _hostServices);
+                instance.Configure(context);
 
                 var loaded = new LoadedPlugin(row.Id, instance.Name, instance.Version, alc, scoped, instance);
                 _loaded[row.Id] = loaded;
@@ -130,6 +191,33 @@ public sealed class PluginRuntime
         finally
         {
             _gate.Release();
+        }
+    }
+
+    // Releases the per-plugin NpgsqlDataSource. Called by the management
+    // service after DisableAsync (data preserved) and again before delete
+    // (so the role can be dropped without dangling pooled connections).
+    public Task ReleaseDataSourceAsync(string code) =>
+        _dataRegistry?.RemoveAsync(code) ?? Task.CompletedTask;
+
+    // Removes every menu_items row tagged with this plugin's id. Called by
+    // the management service on disable so the plugin's items vanish from
+    // the sidebar; on delete, the FK CASCADE handles cleanup but calling
+    // this first is harmless and makes the order of operations explicit.
+    public async Task DeletePluginMenuItemsAsync(Guid pluginId, CancellationToken ct)
+    {
+        if (_dbFactory is null) return;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct);
+        }
+        var removed = PluginMenus.DeleteAllForPlugin(connection, pluginId);
+        if (removed > 0)
+        {
+            _log.LogInformation("Removed {Count} menu item(s) registered by plugin {PluginId}.", removed, pluginId);
         }
     }
 

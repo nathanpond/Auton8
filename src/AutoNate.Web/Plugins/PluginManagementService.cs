@@ -15,6 +15,7 @@ internal sealed class PluginManagementService : IPluginManagementService
     private readonly PluginRuntime _runtime;
     private readonly IApplicationEventPublisher _events;
     private readonly PluginOptions _options;
+    private readonly PluginSchemaProvisioner _provisioner;
     private readonly ILogger<PluginManagementService> _log;
 
     public PluginManagementService(
@@ -22,12 +23,14 @@ internal sealed class PluginManagementService : IPluginManagementService
         PluginRuntime runtime,
         IApplicationEventPublisher events,
         IOptions<PluginOptions> options,
+        PluginSchemaProvisioner provisioner,
         ILogger<PluginManagementService> log)
     {
         _dbFactory = dbFactory;
         _runtime = runtime;
         _events = events;
         _options = options.Value;
+        _provisioner = provisioner;
         _log = log;
     }
 
@@ -83,6 +86,21 @@ internal sealed class PluginManagementService : IPluginManagementService
                 return new(false, null, "extract_failed", ex.Message);
             }
 
+            // Provision the per-plugin DB role and schema before persisting the
+            // row so a failed provision doesn't leave a code-less plugin around.
+            // If the row insert below fails we tear down the schema explicitly.
+            PluginProvisioningResult provisioning;
+            try
+            {
+                provisioning = await _provisioner.ProvisionAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Failed to provision plugin schema; rolling back.");
+                TryDeleteFolder(folder);
+                return new(false, null, "provision_failed", ex.Message);
+            }
+
             var row = new Plugin
             {
                 Id = id,
@@ -93,12 +111,26 @@ internal sealed class PluginManagementService : IPluginManagementService
                 Status = (int)PluginStatus.Disabled,
                 UploadedAt = DateTime.UtcNow,
                 UploadedBy = actorUserId,
+                Code = provisioning.Code,
+                RolePasswordEncrypted = provisioning.EncryptedPassword,
             };
 
-            await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+            try
             {
+                await using var db = await _dbFactory.CreateDbContextAsync(ct);
                 db.Plugins.Add(row);
                 await db.SaveChangesAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Failed to persist plugin row; tearing down schema {Code}.", provisioning.Code);
+                TryDeleteFolder(folder);
+                try { await _provisioner.TeardownAsync(provisioning.Code, ct); }
+                catch (Exception teardownEx)
+                {
+                    _log.LogError(teardownEx, "Schema teardown after row-insert failure also failed for {Code}.", provisioning.Code);
+                }
+                return new(false, null, "row_insert_failed", ex.Message);
             }
 
             await PublishAsync(ApplicationEventTypes.PluginUploaded, row, actorUserId, errorMessage: null, ct);
@@ -168,6 +200,19 @@ internal sealed class PluginManagementService : IPluginManagementService
             row = tracked;
         }
 
+        // Drop the per-plugin NpgsqlDataSource so its pooled connections close.
+        // The schema and role remain — disable is purely a code-side operation.
+        if (!string.IsNullOrEmpty(row.Code))
+        {
+            await _runtime.ReleaseDataSourceAsync(row.Code);
+        }
+
+        // Sweep menu items the plugin registered through IPluginMenus. Plugin
+        // re-creates them on the next enable inside Configure(); the FK
+        // CASCADE on delete handles the case where the plugin is removed
+        // entirely, but disable preserves the row so we sweep explicitly.
+        await _runtime.DeletePluginMenuItemsAsync(id, ct);
+
         await PublishAsync(ApplicationEventTypes.PluginDisabled, row, actorUserId, errorMessage: null, ct);
         return new(true, ToDto(row), null, null);
     }
@@ -177,11 +222,32 @@ internal sealed class PluginManagementService : IPluginManagementService
         await _runtime.DisableAsync(id, ct);
 
         Plugin? snapshotForEvent;
+        string? code;
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))
         {
             var tracked = await db.Plugins.FirstOrDefaultAsync(p => p.Id == id, ct);
             if (tracked is null) return new(false, null, "not_found", "Plugin not found.");
             snapshotForEvent = tracked;
+            code = tracked.Code;
+        }
+
+        // Drop schema/role first; the database side has no file locks so this
+        // can always run to completion immediately, decoupling data lifecycle
+        // from on-disk file lifecycle. If files remain (Windows lock), we
+        // fall through to DeletedPending and only the file delete is retried.
+        if (!string.IsNullOrEmpty(code))
+        {
+            // Close the plugin's NpgsqlDataSource first so pooled connections
+            // don't hold the role and block DROP ROLE.
+            await _runtime.ReleaseDataSourceAsync(code);
+            try
+            {
+                await _provisioner.TeardownAsync(code, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Failed to tear down plugin schema/role for {Code}; continuing with file delete.", code);
+            }
         }
 
         var filesGone = await _runtime.TryDeleteFilesAsync(id, ct);

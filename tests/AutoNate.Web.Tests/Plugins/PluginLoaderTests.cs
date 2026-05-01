@@ -88,7 +88,7 @@ public sealed class PluginLoaderTests : IDisposable
         var registrar = new HookRegistrar(NullLogger<ActionHub>.Instance);
         var services = new ServiceCollection().BuildServiceProvider();
         var options = Options.Create(new PluginOptions { Folder = _tempRoot });
-        var runtime = new PluginRuntime(registrar, services, options, NullLogger<PluginRuntime>.Instance);
+        var runtime = new PluginRuntime(registrar, services, options, NullLoggerFactory.Instance);
         return (runtime, registrar);
     }
 
