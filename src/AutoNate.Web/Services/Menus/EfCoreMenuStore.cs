@@ -417,8 +417,8 @@ public sealed class EfCoreMenuStore(
         // Pages own their URL via item_type='page'. Routes can also "claim" a
         // URL via config.aliasPath — those become aliases the catch-all
         // resolves to the target route's component. Template items mount a
-        // built-in SPA template at their config.path (or the template's own
-        // default_path when path is omitted).
+        // built-in SPA template at their config.path (templates do not carry
+        // a default URL — every mounted template item owns its own path).
         var rows = await db.MenuItems.AsNoTracking()
             .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
             .ToListAsync(cancellationToken);
@@ -460,11 +460,11 @@ public sealed class EfCoreMenuStore(
     }
 
     // Snapshot of every page_templates row referenced by a template-typed menu
-    // item: default path (used when the menu item omits config.path), the
-    // optional plugin-supplied JSX content, and the row's content_type. Lets
-    // ParseTemplateConfig serve plugin templates as JSX directly without the
-    // SPA needing a per-key React component lookup.
-    private readonly record struct TemplateRow(string DefaultPath, string ContentType, string? Content);
+    // item: the optional plugin-supplied JSX content and the row's content_type.
+    // Lets ParseTemplateConfig serve plugin templates as JSX directly without
+    // the SPA needing a per-key React component lookup. The URL itself lives
+    // on the menu item (config.path) — templates do not carry a default URL.
+    private readonly record struct TemplateRow(string ContentType, string? Content);
 
     private static async Task<IReadOnlyDictionary<string, TemplateRow>> LoadTemplateInfoAsync(
         AutoNateDbContext db,
@@ -484,20 +484,21 @@ public sealed class EfCoreMenuStore(
         }
         var templates = await db.PageTemplates.AsNoTracking()
             .Where(t => keys.Contains(t.Key))
-            .Select(t => new { t.Key, t.DefaultPath, t.ContentType, t.Content })
+            .Select(t => new { t.Key, t.ContentType, t.Content })
             .ToListAsync(cancellationToken);
         return templates.ToDictionary(
             t => t.Key,
-            t => new TemplateRow(t.DefaultPath, t.ContentType ?? "builtin", t.Content),
+            t => new TemplateRow(t.ContentType ?? "builtin", t.Content),
             StringComparer.Ordinal);
     }
 
     // For an alias-route item, the registry path is the aliasPath and the
     // content type is "alias" (the SPA renders the target component there).
     // For a page item, fall through to the existing page parsing.
-    // For a template item, the path is config.path or the template's
-    // default_path; content type is "template" for built-in templates and
-    // "jsx" for plugin templates (so the SPA's JsxPage renders them).
+    // For a template item, the path is config.path (each menu item owns its
+    // own URL — templates no longer carry a default URL); content type is
+    // "template" for built-in templates and "jsx" for plugin templates (so
+    // the SPA's JsxPage renders them).
     private static (string? Path, string ContentType) ParseRegistryEntry(
         MenuItemEntity row,
         IReadOnlyDictionary<string, TemplateRow> templateInfo)
@@ -544,10 +545,6 @@ public sealed class EfCoreMenuStore(
         if (string.IsNullOrWhiteSpace(key)) return (null, "template", null);
         var path = ReadStringField(config, "path");
         templateInfo.TryGetValue(key, out var info);
-        if (string.IsNullOrWhiteSpace(path) && !string.IsNullOrEmpty(info.DefaultPath))
-        {
-            path = info.DefaultPath;
-        }
         // Plugin-supplied templates carry their own JSX source; serve it as a
         // jsx page so DynamicPageRoute compiles it via JsxPage instead of
         // looking the key up in the SPA's static PAGE_TEMPLATES map.

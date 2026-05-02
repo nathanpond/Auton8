@@ -33,7 +33,8 @@ public sealed class EfCorePageTemplateStore(
         Key = e.Key,
         Name = e.Name,
         Description = e.Description,
-        DefaultPath = e.DefaultPath,
+        ThumbnailUrl = e.ThumbnailUrl,
+        Category = e.Category,
         IsEnabled = e.IsEnabled,
         CreatedAtUtc = PersistenceModelMapper.ToDateTimeOffset(e.CreatedAtUtc),
         UpdatedAtUtc = PersistenceModelMapper.ToDateTimeOffset(e.UpdatedAtUtc)

@@ -176,8 +176,10 @@ public sealed class Auditor : IAutoNatePlugin
                     IsVisible: true));
             }
 
-            // Path lines up with the AuditLog template's auto-generated
-            // default_path: /plugins/<code>/auditlog. Lower-case for stability.
+            // Plugin templates don't carry a default URL — every mounted
+            // template menu item owns its own path. We pick a stable
+            // /plugins/<code>/auditlog so re-enabling the plugin idempotently
+            // re-creates the menu item at the same URL.
             var path = $"/plugins/{context.Code}/auditlog";
             context.Menus.AddMenuItem("icon", settingsId, new NewMenuItem(
                 DisplayName: "Audit Log",

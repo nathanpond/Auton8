@@ -10,7 +10,9 @@ public sealed record class PageTemplate
 
     public string? Description { get; init; }
 
-    public string DefaultPath { get; init; } = string.Empty;
+    public string? ThumbnailUrl { get; init; }
+
+    public string? Category { get; init; }
 
     public bool IsEnabled { get; init; }
 

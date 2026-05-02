@@ -458,7 +458,6 @@ CREATE TABLE IF NOT EXISTS page_templates (
     key TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     description TEXT NULL,
-    default_path TEXT NOT NULL UNIQUE,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at_utc TIMESTAMPTZ NOT NULL,
     updated_at_utc TIMESTAMPTZ NOT NULL,
@@ -469,7 +468,14 @@ CREATE TABLE IF NOT EXISTS page_templates (
     -- plugins ensures these templates go away with the plugin that owns them.
     content TEXT NULL,
     content_type TEXT NOT NULL DEFAULT 'builtin',
-    created_by_plugin_id UUID NULL
+    created_by_plugin_id UUID NULL,
+    -- Presentation metadata used by the admin template picker. thumbnail_url
+    -- holds an http(s) URL or a data: URI for a 200x150px preview image;
+    -- category is a freeform text bucket for grouping templates in the UI.
+    -- Templates do not carry a default URL — the URL lives on each menu item
+    -- that mounts the template (menu_items.config->>'path').
+    thumbnail_url TEXT NULL,
+    category TEXT NULL
 );
 
 CREATE INDEX IF NOT EXISTS ix_page_templates_created_by_plugin_id

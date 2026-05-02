@@ -4,7 +4,8 @@ export type PageTemplateInfo = {
   key: string;
   name: string;
   description: string | null;
-  defaultPath: string;
+  thumbnailUrl: string | null;
+  category: string | null;
 };
 
 const BASE = "/api/page-templates";

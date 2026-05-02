@@ -381,11 +381,6 @@ public sealed class PluginRuntime
                 .Replace("{{pluginCode}}", pluginCode, StringComparison.Ordinal)
                 .Replace("{{pluginId}}", pluginIdString, StringComparison.Ordinal);
 
-            // Default path is namespaced by code so two plugins can't collide
-            // on the unique default_path constraint. Lower-cased for stability.
-            var defaultPath = string.IsNullOrEmpty(pluginCode)
-                ? $"/plugins/_unprovisioned/{key.ToLowerInvariant()}"
-                : $"/plugins/{pluginCode}/{key.ToLowerInvariant()}";
             keepKeys.Add(key);
 
             var existing = await db.PageTemplates
@@ -400,7 +395,6 @@ public sealed class PluginRuntime
                     Key = key,
                     Name = key,
                     Description = null,
-                    DefaultPath = defaultPath,
                     IsEnabled = true,
                     CreatedAtUtc = now,
                     UpdatedAtUtc = now,
@@ -409,13 +403,12 @@ public sealed class PluginRuntime
                     Content = content,
                 });
                 _log.LogInformation(
-                    "Plugin {Id} registered page template '{Key}' (default path '{DefaultPath}').",
-                    row.Id, key, defaultPath);
+                    "Plugin {Id} registered page template '{Key}'.",
+                    row.Id, key);
             }
             else if (existing.CreatedByPluginId == row.Id)
             {
                 existing.Name = string.IsNullOrEmpty(existing.Name) ? key : existing.Name;
-                existing.DefaultPath = defaultPath;
                 existing.IsEnabled = true;
                 existing.ContentType = "jsx";
                 existing.Content = content;

@@ -98,7 +98,8 @@ function ConfigLeaf({
   item: MenuItem;
   templates: PageTemplateInfo[] | undefined;
 }) {
-  const path = resolveItemPath(item, templates);
+  void templates;
+  const path = resolveItemPath(item);
   if (!path) return null;
   return (
     <li>
@@ -121,8 +122,9 @@ function containsActive(
   pathname: string,
   templates: PageTemplateInfo[] | undefined
 ): boolean {
+  void templates;
   for (const child of group.children ?? []) {
-    const path = resolveItemPath(child, templates);
+    const path = resolveItemPath(child);
     if (path && pathname.startsWith(path)) return true;
     if ((child.children ?? []).length > 0 && containsActive(child, pathname, templates)) return true;
   }

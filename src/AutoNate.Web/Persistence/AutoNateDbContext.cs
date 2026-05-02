@@ -732,15 +732,14 @@ public partial class AutoNateDbContext : DbContext
 
             entity.HasIndex(e => e.Key, "page_templates_key_key").IsUnique();
 
-            entity.HasIndex(e => e.DefaultPath, "page_templates_default_path_key").IsUnique();
-
             entity.Property(e => e.Id)
                 .ValueGeneratedNever()
                 .HasColumnName("id");
             entity.Property(e => e.Key).HasColumnName("key");
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.Description).HasColumnName("description");
-            entity.Property(e => e.DefaultPath).HasColumnName("default_path");
+            entity.Property(e => e.ThumbnailUrl).HasColumnName("thumbnail_url");
+            entity.Property(e => e.Category).HasColumnName("category");
             entity.Property(e => e.IsEnabled).HasColumnName("is_enabled");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");

@@ -46,11 +46,11 @@ public sealed class EfCoreMenuStoreTemplateTests
     }
 
     [Fact]
-    public async Task ListPagesAsync_EmitsTemplateEntriesUsingDefaultPath()
+    public async Task ListPagesAsync_EmitsTemplateEntriesUsingConfigPath()
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         await ResetMenusAsync(database);
-        await SeedTemplateAsync(database, key: "manageUsers", defaultPath: "/manage-users");
+        await SeedTemplateAsync(database, key: "manageUsers");
         await SeedMenuAsync(database, key: "main", name: "Main");
 
         var store = database.CreateMenuStore();
@@ -60,7 +60,7 @@ public sealed class EfCoreMenuStoreTemplateTests
             DisplayName: "Manage Users",
             Icon: null,
             ItemType: "template",
-            Config: ParseJson("""{"templateKey":"manageUsers"}"""),
+            Config: ParseJson("""{"templateKey":"manageUsers","path":"/manage-users"}"""),
             PermissionRequired: null,
             IsVisible: true));
 
@@ -72,29 +72,30 @@ public sealed class EfCoreMenuStoreTemplateTests
     }
 
     [Fact]
-    public async Task ListPagesAsync_HonorsConfigPathOverride()
+    public async Task ListPagesAsync_SkipsTemplateItemsWithoutPath()
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         await ResetMenusAsync(database);
-        await SeedTemplateAsync(database, key: "manageUsers", defaultPath: "/manage-users");
+        await SeedTemplateAsync(database, key: "manageUsers");
         await SeedMenuAsync(database, key: "main", name: "Main");
 
+        // Template menu items now own their own URL — there's no template-level
+        // default to fall back to. An item without config.path is unreachable
+        // and should be skipped from the page registry.
         var store = database.CreateMenuStore();
         await store.CreateItemAsync("main", new CreateMenuItemInput(
             ParentId: null,
             SortOrder: 0,
-            DisplayName: "Users",
+            DisplayName: "Manage Users",
             Icon: null,
             ItemType: "template",
-            Config: ParseJson("""{"templateKey":"manageUsers","path":"/users"}"""),
+            Config: ParseJson("""{"templateKey":"manageUsers"}"""),
             PermissionRequired: null,
             IsVisible: true));
 
         var pages = await store.ListPagesAsync(new ClaimsPrincipal(new ClaimsIdentity()));
 
-        var entry = Assert.Single(pages);
-        Assert.Equal("/users", entry.Path);
-        Assert.Equal("template", entry.ContentType);
+        Assert.Empty(pages);
     }
 
     [Fact]
@@ -102,7 +103,7 @@ public sealed class EfCoreMenuStoreTemplateTests
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         await ResetMenusAsync(database);
-        await SeedTemplateAsync(database, key: "manageUsers", defaultPath: "/manage-users");
+        await SeedTemplateAsync(database, key: "manageUsers");
         await SeedMenuAsync(database, key: "main", name: "Main");
 
         var store = database.CreateMenuStore();
@@ -112,7 +113,7 @@ public sealed class EfCoreMenuStoreTemplateTests
             DisplayName: "Manage Users",
             Icon: null,
             ItemType: "template",
-            Config: ParseJson("""{"templateKey":"manageUsers"}"""),
+            Config: ParseJson("""{"templateKey":"manageUsers","path":"/manage-users"}"""),
             PermissionRequired: null,
             IsVisible: true));
 
@@ -148,7 +149,7 @@ public sealed class EfCoreMenuStoreTemplateTests
     }
 
     private static async Task SeedTemplateAsync(
-        PostgresTestDatabase database, string key, string defaultPath)
+        PostgresTestDatabase database, string key)
     {
         await using var db = database.CreateDbContext();
         db.PageTemplates.Add(new PageTemplateEntity
@@ -157,7 +158,6 @@ public sealed class EfCoreMenuStoreTemplateTests
             Key = key,
             Name = key,
             Description = null,
-            DefaultPath = defaultPath,
             IsEnabled = true,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow

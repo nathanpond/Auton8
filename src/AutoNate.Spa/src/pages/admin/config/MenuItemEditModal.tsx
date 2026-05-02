@@ -8,6 +8,8 @@ import { findIcon } from "@/lib/faIcons";
 import { usePageTemplates } from "@/hooks/usePageTemplates";
 import { usePages } from "@/hooks/usePages";
 import { findCollidingAppRoute } from "@/routes/appRoutes";
+import TemplatePickerModal from "./TemplatePickerModal";
+import "./TemplatePickerModal.css";
 
 function extractIconName(stored: string | null | undefined): string {
   if (!stored) return "";
@@ -44,6 +46,7 @@ const ACTION_OPTIONS = [{ value: "logout", label: "Logout (POST /account/logout)
 export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
   const [draft, setDraft] = useState<MenuItem>(item);
   const [iconQuery, setIconQuery] = useState<string>(() => extractIconName(item.icon));
+  const [pickerOpen, setPickerOpen] = useState(false);
   const { data: pageTemplates = [] } = usePageTemplates();
   const { data: pages = [] } = usePages();
 
@@ -180,7 +183,17 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
     persist(isPage ? { keepOpen: true } : undefined);
   };
 
+  const applyTemplatePick = (templateKey: string) => {
+    // Templates do not carry a default URL — the admin always provides the
+    // path on the menu item itself. Picking a template just swaps the key.
+    setDraft((d) => {
+      const prev = (d.config ?? {}) as Record<string, unknown>;
+      return { ...d, config: { ...prev, templateKey } };
+    });
+  };
+
   return (
+    <>
     <div
       className="modal show d-block"
       tabIndex={-1}
@@ -449,81 +462,82 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                 </>
               )}
 
-              {draft.itemType === "template" && (
-                <>
-                  <div className="col-md-6">
-                    <label className="form-label">
-                      Page template <span className="text-danger">*</span>
-                    </label>
-                    <select
-                      className={`form-select${errors.templateKey ? " is-invalid" : ""}`}
-                      value={String(config.templateKey ?? "")}
-                      required
-                      onChange={(e) => {
-                        const nextKey = e.target.value;
-                        setDraft((d) => {
-                          const prev = (d.config ?? {}) as Record<string, unknown>;
-                          const customPath = typeof prev.path === "string" ? (prev.path as string) : "";
-                          const prevKey = typeof prev.templateKey === "string" ? (prev.templateKey as string) : "";
-                          const prevDefault = pageTemplates.find((t) => t.key === prevKey)?.defaultPath ?? "";
-                          const nextDefault = pageTemplates.find((t) => t.key === nextKey)?.defaultPath ?? "";
-                          // Pre-fill the path with the new template's default unless the
-                          // admin already set a custom path (i.e. one that didn't match
-                          // the previous template's default). Pre-filling makes the
-                          // required URL path field a one-click operation in the common
-                          // case while still allowing overrides.
-                          const next = { ...prev, templateKey: nextKey } as Record<string, unknown>;
-                          if (!customPath || customPath === prevDefault) {
-                            if (nextDefault) next.path = nextDefault;
-                            else delete next.path;
-                          }
-                          return { ...d, config: next };
-                        });
-                      }}
-                    >
-                      <option value="">Select a template…</option>
-                      {pageTemplates.map((t) => (
-                        <option key={t.key} value={t.key}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                    {errors.templateKey ? (
-                      <div className="invalid-feedback">{errors.templateKey}</div>
-                    ) : typeof config.templateKey === "string" && config.templateKey ? (
-                      <small className="text-muted">
-                        {pageTemplates.find((t) => t.key === config.templateKey)?.description ?? ""}
-                      </small>
-                    ) : (
-                      <small className="text-muted">
-                        Pick which built-in page template to mount on this menu item.
-                      </small>
-                    )}
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">
-                      URL path <span className="text-danger">*</span>
-                    </label>
-                    <input
-                      className={`form-control font-monospace${errors.path ? " is-invalid" : ""}`}
-                      placeholder={
-                        pageTemplates.find((t) => t.key === config.templateKey)?.defaultPath ?? "/path"
-                      }
-                      value={String(config.path ?? "")}
-                      onChange={(e) => setConfigField("path", e.target.value)}
-                      required
-                    />
-                    {errors.path ? (
-                      <div className="invalid-feedback">{errors.path}</div>
-                    ) : (
-                      <small className="text-muted">
-                        Pre-filled from the template's default path when you
-                        select one — adjust here if you want a different URL.
-                      </small>
-                    )}
-                  </div>
-                </>
-              )}
+              {draft.itemType === "template" && (() => {
+                const selected =
+                  typeof config.templateKey === "string" && config.templateKey
+                    ? pageTemplates.find((t) => t.key === config.templateKey) ?? null
+                    : null;
+                return (
+                  <>
+                    <div className="col-md-6">
+                      <label className="form-label">
+                        Page template <span className="text-danger">*</span>
+                      </label>
+                      {selected ? (
+                        <div
+                          className={`tp-selected-card-condensed${
+                            errors.templateKey ? " border-danger" : ""
+                          }`}
+                        >
+                          <div className="tp-selected-condensed-main">
+                            <span className="tp-selected-title">{selected.name}</span>
+                            {selected.category && (
+                              <span className="tp-pill">{selected.category}</span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-link btn-sm p-0 ms-auto flex-shrink-0"
+                            onClick={() => setPickerOpen(true)}
+                          >
+                            Change…
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`tp-selected-card-condensed tp-selected-empty${
+                            errors.templateKey ? " border-danger" : ""
+                          }`}
+                          onClick={() => setPickerOpen(true)}
+                        >
+                          <i className="fa fa-th-large me-2" aria-hidden="true" />
+                          <span>Choose a page template…</span>
+                        </button>
+                      )}
+                      {errors.templateKey ? (
+                        <div className="text-danger small mt-1">
+                          {errors.templateKey}
+                        </div>
+                      ) : selected?.description ? (
+                        <small className="text-muted d-block mt-1">
+                          {selected.description}
+                        </small>
+                      ) : null}
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">
+                        URL path <span className="text-danger">*</span>
+                      </label>
+                      <input
+                        className={`form-control font-monospace${errors.path ? " is-invalid" : ""}`}
+                        placeholder="/path"
+                        value={String(config.path ?? "")}
+                        onChange={(e) => setConfigField("path", e.target.value)}
+                        required
+                      />
+                      {errors.path ? (
+                        <div className="invalid-feedback">{errors.path}</div>
+                      ) : (
+                        <small className="text-muted">
+                          The URL where this template will be mounted on this
+                          menu item.
+                        </small>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
 
               {draft.itemType === "action" && (
                 <div className="col-12">
@@ -654,5 +668,17 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
         </form>
       </div>
     </div>
+    {pickerOpen && (
+      <TemplatePickerModal
+        templates={pageTemplates}
+        selectedKey={typeof config.templateKey === "string" ? config.templateKey : null}
+        onSelect={(template) => {
+          applyTemplatePick(template.key);
+          setPickerOpen(false);
+        }}
+        onCancel={() => setPickerOpen(false)}
+      />
+    )}
+    </>
   );
 }

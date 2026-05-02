@@ -12,7 +12,9 @@ public partial class PageTemplate
 
     public string? Description { get; set; }
 
-    public string DefaultPath { get; set; } = null!;
+    public string? ThumbnailUrl { get; set; }
+
+    public string? Category { get; set; }
 
     public bool IsEnabled { get; set; }
 

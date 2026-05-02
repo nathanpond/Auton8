@@ -82,9 +82,9 @@ export default function PagesMenusHelpModal({ onClose }: Props) {
 
                 <dt className="col-sm-3">Template</dt>
                 <dd className="col-sm-9">
-                  Mounts a built-in <strong>page template</strong> at a URL. Pick the
-                  template from the dropdown — its component renders at the chosen
-                  path. Leave the path field blank to use the template's default URL.
+                  Mounts a built-in <strong>page template</strong> at a URL.
+                  Pick a template, then specify the URL where it should be
+                  mounted — every template menu item owns its own path.
                   <em> See the template catalog below.</em>
                 </dd>
 
@@ -154,17 +154,36 @@ export default function PagesMenusHelpModal({ onClose }: Props) {
                   <table className="table table-sm align-middle">
                     <thead>
                       <tr>
+                        <th style={{ width: 220 }}>Thumbnail</th>
                         <th style={{ width: "20%" }}>Template</th>
-                        <th style={{ width: "30%" }}>Default URL</th>
+                        <th style={{ width: "15%" }}>Category</th>
                         <th>Description</th>
                       </tr>
                     </thead>
                     <tbody>
                       {sortedTemplates.map((t) => (
                         <tr key={t.key}>
-                          <td>{t.name}</td>
                           <td>
-                            <code>{t.defaultPath}</code>
+                            {t.thumbnailUrl ? (
+                              <img
+                                src={t.thumbnailUrl}
+                                alt={`${t.name} thumbnail`}
+                                width={200}
+                                height={150}
+                                style={{ objectFit: "cover", border: "1px solid #dee2e6", borderRadius: 4 }}
+                              />
+                            ) : (
+                              <div
+                                className="d-flex align-items-center justify-content-center text-muted bg-light border rounded"
+                                style={{ width: 200, height: 150, fontSize: 12 }}
+                              >
+                                no thumbnail
+                              </div>
+                            )}
+                          </td>
+                          <td>{t.name}</td>
+                          <td className="text-muted">
+                            {t.category ?? <em>(none)</em>}
                           </td>
                           <td className="text-muted">
                             {t.description ?? <em>(no description)</em>}

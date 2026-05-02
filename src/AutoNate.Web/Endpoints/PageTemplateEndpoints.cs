@@ -18,7 +18,7 @@ public static class PageTemplateEndpoints
         {
             var templates = await store.ListEnabledAsync(ct);
             var dto = templates
-                .Select(t => new PageTemplateDto(t.Key, t.Name, t.Description, t.DefaultPath))
+                .Select(t => new PageTemplateDto(t.Key, t.Name, t.Description, t.ThumbnailUrl, t.Category))
                 .ToList();
             await auditPublisher.PublishAsync(
                 SiteEventTopic.TopicName,
@@ -33,5 +33,10 @@ public static class PageTemplateEndpoints
         return app;
     }
 
-    public sealed record PageTemplateDto(string Key, string Name, string? Description, string DefaultPath);
+    public sealed record PageTemplateDto(
+        string Key,
+        string Name,
+        string? Description,
+        string? ThumbnailUrl,
+        string? Category);
 }

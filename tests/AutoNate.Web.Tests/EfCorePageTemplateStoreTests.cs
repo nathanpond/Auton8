@@ -13,9 +13,9 @@ public sealed class EfCorePageTemplateStoreTests
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         await SeedTemplatesAsync(database,
-            ("zeta", "Zeta", "/zeta", isEnabled: true),
-            ("alpha", "Alpha", "/alpha", isEnabled: true),
-            ("disabled", "Beta (off)", "/beta", isEnabled: false));
+            ("zeta", "Zeta", isEnabled: true),
+            ("alpha", "Alpha", isEnabled: true),
+            ("disabled", "Beta (off)", isEnabled: false));
 
         var store = database.CreatePageTemplateStore();
 
@@ -30,14 +30,14 @@ public sealed class EfCorePageTemplateStoreTests
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
         await SeedTemplatesAsync(database,
-            ("offTemplate", "Off", "/off", isEnabled: false));
+            ("offTemplate", "Off", isEnabled: false));
 
         var store = database.CreatePageTemplateStore();
 
         var found = await store.GetByKeyAsync("offTemplate");
 
         Assert.NotNull(found);
-        Assert.Equal("/off", found!.DefaultPath);
+        Assert.Equal("offTemplate", found!.Key);
         Assert.False(found.IsEnabled);
     }
 
@@ -52,10 +52,10 @@ public sealed class EfCorePageTemplateStoreTests
 
     private static async Task SeedTemplatesAsync(
         PostgresTestDatabase database,
-        params (string Key, string Name, string DefaultPath, bool isEnabled)[] templates)
+        params (string Key, string Name, bool isEnabled)[] templates)
     {
         await using var db = database.CreateDbContext();
-        foreach (var (key, name, path, isEnabled) in templates)
+        foreach (var (key, name, isEnabled) in templates)
         {
             db.PageTemplates.Add(new PageTemplateEntity
             {
@@ -63,7 +63,6 @@ public sealed class EfCorePageTemplateStoreTests
                 Key = key,
                 Name = name,
                 Description = null,
-                DefaultPath = path,
                 IsEnabled = isEnabled,
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow

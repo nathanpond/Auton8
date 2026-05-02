@@ -602,7 +602,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           <tbody>
             <tr>
               <td><code>"template"</code></td>
-              <td><code>{"{ templateKey, path? }"}</code></td>
+              <td><code>{"{ templateKey, path }"}</code></td>
               <td>Bind to a built-in React component shipped by the host.</td>
             </tr>
             <tr>

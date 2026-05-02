@@ -434,8 +434,11 @@ function UserDropdownEntry({
   return null;
 }
 
-function pathOf(item: MenuItem, templates: PageTemplateInfo[] | undefined): string | null {
-  return resolveItemPath(item, templates);
+// `templates` is no longer needed to compute a URL — kept on the signature so
+// existing callers don't need to be touched. Templates do not carry default
+// URLs; every template menu item owns its own config.path.
+function pathOf(item: MenuItem, _templates: PageTemplateInfo[] | undefined): string | null {
+  return resolveItemPath(item);
 }
 
 function stringFrom(value: unknown): string | null {
