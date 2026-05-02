@@ -31,3 +31,9 @@ src/AutoNate.Web/wwwroot/
 .idea/
 Test Results/
 
+# Runtime data root: user uploads, persisted plugins, public /files assets,
+# repositories. Container deployments mount this as a volume; locally it's
+# auto-created on startup. Never commit anything that lands here.
+/data/
+src/AutoNate.Web/data/
+

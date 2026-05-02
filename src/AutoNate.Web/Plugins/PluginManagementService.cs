@@ -2,6 +2,7 @@ using System.IO.Compression;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.ApplicationEvents;
+using AutoNate.Web.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +17,7 @@ internal sealed class PluginManagementService : IPluginManagementService
     private readonly IApplicationEventPublisher _events;
     private readonly PluginOptions _options;
     private readonly PluginSchemaProvisioner _provisioner;
+    private readonly IDataPaths _dataPaths;
     private readonly ILogger<PluginManagementService> _log;
 
     public PluginManagementService(
@@ -24,6 +26,7 @@ internal sealed class PluginManagementService : IPluginManagementService
         IApplicationEventPublisher events,
         IOptions<PluginOptions> options,
         PluginSchemaProvisioner provisioner,
+        IDataPaths dataPaths,
         ILogger<PluginManagementService> log)
     {
         _dbFactory = dbFactory;
@@ -31,6 +34,7 @@ internal sealed class PluginManagementService : IPluginManagementService
         _events = events;
         _options = options.Value;
         _provisioner = provisioner;
+        _dataPaths = dataPaths;
         _log = log;
     }
 
@@ -56,8 +60,10 @@ internal sealed class PluginManagementService : IPluginManagementService
     {
         // Stream the upload to a temp file so the validator can scan it
         // without loading the whole archive into memory; ZipFile.OpenRead
-        // expects a path.
-        var tempZip = Path.Combine(Path.GetTempPath(), $"autonate-plugin-{Guid.NewGuid():N}.zip");
+        // expects a path. Staging under the data volume's tmp/ avoids cross-
+        // device copies on hosts where /tmp is on a different mount than
+        // PluginRoot, and keeps stray uploads in a known, sweep-able place.
+        var tempZip = Path.Combine(_dataPaths.TempRoot, $"autonate-plugin-{Guid.NewGuid():N}.zip");
         try
         {
             await using (var fs = File.Create(tempZip))

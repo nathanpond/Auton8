@@ -4,6 +4,7 @@ using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Hooks;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
+using AutoNate.Web.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -37,6 +38,7 @@ public sealed class PluginRuntime
         HookRegistrar registrar,
         IServiceProvider hostServices,
         IOptions<PluginOptions> options,
+        IDataPaths dataPaths,
         ILoggerFactory loggerFactory,
         PluginDataAccessRegistry? dataRegistry = null,
         PluginMigrationRunner? migrationRunner = null,
@@ -50,9 +52,16 @@ public sealed class PluginRuntime
         _loggerFactory = loggerFactory;
         _log = loggerFactory.CreateLogger<PluginRuntime>();
         var configured = options.Value.Folder;
-        _pluginRoot = Path.IsPathRooted(configured)
-            ? configured
-            : Path.Combine(AppContext.BaseDirectory, configured);
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            _pluginRoot = dataPaths.PluginsRoot;
+        }
+        else
+        {
+            _pluginRoot = Path.IsPathRooted(configured)
+                ? configured
+                : Path.Combine(AppContext.BaseDirectory, configured);
+        }
     }
 
     public string PluginRoot => _pluginRoot;

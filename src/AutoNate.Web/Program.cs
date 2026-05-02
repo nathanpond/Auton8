@@ -26,7 +26,9 @@ using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.SiteSettings;
 using AutoNate.Web.Services.Workflow;
+using AutoNate.Web.Storage;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.FileProviders;
 using Dapr.Messaging.PublishSubscribe.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication;
@@ -221,6 +223,8 @@ builder.Services.AddHostedService<WorkflowTaskNotificationListener>();
 // Plugins receive IHookRegistrar (write surface); host services consume
 // IActionHub / IFilterHub (read/dispatch surface).
 builder.Services.AddOptions<PluginOptions>().BindConfiguration(PluginOptions.SectionName);
+builder.Services.AddOptions<DataOptions>().BindConfiguration(DataOptions.SectionName);
+builder.Services.AddSingleton<IDataPaths, DataPaths>();
 builder.Services.AddSingleton<HookRegistrar>();
 builder.Services.AddSingleton<IHookRegistrar>(sp => sp.GetRequiredService<HookRegistrar>());
 builder.Services.AddSingleton<IActionHub>(sp => sp.GetRequiredService<HookRegistrar>().Actions);
@@ -541,6 +545,22 @@ app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();
 app.MapAdminPluginsEndpoints();
+
+// Runtime-mutable public assets live under /data/wwwroot and are served at the
+// configured prefix (default /files). MapStaticAssets only handles compile-time
+// known wwwroot files, so we layer UseStaticFiles for the dynamic side. The
+// prefix can't be /assets — that path is owned by the Vite-built React bundle
+// inside wwwroot/.
+{
+    var dataPaths = app.Services.GetRequiredService<IDataPaths>();
+    var dataOptions = app.Services.GetRequiredService<IOptions<DataOptions>>().Value;
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(dataPaths.PublicRoot),
+        RequestPath = dataOptions.PublicUrlPrefix,
+        ServeUnknownFileTypes = false,
+    });
+}
 
 app.MapStaticAssets();
 

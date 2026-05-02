@@ -3,6 +3,7 @@ using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Hooks;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Plugins;
+using AutoNate.Web.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -88,8 +89,30 @@ public sealed class PluginLoaderTests : IDisposable
         var registrar = new HookRegistrar(NullLogger<ActionHub>.Instance);
         var services = new ServiceCollection().BuildServiceProvider();
         var options = Options.Create(new PluginOptions { Folder = _tempRoot });
-        var runtime = new PluginRuntime(registrar, services, options, NullLoggerFactory.Instance);
+        // Folder override is set above, so PluginsRoot from this stub is never
+        // read — supplying placeholders is fine.
+        var dataPaths = new StubDataPaths(_tempRoot);
+        var runtime = new PluginRuntime(registrar, services, options, dataPaths, NullLoggerFactory.Instance);
         return (runtime, registrar);
+    }
+
+    private sealed class StubDataPaths : IDataPaths
+    {
+        public StubDataPaths(string root)
+        {
+            Root = root;
+            PublicRoot = Path.Combine(root, "wwwroot");
+            PluginsRoot = Path.Combine(root, "plugins");
+            UploadsRoot = Path.Combine(root, "uploads");
+            RepositoriesRoot = Path.Combine(root, "repositories");
+            TempRoot = Path.Combine(root, "tmp");
+        }
+        public string Root { get; }
+        public string PublicRoot { get; }
+        public string PluginsRoot { get; }
+        public string UploadsRoot { get; }
+        public string RepositoriesRoot { get; }
+        public string TempRoot { get; }
     }
 
     private Plugin StageSamplePlugin()

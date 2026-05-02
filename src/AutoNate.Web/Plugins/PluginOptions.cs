@@ -4,9 +4,12 @@ public sealed class PluginOptions
 {
     public const string SectionName = "Plugins";
 
-    // Resolved against AppContext.BaseDirectory at startup; relative paths
-    // make dev/prod symmetric.
-    public string Folder { get; set; } = "plugins";
+    // Optional override for where plugin folders are extracted. When unset,
+    // plugins live under IDataPaths.PluginsRoot (i.e. {DataRoot}/plugins) so
+    // installed plugins persist across container redeploys via the data volume.
+    // Relative values are resolved against AppContext.BaseDirectory; absolute
+    // values are used as-is. Leave empty in normal deployments.
+    public string Folder { get; set; } = string.Empty;
 
     // Cap on uncompressed size of an uploaded zip. 50 MB default — large
     // enough for plugins with private deps, small enough to bound an upload's

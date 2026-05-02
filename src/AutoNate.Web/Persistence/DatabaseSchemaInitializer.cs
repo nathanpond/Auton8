@@ -645,11 +645,17 @@ internal static class DatabaseSchemaInitializer
             key TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             description TEXT NULL,
-            default_path TEXT NOT NULL UNIQUE,
             is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
             created_at_utc TIMESTAMPTZ NOT NULL,
             updated_at_utc TIMESTAMPTZ NOT NULL
         );
+
+        -- Older DBs created when the entity still had DefaultPath have a
+        -- default_path TEXT NOT NULL UNIQUE column. The entity dropped it in
+        -- eb87a53d (every template menu item now owns its URL), so the
+        -- column has to go before the seed INSERT runs without it.
+        ALTER TABLE page_templates
+            DROP COLUMN IF EXISTS default_path;
 
         CREATE INDEX IF NOT EXISTS ix_menu_items_template_key
             ON menu_items ((config->>'templateKey'))
@@ -1253,34 +1259,34 @@ internal static class DatabaseSchemaInitializer
             seed_actor UUID := '00000000-0000-0000-0000-000000000000';
             standalone_id UUID := '00000000-0000-0000-0001-000000000006';
         BEGIN
-            INSERT INTO page_templates (id, key, name, description, default_path, is_enabled, created_at_utc, updated_at_utc)
+            INSERT INTO page_templates (id, key, name, description, is_enabled, created_at_utc, updated_at_utc)
             VALUES
-              (gen_random_uuid(), 'home', 'Home', 'The main dashboard.', '/home', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'userProfile', 'User Profile', 'View and edit the signed-in user''s profile.', '/user-profile', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'manageUsers', 'Manage Users', 'Top-level user management page.', '/manage-users', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'busWatcher', 'Bus Watcher', 'Live event bus inspector.', '/bus-watcher', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'adminRoles', 'Roles & Permissions', 'Manage roles and assigned permissions.', '/admin/roles', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'adminGroups', 'Groups', 'Manage user groups.', '/admin/groups', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'adminGrants', 'Permission Grants', 'Direct permission grants for principals.', '/admin/grants', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'adminHierarchy', 'Hierarchy', 'View role / group hierarchy.', '/admin/hierarchy', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'adminExplain', 'Effective Permissions', 'Explain why a principal has a permission.', '/admin/explain', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'adminPlugins', 'Plugins', 'Manage installed plugins.', '/admin/plugins', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configGeneral', 'General (Site Config)', 'General sitewide configuration.', '/admin/config/general', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configFeatures', 'Features (Site Config)', 'Feature toggles.', '/admin/config/features', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configAppearance', 'Site Appearance (Site Config)', 'Sitewide appearance settings.', '/admin/config/appearance', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configStatusAppearance', 'Status Appearance (Site Config)', 'Status colour mapping.', '/admin/config/status-appearance', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configExternalConnections', 'External Connections (Site Config)', 'External service connections.', '/admin/config/external-connections', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configPagesMenus', 'Pages / Menus (Site Config)', 'Pages and menus admin.', '/admin/config/pages-menus', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configBusWatcher', 'Bus Watcher (Site Config)', 'Bus watcher mounted inside Site Config.', '/admin/config/bus-watcher', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configEvents', 'Events (Site Config)', 'Event subscriptions and topics.', '/admin/config/events', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configSystemHealth', 'System Health (Site Config)', 'Live status of every component and its connections.', '/admin/config/system-health', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configSecurityUsers', 'Manage Users (Site Config)', 'User management mounted inside Site Config.', '/admin/config/users', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configSecurityGroups', 'Manage Groups (Site Config)', 'Group management mounted inside Site Config.', '/admin/config/groups', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configSecurityRoles', 'Manage Roles (Site Config)', 'Role management mounted inside Site Config.', '/admin/config/roles', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configSecurityPermissions', 'Set Permissions (Site Config)', 'Set permissions mounted inside Site Config.', '/admin/config/permissions', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configSecurityPermissionChecker', 'Permission Checker (Site Config)', 'Effective-permission checker.', '/admin/config/permission-checker', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configPlugins', 'Manage Plugins (Site Config)', 'Plugin management mounted inside Site Config.', '/admin/config/plugins', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How AutoNate plugins work and the patterns for working within them.', '/admin/config/plugins/documentation', TRUE, NOW(), NOW())
+              (gen_random_uuid(), 'home', 'Home', 'The main dashboard.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'userProfile', 'User Profile', 'View and edit the signed-in user''s profile.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'manageUsers', 'Manage Users', 'Top-level user management page.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'busWatcher', 'Bus Watcher', 'Live event bus inspector.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminRoles', 'Roles & Permissions', 'Manage roles and assigned permissions.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminGroups', 'Groups', 'Manage user groups.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminGrants', 'Permission Grants', 'Direct permission grants for principals.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminHierarchy', 'Hierarchy', 'View role / group hierarchy.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminExplain', 'Effective Permissions', 'Explain why a principal has a permission.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'adminPlugins', 'Plugins', 'Manage installed plugins.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configGeneral', 'General (Site Config)', 'General sitewide configuration.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configFeatures', 'Features (Site Config)', 'Feature toggles.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configAppearance', 'Site Appearance (Site Config)', 'Sitewide appearance settings.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configStatusAppearance', 'Status Appearance (Site Config)', 'Status colour mapping.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configExternalConnections', 'External Connections (Site Config)', 'External service connections.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configPagesMenus', 'Pages / Menus (Site Config)', 'Pages and menus admin.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configBusWatcher', 'Bus Watcher (Site Config)', 'Bus watcher mounted inside Site Config.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configEvents', 'Events (Site Config)', 'Event subscriptions and topics.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSystemHealth', 'System Health (Site Config)', 'Live status of every component and its connections.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityUsers', 'Manage Users (Site Config)', 'User management mounted inside Site Config.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityGroups', 'Manage Groups (Site Config)', 'Group management mounted inside Site Config.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityRoles', 'Manage Roles (Site Config)', 'Role management mounted inside Site Config.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityPermissions', 'Set Permissions (Site Config)', 'Set permissions mounted inside Site Config.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSecurityPermissionChecker', 'Permission Checker (Site Config)', 'Effective-permission checker.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configPlugins', 'Manage Plugins (Site Config)', 'Plugin management mounted inside Site Config.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How AutoNate plugins work and the patterns for working within them.', TRUE, NOW(), NOW())
             ON CONFLICT (key) DO NOTHING;
 
             INSERT INTO menus (id, key, name, description, is_system,
