@@ -150,16 +150,17 @@ export default function TemplatePickerModal({
 
   const jumpTo = useCallback((category: string) => {
     setActiveCategory(category);
-    const el = sectionRefs.current[category];
+    const headerEl = sectionRefs.current[category];
     const root = listRef.current;
-    if (!el || !root) return;
-    // Use bounding-rect math so this works regardless of where the user is
-    // currently scrolled (above or below the target) and regardless of
-    // .tp-list's CSS position. offsetTop is unreliable here because the
-    // section header is `position: sticky`, which can make offsetTop the
-    // header's natural-position value rather than its visual offset within
-    // the scroll container.
-    const elRect = el.getBoundingClientRect();
+    if (!headerEl || !root) return;
+    // Target the parent <section> rather than the header itself. The header
+    // is `position: sticky`, so its bounding rect reflects the visual sticky
+    // offset — when the user has scrolled past the section, the header has
+    // been released to the section's bottom edge, and using it would scroll
+    // to the BOTTOM of the category instead of the top. The <section> is in
+    // normal flow, so its rect tracks the section's true top.
+    const sectionEl = headerEl.parentElement ?? headerEl;
+    const elRect = sectionEl.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
     const target = root.scrollTop + (elRect.top - rootRect.top) - 4;
     root.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
