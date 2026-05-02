@@ -977,6 +977,7 @@ function describeBusinessObject(businessObject) {
   const signal = describeSignalStartEvent(businessObject);
   const timer = describeTimerStartEvent(businessObject);
   const timerCatch = describeTimerIntermediateCatchEvent(businessObject);
+  const serviceTask = describeServiceTask(businessObject);
   const description = {
     id: businessObject.id,
     type: businessObject.$type,
@@ -1014,7 +1015,59 @@ function describeBusinessObject(businessObject) {
     description.timerDate = timerCatch.timerDate;
   }
 
+  if (serviceTask) {
+    // Only present for service tasks the studio recognizes (delegateExpression
+    // points at the AutoNate behavior bridge). Lets the studio route the
+    // selection to the service-task modal and pre-populate the picker.
+    description.serviceTaskKind = serviceTask.serviceTaskKind;
+    description.behaviorKey = serviceTask.behaviorKey;
+  }
+
   return description;
+}
+
+function describeServiceTask(businessObject) {
+  if (!businessObject || businessObject.$type !== "bpmn:ServiceTask") {
+    return null;
+  }
+
+  // Two cases route to our modal:
+  //   1. delegateExpression is already ${autonateBehaviorDelegate} — the
+  //      task was previously configured by us; pre-populate from the
+  //      flowable: attributes we wrote.
+  //   2. The task is unwired (no class / expression / delegateExpression /
+  //      type) — fresh from the palette; let the user pick a behavior and
+  //      we'll write the wiring on apply.
+  // A task pointing at a different delegate (custom Java class, plugin-
+  // shipped delegate, etc.) is left alone — returning null here means
+  // selecting it shows no modal, matching the "we don't manage this" stance.
+  const delegateExpression = readFlowableServiceTaskAttr(businessObject, "delegateExpression");
+  const className = readFlowableServiceTaskAttr(businessObject, "class");
+  const expression = readFlowableServiceTaskAttr(businessObject, "expression");
+  const flowableType = readFlowableServiceTaskAttr(businessObject, "type");
+
+  const isOurs = delegateExpression === "${autonateBehaviorDelegate}";
+  const isUnwired =
+    !delegateExpression && !className && !expression && !flowableType;
+
+  if (!isOurs && !isUnwired) {
+    return null;
+  }
+
+  const kind = readFlowableServiceTaskAttr(businessObject, "autonateServiceKind") ?? "behavior";
+  const behaviorKey = readFlowableServiceTaskAttr(businessObject, "behaviorKey");
+
+  return {
+    serviceTaskKind: kind,
+    behaviorKey: behaviorKey
+  };
+}
+
+function readFlowableServiceTaskAttr(businessObject, name) {
+  const direct = businessObject[name];
+  if (typeof direct === "string" && direct.length > 0) return direct;
+  const fromAttrs = businessObject.$attrs?.[`flowable:${name}`];
+  return typeof fromAttrs === "string" && fromAttrs.length > 0 ? fromAttrs : null;
 }
 
 function describeTimerIntermediateCatchEvent(businessObject) {
@@ -1414,6 +1467,91 @@ export function updateTimerIntermediateCatchEventProperties(modelerHandle, paylo
   modeling.updateProperties(element, {
     name: normalizeOptionalString(payload.name)
   });
+}
+
+export function updateServiceTaskProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the service task.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:ServiceTask") {
+    throw new Error(`Service task '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const businessObject = element.businessObject;
+  const kind = normalizeOptionalString(payload.serviceTaskKind) ?? "behavior";
+  const behaviorKey = normalizeOptionalString(payload.behaviorKey);
+
+  // Drop alternative wirings before writing ours so the saved XML can't end
+  // up wired two ways at once. We sweep both shapes:
+  //   * flowable:-prefixed entries — what we write today.
+  //   * Plain (no-prefix) entries — bpmn-moddle imports unknown plain
+  //     attributes into $attrs without a prefix, and an earlier studio
+  //     build wrote `delegateExpression` as plain via
+  //     modeling.updateProperties. Without removing them they survive the
+  //     next save and Flowable rejects the deploy with "Attribute
+  //     'delegateExpression' is not allowed to appear in element
+  //     'bpmn:serviceTask'".
+  if (businessObject.$attrs) {
+    for (const key of [
+      "flowable:class",
+      "flowable:expression",
+      "flowable:type",
+      "flowable:delegateExpression",
+      "class",
+      "expression",
+      "type",
+      "delegateExpression"
+    ]) {
+      delete businessObject.$attrs[key];
+    }
+  }
+  pruneLegacyServiceTaskExtensionFields(businessObject);
+
+  // Mirrors how every other Flowable property in this codebase is stored
+  // (assignee, dueDate, endDate, topic): a flowable: attribute on the
+  // owning BPMN element via $attrs. The studio's bpmn-js doesn't load a
+  // Flowable moddle extension, so going through modeling.updateProperties
+  // for these would serialize them WITHOUT the flowable: prefix and
+  // Flowable's deploy validator would reject the resulting XML.
+  writeFlowableAttribute(businessObject, "delegateExpression", "${autonateBehaviorDelegate}");
+  writeFlowableAttribute(businessObject, "autonateServiceKind", kind);
+  writeFlowableAttribute(businessObject, "behaviorKey", behaviorKey);
+
+  // Clear any plain (no-namespace) leftovers a prior studio iteration may
+  // have set via modeling.updateProperties; passing null here removes them
+  // from the businessObject so they don't survive the next save.
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name),
+    class: null,
+    expression: null,
+    type: null,
+    delegateExpression: null
+  });
+}
+
+// Strips any prior extension-element field-injection entries the studio
+// wrote during an earlier (broken) iteration, so re-applying picks the
+// attribute shape and stops the moddle parser from later rejecting an
+// orphan flowable:Field child.
+function pruneLegacyServiceTaskExtensionFields(businessObject) {
+  const extensionElements = businessObject.extensionElements;
+  const values = Array.isArray(extensionElements?.values) ? extensionElements.values : null;
+  if (!values) return;
+  const filtered = values.filter((value) => {
+    if (!value) return false;
+    if (value.$type !== "flowable:Field") return true;
+    return value.name !== "autonateServiceKind" && value.name !== "behaviorKey";
+  });
+  if (filtered.length === 0) {
+    businessObject.extensionElements = undefined;
+  } else if (filtered.length !== values.length) {
+    extensionElements.values = filtered;
+  }
 }
 
 function buildSignalId(rootElements, signalName) {

@@ -46,6 +46,14 @@ public class FlowableExecutionEventAutoConfiguration {
         return new DueDateHelper(historyService);
     }
 
+    // Bean name MUST match the BPMN delegateExpression
+    // ${autonateBehaviorDelegate} that WorkflowBpmnXml writes onto every
+    // service task. Renaming it would orphan every published workflow.
+    @Bean(name = "autonateBehaviorDelegate")
+    AutoNateBehaviorDelegate autonateBehaviorDelegate(FlowableExecutionEventProperties properties) {
+        return new AutoNateBehaviorDelegate(properties);
+    }
+
     @Bean
     FlowableScriptTaskSupportController flowableScriptTaskSupportController(
         FlowableScriptTaskSupportService scriptTaskSupportService

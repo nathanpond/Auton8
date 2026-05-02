@@ -29,7 +29,6 @@ public static partial class WorkflowBpmnXml
     ];
     private static readonly HashSet<string> UnsupportedRuntimeTaskElementNames =
     [
-        "serviceTask",
         "businessRuleTask",
         "sendTask",
         "receiveTask",
@@ -173,6 +172,7 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildSignalStartEventValidationErrors(document));
             errors.AddRange(BuildTimerStartEventValidationErrors(document));
             errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));
+            errors.AddRange(BuildServiceTaskValidationErrors(document));
 
             if (errors.Count > 0)
             {
@@ -356,6 +356,90 @@ public static partial class WorkflowBpmnXml
             {
                 ApplyTimerIntermediateCatchEventSnapshot(element, snapshot);
             }
+
+            if (string.Equals(element.Name.LocalName, "serviceTask", StringComparison.Ordinal))
+            {
+                ApplyServiceTaskSnapshot(element, snapshot);
+            }
+        }
+    }
+
+    // Service tasks are routed to AutoNate via a fixed Flowable bean —
+    // `autonateBehaviorDelegate`, registered in the flowable-extension Spring
+    // autoconfig. The author's choice of behavior is stored as plain
+    // flowable: attributes on the serviceTask element (the studio's bpmn-js
+    // doesn't load a Flowable moddle extension, so attributes are the only
+    // round-trip-safe shape — same pattern used for assignee/dueDate/topic).
+    // A second attribute `autonateServiceKind` is reserved for future
+    // service-task types (HTTP webhook, etc.) so adding them later doesn't
+    // require an XML migration on existing models.
+    private const string AutoNateBehaviorDelegateExpression = "${autonateBehaviorDelegate}";
+    private const string ServiceTaskBehaviorKind = "behavior";
+
+    private static void ApplyServiceTaskSnapshot(XElement serviceTaskElement, WorkflowElementSnapshot snapshot)
+    {
+        var trimmedKey = snapshot.BehaviorKey?.Trim();
+        var kind = string.IsNullOrWhiteSpace(snapshot.ServiceTaskKind)
+            ? ServiceTaskBehaviorKind
+            : snapshot.ServiceTaskKind!.Trim();
+
+        // Strip alternative wirings before installing ours so a service task
+        // round-tripped from another modeler can't end up referencing both a
+        // delegate expression and a class. Sweep both flowable:-prefixed
+        // and plain (no-namespace) attributes — an older SPA build wrote
+        // `delegateExpression` without a prefix via bpmn-js's typed property
+        // API, which the BPMN core schema rejects on deploy.
+        serviceTaskElement.SetAttributeValue(FlowableNamespace + "class", null);
+        serviceTaskElement.SetAttributeValue(FlowableNamespace + "expression", null);
+        serviceTaskElement.SetAttributeValue(FlowableNamespace + "type", null);
+        serviceTaskElement.SetAttributeValue("class", null);
+        serviceTaskElement.SetAttributeValue("expression", null);
+        serviceTaskElement.SetAttributeValue("type", null);
+        serviceTaskElement.SetAttributeValue("delegateExpression", null);
+
+        serviceTaskElement.SetAttributeValue(FlowableNamespace + "delegateExpression", AutoNateBehaviorDelegateExpression);
+        // Default true matches Flowable's behavior; setting it explicitly
+        // protects against modeler regressions that drop the attribute.
+        serviceTaskElement.SetAttributeValue(FlowableNamespace + "exclusive", "true");
+
+        serviceTaskElement.SetAttributeValue(FlowableNamespace + "autonateServiceKind", kind);
+        if (string.IsNullOrEmpty(trimmedKey))
+        {
+            serviceTaskElement.SetAttributeValue(FlowableNamespace + "behaviorKey", null);
+        }
+        else
+        {
+            serviceTaskElement.SetAttributeValue(FlowableNamespace + "behaviorKey", trimmedKey);
+        }
+
+        // Sweep any leftover field-injection children from the previous
+        // implementation so XML produced by an older studio build round-trips
+        // cleanly under the new attribute shape.
+        StripLegacyServiceTaskFields(serviceTaskElement);
+    }
+
+    private static void StripLegacyServiceTaskFields(XElement serviceTaskElement)
+    {
+        var extensionElements = serviceTaskElement.Element(BpmnNamespace + "extensionElements");
+        if (extensionElements is null) return;
+
+        var stale = extensionElements
+            .Elements(FlowableNamespace + "field")
+            .Where(field =>
+            {
+                var name = field.Attribute("name")?.Value;
+                return string.Equals(name, "autonateServiceKind", StringComparison.Ordinal) ||
+                       string.Equals(name, "behaviorKey", StringComparison.Ordinal);
+            })
+            .ToArray();
+        foreach (var field in stale)
+        {
+            field.Remove();
+        }
+
+        if (!extensionElements.HasElements && !extensionElements.HasAttributes)
+        {
+            extensionElements.Remove();
         }
     }
 
@@ -871,6 +955,71 @@ public static partial class WorkflowBpmnXml
         }
 
         return errors;
+    }
+
+    private static IReadOnlyList<string> BuildServiceTaskValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var serviceTask in document.Descendants(BpmnNamespace + "serviceTask"))
+        {
+            var label = serviceTask.Attribute("name")?.Value
+                ?? serviceTask.Attribute("id")?.Value
+                ?? "Unnamed service task";
+
+            // Resolve the AutoNate-managed wiring. We accept hand-written XML
+            // that points at a different delegate (e.g. a custom Java class
+            // shipped via a future plugin) and skip behavior validation for
+            // those — only configurations the studio creates need a behavior
+            // key.
+            var delegateExpression = serviceTask.Attribute(FlowableNamespace + "delegateExpression")?.Value;
+            if (!string.Equals(delegateExpression, AutoNateBehaviorDelegateExpression, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var (kind, behaviorKey) = ReadServiceTaskBehaviorConfig(serviceTask);
+
+            if (!string.Equals(kind, ServiceTaskBehaviorKind, StringComparison.Ordinal))
+            {
+                errors.Add($"Service task '{label}' has unsupported autonateServiceKind '{kind}'. Only 'behavior' is supported.");
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(behaviorKey))
+            {
+                errors.Add($"Service task '{label}' must have a behavior selected before publishing.");
+            }
+        }
+
+        return errors;
+    }
+
+    // Reads (kind, behaviorKey) from a serviceTask element. Prefers
+    // flowable: attributes (current shape); falls back to the legacy
+    // <flowable:field>-injection shape produced by an older iteration so
+    // workflows saved with that build still validate correctly.
+    private static (string Kind, string? BehaviorKey) ReadServiceTaskBehaviorConfig(XElement serviceTask)
+    {
+        var kindAttr = serviceTask.Attribute(FlowableNamespace + "autonateServiceKind")?.Value?.Trim();
+        var keyAttr = serviceTask.Attribute(FlowableNamespace + "behaviorKey")?.Value?.Trim();
+
+        if (!string.IsNullOrEmpty(kindAttr) || !string.IsNullOrEmpty(keyAttr))
+        {
+            return (string.IsNullOrEmpty(kindAttr) ? ServiceTaskBehaviorKind : kindAttr, keyAttr);
+        }
+
+        var fields = serviceTask
+            .Element(BpmnNamespace + "extensionElements")
+            ?.Elements(FlowableNamespace + "field")
+            .ToDictionary(
+                field => field.Attribute("name")?.Value ?? string.Empty,
+                field => field.Element(FlowableNamespace + "string")?.Value?.Trim() ?? string.Empty,
+                StringComparer.Ordinal);
+
+        var legacyKind = fields?.TryGetValue("autonateServiceKind", out var k) == true ? k : ServiceTaskBehaviorKind;
+        var legacyKey = fields?.TryGetValue("behaviorKey", out var b) == true ? b : null;
+        return (legacyKind, legacyKey);
     }
 
     private static IReadOnlyList<string> BuildTimerIntermediateCatchEventValidationErrors(XDocument document)

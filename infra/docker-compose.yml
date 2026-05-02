@@ -31,6 +31,12 @@ services:
       AUTONATE_FLOWABLE_EVENTS_PUBSUB_NAME: pubsub
       AUTONATE_FLOWABLE_EVENTS_TOPIC_ROOT: workflow.execution.events
       AUTONATE_FLOWABLE_EVENTS_SOURCE_APP_ID: flowable
+      # AutoNateBehaviorDelegate posts directly to AutoNate.Web for service
+      # task → behavior dispatch. Must reach the host's app from inside the
+      # Flowable container; the secret must match
+      # WorkflowBehaviors:CallbackSharedSecret on the AutoNate.Web side.
+      AUTONATE_FLOWABLE_EVENTS_CALLBACK_BASE_URL: ${AUTONATE_BEHAVIOR_CALLBACK_BASE_URL:-http://host.docker.internal:5108}
+      AUTONATE_FLOWABLE_EVENTS_CALLBACK_SHARED_SECRET: ${AUTONATE_BEHAVIOR_CALLBACK_SECRET:-dev-only-workflow-behavior-secret-change-me}
       # Record per-update variable history (historic-detail rows). Default
       # `audit` only stores the latest value of each variable; `full` keeps
       # the change log we render in the Execution Log tab.

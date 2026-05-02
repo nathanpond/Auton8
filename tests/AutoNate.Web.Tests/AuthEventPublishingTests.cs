@@ -60,6 +60,11 @@ public sealed class AuthEventPublishingTests
         Assert.NotNull(usernameProp);
         Assert.Equal("admin", usernameProp!.GetValue(resource));
 
+        var userIdProp = resource.GetType().GetProperty("userId");
+        Assert.NotNull(userIdProp);
+        var userId = Assert.IsType<Guid>(userIdProp!.GetValue(resource));
+        Assert.NotEqual(Guid.Empty, userId);
+
         var details = locked.Details!;
         var failedAttemptsProp = details.GetType().GetProperty("failedAttempts");
         Assert.NotNull(failedAttemptsProp);

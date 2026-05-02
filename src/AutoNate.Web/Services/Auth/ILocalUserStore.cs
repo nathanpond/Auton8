@@ -13,6 +13,11 @@ public interface ILocalUserStore
     // instead of a bare numeric id.
     Task<LocalUser?> GetByIdAsync(long id, CancellationToken cancellationToken = default);
 
+    // Lookup by the user's stable Guid identifier (`UserId`). Audit events and
+    // workflow process variables carry this shape; UnlockAccountBehavior
+    // resolves through here when a workflow author hands it the Guid form.
+    Task<LocalUser?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
+
     Task<LocalUser?> ValidateCredentialsAsync(string username, string password, CancellationToken cancellationToken = default);
 
     Task<LoginAttemptResult> AttemptLoginAsync(string username, string password, CancellationToken cancellationToken = default);

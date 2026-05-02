@@ -5,6 +5,7 @@ using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Hooks;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
+using AutoNate.Web.Services.Workflow.Behaviors;
 using AutoNate.Web.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -28,6 +29,7 @@ public sealed class PluginRuntime
     private readonly PluginDataAccessRegistry? _dataRegistry;
     private readonly PluginMigrationRunner? _migrationRunner;
     private readonly IDbContextFactory<AutoNateDbContext>? _dbFactory;
+    private readonly IWorkflowBehaviorRegistry? _behaviorRegistry;
     private readonly IDataPaths _dataPaths;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginRuntime> _log;
@@ -51,13 +53,15 @@ public sealed class PluginRuntime
         ILoggerFactory loggerFactory,
         PluginDataAccessRegistry? dataRegistry = null,
         PluginMigrationRunner? migrationRunner = null,
-        IDbContextFactory<AutoNateDbContext>? dbFactory = null)
+        IDbContextFactory<AutoNateDbContext>? dbFactory = null,
+        IWorkflowBehaviorRegistry? behaviorRegistry = null)
     {
         _registrar = registrar;
         _hostServices = hostServices;
         _dataRegistry = dataRegistry;
         _migrationRunner = migrationRunner;
         _dbFactory = dbFactory;
+        _behaviorRegistry = behaviorRegistry;
         _dataPaths = dataPaths;
         _loggerFactory = loggerFactory;
         _log = loggerFactory.CreateLogger<PluginRuntime>();
@@ -179,8 +183,16 @@ public sealed class PluginRuntime
                     menus = new NoopPluginMenus();
                 }
 
+                IPluginBehaviors behaviors = _behaviorRegistry is not null
+                    ? new PluginBehaviors(_behaviorRegistry, row.Id)
+                    : new NoopPluginBehaviors();
+                // Sweep any leftover plugin behaviors before Configure() runs,
+                // mirroring the menu-item slate-cleaning above. Covers crash-
+                // mid-disable / reuse-of-pluginId-after-process-restart paths.
+                _behaviorRegistry?.RemoveAllForPlugin(row.Id);
+
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, _hostServices);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, _hostServices);
                 instance.Configure(context);
 
                 var loaded = new LoadedPlugin(row.Id, instance.Name, instance.Version, alc, scoped, instance);
@@ -209,6 +221,7 @@ public sealed class PluginRuntime
         {
             if (!_loaded.TryRemove(id, out var loaded)) return;
             loaded.ScopedRegistrar.RemoveAllForPlugin();
+            _behaviorRegistry?.RemoveAllForPlugin(id);
             _log.LogInformation(
                 "Disabled plugin {Id} ({Name}); ALC remains loaded inert until process restart.",
                 id, loaded.Name);
@@ -292,12 +305,16 @@ public sealed class PluginRuntime
                     ? new PluginMenus(_dbFactory, row.Id, _loggerFactory.CreateLogger<PluginMenus>())
                     : new NoopPluginMenus();
 
+                IPluginBehaviors behaviors = _behaviorRegistry is not null
+                    ? new PluginBehaviors(_behaviorRegistry, row.Id)
+                    : new NoopPluginBehaviors();
+
                 // Wrap the registrar so anything Cleanup() accidentally
                 // subscribes to gets dropped immediately afterwards. We don't
                 // want a cleanup callback to leak hooks into a plugin that's
                 // about to be deleted.
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, _hostServices);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, _hostServices);
 
                 try
                 {
@@ -320,6 +337,7 @@ public sealed class PluginRuntime
             finally
             {
                 scoped?.RemoveAllForPlugin();
+                _behaviorRegistry?.RemoveAllForPlugin(row.Id);
                 alc.Unload();
             }
         }

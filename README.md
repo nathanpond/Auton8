@@ -104,6 +104,7 @@ make infra-reset
 - `Dapr:SchedulerHostAddress`
 - `Dapr:StateStoreName`
 - `Dapr:PubSubName`
+- `WorkflowBehaviors:CallbackSharedSecret` — shared secret the Flowable JVM presents on the workflow-behavior callback endpoint. The flowable-extension reads the same value from `autonate.flowable-events.callback-shared-secret` and `autonate.flowable-events.callback-base-url`. The dev appsettings.json carries a placeholder; non-Development environments refuse to start when this is unset.
 
 The checked-in defaults use development-only PostgreSQL credentials. Override secrets locally with environment variables when needed:
 

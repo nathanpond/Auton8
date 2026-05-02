@@ -43,6 +43,7 @@ import AssigneePicker from "@/components/AssigneePicker";
 import { useUsers } from "@/hooks/useUsers";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
 import { useEventCatalog } from "@/hooks/useEventCatalog";
+import { useWorkflowBehaviors } from "@/hooks/useWorkflowBehaviors";
 import "./Workflow.css";
 
 type ScriptTaskEditor = {
@@ -97,6 +98,16 @@ type TimerIntermediateCatchEventEditor = {
   dateExpression: string;
 };
 
+type ServiceTaskKind = "behavior";
+
+type ServiceTaskEditor = {
+  id: string;
+  type: string;
+  name: string;
+  kind: ServiceTaskKind;
+  behaviorKey: string;
+};
+
 const DEFAULT_SIGNAL_TOPIC = "workflow.signals";
 
 type AssignmentMode = "picker" | "expression";
@@ -137,6 +148,8 @@ type ElementSelection = {
   timerEndDate?: string | null;
   timerDuration?: string | null;
   timerDate?: string | null;
+  serviceTaskKind?: string | null;
+  behaviorKey?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -267,6 +280,7 @@ export default function WorkflowStudio() {
   const [timerStartEditor, setTimerStartEditor] = useState<TimerStartEventEditor | null>(null);
   const [timerIntermediateEditor, setTimerIntermediateEditor] =
     useState<TimerIntermediateCatchEventEditor | null>(null);
+  const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
 
   // Seed currentModel from the first workflow once the list query resolves. Gating on
   // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
@@ -310,6 +324,7 @@ export default function WorkflowStudio() {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
+      setServiceTaskEditor(null);
       return;
     }
     const isTimerStart =
@@ -342,6 +357,7 @@ export default function WorkflowStudio() {
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
       return;
     }
     const isSignalStart =
@@ -366,6 +382,30 @@ export default function WorkflowStudio() {
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
+      return;
+    }
+    const isServiceTask =
+      !!selection &&
+      selection.type === "bpmn:ServiceTask" &&
+      // describeBusinessObject only sets these when the service task is wired
+      // through the AutoNate behavior bridge; service tasks pointing at a
+      // different delegateExpression are left to bare-XML editing.
+      ("serviceTaskKind" in selection || "behaviorKey" in selection);
+    if (isServiceTask && selection) {
+      setServiceTaskEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        kind: "behavior",
+        behaviorKey: selection.behaviorKey ?? ""
+      });
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setSignalStartEditor(null);
+      setTimerStartEditor(null);
+      setTimerIntermediateEditor(null);
       return;
     }
     if (selection && selection.type === "bpmn:ScriptTask") {
@@ -382,6 +422,7 @@ export default function WorkflowStudio() {
       setSignalStartEditor(null);
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -394,6 +435,7 @@ export default function WorkflowStudio() {
       setSignalStartEditor(null);
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -423,6 +465,7 @@ export default function WorkflowStudio() {
       setSignalStartEditor(null);
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
     } else {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
@@ -430,6 +473,7 @@ export default function WorkflowStudio() {
       setSignalStartEditor(null);
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
     }
   }, []);
 
@@ -465,6 +509,7 @@ export default function WorkflowStudio() {
     setSignalStartEditor(null);
     setTimerStartEditor(null);
     setTimerIntermediateEditor(null);
+    setServiceTaskEditor(null);
     // Fire-and-forget audit ping. The studio reuses one workflow list call
     // for the whole session, so without this the audit log would only ever
     // see the list-view event; this ensures one ModelViewed event per
@@ -675,6 +720,24 @@ export default function WorkflowStudio() {
         timerDate
       });
       setTimerIntermediateEditor(null);
+    });
+
+  const applyServiceTask = () =>
+    runBusy("applying service task changes", async () => {
+      if (!handle || !serviceTaskEditor) {
+        throw new Error("Select a service task before applying changes.");
+      }
+      const behaviorKey = serviceTaskEditor.behaviorKey.trim();
+      if (!behaviorKey) {
+        throw new Error("Pick a behavior before applying.");
+      }
+      await workflow.updateServiceTaskProperties(handle, {
+        id: serviceTaskEditor.id,
+        name: serviceTaskEditor.name,
+        serviceTaskKind: serviceTaskEditor.kind,
+        behaviorKey
+      });
+      setServiceTaskEditor(null);
     });
 
   const applyUserTask = () =>
@@ -996,6 +1059,19 @@ export default function WorkflowStudio() {
             setTimerIntermediateEditor(null);
           }}
           onApply={applyTimerIntermediate}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {serviceTaskEditor && (
+        <ServiceTaskModal
+          editor={serviceTaskEditor}
+          onChange={setServiceTaskEditor}
+          onClose={() => {
+            if (busy) return;
+            setServiceTaskEditor(null);
+          }}
+          onApply={applyServiceTask}
           disabled={!!busy || !handle}
         />
       )}
@@ -2228,6 +2304,134 @@ function TimerIntermediateCatchEventModal({
   );
 }
 
+type ServiceTaskModalProps = {
+  editor: ServiceTaskEditor;
+  onChange: (next: ServiceTaskEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+};
+
+function ServiceTaskModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: ServiceTaskModalProps) {
+  const { data: behaviors = [], isLoading, error } = useWorkflowBehaviors();
+  const selected = behaviors.find((b) => b.key === editor.behaviorKey) ?? null;
+
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Service Task</h2>
+            <p className="workflow-modal-copy">
+              Run a predefined AutoNate routine when the workflow reaches this step. The behavior
+              receives every process variable plus execution metadata, and may write process
+              variables back for downstream steps to branch on.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        <label className="workflow-field">
+          <span>Task Name (optional)</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Unlock account"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Type</span>
+          <select
+            className="form-select"
+            value={editor.kind}
+            onChange={(e) => onChange({ ...editor, kind: e.target.value as ServiceTaskKind })}
+          >
+            <option value="behavior">Behavior</option>
+          </select>
+          <p className="workflow-modal-note">
+            Behavior runs a curated routine inside AutoNate. More service-task types (HTTP webhook,
+            etc.) will appear here as they ship.
+          </p>
+        </label>
+
+        {editor.kind === "behavior" && (
+          <label className="workflow-field">
+            <span>Behavior</span>
+            {error ? (
+              <div className="alert alert-danger" role="alert">
+                Failed to load workflow behaviors. Try reopening this modal.
+              </div>
+            ) : (
+              <select
+                className="form-select"
+                value={editor.behaviorKey}
+                disabled={isLoading}
+                onChange={(e) => onChange({ ...editor, behaviorKey: e.target.value })}
+              >
+                <option value="">{isLoading ? "Loading…" : "Select a behavior…"}</option>
+                {behaviors.map((behavior) => (
+                  <option key={behavior.key} value={behavior.key}>
+                    {behavior.displayName}
+                  </option>
+                ))}
+                {/* If the saved key isn't in the catalog (plugin disabled, key
+                    renamed, etc.), keep it visible so authors can still see
+                    what's wired up before changing it. */}
+                {editor.behaviorKey && !behaviors.some((b) => b.key === editor.behaviorKey) && (
+                  <option value={editor.behaviorKey}>
+                    {editor.behaviorKey} (not registered on this server)
+                  </option>
+                )}
+              </select>
+            )}
+            {selected?.description && (
+              <p className="workflow-modal-note">{selected.description}</p>
+            )}
+            {!selected && editor.behaviorKey && (
+              <p className="workflow-modal-note text-warning">
+                The selected behavior key is not registered on this server. Saving will keep the
+                key, but the workflow can't run until a matching behavior is registered.
+              </p>
+            )}
+          </label>
+        )}
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onApply}
+            disabled={disabled || !editor.behaviorKey.trim()}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function pad2(value: string): string {
   const n = parseInt(value, 10);
   if (!Number.isFinite(n)) return "00";
@@ -2625,7 +2829,7 @@ const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
   },
   {
     category: "Tasks",
-    items: ["Task (Generic)", "User Task", "Script Task"]
+    items: ["Task (Generic)", "User Task", "Script Task", "Service Task (Behavior)"]
   },
   {
     category: "Gateways",
@@ -2690,7 +2894,6 @@ const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
   {
     category: "Tasks",
     items: [
-      "Service Task",
       "Send Task",
       "Receive Task",
       "Manual Task",

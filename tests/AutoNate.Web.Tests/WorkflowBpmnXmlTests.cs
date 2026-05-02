@@ -19,7 +19,7 @@ public sealed class WorkflowBpmnXmlTests
                                              targetNamespace="http://autonate.dev/workflows">
                              <bpmn:process id="warning_flow" name="Warning Flow" isExecutable="true">
                                <bpmn:startEvent id="StartEvent_1" />
-                               <bpmn:serviceTask id="ServiceTask_1" name="Automate" />
+                               <bpmn:businessRuleTask id="BusinessRuleTask_1" name="Decide" />
                                <bpmn:exclusiveGateway id="Gateway_1" />
                                <bpmn:subProcess id="SubProcess_1" triggeredByEvent="true" />
                                <bpmn:participant id="Participant_1" processRef="warning_flow" />
@@ -31,7 +31,8 @@ public sealed class WorkflowBpmnXmlTests
 
         Assert.Empty(result.Errors);
         Assert.NotEmpty(result.Warnings);
-        Assert.Contains(result.Warnings, warning => warning.Contains("service tasks", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Warnings, warning => warning.Contains("business rule tasks", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("service tasks", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(result.Warnings, warning => warning.Contains("exclusive gateways", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Warnings, warning => warning.Contains("event subprocesses", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Warnings, warning => warning.Contains("participants", StringComparison.OrdinalIgnoreCase));
@@ -1268,6 +1269,308 @@ public sealed class WorkflowBpmnXmlTests
         Assert.DoesNotContain(
             result.Warnings,
             w => w.Contains("timer events", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // --- Service tasks (behaviors) -------------------------------------------
+
+    [Fact]
+    public void ApplyProcessMetadata_WiresAutonateBehaviorDelegate_ForServiceTaskSnapshot()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1" name="Unlock account" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "behavior_flow",
+            "Behavior Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ServiceTask_1",
+                    "bpmn:ServiceTask",
+                    "Unlock account",
+                    BehaviorKey: "autonate.unlock-account")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Equal("${autonateBehaviorDelegate}", serviceTask.Attribute(flowable + "delegateExpression")?.Value);
+        Assert.Equal("true", serviceTask.Attribute(flowable + "exclusive")?.Value);
+        Assert.Equal("behavior", serviceTask.Attribute(flowable + "autonateServiceKind")?.Value);
+        Assert.Equal("autonate.unlock-account", serviceTask.Attribute(flowable + "behaviorKey")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_StripsLegacyClassAttribute_OnServiceTaskSnapshot()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 name="Whatever"
+                                                 flowable:class="com.example.LegacyDelegate"
+                                                 flowable:expression="${ignored}" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "behavior_flow",
+            "Behavior Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ServiceTask_1",
+                    "bpmn:ServiceTask",
+                    "Whatever",
+                    BehaviorKey: "autonate.unlock-account")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Null(serviceTask.Attribute(flowable + "class"));
+        Assert.Null(serviceTask.Attribute(flowable + "expression"));
+        Assert.Equal("${autonateBehaviorDelegate}", serviceTask.Attribute(flowable + "delegateExpression")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_OverwritesPreviousBehaviorKey_OnServiceTaskSnapshot()
+    {
+        // Previously wired to an older behavior via the attribute shape; re-
+        // applying should leave a single behaviorKey attribute pointing at
+        // the new value.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 flowable:delegateExpression="${autonateBehaviorDelegate}"
+                                                 flowable:autonateServiceKind="behavior"
+                                                 flowable:behaviorKey="old.behavior" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "behavior_flow",
+            "Behavior Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ServiceTask_1",
+                    "bpmn:ServiceTask",
+                    null,
+                    BehaviorKey: "autonate.unlock-account")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Equal("autonate.unlock-account", serviceTask.Attribute(flowable + "behaviorKey")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_StripsLegacyFieldInjectionChildren_OnServiceTaskSnapshot()
+    {
+        // Earlier studio builds wrote behaviorKey/autonateServiceKind as
+        // <flowable:field> child elements. Re-saving an older model should
+        // promote them to attributes and leave no stale field children.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 flowable:delegateExpression="${autonateBehaviorDelegate}">
+                                 <bpmn:extensionElements>
+                                   <flowable:field name="autonateServiceKind">
+                                     <flowable:string>behavior</flowable:string>
+                                   </flowable:field>
+                                   <flowable:field name="behaviorKey">
+                                     <flowable:string>old.behavior</flowable:string>
+                                   </flowable:field>
+                                 </bpmn:extensionElements>
+                               </bpmn:serviceTask>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "behavior_flow",
+            "Behavior Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ServiceTask_1",
+                    "bpmn:ServiceTask",
+                    null,
+                    BehaviorKey: "autonate.unlock-account")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Equal("autonate.unlock-account", serviceTask.Attribute(flowable + "behaviorKey")?.Value);
+        // No leftover <flowable:field> children for the swept names.
+        Assert.Empty(serviceTask
+            .Element(bpmn + "extensionElements")
+            ?.Elements(flowable + "field")
+            .Where(f =>
+            {
+                var n = f.Attribute("name")?.Value;
+                return n == "autonateServiceKind" || n == "behaviorKey";
+            })
+            ?? Enumerable.Empty<XElement>());
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsServiceTask_WhenBehaviorKeyMissing()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 flowable:delegateExpression="${autonateBehaviorDelegate}"
+                                                 flowable:autonateServiceKind="behavior" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("behavior selected", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsServiceTask_WhenBehaviorConfigured()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="behavior_flow"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 flowable:delegateExpression="${autonateBehaviorDelegate}"
+                                                 flowable:autonateServiceKind="behavior"
+                                                 flowable:behaviorKey="autonate.unlock-account" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("service tasks", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsServiceTask_WrittenInLegacyFieldInjectionShape()
+    {
+        // Back-compat: workflows saved by the older studio build still
+        // validate without the user having to re-save them first.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="behavior_flow"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 flowable:delegateExpression="${autonateBehaviorDelegate}">
+                                 <bpmn:extensionElements>
+                                   <flowable:field name="autonateServiceKind">
+                                     <flowable:string>behavior</flowable:string>
+                                   </flowable:field>
+                                   <flowable:field name="behaviorKey">
+                                     <flowable:string>autonate.unlock-account</flowable:string>
+                                   </flowable:field>
+                                 </bpmn:extensionElements>
+                               </bpmn:serviceTask>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsServiceTask_WithUnsupportedKind()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 flowable:delegateExpression="${autonateBehaviorDelegate}"
+                                                 flowable:autonateServiceKind="http-call" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("unsupported autonateServiceKind", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_IgnoresServiceTaskBoundToCustomDelegate()
+    {
+        // A service task wired to a non-AutoNate delegate (legitimate v2
+        // shape: plugin ships its own JavaDelegate class) is left alone —
+        // we don't validate behavior keys for it.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="behavior_flow" name="Behavior Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1"
+                                                 flowable:class="com.acme.MyDelegate" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
     }
 
     [Fact]

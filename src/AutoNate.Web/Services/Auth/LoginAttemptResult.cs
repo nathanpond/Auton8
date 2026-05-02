@@ -14,4 +14,5 @@ public sealed record LoginAttemptResult(
     LoginAttemptOutcome Outcome,
     LocalUser? User,
     string? Username,
-    int FailedAttempts);
+    int FailedAttempts,
+    Guid? UserId = null);

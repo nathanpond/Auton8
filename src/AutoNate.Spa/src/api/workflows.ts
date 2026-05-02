@@ -69,6 +69,8 @@ export type WorkflowElementSnapshot = {
   timerEndDate?: string | null;
   timerDuration?: string | null;
   timerDate?: string | null;
+  serviceTaskKind?: string | null;
+  behaviorKey?: string | null;
 };
 
 export type PrepareWorkflowRequest = {

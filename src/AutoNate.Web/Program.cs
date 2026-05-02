@@ -26,6 +26,7 @@ using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.SiteSettings;
 using AutoNate.Web.Services.Workflow;
+using AutoNate.Web.Services.Workflow.Behaviors;
 using AutoNate.Web.Storage;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.FileProviders;
@@ -212,6 +213,20 @@ builder.Services.AddSingleton<IFieldType, EmailFieldType>();
 builder.Services.AddSingleton<IFieldType, OptionFieldType>();
 builder.Services.AddSingleton<IFieldType, BooleanFieldType>();
 builder.Services.AddSingleton<IFieldTypeRegistry, FieldTypeRegistry>();
+
+// Workflow behaviors: built-ins register as IWorkflowBehavior singletons;
+// the registry merges them with plugin-registered ones (plugins go through
+// IPluginContext.Behaviors at enable time, see PluginRuntime).
+builder.Services.AddOptions<WorkflowBehaviorOptions>()
+    .BindConfiguration(WorkflowBehaviorOptions.SectionName)
+    .Validate(
+        opts => builder.Environment.IsDevelopment() || !string.IsNullOrWhiteSpace(opts.CallbackSharedSecret),
+        $"{WorkflowBehaviorOptions.SectionName}:CallbackSharedSecret must be set outside Development.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<IWorkflowBehavior, UnlockAccountBehavior>();
+builder.Services.AddSingleton<IWorkflowBehaviorRegistry, WorkflowBehaviorRegistry>();
+builder.Services.AddSingleton<SharedSecretEndpointFilter>();
+
 builder.Services.AddSingleton<IRecordEventPublisher, DaprRecordEventPublisher>();
 builder.Services.AddSingleton<IApplicationEventPublisher, DaprApplicationEventPublisher>();
 builder.Services.AddSingleton<INotificationEventPublisher, DaprNotificationEventPublisher>();
@@ -490,7 +505,7 @@ app.MapPost(
                         AuthEventTopic.TopicName,
                         AuthEventTypes.AccountLocked,
                         AuthEventTopic.ResourceKind,
-                        resource: new { username = attempt.Username ?? username },
+                        resource: new { userId = attempt.UserId, username = attempt.Username ?? username },
                         details: new
                         {
                             failedAttempts = attempt.FailedAttempts,
@@ -550,6 +565,7 @@ app.MapHealthEndpoints();
 app.MapUserEndpoints();
 app.MapEventCatalogEndpoints();
 app.MapWorkflowEndpoints();
+app.MapWorkflowBehaviorEndpoints();
 app.MapExecutionEndpoints();
 app.MapRecordTypeEndpoints();
 app.MapRecordEndpoints();

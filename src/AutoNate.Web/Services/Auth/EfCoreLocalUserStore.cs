@@ -44,6 +44,15 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
         return entity?.ToModel();
     }
 
+    public async Task<LocalUser?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.LocalUsers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(localUser => localUser.UserId == userId, cancellationToken);
+        return entity?.ToModel();
+    }
+
     public async Task<LocalUser?> ValidateCredentialsAsync(
         string username,
         string password,
@@ -78,7 +87,8 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
                 LoginAttemptOutcome.AccountLocked,
                 null,
                 entity.Username,
-                entity.FailedLoginAttempts);
+                entity.FailedLoginAttempts,
+                entity.UserId);
         }
 
         if (!PasswordHasher.VerifyPassword(password, entity.PasswordHash, entity.PasswordSalt))
@@ -97,14 +107,15 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
                 justLocked ? LoginAttemptOutcome.JustLocked : LoginAttemptOutcome.InvalidCredentials,
                 null,
                 entity.Username,
-                entity.FailedLoginAttempts);
+                entity.FailedLoginAttempts,
+                entity.UserId);
         }
 
         entity.LastLoginDate = DateTime.UtcNow;
         entity.FailedLoginAttempts = 0;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new LoginAttemptResult(LoginAttemptOutcome.Succeeded, entity.ToModel(), entity.Username, 0);
+        return new LoginAttemptResult(LoginAttemptOutcome.Succeeded, entity.ToModel(), entity.Username, 0, entity.UserId);
     }
 
     public async Task<LocalUser?> SetLockedAsync(long id, bool isLocked, CancellationToken cancellationToken = default)

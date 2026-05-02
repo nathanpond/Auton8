@@ -14,6 +14,21 @@ public class FlowableExecutionEventProperties {
 
     private String sourceAppId = "flowable";
 
+    // Direct (non-Dapr) HTTP target for the workflow-behavior callback. Set
+    // to AutoNate.Web's externally reachable base URL (e.g.
+    // http://host.docker.internal:5040 in dev). When unset the
+    // AutoNateBehaviorDelegate refuses to execute, surfacing as a
+    // FlowableException so the engine retries — better than silently
+    // pointing at a wrong URL.
+    private URI callbackBaseUrl;
+
+    // Shared secret matching WorkflowBehaviors:CallbackSharedSecret on the
+    // AutoNate.Web side. Both must be present and equal for the callback
+    // endpoint to accept the request.
+    private String callbackSharedSecret;
+
+    private int behaviorTimeoutSeconds = 30;
+
     public URI getDaprPublishBaseUrl() {
         return daprPublishBaseUrl;
     }
@@ -44,5 +59,29 @@ public class FlowableExecutionEventProperties {
 
     public void setSourceAppId(String sourceAppId) {
         this.sourceAppId = sourceAppId;
+    }
+
+    public URI getCallbackBaseUrl() {
+        return callbackBaseUrl;
+    }
+
+    public void setCallbackBaseUrl(URI callbackBaseUrl) {
+        this.callbackBaseUrl = callbackBaseUrl;
+    }
+
+    public String getCallbackSharedSecret() {
+        return callbackSharedSecret;
+    }
+
+    public void setCallbackSharedSecret(String callbackSharedSecret) {
+        this.callbackSharedSecret = callbackSharedSecret;
+    }
+
+    public int getBehaviorTimeoutSeconds() {
+        return behaviorTimeoutSeconds;
+    }
+
+    public void setBehaviorTimeoutSeconds(int behaviorTimeoutSeconds) {
+        this.behaviorTimeoutSeconds = behaviorTimeoutSeconds;
     }
 }

@@ -396,7 +396,7 @@ public static class EventCatalog
                     "A user's account was locked because the failed-login counter reached the configured threshold.",
                     "Fires from /account/login on the same request that pushed the counter to the threshold, immediately after the matching auth.login.failed event.",
                     [
-                        "resource: { username } — the locked account's username.",
+                        "resource: { userId, username } — the locked account's stable user id (UUID) and username.",
                         "details: { failedAttempts, threshold } — the current counter value (>= threshold) and the configured threshold (default 3).",
                         "auditContext.actorId is null (the user never authenticated)."
                     ]),

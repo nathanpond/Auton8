@@ -33,6 +33,11 @@ public interface IPluginContext
     // enable.
     IPluginMenus Menus { get; }
 
+    // Helpers for registering IWorkflowBehavior implementations the workflow
+    // studio surfaces in the service-task picker. Same lifecycle as Menus:
+    // tagged by plugin id and auto-removed on disable.
+    IPluginBehaviors Behaviors { get; }
+
     // Host services for cross-cutting needs (logging, etc.). Avoid using this
     // for data access; use `Data` instead.
     IServiceProvider HostServices { get; }

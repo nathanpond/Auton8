@@ -14,6 +14,7 @@ internal sealed class PluginContext : IPluginContext
         IHookRegistrar hooks,
         IPluginDataAccess data,
         IPluginMenus menus,
+        IPluginBehaviors behaviors,
         IServiceProvider hostServices)
     {
         PluginId = pluginId;
@@ -22,6 +23,7 @@ internal sealed class PluginContext : IPluginContext
         Hooks = hooks;
         Data = data;
         Menus = menus;
+        Behaviors = behaviors;
         HostServices = hostServices;
     }
 
@@ -31,5 +33,6 @@ internal sealed class PluginContext : IPluginContext
     public IHookRegistrar Hooks { get; }
     public IPluginDataAccess Data { get; }
     public IPluginMenus Menus { get; }
+    public IPluginBehaviors Behaviors { get; }
     public IServiceProvider HostServices { get; }
 }
