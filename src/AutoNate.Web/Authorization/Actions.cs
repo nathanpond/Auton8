@@ -24,6 +24,8 @@ public static class Actions
 
     public const string Deactivate = "deactivate";
 
+    public const string Unlock = "unlock";
+
     public const string Publish = "publish";
     public const string Start = "start";
     public const string Pause = "pause";

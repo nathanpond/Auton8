@@ -100,4 +100,85 @@ public sealed class EfCoreLocalUserStoreTests
         Assert.True(deleted);
         Assert.Null(await store.GetByUsernameAsync("deleteme"));
     }
+
+    [Fact]
+    public async Task AttemptLoginAsync_LocksAccountAfterThreeFailedAttempts()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateLocalUserStore();
+        await store.CreateAsync("lockme", "Lock", "Me", "right-password");
+
+        var first = await store.AttemptLoginAsync("lockme", "wrong");
+        var second = await store.AttemptLoginAsync("lockme", "wrong");
+        var third = await store.AttemptLoginAsync("lockme", "wrong");
+
+        Assert.Equal(LoginAttemptOutcome.InvalidCredentials, first.Outcome);
+        Assert.Equal(1, first.FailedAttempts);
+        Assert.Equal(LoginAttemptOutcome.InvalidCredentials, second.Outcome);
+        Assert.Equal(2, second.FailedAttempts);
+        Assert.Equal(LoginAttemptOutcome.JustLocked, third.Outcome);
+        Assert.Equal(3, third.FailedAttempts);
+
+        var loaded = await store.GetByUsernameAsync("lockme");
+        Assert.NotNull(loaded);
+        Assert.True(loaded!.IsLocked);
+        Assert.NotNull(loaded.LockedAtUtc);
+    }
+
+    [Fact]
+    public async Task AttemptLoginAsync_LockedAccountRejectsCorrectPassword()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateLocalUserStore();
+        await store.CreateAsync("lockedout", "Locked", "Out", "right-password");
+        for (var i = 0; i < 3; i++)
+        {
+            await store.AttemptLoginAsync("lockedout", "wrong");
+        }
+
+        var attempt = await store.AttemptLoginAsync("lockedout", "right-password");
+
+        Assert.Equal(LoginAttemptOutcome.AccountLocked, attempt.Outcome);
+        Assert.Null(attempt.User);
+    }
+
+    [Fact]
+    public async Task AttemptLoginAsync_SuccessResetsFailedAttempts()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateLocalUserStore();
+        await store.CreateAsync("resetcounter", "Reset", "Counter", "right-password");
+        await store.AttemptLoginAsync("resetcounter", "wrong");
+        await store.AttemptLoginAsync("resetcounter", "wrong");
+
+        var success = await store.AttemptLoginAsync("resetcounter", "right-password");
+
+        Assert.Equal(LoginAttemptOutcome.Succeeded, success.Outcome);
+        var loaded = await store.GetByUsernameAsync("resetcounter");
+        Assert.NotNull(loaded);
+        Assert.Equal(0, loaded!.FailedLoginAttempts);
+        Assert.False(loaded.IsLocked);
+    }
+
+    [Fact]
+    public async Task SetLockedAsync_UnlockClearsCounterAndLock()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var store = database.CreateLocalUserStore();
+        var created = await store.CreateAsync("unlockme", "Un", "Lock", "right-password");
+        for (var i = 0; i < 3; i++)
+        {
+            await store.AttemptLoginAsync("unlockme", "wrong");
+        }
+
+        var unlocked = await store.SetLockedAsync(created.Id, isLocked: false);
+
+        Assert.NotNull(unlocked);
+        Assert.False(unlocked!.IsLocked);
+        Assert.Equal(0, unlocked.FailedLoginAttempts);
+        Assert.Null(unlocked.LockedAtUtc);
+
+        var afterUnlock = await store.AttemptLoginAsync("unlockme", "right-password");
+        Assert.Equal(LoginAttemptOutcome.Succeeded, afterUnlock.Outcome);
+    }
 }

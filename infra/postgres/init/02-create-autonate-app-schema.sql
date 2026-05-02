@@ -9,8 +9,20 @@ CREATE TABLE IF NOT EXISTS local_users (
     user_id UUID NOT NULL UNIQUE,
     created_date TIMESTAMPTZ NOT NULL,
     last_login_date TIMESTAMPTZ NULL,
-    idp_key TEXT NOT NULL UNIQUE
+    idp_key TEXT NOT NULL UNIQUE,
+    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+    is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    locked_at_utc TIMESTAMPTZ NULL
 );
+
+ALTER TABLE local_users
+    ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE local_users
+    ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE local_users
+    ADD COLUMN IF NOT EXISTS locked_at_utc TIMESTAMPTZ NULL;
 
 CREATE INDEX IF NOT EXISTS ix_local_users_username
     ON local_users (username);

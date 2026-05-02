@@ -16,9 +16,11 @@ import {
   useCreateUser,
   useDeleteUser,
   useResetUserPassword,
+  useUnlockUser,
   useUpdateUser,
   useUsers
 } from "@/hooks/useUsers";
+import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
 import { LocalUser } from "@/types/flowable";
 import {
   CreateUserForm,
@@ -45,6 +47,15 @@ export default function ManageUsers() {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([{ id: "username", desc: false }]);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
+
+  // Kind-level check for the unlock switch on the edit modal. Backend gate
+  // uses id="*" (RequireKindPermissionFilter), so the SPA mirrors that.
+  const unlockCheck = useMemo(
+    () => [{ kind: "user", action: "unlock", id: "*" }],
+    []
+  );
+  const { data: unlockPermissions } = usePermissionChecks(unlockCheck);
+  const canUnlock = unlockPermissions?.get(permissionKey(unlockCheck[0])) ?? false;
 
   const columns = useMemo<ColumnDef<LocalUser>[]>(
     () => [
@@ -77,6 +88,17 @@ export default function ManageUsers() {
         header: "Last Login",
         accessorFn: (u) => u.lastLoginDate ?? "",
         cell: ({ row }) => formatLastLogin(row.original.lastLoginDate)
+      },
+      {
+        id: "locked",
+        header: "Status",
+        accessorFn: (u) => (u.isLocked ? "Locked" : "Active"),
+        cell: ({ row }) =>
+          row.original.isLocked ? (
+            <span className="badge bg-danger">Locked</span>
+          ) : (
+            <span className="badge bg-success-subtle text-success-emphasis">Active</span>
+          )
       },
       {
         id: "actions",
@@ -327,10 +349,14 @@ export default function ManageUsers() {
       {modal.kind === "edit" && (
         <EditUserModal
           user={modal.user}
+          canUnlock={canUnlock}
           onClose={close}
           onSuccess={(u) => {
             setFlash({ kind: "success", message: `Updated ${u.username}.` });
             close();
+          }}
+          onUnlocked={(u) => {
+            setFlash({ kind: "success", message: `Unlocked ${u.username}.` });
           }}
           onError={(m) => setFlash({ kind: "error", message: m })}
         />
@@ -439,9 +465,13 @@ function AddUserModal({ onClose, onSuccess, onError }: AddProps) {
   );
 }
 
-type EditProps = AddProps & { user: LocalUser };
+type EditProps = AddProps & {
+  user: LocalUser;
+  canUnlock: boolean;
+  onUnlocked: (user: LocalUser) => void;
+};
 
-function EditUserModal({ user, onClose, onSuccess, onError }: EditProps) {
+function EditUserModal({ user, canUnlock, onClose, onSuccess, onUnlocked, onError }: EditProps) {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<EditUserForm>({
     resolver: zodResolver(editUserSchema),
     defaultValues: {
@@ -452,11 +482,26 @@ function EditUserModal({ user, onClose, onSuccess, onError }: EditProps) {
     }
   });
   const update = useUpdateUser();
+  const unlock = useUnlockUser();
+  const [isLocked, setIsLocked] = useState(user.isLocked);
 
   const onSubmit = async (values: EditUserForm) => {
     try {
       const updated = await update.mutateAsync({ id: user.id, request: values });
       onSuccess(updated);
+    } catch (err) {
+      onError(describeError(err));
+    }
+  };
+
+  const onToggleLocked = async () => {
+    // Lockout is set automatically after 3 failed logins. The switch only
+    // ever flips locked → unlocked; flipping back is not exposed.
+    if (!isLocked) return;
+    try {
+      const updated = await unlock.mutateAsync(user.id);
+      setIsLocked(false);
+      onUnlocked(updated);
     } catch (err) {
       onError(describeError(err));
     }
@@ -478,6 +523,32 @@ function EditUserModal({ user, onClose, onSuccess, onError }: EditProps) {
           <FormField label="Email" error={errors.email?.message}>
             <input className="form-control" type="email" {...register("email")} />
           </FormField>
+          <div className="mb-3">
+            <label className="form-label">Account locked</label>
+            <div className="form-check form-switch">
+              <input
+                id="account-locked-switch"
+                className="form-check-input"
+                type="checkbox"
+                role="switch"
+                checked={isLocked}
+                disabled={!isLocked || !canUnlock || unlock.isPending}
+                onChange={onToggleLocked}
+              />
+              <label className="form-check-label" htmlFor="account-locked-switch">
+                {isLocked
+                  ? canUnlock
+                    ? "Locked — toggle off to unlock"
+                    : "Locked (you don't have permission to unlock)"
+                  : "Active"}
+              </label>
+            </div>
+            {user.failedLoginAttempts > 0 && isLocked && (
+              <div className="text-body-secondary small mt-1">
+                {user.failedLoginAttempts} failed login attempts recorded.
+              </div>
+            )}
+          </div>
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-outline-secondary" onClick={onClose}>

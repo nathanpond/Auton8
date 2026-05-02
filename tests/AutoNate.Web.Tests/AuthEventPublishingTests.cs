@@ -18,6 +18,102 @@ namespace AutoNate.Web.Tests;
 public sealed class AuthEventPublishingTests
 {
     [Fact]
+    public async Task PostLogin_publishes_account_locked_after_three_failed_attempts()
+    {
+        // The auto-login middleware kicks in for GETs as the seeded admin; the
+        // /account/login POST is unaffected and exercises the lockout path.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        async Task PostFailedLogin()
+        {
+            var form = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["username"] = "admin",
+                ["password"] = "definitely-not-the-password"
+            });
+            var response = await client.PostAsync("/account/login", form);
+            Assert.Equal(System.Net.HttpStatusCode.Redirect, response.StatusCode);
+        }
+
+        for (var i = 0; i < 3; i++)
+        {
+            await PostFailedLogin();
+        }
+
+        var failed = factory.RecordedAuditEvents.Events
+            .Where(e => e.EventType == AuthEventTypes.LoginFailed)
+            .ToArray();
+        Assert.Equal(3, failed.Length);
+
+        var locked = Assert.Single(
+            factory.RecordedAuditEvents.Events,
+            e => e.EventType == AuthEventTypes.AccountLocked);
+        Assert.Equal(AuthEventTopic.TopicName, locked.Topic);
+        Assert.Equal(AuthEventTopic.ResourceKind, locked.ResourceKind);
+
+        var resource = locked.Resource!;
+        var usernameProp = resource.GetType().GetProperty("username");
+        Assert.NotNull(usernameProp);
+        Assert.Equal("admin", usernameProp!.GetValue(resource));
+
+        var details = locked.Details!;
+        var failedAttemptsProp = details.GetType().GetProperty("failedAttempts");
+        Assert.NotNull(failedAttemptsProp);
+        Assert.Equal(3, (int)failedAttemptsProp!.GetValue(details)!);
+    }
+
+    [Fact]
+    public async Task PostUnlockUser_publishes_account_unlocked()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        // Prime the dev auto-login cookie before any POST.
+        (await client.GetAsync("/api/users")).EnsureSuccessStatusCode();
+
+        // Create a user, then lock them by triggering 3 failed logins.
+        var create = await client.PostAsJsonAsync(
+            "/api/users",
+            new AutoNate.Web.Endpoints.UserEndpoints.CreateUserRequest(
+                Username: "lockedalice",
+                FirstName: "A",
+                LastName: "L",
+                Password: "p@ssword123",
+                Email: "alice@example.com"));
+        create.EnsureSuccessStatusCode();
+        var created = await create.Content.ReadFromJsonAsync<UserDto>();
+        Assert.NotNull(created);
+
+        var anonClient = factory.CreateClient();
+        anonClient.DefaultRequestHeaders.Clear();
+        for (var i = 0; i < 3; i++)
+        {
+            var form = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["username"] = "lockedalice",
+                ["password"] = "wrong"
+            });
+            await anonClient.PostAsync("/account/login", form);
+        }
+
+        factory.RecordedAuditEvents.Clear();
+
+        var unlock = await client.PostAsync($"/api/users/{created!.Id}/unlock", content: null);
+        unlock.EnsureSuccessStatusCode();
+
+        var unlocked = Assert.Single(
+            factory.RecordedAuditEvents.Events,
+            e => e.EventType == AuthEventTypes.AccountUnlocked);
+        Assert.Equal(AuthEventTopic.TopicName, unlocked.Topic);
+        Assert.Equal(AuthEventTopic.ResourceKind, unlocked.ResourceKind);
+    }
+
+    private sealed record UserDto(long Id, Guid UserId, string Username);
+
+    [Fact]
     public async Task GetMe_publishes_auth_me_viewed()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();

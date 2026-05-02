@@ -9,6 +9,7 @@ import {
   listUsers,
   resetUserPassword,
   setUserSupervisor,
+  unlockUser,
   updateUser
 } from "@/api/users";
 import { LocalUser } from "@/types/flowable";
@@ -50,6 +51,14 @@ export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => deleteUser(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: USERS_QUERY_KEY })
+  });
+}
+
+export function useUnlockUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => unlockUser(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: USERS_QUERY_KEY })
   });
 }

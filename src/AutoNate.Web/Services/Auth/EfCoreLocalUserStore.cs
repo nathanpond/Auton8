@@ -7,6 +7,8 @@ namespace AutoNate.Web.Services.Auth;
 
 public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> dbContextFactory) : ILocalUserStore
 {
+    public const int FailedLoginLockoutThreshold = 3;
+
     public async Task<IReadOnlyList<LocalUser>> ListAsync(CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -47,19 +49,81 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
         string password,
         CancellationToken cancellationToken = default)
     {
+        var result = await AttemptLoginAsync(username, password, cancellationToken);
+        return result.Outcome == LoginAttemptOutcome.Succeeded ? result.User : null;
+    }
+
+    // Attempts a login against the local user store and applies the lockout
+    // policy: three consecutive incorrect attempts lock the account, and a
+    // locked account rejects every login (even with the right password) until
+    // an admin clears the lock. Successful authentication resets the counter.
+    public async Task<LoginAttemptResult> AttemptLoginAsync(
+        string username,
+        string password,
+        CancellationToken cancellationToken = default)
+    {
         var normalizedUsername = NormalizeRequired(username, nameof(username));
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await dbContext.LocalUsers
             .SingleOrDefaultAsync(localUser => localUser.Username == normalizedUsername, cancellationToken);
-        if (entity is null || !PasswordHasher.VerifyPassword(password, entity.PasswordHash, entity.PasswordSalt))
+        if (entity is null)
+        {
+            return new LoginAttemptResult(LoginAttemptOutcome.InvalidCredentials, null, normalizedUsername, 0);
+        }
+
+        if (entity.IsLocked)
+        {
+            return new LoginAttemptResult(
+                LoginAttemptOutcome.AccountLocked,
+                null,
+                entity.Username,
+                entity.FailedLoginAttempts);
+        }
+
+        if (!PasswordHasher.VerifyPassword(password, entity.PasswordHash, entity.PasswordSalt))
+        {
+            entity.FailedLoginAttempts += 1;
+            var justLocked = entity.FailedLoginAttempts >= FailedLoginLockoutThreshold;
+            if (justLocked)
+            {
+                entity.IsLocked = true;
+                entity.LockedAtUtc = DateTime.UtcNow;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            return new LoginAttemptResult(
+                justLocked ? LoginAttemptOutcome.JustLocked : LoginAttemptOutcome.InvalidCredentials,
+                null,
+                entity.Username,
+                entity.FailedLoginAttempts);
+        }
+
+        entity.LastLoginDate = DateTime.UtcNow;
+        entity.FailedLoginAttempts = 0;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new LoginAttemptResult(LoginAttemptOutcome.Succeeded, entity.ToModel(), entity.Username, 0);
+    }
+
+    public async Task<LocalUser?> SetLockedAsync(long id, bool isLocked, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.LocalUsers.SingleOrDefaultAsync(user => user.Id == id, cancellationToken);
+        if (entity is null)
         {
             return null;
         }
 
-        entity.LastLoginDate = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        entity.IsLocked = isLocked;
+        entity.LockedAtUtc = isLocked ? DateTime.UtcNow : null;
+        if (!isLocked)
+        {
+            entity.FailedLoginAttempts = 0;
+        }
 
+        await dbContext.SaveChangesAsync(cancellationToken);
         return entity.ToModel();
     }
 

@@ -467,19 +467,43 @@ app.MapPost(
                 return Results.Redirect(BuildLoginRedirect(returnUrl, "invalid", username));
             }
 
-            var user = await localUserStore.ValidateCredentialsAsync(username, password, cancellationToken);
-            if (user is null)
+            var attempt = await localUserStore.AttemptLoginAsync(username, password, cancellationToken);
+            if (attempt.Outcome != LoginAttemptOutcome.Succeeded)
             {
+                var reason = attempt.Outcome switch
+                {
+                    LoginAttemptOutcome.AccountLocked => "account_locked",
+                    LoginAttemptOutcome.JustLocked => "account_locked",
+                    _ => "invalid_credentials"
+                };
                 await auditPublisher.PublishAsync(
                     AuthEventTopic.TopicName,
                     AuthEventTypes.LoginFailed,
                     AuthEventTopic.ResourceKind,
-                    resource: new { username },
-                    details: new { reason = "invalid_credentials" },
+                    resource: new { username = attempt.Username ?? username },
+                    details: new { reason, failedAttempts = attempt.FailedAttempts },
                     cancellationToken);
-                return Results.Redirect(BuildLoginRedirect(returnUrl, "invalid", username));
+
+                if (attempt.Outcome == LoginAttemptOutcome.JustLocked)
+                {
+                    await auditPublisher.PublishAsync(
+                        AuthEventTopic.TopicName,
+                        AuthEventTypes.AccountLocked,
+                        AuthEventTopic.ResourceKind,
+                        resource: new { username = attempt.Username ?? username },
+                        details: new
+                        {
+                            failedAttempts = attempt.FailedAttempts,
+                            threshold = EfCoreLocalUserStore.FailedLoginLockoutThreshold
+                        },
+                        cancellationToken);
+                }
+
+                var redirectError = reason == "account_locked" ? "locked" : "invalid";
+                return Results.Redirect(BuildLoginRedirect(returnUrl, redirectError, username));
             }
 
+            var user = attempt.User!;
             var principal = BuildPrincipal(user, authenticationSource: ManualAuthenticationSource);
 
             await context.SignInAsync(

@@ -19,4 +19,10 @@ public sealed record LocalUser
     public DateTimeOffset? LastLoginDate { get; init; }
 
     public string IdpKey { get; init; } = string.Empty;
+
+    public int FailedLoginAttempts { get; init; }
+
+    public bool IsLocked { get; init; }
+
+    public DateTimeOffset? LockedAtUtc { get; init; }
 }

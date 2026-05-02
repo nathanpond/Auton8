@@ -24,7 +24,7 @@ public static class CoreEntityTypes
         kind: EntityKinds.User,
         clrType: typeof(LocalUserModel),
         idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.Edit, Actions.Deactivate },
+        actions: new[] { Actions.View, Actions.Edit, Actions.Deactivate, Actions.Unlock },
         tags: new[] { "username", "email", "supervisor", "manager" });
 
     // The Group CLR model arrives in Phase 3. The kind is registered now so

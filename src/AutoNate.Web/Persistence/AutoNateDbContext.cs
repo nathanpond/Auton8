@@ -101,6 +101,9 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.PasswordSalt).HasColumnName("password_salt");
             entity.Property(e => e.UserId).HasColumnName("user_id");
             entity.Property(e => e.Username).HasColumnName("username");
+            entity.Property(e => e.FailedLoginAttempts).HasColumnName("failed_login_attempts").HasDefaultValue(0);
+            entity.Property(e => e.IsLocked).HasColumnName("is_locked").HasDefaultValue(false);
+            entity.Property(e => e.LockedAtUtc).HasColumnName("locked_at_utc");
         });
 
         modelBuilder.Entity<WorkflowModel>(entity =>

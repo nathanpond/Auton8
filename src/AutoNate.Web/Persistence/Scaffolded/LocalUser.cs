@@ -26,4 +26,10 @@ public partial class LocalUser
     public DateTime? LastLoginDate { get; set; }
 
     public string IdpKey { get; set; } = null!;
+
+    public int FailedLoginAttempts { get; set; }
+
+    public bool IsLocked { get; set; }
+
+    public DateTime? LockedAtUtc { get; set; }
 }

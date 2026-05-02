@@ -384,11 +384,31 @@ public static class EventCatalog
                     AuthEventTopic.TopicName,
                     AuthEventTypes.LoginFailed,
                     "A login attempt was rejected.",
-                    "Fires from /account/login when credentials are missing or ValidateCredentialsAsync returns null. The HTTP 302 redirect to the login page carries an 'error=invalid' query param so the SPA can render a message.",
+                    "Fires from /account/login when credentials are missing, the password is wrong, or the account is locked. The HTTP 302 redirect to the login page carries an 'error' query param ('invalid' or 'locked') so the SPA can render a message.",
                     [
                         "resource: { username } — the attempted username, may be empty or non-existent.",
-                        "details: { reason } where reason is 'missing_credentials' or 'invalid_credentials'.",
+                        "details: { reason, failedAttempts } where reason is 'missing_credentials', 'invalid_credentials', or 'account_locked'; failedAttempts is the running counter on the user row (0 when the username is unknown).",
                         "auditContext.actorId is null (no authenticated identity)."
+                    ]),
+                new EventCatalogEntry(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.AccountLocked,
+                    "A user's account was locked because the failed-login counter reached the configured threshold.",
+                    "Fires from /account/login on the same request that pushed the counter to the threshold, immediately after the matching auth.login.failed event.",
+                    [
+                        "resource: { username } — the locked account's username.",
+                        "details: { failedAttempts, threshold } — the current counter value (>= threshold) and the configured threshold (default 3).",
+                        "auditContext.actorId is null (the user never authenticated)."
+                    ]),
+                new EventCatalogEntry(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.AccountUnlocked,
+                    "An admin cleared the lock on a user account.",
+                    "Fires from POST /api/users/{id}/unlock after the underlying SetLockedAsync(false) commits.",
+                    [
+                        "resource: { id, userId, username } — the unlocked account.",
+                        "details: null.",
+                        "auditContext.actorId is the admin who performed the unlock."
                     ]),
                 new EventCatalogEntry(
                     AuthEventTopic.TopicName,

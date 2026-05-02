@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
@@ -100,6 +101,25 @@ public static class UserEndpoints
                 cancellationToken);
             return Results.NoContent();
         }).DisableAntiforgery();
+
+        group.MapPost("/{id:long}/unlock", async (
+            long id,
+            ILocalUserStore store,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var updated = await store.SetLockedAsync(id, isLocked: false, cancellationToken);
+            if (updated is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.AccountUnlocked,
+                AuthEventTopic.ResourceKind,
+                resource: new { id = updated.Id, userId = updated.UserId, username = updated.Username },
+                details: null,
+                cancellationToken);
+            return Results.Ok(updated);
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.User, Actions.Unlock);
 
         group.MapDelete("/{id:long}", async (
             long id,

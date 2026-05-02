@@ -198,6 +198,9 @@ export type LocalUser = {
   createdDate: string;
   lastLoginDate: string | null;
   idpKey: string;
+  failedLoginAttempts: number;
+  isLocked: boolean;
+  lockedAtUtc: string | null;
 };
 
 export type AuthenticatedUser = {

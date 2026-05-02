@@ -1629,6 +1629,21 @@ internal static class DatabaseSchemaInitializer
             ON notifications (user_id, is_read);
         """;
 
+    // Lockout columns for local_users — added when the failed-login lockout
+    // policy was introduced. Idempotent ALTERs so existing dev/prod databases
+    // pick up the columns without a manual migration.
+    private const string LocalUserLockoutSql =
+        """
+        ALTER TABLE local_users
+            ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0;
+
+        ALTER TABLE local_users
+            ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT FALSE;
+
+        ALTER TABLE local_users
+            ADD COLUMN IF NOT EXISTS locked_at_utc TIMESTAMPTZ NULL;
+        """;
+
     // Phase 5 of the audit-events plan: durable outbox between event publishers
     // and Dapr/NATS. EfCoreAuditEventOutbox writes one row per published event
     // in its own transaction (post-domain-commit, no atomic enqueue today —
@@ -1686,6 +1701,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(LocalUserLockoutSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

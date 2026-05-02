@@ -21,7 +21,10 @@ internal static class PersistenceModelMapper
             UserId = entity.UserId,
             CreatedDate = ToDateTimeOffset(entity.CreatedDate),
             LastLoginDate = entity.LastLoginDate is null ? null : ToDateTimeOffset(entity.LastLoginDate.Value),
-            IdpKey = entity.IdpKey
+            IdpKey = entity.IdpKey,
+            FailedLoginAttempts = entity.FailedLoginAttempts,
+            IsLocked = entity.IsLocked,
+            LockedAtUtc = entity.LockedAtUtc is null ? null : ToDateTimeOffset(entity.LockedAtUtc.Value)
         };
     }
 

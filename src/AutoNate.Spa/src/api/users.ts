@@ -39,6 +39,11 @@ export async function deleteUser(id: number): Promise<void> {
   await api.delete(`/api/users/${id}`);
 }
 
+export async function unlockUser(id: number): Promise<LocalUser> {
+  const { data } = await api.post<LocalUser>(`/api/users/${id}/unlock`);
+  return data;
+}
+
 export type UserSupervisorPayload = {
   userId: string;
   supervisorUserId: string | null;

@@ -16,6 +16,8 @@ public static class AuthEventTypes
 {
     public const string LoginSucceeded = "auth.login.succeeded";
     public const string LoginFailed = "auth.login.failed";
+    public const string AccountLocked = "auth.account.locked";
+    public const string AccountUnlocked = "auth.account.unlocked";
     public const string Logout = "auth.logout";
     public const string MeViewed = "auth.me.viewed";
     public const string PermissionChecked = "auth.permission.checked";

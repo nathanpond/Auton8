@@ -33,13 +33,15 @@ export default function Login() {
 
   return (
     <>
-      {error === "invalid" && (
+      {(error === "invalid" || error === "locked") && (
         <div
           className="position-fixed top-0 start-50 translate-middle-x mt-4 z-3"
           style={{ width: "min(100%, 420px)" }}
         >
           <div className="alert alert-danger mb-0" role="alert">
-            Invalid username or password.
+            {error === "locked"
+              ? "This account is locked after too many failed sign-in attempts. Contact an administrator to unlock it."
+              : "Invalid username or password."}
           </div>
         </div>
       )}

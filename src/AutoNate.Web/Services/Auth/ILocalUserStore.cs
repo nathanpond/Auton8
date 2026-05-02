@@ -15,6 +15,10 @@ public interface ILocalUserStore
 
     Task<LocalUser?> ValidateCredentialsAsync(string username, string password, CancellationToken cancellationToken = default);
 
+    Task<LoginAttemptResult> AttemptLoginAsync(string username, string password, CancellationToken cancellationToken = default);
+
+    Task<LocalUser?> SetLockedAsync(long id, bool isLocked, CancellationToken cancellationToken = default);
+
     Task<LocalUser> CreateAsync(
         string username,
         string firstName,
