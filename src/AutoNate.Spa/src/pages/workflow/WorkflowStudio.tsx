@@ -81,6 +81,22 @@ type TimerStartEventEditor = {
   parseError: string | null;
 };
 
+type TimerIntermediateMode = "duration" | "date";
+type TimerIntermediateValueKind = "literal" | "expression";
+
+type TimerIntermediateCatchEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  mode: TimerIntermediateMode;
+  durationKind: TimerIntermediateValueKind;
+  durationLiteral: string;
+  durationExpression: string;
+  dateKind: TimerIntermediateValueKind;
+  dateLiteral: string;
+  dateExpression: string;
+};
+
 const DEFAULT_SIGNAL_TOPIC = "workflow.signals";
 
 type AssignmentMode = "picker" | "expression";
@@ -119,6 +135,8 @@ type ElementSelection = {
   signalTopic?: string | null;
   timerCycleCron?: string | null;
   timerEndDate?: string | null;
+  timerDuration?: string | null;
+  timerDate?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -156,6 +174,55 @@ function parseDueDate(raw: string | null | undefined): {
   }
 
   return { mode: "expression", days: "", expression: trimmed };
+}
+
+function buildTimerIntermediateEditorState(
+  id: string,
+  type: string,
+  name: string,
+  duration: string | null | undefined,
+  date: string | null | undefined
+): TimerIntermediateCatchEventEditor {
+  const trimmedDuration = (duration ?? "").trim();
+  const trimmedDate = (date ?? "").trim();
+
+  const durationIsExpression = looksLikeExpression(trimmedDuration);
+  const dateIsExpression = looksLikeExpression(trimmedDate);
+
+  // Date wins only when explicitly set; otherwise default to duration so the
+  // picker opens on a sensible mode for a freshly-dropped node.
+  const mode: TimerIntermediateMode = trimmedDate && !trimmedDuration ? "date" : "duration";
+
+  return {
+    id,
+    type,
+    name,
+    mode,
+    durationKind: durationIsExpression ? "expression" : "literal",
+    durationLiteral: durationIsExpression ? "" : trimmedDuration,
+    durationExpression: durationIsExpression ? trimmedDuration : "",
+    dateKind: dateIsExpression ? "expression" : "literal",
+    dateLiteral: dateIsExpression ? "" : trimmedDate,
+    dateExpression: dateIsExpression ? trimmedDate : ""
+  };
+}
+
+function buildTimerIntermediatePayload(editor: TimerIntermediateCatchEventEditor): {
+  timerDuration: string | null;
+  timerDate: string | null;
+} {
+  if (editor.mode === "duration") {
+    const value =
+      editor.durationKind === "expression"
+        ? editor.durationExpression.trim()
+        : editor.durationLiteral.trim();
+    return { timerDuration: value || null, timerDate: null };
+  }
+  const value =
+    editor.dateKind === "expression"
+      ? editor.dateExpression.trim()
+      : editor.dateLiteral.trim();
+  return { timerDuration: null, timerDate: value || null };
 }
 
 function buildDueDate(editor: UserTaskEditor): string | null {
@@ -198,6 +265,8 @@ export default function WorkflowStudio() {
   const [userTaskEditor, setUserTaskEditor] = useState<UserTaskEditor | null>(null);
   const [signalStartEditor, setSignalStartEditor] = useState<SignalStartEventEditor | null>(null);
   const [timerStartEditor, setTimerStartEditor] = useState<TimerStartEventEditor | null>(null);
+  const [timerIntermediateEditor, setTimerIntermediateEditor] =
+    useState<TimerIntermediateCatchEventEditor | null>(null);
 
   // Seed currentModel from the first workflow once the list query resolves. Gating on
   // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
@@ -219,6 +288,30 @@ export default function WorkflowStudio() {
 
   const onSelectionChanged = useCallback((raw: unknown) => {
     const selection = raw as ElementSelection;
+    const isTimerIntermediateCatch =
+      !!selection &&
+      selection.type === "bpmn:IntermediateCatchEvent" &&
+      // describeBusinessObject only sets timerDuration/timerDate when the
+      // intermediate catch event has a TimerEventDefinition; non-timer
+      // catch events leave them undefined entirely.
+      ("timerDuration" in selection || "timerDate" in selection);
+    if (isTimerIntermediateCatch && selection) {
+      setTimerIntermediateEditor(
+        buildTimerIntermediateEditorState(
+          selection.id,
+          selection.type,
+          selection.name ?? "",
+          selection.timerDuration,
+          selection.timerDate
+        )
+      );
+      setTimerStartEditor(null);
+      setSignalStartEditor(null);
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      return;
+    }
     const isTimerStart =
       !!selection &&
       selection.type === "bpmn:StartEvent" &&
@@ -248,6 +341,7 @@ export default function WorkflowStudio() {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
+      setTimerIntermediateEditor(null);
       return;
     }
     const isSignalStart =
@@ -271,6 +365,7 @@ export default function WorkflowStudio() {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
+      setTimerIntermediateEditor(null);
       return;
     }
     if (selection && selection.type === "bpmn:ScriptTask") {
@@ -286,6 +381,7 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
       setSignalStartEditor(null);
       setTimerStartEditor(null);
+      setTimerIntermediateEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -297,6 +393,7 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
       setSignalStartEditor(null);
       setTimerStartEditor(null);
+      setTimerIntermediateEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -325,12 +422,14 @@ export default function WorkflowStudio() {
       setSequenceFlowEditor(null);
       setSignalStartEditor(null);
       setTimerStartEditor(null);
+      setTimerIntermediateEditor(null);
     } else {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setSignalStartEditor(null);
       setTimerStartEditor(null);
+      setTimerIntermediateEditor(null);
     }
   }, []);
 
@@ -365,6 +464,7 @@ export default function WorkflowStudio() {
     setUserTaskEditor(null);
     setSignalStartEditor(null);
     setTimerStartEditor(null);
+    setTimerIntermediateEditor(null);
     // Fire-and-forget audit ping. The studio reuses one workflow list call
     // for the whole session, so without this the audit log would only ever
     // see the list-view event; this ensures one ModelViewed event per
@@ -551,6 +651,30 @@ export default function WorkflowStudio() {
         endDate: timerStartEditor.endDate.trim() || null
       });
       setTimerStartEditor(null);
+    });
+
+  const applyTimerIntermediate = () =>
+    runBusy("applying timer intermediate catch event changes", async () => {
+      if (!handle || !timerIntermediateEditor) {
+        throw new Error("Select a timer intermediate catch event before applying changes.");
+      }
+
+      const { timerDuration, timerDate } = buildTimerIntermediatePayload(timerIntermediateEditor);
+      if (!timerDuration && !timerDate) {
+        throw new Error(
+          timerIntermediateEditor.mode === "duration"
+            ? "Enter a duration (e.g. PT15M) or a Flowable expression before applying."
+            : "Enter a date/time (e.g. 2026-12-31T09:00:00) or a Flowable expression before applying."
+        );
+      }
+
+      await workflow.updateTimerIntermediateCatchEventProperties(handle, {
+        id: timerIntermediateEditor.id,
+        name: timerIntermediateEditor.name,
+        timerDuration,
+        timerDate
+      });
+      setTimerIntermediateEditor(null);
     });
 
   const applyUserTask = () =>
@@ -859,6 +983,19 @@ export default function WorkflowStudio() {
             setTimerStartEditor(null);
           }}
           onApply={applyTimerStart}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {timerIntermediateEditor && (
+        <TimerIntermediateCatchEventModal
+          editor={timerIntermediateEditor}
+          onChange={setTimerIntermediateEditor}
+          onClose={() => {
+            if (busy) return;
+            setTimerIntermediateEditor(null);
+          }}
+          onApply={applyTimerIntermediate}
           disabled={!!busy || !handle}
         />
       )}
@@ -1855,6 +1992,242 @@ function TimerStartEventModal({
   );
 }
 
+type TimerIntermediateCatchEventModalProps = {
+  editor: TimerIntermediateCatchEventEditor;
+  onChange: (next: TimerIntermediateCatchEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+};
+
+function TimerIntermediateCatchEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: TimerIntermediateCatchEventModalProps) {
+  const setMode = (mode: TimerIntermediateMode) => onChange({ ...editor, mode });
+  const setDurationKind = (durationKind: TimerIntermediateValueKind) =>
+    onChange({ ...editor, durationKind });
+  const setDateKind = (dateKind: TimerIntermediateValueKind) => onChange({ ...editor, dateKind });
+
+  const activeValueEmpty =
+    editor.mode === "duration"
+      ? (editor.durationKind === "expression"
+          ? editor.durationExpression
+          : editor.durationLiteral
+        ).trim().length === 0
+      : (editor.dateKind === "expression" ? editor.dateExpression : editor.dateLiteral).trim()
+          .length === 0;
+
+  return (
+    <div className="workflow-modal-backdrop" onClick={onClose}>
+      <div
+        className="workflow-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>Timer Intermediate Catch Event</h2>
+            <p className="workflow-modal-copy">
+              Pause the workflow until either a fixed delay has elapsed since this node was reached
+              or a specific date/time arrives. Use a literal ISO 8601 value, or a Flowable
+              expression like <code>${"{execution.getVariable('reminderDate')}"}</code> to compute
+              it from process variables at runtime.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        <label className="workflow-field">
+          <span>Event Name (optional)</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Wait for review window"
+          />
+        </label>
+
+        <fieldset className="workflow-field">
+          <legend>
+            <span>Trigger</span>
+          </legend>
+          <div className="form-check">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="timer-catch-mode-duration"
+              checked={editor.mode === "duration"}
+              onChange={() => setMode("duration")}
+            />
+            <label className="form-check-label" htmlFor="timer-catch-mode-duration">
+              Duration after node start
+            </label>
+          </div>
+          <div className="form-check">
+            <input
+              type="radio"
+              className="form-check-input"
+              id="timer-catch-mode-date"
+              checked={editor.mode === "date"}
+              onChange={() => setMode("date")}
+            />
+            <label className="form-check-label" htmlFor="timer-catch-mode-date">
+              Specific date / time
+            </label>
+          </div>
+        </fieldset>
+
+        {editor.mode === "duration" && (
+          <fieldset className="workflow-field">
+            <legend>
+              <span>Duration</span>
+            </legend>
+            <div className="form-check form-check-inline">
+              <input
+                type="radio"
+                className="form-check-input"
+                id="timer-catch-duration-literal"
+                checked={editor.durationKind === "literal"}
+                onChange={() => setDurationKind("literal")}
+              />
+              <label className="form-check-label" htmlFor="timer-catch-duration-literal">
+                Hard-coded
+              </label>
+            </div>
+            <div className="form-check form-check-inline">
+              <input
+                type="radio"
+                className="form-check-input"
+                id="timer-catch-duration-expression"
+                checked={editor.durationKind === "expression"}
+                onChange={() => setDurationKind("expression")}
+              />
+              <label className="form-check-label" htmlFor="timer-catch-duration-expression">
+                Expression
+              </label>
+            </div>
+            {editor.durationKind === "literal" ? (
+              <>
+                <input
+                  className="form-control mt-2"
+                  value={editor.durationLiteral}
+                  onChange={(e) => onChange({ ...editor, durationLiteral: e.target.value })}
+                  placeholder="PT15M"
+                />
+                <p className="workflow-modal-note">
+                  ISO 8601 duration — for example <code>PT15M</code> (15 minutes), <code>PT2H</code>{" "}
+                  (2 hours), <code>P1D</code> (1 day), <code>P1DT12H</code> (1 day 12 hours).
+                </p>
+              </>
+            ) : (
+              <>
+                <textarea
+                  className="form-control workflow-expression-editor mt-2"
+                  rows={3}
+                  spellCheck={false}
+                  value={editor.durationExpression}
+                  onChange={(e) => onChange({ ...editor, durationExpression: e.target.value })}
+                  placeholder="${execution.getVariable('waitDuration')}"
+                />
+                <p className="workflow-modal-note">
+                  Flowable expression evaluated when the token reaches this event. Must resolve to
+                  an ISO 8601 duration string like <code>PT15M</code>.
+                </p>
+              </>
+            )}
+          </fieldset>
+        )}
+
+        {editor.mode === "date" && (
+          <fieldset className="workflow-field">
+            <legend>
+              <span>Date / Time</span>
+            </legend>
+            <div className="form-check form-check-inline">
+              <input
+                type="radio"
+                className="form-check-input"
+                id="timer-catch-date-literal"
+                checked={editor.dateKind === "literal"}
+                onChange={() => setDateKind("literal")}
+              />
+              <label className="form-check-label" htmlFor="timer-catch-date-literal">
+                Hard-coded
+              </label>
+            </div>
+            <div className="form-check form-check-inline">
+              <input
+                type="radio"
+                className="form-check-input"
+                id="timer-catch-date-expression"
+                checked={editor.dateKind === "expression"}
+                onChange={() => setDateKind("expression")}
+              />
+              <label className="form-check-label" htmlFor="timer-catch-date-expression">
+                Expression
+              </label>
+            </div>
+            {editor.dateKind === "literal" ? (
+              <>
+                <input
+                  className="form-control mt-2"
+                  value={editor.dateLiteral}
+                  onChange={(e) => onChange({ ...editor, dateLiteral: e.target.value })}
+                  placeholder="2026-12-31T09:00:00"
+                />
+                <p className="workflow-modal-note">
+                  ISO 8601 date or date/time — <code>YYYY-MM-DD</code> or{" "}
+                  <code>YYYY-MM-DDTHH:mm:ss</code>. Times use the Flowable engine's timezone (UTC by
+                  default).
+                </p>
+              </>
+            ) : (
+              <>
+                <textarea
+                  className="form-control workflow-expression-editor mt-2"
+                  rows={3}
+                  spellCheck={false}
+                  value={editor.dateExpression}
+                  onChange={(e) => onChange({ ...editor, dateExpression: e.target.value })}
+                  placeholder="${execution.getVariable('reminderDate')}"
+                />
+                <p className="workflow-modal-note">
+                  Flowable expression evaluated when the token reaches this event. Must resolve to
+                  an ISO 8601 date or date/time string.
+                </p>
+              </>
+            )}
+          </fieldset>
+        )}
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onApply}
+            disabled={disabled || activeValueEmpty}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function pad2(value: string): string {
   const n = parseInt(value, 10);
   if (!Number.isFinite(n)) return "00";
@@ -2245,6 +2618,7 @@ const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
       "Start Event (None)",
       "Signal Start Event",
       "Timer Start Event",
+      "Intermediate Catch (Timer)",
       "End Event (None)",
       "End Event (Terminate)"
     ]
@@ -2284,7 +2658,6 @@ const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
       "Intermediate Throw (Link)",
       "Intermediate Throw (Compensation)",
       "Intermediate Catch (Message)",
-      "Intermediate Catch (Timer)",
       "Intermediate Catch (Signal)",
       "Intermediate Catch (Conditional)",
       "Intermediate Catch (Link)"

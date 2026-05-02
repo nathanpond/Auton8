@@ -974,4 +974,325 @@ public sealed class WorkflowBpmnXmlTests
 
         Assert.Empty(result.Errors);
     }
+
+    // --- Timer intermediate catch events --------------------------------------
+
+    [Fact]
+    public void ApplyProcessMetadata_WritesTimeDuration_FromTimerIntermediateSnapshot()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "Catch_1",
+                    "bpmn:IntermediateCatchEvent",
+                    null,
+                    TimerDuration: "PT15M")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        var timerEventDefinition = document.Descendants(bpmn + "timerEventDefinition").Single();
+        Assert.Equal("PT15M", timerEventDefinition.Element(bpmn + "timeDuration")?.Value);
+        Assert.Empty(timerEventDefinition.Elements(bpmn + "timeDate"));
+        Assert.Empty(timerEventDefinition.Elements(bpmn + "timeCycle"));
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_WritesTimeDate_FromTimerIntermediateSnapshot()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "Catch_1",
+                    "bpmn:IntermediateCatchEvent",
+                    null,
+                    TimerDate: "2026-12-31T09:00:00")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        var timerEventDefinition = document.Descendants(bpmn + "timerEventDefinition").Single();
+        Assert.Equal("2026-12-31T09:00:00", timerEventDefinition.Element(bpmn + "timeDate")?.Value);
+        Assert.Empty(timerEventDefinition.Elements(bpmn + "timeDuration"));
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_WritesExpression_FromTimerIntermediateDurationSnapshot()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "Catch_1",
+                    "bpmn:IntermediateCatchEvent",
+                    null,
+                    TimerDuration: "${execution.getVariable('waitDuration')}")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        var duration = document.Descendants(bpmn + "timerEventDefinition").Single()
+            .Element(bpmn + "timeDuration")?.Value;
+        Assert.Equal("${execution.getVariable('waitDuration')}", duration);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_SwitchingMode_DropsPreviousTimerKindOnIntermediateCatch()
+    {
+        // Previous shape: timeDate. New snapshot: timeDuration. Flowable
+        // rejects multiple kinds, so the writer must clear the date child
+        // when only duration is present.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeDate>2026-01-01T09:00:00</bpmn:timeDate>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "timer_flow",
+            "Timer Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "Catch_1",
+                    "bpmn:IntermediateCatchEvent",
+                    null,
+                    TimerDuration: "PT30M")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        var timerEventDefinition = document.Descendants(bpmn + "timerEventDefinition").Single();
+        Assert.Equal("PT30M", timerEventDefinition.Element(bpmn + "timeDuration")?.Value);
+        Assert.Empty(timerEventDefinition.Elements(bpmn + "timeDate"));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsTimerIntermediateCatchEventWithoutSchedule()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("duration or date", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsTimerIntermediateCatchEventWithMalformedDuration()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeDuration>15 minutes</bpmn:timeDuration>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("invalid duration", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_RejectsTimerIntermediateCatchEventWithMalformedDate()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeDate>tomorrow at noon</bpmn:timeDate>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors, e => e.Contains("invalid date", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsTimerIntermediateCatchEventWithLiteralDuration()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeDuration>P1DT12H</bpmn:timeDuration>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsTimerIntermediateCatchEventWithExpression()
+    {
+        // Expressions are evaluated at runtime by Flowable; the validator
+        // can't sanity-check them, so we accept any ${...} body.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeDate>${execution.getVariable('reminderDate')}</bpmn:timeDate>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ValidateProcess_DoesNotWarnAboutTimerIntermediateCatchEvent()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="timer_flow" name="Timer Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:timerEventDefinition>
+                                   <bpmn:timeDuration>PT15M</bpmn:timeDuration>
+                                 </bpmn:timerEventDefinition>
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.DoesNotContain(
+            result.Warnings,
+            w => w.Contains("intermediate catch events", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            result.Warnings,
+            w => w.Contains("timer events", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ValidateProcess_StillWarnsAboutNonTimerIntermediateCatchEvent()
+    {
+        // A signal/message intermediate catch event is still unsupported —
+        // make sure we didn't accidentally whitelist the entire element type.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Signal_X" name="OrderPlaced" />
+                             <bpmn:process id="catch_flow" name="Catch Flow" isExecutable="true">
+                               <bpmn:intermediateCatchEvent id="Catch_1">
+                                 <bpmn:signalEventDefinition signalRef="Signal_X" />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(
+            result.Warnings,
+            w => w.Contains("intermediate catch events", StringComparison.OrdinalIgnoreCase));
+    }
 }

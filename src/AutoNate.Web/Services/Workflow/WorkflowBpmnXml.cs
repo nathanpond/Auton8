@@ -172,6 +172,7 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildScriptTaskValidationErrors(document));
             errors.AddRange(BuildSignalStartEventValidationErrors(document));
             errors.AddRange(BuildTimerStartEventValidationErrors(document));
+            errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));
 
             if (errors.Count > 0)
             {
@@ -349,6 +350,40 @@ public static partial class WorkflowBpmnXml
             {
                 ApplyTimerStartEventSnapshot(element, snapshot);
             }
+
+            if (string.Equals(element.Name.LocalName, "intermediateCatchEvent", StringComparison.Ordinal) &&
+                element.Element(BpmnNamespace + "timerEventDefinition") is not null)
+            {
+                ApplyTimerIntermediateCatchEventSnapshot(element, snapshot);
+            }
+        }
+    }
+
+    private static void ApplyTimerIntermediateCatchEventSnapshot(XElement catchEventElement, WorkflowElementSnapshot snapshot)
+    {
+        var timerEventDefinition = catchEventElement.Element(BpmnNamespace + "timerEventDefinition");
+        if (timerEventDefinition is null)
+        {
+            return;
+        }
+
+        var trimmedDuration = snapshot.TimerDuration?.Trim();
+        var trimmedDate = snapshot.TimerDate?.Trim();
+
+        // Intermediate catch timers fire once. Strip every kind first so a
+        // mode switch (duration ⇄ date) can't leave the previous child behind
+        // — Flowable rejects a timerEventDefinition with multiple kinds.
+        timerEventDefinition.Elements(BpmnNamespace + "timeCycle").Remove();
+        timerEventDefinition.Elements(BpmnNamespace + "timeDuration").Remove();
+        timerEventDefinition.Elements(BpmnNamespace + "timeDate").Remove();
+
+        if (!string.IsNullOrEmpty(trimmedDuration))
+        {
+            timerEventDefinition.Add(new XElement(BpmnNamespace + "timeDuration", trimmedDuration));
+        }
+        else if (!string.IsNullOrEmpty(trimmedDate))
+        {
+            timerEventDefinition.Add(new XElement(BpmnNamespace + "timeDate", trimmedDate));
         }
     }
 
@@ -838,6 +873,90 @@ public static partial class WorkflowBpmnXml
         return errors;
     }
 
+    private static IReadOnlyList<string> BuildTimerIntermediateCatchEventValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var catchEvent in document.Descendants(BpmnNamespace + "intermediateCatchEvent"))
+        {
+            var timerEventDefinition = catchEvent.Element(BpmnNamespace + "timerEventDefinition");
+            if (timerEventDefinition is null)
+            {
+                continue;
+            }
+
+            var label = catchEvent.Attribute("name")?.Value
+                ?? catchEvent.Attribute("id")?.Value
+                ?? "Unnamed timer intermediate catch event";
+
+            var timerKindChildren = timerEventDefinition.Elements()
+                .Where(child => child.Name.Namespace == BpmnNamespace &&
+                    (child.Name.LocalName == "timeDuration" ||
+                     child.Name.LocalName == "timeDate" ||
+                     child.Name.LocalName == "timeCycle"))
+                .ToArray();
+            if (timerKindChildren.Length == 0)
+            {
+                errors.Add($"Timer intermediate catch event '{label}' must specify a duration or date before publishing.");
+                continue;
+            }
+            if (timerKindChildren.Length > 1)
+            {
+                errors.Add($"Timer intermediate catch event '{label}' may only specify one of timeDuration or timeDate.");
+                continue;
+            }
+
+            var timerKind = timerKindChildren[0];
+            var body = timerKind.Value?.Trim();
+            if (string.IsNullOrEmpty(body))
+            {
+                errors.Add($"Timer intermediate catch event '{label}' has an empty timer expression.");
+                continue;
+            }
+
+            // Cycle isn't a documented mode in this UI; if a hand-edited file
+            // uses it, surface that rather than silently ignoring.
+            if (timerKind.Name.LocalName == "timeCycle")
+            {
+                errors.Add($"Timer intermediate catch event '{label}' uses timeCycle — only timeDuration or timeDate are supported here.");
+                continue;
+            }
+
+            // Expressions are evaluated by Flowable at event entry; we can't
+            // syntax-check them here, so only validate hard-coded literals.
+            if (LooksLikeFlowableExpression(body))
+            {
+                continue;
+            }
+
+            if (timerKind.Name.LocalName == "timeDuration" && !LooksLikeIso8601Duration(body))
+            {
+                errors.Add($"Timer intermediate catch event '{label}' has an invalid duration '{body}'. Use ISO 8601 like PT15M or P1DT2H, or a Flowable expression.");
+                continue;
+            }
+
+            if (timerKind.Name.LocalName == "timeDate" && !LooksLikeIsoDateOrDateTime(body))
+            {
+                errors.Add($"Timer intermediate catch event '{label}' has an invalid date '{body}'. Use YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss, or a Flowable expression.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static bool LooksLikeFlowableExpression(string value)
+    {
+        return value.StartsWith("${", StringComparison.Ordinal) && value.EndsWith("}", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeIso8601Duration(string value)
+    {
+        return Iso8601DurationRegex().IsMatch(value);
+    }
+
+    [GeneratedRegex(@"^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$", RegexOptions.Compiled)]
+    private static partial Regex Iso8601DurationRegex();
+
     private static bool LooksLikeQuartzCron(string expression)
     {
         var fields = expression.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -922,6 +1041,14 @@ public static partial class WorkflowBpmnXml
                     continue;
                 }
 
+                // Timer intermediate catch events are first-class — only warn for
+                // the message/signal/conditional flavors that aren't wired up yet.
+                if (localName.Equals("intermediateCatchEvent", StringComparison.Ordinal) &&
+                    element.Element(BpmnNamespace + "timerEventDefinition") is not null)
+                {
+                    continue;
+                }
+
                 controlElements.Add(ToFriendlyElementName(localName));
             }
 
@@ -939,6 +1066,12 @@ public static partial class WorkflowBpmnXml
                 if ((localName.Equals("signalEventDefinition", StringComparison.Ordinal) ||
                      localName.Equals("timerEventDefinition", StringComparison.Ordinal)) &&
                     element.Parent?.Name == BpmnNamespace + "startEvent")
+                {
+                    continue;
+                }
+
+                if (localName.Equals("timerEventDefinition", StringComparison.Ordinal) &&
+                    element.Parent?.Name == BpmnNamespace + "intermediateCatchEvent")
                 {
                     continue;
                 }

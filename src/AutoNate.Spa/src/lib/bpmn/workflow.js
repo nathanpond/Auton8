@@ -976,6 +976,7 @@ function describeBusinessObject(businessObject) {
   const conditionExpression = businessObject.conditionExpression;
   const signal = describeSignalStartEvent(businessObject);
   const timer = describeTimerStartEvent(businessObject);
+  const timerCatch = describeTimerIntermediateCatchEvent(businessObject);
   const description = {
     id: businessObject.id,
     type: businessObject.$type,
@@ -1005,7 +1006,40 @@ function describeBusinessObject(businessObject) {
     description.timerEndDate = timer.timerEndDate;
   }
 
+  if (timerCatch) {
+    // Only present for timer intermediate catch events. Mutually exclusive
+    // with the start-event timer fields above (start/intermediate are
+    // different $type values), so the studio can route on whichever is set.
+    description.timerDuration = timerCatch.timerDuration;
+    description.timerDate = timerCatch.timerDate;
+  }
+
   return description;
+}
+
+function describeTimerIntermediateCatchEvent(businessObject) {
+  if (!businessObject || businessObject.$type !== "bpmn:IntermediateCatchEvent") {
+    return null;
+  }
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const timerEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:TimerEventDefinition"
+  );
+  if (!timerEventDefinition) {
+    return null;
+  }
+
+  const duration = typeof timerEventDefinition.timeDuration?.body === "string"
+    ? timerEventDefinition.timeDuration.body
+    : null;
+  const date = typeof timerEventDefinition.timeDate?.body === "string"
+    ? timerEventDefinition.timeDate.body
+    : null;
+
+  return { timerDuration: duration, timerDate: date };
 }
 
 function describeTimerStartEvent(businessObject) {
@@ -1329,6 +1363,53 @@ export function updateTimerStartEventProperties(modelerHandle, payload) {
   // intact and the engine reads it natively. ApplyElementSnapshots also
   // normalizes the on-disk shape to a child element on save.
   writeFlowableAttribute(timerEventDefinition, "endDate", endDate);
+
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name)
+  });
+}
+
+export function updateTimerIntermediateCatchEventProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the timer intermediate catch event.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:IntermediateCatchEvent") {
+    throw new Error(`Timer intermediate catch event '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const businessObject = element.businessObject;
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const timerEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:TimerEventDefinition"
+  );
+  if (!timerEventDefinition) {
+    throw new Error(
+      `Intermediate catch event '${payload.id}' is not a timer catch event — drop a timer intermediate catch event from the palette instead.`
+    );
+  }
+
+  const duration = normalizeOptionalString(payload.timerDuration);
+  const date = normalizeOptionalString(payload.timerDate);
+
+  // Catch timers fire once: clear every kind first so a mode switch can't
+  // leave the previous child behind. Flowable rejects multiple kinds.
+  timerEventDefinition.timeCycle = undefined;
+  timerEventDefinition.timeDuration = undefined;
+  timerEventDefinition.timeDate = undefined;
+
+  if (duration) {
+    timerEventDefinition.timeDuration = moddle.create("bpmn:FormalExpression", { body: duration });
+  } else if (date) {
+    timerEventDefinition.timeDate = moddle.create("bpmn:FormalExpression", { body: date });
+  }
 
   modeling.updateProperties(element, {
     name: normalizeOptionalString(payload.name)
