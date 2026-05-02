@@ -15,11 +15,20 @@ public static class ApplicationEventTypes
     // View events (Phase 4)
     public const string PluginListViewed = "plugin.list.viewed";
     public const string PluginViewed = "plugin.viewed";
+
+    // Per-plugin admin endpoints (settings KV + generic data view). Both view
+    // and update emit so an audit consumer can answer "who poked the
+    // Auditor's settings yesterday?" or "who opened the AuditLog page?".
+    public const string PluginSettingsViewed = "plugin.settings.viewed";
+    public const string PluginSettingsUpdated = "plugin.settings.updated";
+    public const string PluginDataViewed = "plugin.data.viewed";
 }
 
 public static class ApplicationResourceKinds
 {
     public const string Plugin = "plugin";
+    public const string PluginSettings = "plugin.settings";
+    public const string PluginData = "plugin.data";
 }
 
 public sealed record class ApplicationEventEnvelope(

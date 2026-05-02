@@ -219,8 +219,8 @@ internal sealed class PluginManagementService : IPluginManagementService
 
     public async Task<PluginActionOutcome> DeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        await _runtime.DisableAsync(id, ct);
-
+        // Snapshot the row up-front so cleanup can run against authoritative
+        // state regardless of subsequent disable/teardown side-effects.
         Plugin? snapshotForEvent;
         string? code;
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))
@@ -231,7 +231,18 @@ internal sealed class PluginManagementService : IPluginManagementService
             code = tracked.Code;
         }
 
-        // Drop schema/role first; the database side has no file locks so this
+        // Drop hooks first if currently loaded. Idempotent if already disabled.
+        await _runtime.DisableAsync(id, ct);
+
+        // Give the plugin a chance to remove artifacts it created outside the
+        // host's automatic teardown — record types, app-level menu rows it
+        // wants to sweep explicitly, files in shared folders. Runs even if
+        // the plugin was disabled at delete time (the runtime spins up a
+        // transient ALC just for this call). Failures are logged inside
+        // CleanupAsync; we never let cleanup block a delete.
+        await _runtime.CleanupAsync(snapshotForEvent, ct);
+
+        // Drop schema/role next; the database side has no file locks so this
         // can always run to completion immediately, decoupling data lifecycle
         // from on-disk file lifecycle. If files remain (Windows lock), we
         // fall through to DeletedPending and only the file delete is retried.

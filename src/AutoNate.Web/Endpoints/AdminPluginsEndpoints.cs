@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using System.Text.Json;
+using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Plugins;
 using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.Events;
@@ -136,8 +138,9 @@ public static class AdminPluginsEndpoints
                 string code,
                 IDbContextFactory<AutoNateDbContext> dbFactory,
                 PluginDataAccessRegistry dataRegistry,
+                IAuditEventPublisher auditPublisher,
                 CancellationToken ct) =>
-                await ReadPluginSettingsAsync(code, dbFactory, dataRegistry, ct))
+                await ReadPluginSettingsAsync(code, dbFactory, dataRegistry, auditPublisher, ct))
             .RequireKindPermission(EntityKinds.Plugin, Actions.Manage);
 
         group.MapPut("/by-code/{code}/settings", async (
@@ -145,18 +148,98 @@ public static class AdminPluginsEndpoints
                 PluginSettingsUpdateRequest body,
                 IDbContextFactory<AutoNateDbContext> dbFactory,
                 PluginDataAccessRegistry dataRegistry,
+                IAuditEventPublisher auditPublisher,
                 CancellationToken ct) =>
-                await WritePluginSettingsAsync(code, body, dbFactory, dataRegistry, ct))
+                await WritePluginSettingsAsync(code, body, dbFactory, dataRegistry, auditPublisher, ct))
             .DisableAntiforgery()
             .RequireKindPermission(EntityKinds.Plugin, Actions.Manage);
 
+        // Generic per-plugin "data view" endpoint. The host validates the
+        // code, then fires HookPoints.PluginDataHookFor(code) — a per-plugin
+        // filter hook the plugin subscribes to in Configure(). The plugin
+        // returns a PluginDataResponse with raw JSON; the host writes it
+        // back as-is. Lets a JSX page template fetch data from the plugin's
+        // plg_<code> schema via `api.get(...)` without the plugin needing to
+        // register its own HTTP routes.
+        group.MapGet("/by-code/{code}/data/{view}", async (
+                string code,
+                string view,
+                HttpContext http,
+                IFilterHub filterHub,
+                IDbContextFactory<AutoNateDbContext> dbFactory,
+                IAuditEventPublisher auditPublisher,
+                CancellationToken ct) =>
+                await DispatchPluginDataAsync(code, view, http, filterHub, dbFactory, auditPublisher, ct))
+            .RequireKindPermission(EntityKinds.Plugin, Actions.Manage);
+
         return app;
+    }
+
+    private static async Task<IResult> DispatchPluginDataAsync(
+        string code,
+        string view,
+        HttpContext http,
+        IFilterHub filterHub,
+        IDbContextFactory<AutoNateDbContext> dbFactory,
+        IAuditEventPublisher auditPublisher,
+        CancellationToken ct)
+    {
+        if (!IsValidCode(code)) return Results.BadRequest(new { error = "Invalid plugin code." });
+        if (string.IsNullOrWhiteSpace(view)) return Results.BadRequest(new { error = "view is required." });
+
+        // Confirm the plugin exists so unknown codes return 404 even when no
+        // plugin happens to be subscribing to a stray hook.
+        Plugin? plugin;
+        await using (var db = await dbFactory.CreateDbContextAsync(ct))
+        {
+            plugin = await db.Plugins.AsNoTracking().FirstOrDefaultAsync(p => p.Code == code, ct);
+            if (plugin is null) return Results.NotFound(new { error = "Plugin not found." });
+        }
+
+        var query = http.Request.Query.ToDictionary(
+            q => q.Key,
+            q => q.Value.ToString(),
+            StringComparer.Ordinal);
+
+        var hookName = HookPoints.PluginDataHookFor(code);
+        if (!filterHub.HasFilter(hookName))
+        {
+            return Results.NotFound(new { error = $"Plugin '{code}' does not expose data view '{view}'." });
+        }
+
+        var initial = new PluginDataResponse();
+        var result = await filterHub.ApplyAsync(
+            hookName,
+            initial,
+            ct,
+            new PluginDataRequest(code, view, query));
+
+        if (result.StatusCode == 404 || string.IsNullOrEmpty(result.ContentJson))
+        {
+            return Results.NotFound(new { error = $"Plugin '{code}' does not expose data view '{view}'." });
+        }
+
+        // Audit-publish AFTER the successful dispatch so the consumer sees a
+        // coherent "view succeeded" event with the resolved view name. The
+        // plugin itself may be the audit consumer (Auditor's AuditLog page
+        // hits this endpoint) — that self-feeding cycle stops at one event
+        // per fetch, no recursion.
+        await auditPublisher.PublishAsync(
+            DaprApplicationEventPublisher.TopicName,
+            ApplicationEventTypes.PluginDataViewed,
+            ApplicationResourceKinds.PluginData,
+            resource: new { id = plugin.Id, pluginId = plugin.Id, code = plugin.Code, name = plugin.Name, view },
+            details: new { queryKeys = query.Keys.ToArray() },
+            ct);
+
+        return Results.Content(result.ContentJson, result.ContentType, statusCode: result.StatusCode);
     }
 
     private static async Task<IResult> ReadPluginSettingsAsync(
         string code,
         IDbContextFactory<AutoNateDbContext> dbFactory,
         PluginDataAccessRegistry dataRegistry,
+        IAuditEventPublisher auditPublisher,
         CancellationToken ct)
     {
         if (!IsValidCode(code)) return Results.BadRequest(new { error = "Invalid plugin code." });
@@ -179,6 +262,8 @@ public static class AdminPluginsEndpoints
             cmd.CommandText =
                 "SELECT settings_json FROM plugin_settings_kv WHERE id = 1 LIMIT 1;";
             var raw = await cmd.ExecuteScalarAsync(ct);
+            await PublishPluginSettingsEventAsync(
+                auditPublisher, plugin, ApplicationEventTypes.PluginSettingsViewed, ct);
             if (raw is null or DBNull)
             {
                 return Results.Ok(new PluginSettingsDto(null));
@@ -199,6 +284,7 @@ public static class AdminPluginsEndpoints
         PluginSettingsUpdateRequest body,
         IDbContextFactory<AutoNateDbContext> dbFactory,
         PluginDataAccessRegistry dataRegistry,
+        IAuditEventPublisher auditPublisher,
         CancellationToken ct)
     {
         if (!IsValidCode(code)) return Results.BadRequest(new { error = "Invalid plugin code." });
@@ -234,6 +320,9 @@ public static class AdminPluginsEndpoints
             cmd.Parameters.AddWithValue("@json", settingsJson);
             await cmd.ExecuteNonQueryAsync(ct);
 
+            await PublishPluginSettingsEventAsync(
+                auditPublisher, plugin, ApplicationEventTypes.PluginSettingsUpdated, ct);
+
             using var parsed = JsonDocument.Parse(settingsJson);
             return Results.Ok(new PluginSettingsDto(parsed.RootElement.Clone()));
         }
@@ -242,6 +331,22 @@ public static class AdminPluginsEndpoints
             return Results.NotFound(new { error = "Plugin does not expose settings." });
         }
     }
+
+    // Resource shape lines up with the existing plugin lifecycle events
+    // (PluginViewed/PluginEnabled/etc.) plus a `code` field so consumers can
+    // address the per-plugin namespace without joining back to plugins.
+    private static Task PublishPluginSettingsEventAsync(
+        IAuditEventPublisher auditPublisher,
+        Plugin plugin,
+        string eventType,
+        CancellationToken ct) =>
+        auditPublisher.PublishAsync(
+            DaprApplicationEventPublisher.TopicName,
+            eventType,
+            ApplicationResourceKinds.PluginSettings,
+            resource: new { id = plugin.Id, pluginId = plugin.Id, code = plugin.Code, name = plugin.Name },
+            details: null,
+            ct);
 
     private static bool IsValidCode(string code)
     {

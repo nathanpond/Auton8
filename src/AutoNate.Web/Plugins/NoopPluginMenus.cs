@@ -15,4 +15,6 @@ internal sealed class NoopPluginMenus : IPluginMenus
         throw new InvalidOperationException(Message);
     public Guid AddMenuItem(string menuKey, Guid? parentId, NewMenuItem item) =>
         throw new InvalidOperationException(Message);
+    public int RemoveAll() => 0;
+    public bool RemoveMenuItem(Guid id) => false;
 }

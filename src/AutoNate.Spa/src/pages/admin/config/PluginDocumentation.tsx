@@ -29,6 +29,8 @@ export default function PluginDocumentation() {
             <li><a href="#data-access">IPluginDataAccess</a></li>
             <li><a href="#cross-plugin">Cross-plugin reads</a></li>
             <li><a href="#menus">Menu helpers</a></li>
+            <li><a href="#page-templates">Page templates</a></li>
+            <li><a href="#cleanup">Cleanup routines</a></li>
             <li><a href="#patterns">Patterns &amp; best practices</a></li>
             <li><a href="#packaging">Building &amp; packaging</a></li>
             <li><a href="#hello">Worked example: HelloPlugin</a></li>
@@ -184,13 +186,17 @@ export default function PluginDocumentation() {
         </p>
         <h5 className="mt-3">Delete</h5>
         <p>
-          Disable runs first, then the host drops the schema with{" "}
-          <code>DROP SCHEMA … CASCADE</code> and drops the role. Files are
-          removed last; if a Windows file lock blocks file removal the row is
-          marked <code>DeletedPending</code> and the file delete (only) is
-          retried at the next startup. The schema and role are <em>always</em>{" "}
-          dropped immediately on the first delete attempt. Any menu items still
-          tagged with the plugin's id are cleaned up by the FK{" "}
+          Disable runs first, then the host invokes the plugin's{" "}
+          <code>Cleanup(IPluginContext)</code> callback (loading the assembly
+          into a fresh ALC if the plugin was disabled at the time of delete —
+          see <a href="#cleanup">Cleanup routines</a>). Then the host drops
+          the schema with <code>DROP SCHEMA … CASCADE</code> and drops the
+          role. Files are removed last; if a Windows file lock blocks file
+          removal the row is marked <code>DeletedPending</code> and the file
+          delete (only) is retried at the next startup. The schema and role
+          are <em>always</em> dropped immediately on the first delete attempt.
+          Any menu items and plugin-owned page templates still tagged with the
+          plugin's id are cleaned up by the FK{" "}
           <code>ON DELETE CASCADE</code>.
         </p>
       </Section>
@@ -206,6 +212,10 @@ export default function PluginDocumentation() {
     string Name { get; }
     string Version { get; }
     void Configure(IPluginContext context);
+
+    // Optional teardown callback. Default impl is a no-op, so plugins that
+    // don't need extra cleanup don't have to override it.
+    void Cleanup(IPluginContext context) { }
 }`}
         </pre>
         <p>
@@ -214,6 +224,13 @@ export default function PluginDocumentation() {
           blocking I/O here — registration only. The host has already cleared
           any prior menu items this plugin owned, so plain{" "}
           <code>AddXxx()</code> calls are correct on every enable.
+        </p>
+        <p>
+          <code>Cleanup</code> is called <em>once</em> when the host is about
+          to delete the plugin, before its schema, role, files, and row are
+          torn down. The default implementation does nothing — only override
+          it when the plugin created artifacts the host doesn't sweep
+          automatically. See <a href="#cleanup">Cleanup routines</a>.
         </p>
         <p>
           The <code>IPluginContext</code> argument carries everything you need:
@@ -544,6 +561,17 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
     // Generic insert: any menu (looked up by key) under any parent
     // (null = top-level).
     Guid AddMenuItem(string menuKey, Guid? parentId, NewMenuItem item);
+
+    // Removes every menu_items row this plugin previously added. Mirrors
+    // the sweep the host runs on disable / FK CASCADE on delete; expose it
+    // so plugins can call it explicitly from Cleanup() or to stage a
+    // re-registration mid-session.
+    int RemoveAll();
+
+    // Removes a single menu_items row by id IF it was added by this plugin.
+    // No-op for items the plugin doesn't own — useful for surgical cleanup
+    // (e.g. "remove the trailing separator I added under Settings").
+    bool RemoveMenuItem(Guid id);
 }`}
         </pre>
 
@@ -741,6 +769,312 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
                   contentType = "jsx",
                   content = "function Page() { return <p>...</p>; }" }));`}
         </pre>
+      </Section>
+
+      <Section id="page-templates" title="Page templates">
+        <p>
+          Plugins can ship reusable page templates that augment the host's
+          built-in template set. They appear in the <em>Pages / Menus</em>{" "}
+          template-picker dropdown alongside <code>home</code>,{" "}
+          <code>busWatcher</code>, etc., so an admin can mount any of them in
+          any menu without the plugin having to register a menu item itself.
+          Use them when the page is reusable; use a plain{" "}
+          <code>item_type = "page"</code> menu item when the page is a
+          one-off settings screen tied to a specific sidebar entry.
+        </p>
+
+        <h5 className="mt-3">Folder convention</h5>
+        <p>
+          Drop <code>.template</code> files in a top-level{" "}
+          <code>PageTemplates/</code> folder next to your csproj. The shared{" "}
+          <code>plugins/Directory.Build.props</code> copies them into the zip
+          automatically.
+        </p>
+        <pre className="bg-light p-3 small">
+{`MyPlugin/
+  MyPlugin.csproj
+  plugin.json
+  MyPlugin.cs
+  migrations/
+    001_init.sql
+  PageTemplates/
+    AuditLog.template
+    Dashboard.template`}
+        </pre>
+        <ul>
+          <li>
+            <strong>The filename stem becomes the template{" "}
+            <code>key</code></strong>. <code>AuditLog.template</code> →{" "}
+            <code>key = "AuditLog"</code>. The key is unique across the
+            install (host built-ins included), so namespace yours to avoid
+            collisions — the host won't clobber a key it doesn't own.
+          </li>
+          <li>
+            <strong>The contents are JSX</strong>, exactly the same shape as
+            the JSX page strings in <code>contentType: "jsx"</code> menu
+            items. Define a top-level <code>function Page()</code> and you
+            have access to <code>useState</code>, <code>useEffect</code>,{" "}
+            <code>navigate</code>, <code>api</code>, and the rest of the
+            JsxPage scope.
+          </li>
+        </ul>
+
+        <h5 className="mt-3">Auto-registration on enable</h5>
+        <p>
+          On every enable, the host's <code>PluginRuntime</code> walks{" "}
+          <code>PageTemplates/*.template</code> and{" "}
+          <strong>UPSERTs each row by key</strong> into{" "}
+          <code>public.page_templates</code> with{" "}
+          <code>created_by_plugin_id = &lt;your-plugin-id&gt;</code> and{" "}
+          <code>content_type = "jsx"</code>. Templates the plugin
+          registered on a previous enable but no longer ships are deleted —
+          file presence is the source of truth.
+        </p>
+        <p>
+          Three things happen automatically and you don't have to manage them:
+        </p>
+        <ul>
+          <li>
+            <strong>Default path</strong> is set to{" "}
+            <code>/plugins/&lt;code&gt;/&lt;key-lowercased&gt;</code> so two
+            plugins can't collide on the unique <code>default_path</code>{" "}
+            constraint.
+          </li>
+          <li>
+            <strong>Placeholder substitution</strong> happens before the JSX
+            is persisted. <code>&#123;&#123;pluginCode&#125;&#125;</code> is
+            replaced with the plugin's 8-char code and{" "}
+            <code>&#123;&#123;pluginId&#125;&#125;</code> with its UUID. Use
+            them to address your own per-plugin endpoints (the data hook
+            below) without knowing the code at build time.
+          </li>
+          <li>
+            <strong>Conflict guard</strong>: if a row with the same key is
+            owned by the host or another plugin, registration is skipped
+            with a warning rather than overwriting it. Pick a key with the
+            plugin's name as a prefix.
+          </li>
+        </ul>
+
+        <h5 className="mt-3">Mounting a template in a menu</h5>
+        <p>
+          Once registered, a template is identified by its key wherever a
+          menu item uses <code>item_type = "template"</code>. The plugin can
+          mount its own template:
+        </p>
+        <pre className="bg-light p-3 small">
+{`context.Menus.AddMenuItem("icon", settingsGroupId, new NewMenuItem(
+    DisplayName: "Audit Log",
+    ItemType:    "template",
+    Icon:        "fa fa-clipboard-list",
+    Config: new {
+        templateKey = "AuditLog",
+        path        = $"/plugins/{context.Code}/auditlog",
+    }));`}
+        </pre>
+        <p>
+          The same template is also available in the admin{" "}
+          <em>Pages / Menus</em> editor's template picker, so a non-coding
+          admin can mount it under any group without touching the plugin.
+        </p>
+
+        <h5 className="mt-3">Fetching plugin data from a template</h5>
+        <p>
+          A template that needs to read plugin data hits the host's per-plugin
+          data endpoint. The host fires{" "}
+          <code>HookPoints.PluginDataHookFor(code)</code>, the plugin
+          subscribes in <code>Configure()</code> and returns a JSON payload:
+        </p>
+        <pre className="bg-light p-3 small">
+{`// In the plugin's Configure(), wired once:
+context.Hooks.AddFilterAsync<PluginDataResponse>(
+    HookPoints.PluginDataHookFor(context.Code),
+    priority: 100,
+    async (current, args, ct) =>
+    {
+        if (args.Length == 0 || args[0] is not PluginDataRequest req) return current;
+        if (req.View != "audit-log") return current;
+        var rows = await context.Data.QueryAsync<MyRow>("SELECT … FROM audit_log …", ct: ct);
+        return new PluginDataResponse {
+            StatusCode  = 200,
+            ContentJson = JsonSerializer.Serialize(new { rows }),
+        };
+    });
+
+// In the .template file, the JSX uses the substituted code:
+api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
+        { params: { limit: 50, offset: 0 } })
+   .then((res) => setRows(res.data.rows));`}
+        </pre>
+
+        <h5 className="mt-3">Lifecycle</h5>
+        <ul>
+          <li>
+            <strong>Enable</strong>: registers / refreshes the rows; sweeps
+            stale rows whose source files were removed.
+          </li>
+          <li>
+            <strong>Disable</strong>: rows stay (they're reference data; the
+            menu items that point at them are removed instead). On the next
+            enable they're refreshed in place.
+          </li>
+          <li>
+            <strong>Delete</strong>: FK <code>ON DELETE CASCADE</code> on{" "}
+            <code>page_templates.created_by_plugin_id → plugins(id)</code>{" "}
+            sweeps every template the plugin ever registered.
+          </li>
+        </ul>
+      </Section>
+
+      <Section id="cleanup" title="Cleanup routines">
+        <p>
+          When the host is about to delete a plugin, it calls{" "}
+          <code>IAutoNatePlugin.Cleanup(IPluginContext)</code>{" "}
+          <strong>before</strong> tearing down the plugin's schema, role,
+          on-disk files, and database row. This is the plugin's last chance
+          to remove anything <em>outside</em> the host's automatic teardown.
+          The default implementation is a no-op; only override it when your
+          plugin actually owns artifacts beyond what's listed below.
+        </p>
+
+        <h5 className="mt-3">When it runs</h5>
+        <ul>
+          <li>
+            <strong>On every delete, even if the plugin is disabled</strong>.
+            The host loads the assembly into a transient ALC just for this
+            call, instantiates the plugin via{" "}
+            <code>Activator.CreateInstance</code>, and invokes{" "}
+            <code>Cleanup</code> with a fresh context — the same shape{" "}
+            <code>Configure</code> got, with a working{" "}
+            <code>Hooks</code> / <code>Data</code> / <code>Menus</code>{" "}
+            surface. The transient ALC is unloaded as soon as cleanup
+            returns.
+          </li>
+          <li>
+            <strong>Never on disable, upload, or enable</strong>. Disable
+            revokes hooks and sweeps menu items; enable re-registers them.
+            Cleanup is delete-only.
+          </li>
+          <li>
+            <strong>Errors are logged and swallowed</strong>. A throw inside
+            Cleanup never blocks the delete. Log loudly so operators see the
+            breakage; don't rely on cleanup-must-succeed semantics.
+          </li>
+        </ul>
+
+        <h5 className="mt-3">What the host already cleans up for free</h5>
+        <p>
+          You do <strong>not</strong> need to do any of this in{" "}
+          <code>Cleanup</code> — the host handles it after your callback
+          returns:
+        </p>
+        <ul>
+          <li>
+            <strong>The plugin's per-plugin schema</strong> (
+            <code>plg_&lt;code&gt;</code>) and every table in it via{" "}
+            <code>DROP SCHEMA … CASCADE</code>.
+          </li>
+          <li>
+            <strong>The plugin's per-plugin Postgres role</strong> (
+            <code>plg_&lt;code&gt;</code>).
+          </li>
+          <li>
+            <strong>Menu items and page templates</strong> the plugin
+            registered, via FK <code>ON DELETE CASCADE</code> on{" "}
+            <code>created_by_plugin_id → plugins(id)</code>.
+          </li>
+          <li>
+            <strong>The plugin's on-disk folder</strong> under{" "}
+            <code>plugins/&lt;PluginId&gt;/</code>.
+          </li>
+          <li>
+            <strong>Audit / lifecycle event publication</strong> for the
+            delete itself (<code>plugin.deleted</code>).
+          </li>
+        </ul>
+
+        <h5 className="mt-3">What Cleanup is for</h5>
+        <p>
+          Anything the plugin created that the host has no FK / schema
+          ownership over:
+        </p>
+        <ul>
+          <li>
+            <strong>Menu items the plugin wants removed before the FK runs</strong>
+            (so the sidebar updates cleanly without waiting for a refresh).
+            Use <code>context.Menus.RemoveAll()</code> for the bulk case or{" "}
+            <code>context.Menus.RemoveMenuItem(id)</code> when the plugin
+            wants to be surgical (e.g. remove an item but leave a separator
+            another plugin owns). Both helpers are ownership-checked: a
+            plugin cannot remove items it didn't create.
+          </li>
+          <li>
+            <strong>Application-data records the plugin created via host
+            hooks</strong> (record types, role grants, workflow definitions,
+            etc.). The host doesn't track these as "owned by this plugin",
+            so they outlive the delete unless Cleanup removes them through
+            the same hooks.
+          </li>
+          <li>
+            <strong>Files, queues, or external state outside the
+            database</strong> — anything the plugin wrote to a shared
+            directory, an outbound queue it provisioned, a third-party
+            service it registered with.
+          </li>
+        </ul>
+
+        <h5 className="mt-3">Example</h5>
+        <pre className="bg-light p-3 small">
+{`public void Cleanup(IPluginContext context)
+{
+    var logger = context.HostServices
+        .GetService<ILoggerFactory>()
+        ?.CreateLogger("MyPlugin");
+
+    // Remove a specific menu item we added in Configure(), then a
+    // trailing separator only if we own it. RemoveMenuItem is a no-op
+    // for items the plugin didn't create, so this is always safe.
+    var menus = context.Menus.ListMenus();
+    var icon = menus.FirstOrDefault(m => m.Key == "icon");
+    if (icon is not null)
+    {
+        var settings = icon.Items.FirstOrDefault(
+            i => i.DisplayName == "Settings" && i.ItemType == "group");
+        if (settings is not null)
+        {
+            // ... locate and remove our items by id ...
+        }
+    }
+
+    // Bulk-remove anything else this plugin owns. Equivalent to the
+    // sweep the host runs on disable; runs again here so the sidebar
+    // is consistent BEFORE the FK CASCADE.
+    var removed = context.Menus.RemoveAll();
+    logger?.LogInformation("MyPlugin cleanup removed {Count} menu item(s).", removed);
+
+    // The plugin's plg_<code> schema is dropped by the host immediately
+    // after this returns, so don't bother dropping its tables here.
+}`}
+        </pre>
+
+        <h5 className="mt-3">What you should NOT do in Cleanup</h5>
+        <ul>
+          <li>
+            Don't try to mutate <code>public.*</code> tables directly. The
+            plugin role still can't write to them; use a host hook or skip
+            the cleanup if no hook exists.
+          </li>
+          <li>
+            Don't register hooks. The host wraps Cleanup's hook registrar in
+            a scope and discards everything it added the moment Cleanup
+            returns.
+          </li>
+          <li>
+            Don't depend on long-running side effects. The transient ALC is
+            unloaded right after Cleanup, so any background <code>Task</code>{" "}
+            you start may be cut short.
+          </li>
+        </ul>
       </Section>
 
       <Section id="patterns" title="Patterns & best practices">

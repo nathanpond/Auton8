@@ -744,6 +744,9 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.IsEnabled).HasColumnName("is_enabled");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedByPluginId).HasColumnName("created_by_plugin_id");
+            entity.Property(e => e.ContentType).HasColumnName("content_type").HasDefaultValue("builtin");
+            entity.Property(e => e.Content).HasColumnName("content");
         });
 
         modelBuilder.Entity<Notification>(entity =>

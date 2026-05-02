@@ -79,15 +79,40 @@ public static class WorkflowEndpoints
             IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var versions = await store.ListVersionsAsync(id, cancellationToken);
+            // Snapshot the model so the audit log shows the name instead of
+            // a bare UUID; no extra Flowable round-trip needed for versions.
+            var snapshot = await store.GetAsync(id, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ModelVersionsViewed,
                 WorkflowResourceKinds.WorkflowModel,
-                resource: new { id },
+                resource: new { id, name = snapshot?.Name, processKey = snapshot?.ProcessKey },
                 details: new { resultCount = versions.Count },
                 cancellationToken);
             return Results.Ok(versions);
         });
+
+        // Telemetry-only endpoint: publishes a ModelViewed event WITHOUT
+        // re-fetching the model BPMN or talking to Flowable. The SPA's
+        // Workflow Studio loads all models in one list call, then switches
+        // between them locally; this gives the studio a way to record each
+        // switch as a discrete view event so an audit consumer (the Auditor
+        // plugin) sees one row per model the user inspected.
+        group.MapPost("/{id:guid}/viewed", async (
+            Guid id, IWorkflowModelStore store,
+            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
+        {
+            var snapshot = await store.GetAsync(id, cancellationToken);
+            if (snapshot is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelViewed,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = snapshot.Id, name = snapshot.Name, processKey = snapshot.ProcessKey },
+                details: new { source = "studio" },
+                cancellationToken);
+            return Results.NoContent();
+        }).DisableAntiforgery();
 
         group.MapPost("/", async (
             WorkflowModel model,

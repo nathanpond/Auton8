@@ -118,6 +118,19 @@ export async function resumeWorkflow(id: string): Promise<WorkflowModel> {
   return data;
 }
 
+// Telemetry-only ping the Studio fires whenever the user opens a model in
+// the modeler. Drives one ModelViewed audit event per switch — without this
+// the studio loads every model in a single list call and the audit log only
+// ever sees the list-view event. Errors are swallowed; missing telemetry
+// must never break the modeler.
+export async function markWorkflowViewed(id: string): Promise<void> {
+  try {
+    await api.post(`/api/workflows/${id}/viewed`);
+  } catch {
+    /* best-effort: don't surface telemetry failures to the user */
+  }
+}
+
 function isNotFound(error: unknown): boolean {
   const response = (error as { response?: { status?: number } } | undefined)?.response;
   return response?.status === 404;

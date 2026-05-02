@@ -110,13 +110,16 @@ public static class RoleEndpoints
         {
             try
             {
+                // Snapshot the role before delete so the audit log shows
+                // the role name instead of a UUID.
+                var snapshot = await store.GetAsync(id, ct);
                 var deleted = await store.DeleteAsync(id, ct);
                 if (!deleted) return Results.NotFound();
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.RoleDeleted,
                     IamResourceKinds.Role,
-                    resource: new { id },
+                    resource: new { id, name = snapshot?.Name },
                     details: null,
                     ct);
                 return Results.NoContent();

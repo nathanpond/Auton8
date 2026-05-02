@@ -21,6 +21,7 @@ import {
 import {
   PrepareWorkflowResponse,
   WorkflowElementSnapshot,
+  markWorkflowViewed,
   prepareWorkflow,
   saveWorkflow
 } from "@/api/workflows";
@@ -364,6 +365,11 @@ export default function WorkflowStudio() {
     setUserTaskEditor(null);
     setSignalStartEditor(null);
     setTimerStartEditor(null);
+    // Fire-and-forget audit ping. The studio reuses one workflow list call
+    // for the whole session, so without this the audit log would only ever
+    // see the list-view event; this ensures one ModelViewed event per
+    // distinct model the user opens in the modeler.
+    void markWorkflowViewed(model.id);
   };
 
   const onSelectionChange = async (id: string) => {

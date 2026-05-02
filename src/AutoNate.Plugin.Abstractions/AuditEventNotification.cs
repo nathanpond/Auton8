@@ -21,6 +21,18 @@ public sealed record AuditEventNotification
     // Short tag identifying the resource kind affected (e.g. "user", "record").
     public required string ResourceKind { get; init; }
 
+    // System identifier of the affected resource pulled out of envelope.resource
+    // (`id` if present, otherwise the first `*Id` property — covers shapes like
+    // {recordId,key,recordTypeId} and {pluginId,code,name}). Null for events
+    // without a single subject (list/search reads).
+    public required string? ResourceId { get; init; }
+
+    // Human-readable identifier of the affected resource pulled out of
+    // envelope.resource (`label` -> `displayName` -> `name` -> `key` ->
+    // `recordKey` -> `processKey`). Lets the audit log surface "what was
+    // touched?" without callers having to dig into the envelope JSON.
+    public required string? ResourceLabel { get; init; }
+
     // Serialized envelope as it was handed to the outbox — contains everything
     // the consumer needs, including the typed Resource/Details payloads. Plugins
     // that want richer access than the flat fields below can json-parse this.

@@ -8,6 +8,11 @@ public interface ILocalUserStore
 
     Task<LocalUser?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default);
 
+    // By-id lookup the delete endpoint uses to snapshot the username into the
+    // audit event before the row is gone, so the audit log shows "alice"
+    // instead of a bare numeric id.
+    Task<LocalUser?> GetByIdAsync(long id, CancellationToken cancellationToken = default);
+
     Task<LocalUser?> ValidateCredentialsAsync(string username, string password, CancellationToken cancellationToken = default);
 
     Task<LocalUser> CreateAsync(

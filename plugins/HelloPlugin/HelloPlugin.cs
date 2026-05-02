@@ -77,6 +77,31 @@ public sealed class HelloPlugin : IAutoNatePlugin
             });
     }
 
+    public void Cleanup(IPluginContext context)
+    {
+        var logger = context.HostServices
+            .GetService<ILoggerFactory>()
+            ?.CreateLogger("HelloPlugin");
+
+        // Sweep the settings menu item we registered in Configure. The host
+        // would also drop these via FK CASCADE during delete, but calling
+        // RemoveAll() here makes the intent explicit and gives admins watching
+        // the sidebar a clean before/after.
+        try
+        {
+            var removed = context.Menus.RemoveAll();
+            logger?.LogInformation("HelloPlugin cleanup removed {Count} menu item(s).", removed);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "HelloPlugin cleanup failed to remove its menu items.");
+        }
+
+        // The greetings table lives in the plugin's plg_<code> schema, which
+        // the host DROP SCHEMA CASCADEs right after this returns — nothing
+        // more to do.
+    }
+
     // JSX source rendered by the host's JsxPage component. The contract is:
     // define a `function Page() { return <jsx/> }`. Available in scope:
     // React, useState/useEffect/useMemo/useCallback/useRef, navigate, Link,

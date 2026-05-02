@@ -39,4 +39,16 @@
         </None>
     </ItemGroup>
 
+    <!-- A plugin can ship .template files (JSX page templates) in
+         /PageTemplates. PluginRuntime.SyncPluginPageTemplatesAsync ingests
+         each on enable and registers it as a plugin-owned page_templates row
+         that the SPA's menu-item picker exposes alongside the host's
+         built-in templates. -->
+    <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\PageTemplates')">
+        <None Include="PageTemplates\*.template">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>PageTemplates\%(Filename)%(Extension)</Link>
+        </None>
+    </ItemGroup>
+
 </Project>

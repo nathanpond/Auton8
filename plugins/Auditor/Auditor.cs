@@ -25,6 +25,10 @@ public sealed class Auditor : IAutoNatePlugin
     // would outlive the plugin's load context).
     private static readonly TimeSpan MinPruneInterval = TimeSpan.FromMinutes(1);
 
+    // Template key the AuditLog page template registers as (matches the
+    // PageTemplates/AuditLog.template filename stem).
+    private const string AuditLogTemplateKey = "AuditLog";
+
     public void Configure(IPluginContext context)
     {
         var logger = context.HostServices
@@ -32,6 +36,7 @@ public sealed class Auditor : IAutoNatePlugin
             ?.CreateLogger("Auditor");
 
         RegisterSettingsMenu(context, logger);
+        RegisterAuditLogMenuItem(context, logger);
 
         var state = new AuditorState(context.Data, logger);
 
@@ -46,6 +51,78 @@ public sealed class Auditor : IAutoNatePlugin
                 }
                 await state.HandleAsync(notification, ct).ConfigureAwait(false);
             });
+
+        // Per-plugin data hook backing the AuditLog page template's
+        // /api/admin/plugins/by-code/{code}/data/audit-log calls.
+        context.Hooks.AddFilterAsync<PluginDataResponse>(
+            HookPoints.PluginDataHookFor(context.Code),
+            priority: 100,
+            async (current, args, ct) =>
+            {
+                if (args.Length == 0 || args[0] is not PluginDataRequest req) return current;
+                if (!string.Equals(req.View, "audit-log", StringComparison.Ordinal)) return current;
+                return await state.QueryAuditLogAsync(req, ct).ConfigureAwait(false);
+            });
+    }
+
+    public void Cleanup(IPluginContext context)
+    {
+        var logger = context.HostServices
+            .GetService<ILoggerFactory>()
+            ?.CreateLogger("Auditor");
+
+        // Remove the AuditLog item from the icon menu's Settings group, then
+        // — per the plugin spec — sweep a trailing separator we own if it's
+        // still alone at the bottom. RemoveMenuItem is ownership-checked, so
+        // pre-existing admin separators stay put.
+        try
+        {
+            var settings = FindSettingsGroupChildren(context);
+            if (settings is not null)
+            {
+                var (settingsId, children) = settings.Value;
+
+                // Drop our AuditLog menu item.
+                var ownedItem = children.FirstOrDefault(c =>
+                    c.CreatedByPluginId == context.PluginId
+                    && c.ItemType == "template"
+                    && ReadConfigString(c.ConfigJson, "templateKey") == AuditLogTemplateKey);
+                if (ownedItem is not null)
+                {
+                    context.Menus.RemoveMenuItem(ownedItem.Id);
+                }
+
+                // Re-snapshot — children no longer contains the AuditLog row
+                // we just removed. If the new bottom is a separator we added,
+                // remove it too so the gear menu doesn't end with a dangling
+                // divider.
+                var refreshed = FindSettingsGroupChildren(context);
+                if (refreshed is not null)
+                {
+                    var trailing = refreshed.Value.Children.LastOrDefault();
+                    if (trailing is not null
+                        && trailing.ItemType == "separator"
+                        && trailing.CreatedByPluginId == context.PluginId)
+                    {
+                        context.Menus.RemoveMenuItem(trailing.Id);
+                    }
+                }
+            }
+
+            // Sweep any other items we still own (Auditor Settings page,
+            // a separator we added but somehow couldn't remove above, etc.).
+            var removed = context.Menus.RemoveAll();
+            logger?.LogInformation("Auditor cleanup removed {Count} remaining menu item(s).", removed);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Auditor cleanup failed while removing menu items.");
+        }
+
+        // The audit_log and plugin_settings_kv tables live in the plugin's own
+        // plg_<code> schema, which the host DROP SCHEMA CASCADEs immediately
+        // after this call returns. Same for the AuditLog page_templates row —
+        // the FK CASCADE on plugins.id sweeps it. No explicit work needed.
     }
 
     private static void RegisterSettingsMenu(IPluginContext context, ILogger? logger)
@@ -66,6 +143,95 @@ public sealed class Auditor : IAutoNatePlugin
         catch (Exception ex)
         {
             logger?.LogWarning(ex, "Auditor failed to register its settings menu item.");
+        }
+    }
+
+    // Append the AuditLog template item under the icon menu's "Settings"
+    // (gear) group, putting a separator above it first when the group's
+    // current bottom is something other than a separator. This keeps the
+    // pre-existing items visually distinct from plugin-injected items
+    // without piling up consecutive dividers across multiple plugins.
+    private static void RegisterAuditLogMenuItem(IPluginContext context, ILogger? logger)
+    {
+        try
+        {
+            var found = FindSettingsGroupChildren(context);
+            if (found is null)
+            {
+                logger?.LogWarning(
+                    "Auditor: 'Settings' group not found in icon menu; skipping AuditLog menu registration.");
+                return;
+            }
+            var (settingsId, children) = found.Value;
+
+            var lastChild = children.LastOrDefault();
+            if (lastChild is null || lastChild.ItemType != "separator")
+            {
+                context.Menus.AddMenuItem("icon", settingsId, new NewMenuItem(
+                    DisplayName: string.Empty,
+                    ItemType: "separator",
+                    Icon: null,
+                    Config: null,
+                    SortOrder: null,
+                    IsVisible: true));
+            }
+
+            // Path lines up with the AuditLog template's auto-generated
+            // default_path: /plugins/<code>/auditlog. Lower-case for stability.
+            var path = $"/plugins/{context.Code}/auditlog";
+            context.Menus.AddMenuItem("icon", settingsId, new NewMenuItem(
+                DisplayName: "Audit Log",
+                ItemType: "template",
+                Icon: "fa fa-clipboard-list",
+                Config: new { templateKey = AuditLogTemplateKey, path },
+                SortOrder: null,
+                IsVisible: true));
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Auditor failed to register the AuditLog menu item.");
+        }
+    }
+
+    // Locate the "Settings" group inside the icon menu and return its id +
+    // children sorted by sort_order. Returns null when the icon menu or
+    // group can't be found (e.g. a customized install that renamed/removed
+    // the group). Comparing the icon helps survive a display-name rename.
+    private static (Guid SettingsId, IReadOnlyList<MenuItemInfo> Children)? FindSettingsGroupChildren(
+        IPluginContext context)
+    {
+        var menus = context.Menus.ListMenus();
+        var icon = menus.FirstOrDefault(m => m.Key == "icon");
+        if (icon is null) return null;
+
+        var settings = icon.Items.FirstOrDefault(i =>
+            i.ParentId is null
+            && i.ItemType == "group"
+            && (string.Equals(i.DisplayName, "Settings", StringComparison.Ordinal)
+                || (i.Icon is not null && i.Icon.Contains("fa-gear", StringComparison.Ordinal))));
+        if (settings is null) return null;
+
+        var children = icon.Items
+            .Where(i => i.ParentId == settings.Id)
+            .OrderBy(i => i.SortOrder)
+            .ToList();
+        return (settings.Id, children);
+    }
+
+    private static string? ReadConfigString(string configJson, string field)
+    {
+        if (string.IsNullOrWhiteSpace(configJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            return doc.RootElement.TryGetProperty(field, out var v)
+                   && v.ValueKind == JsonValueKind.String
+                ? v.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -114,12 +280,14 @@ public sealed class Auditor : IAutoNatePlugin
                     """
                     INSERT INTO audit_log (
                         event_id, event_type, topic_name, resource_kind,
+                        resource_id, resource_label,
                         actor_id, actor_user_name, occurred_at,
                         request_id, correlation_id, ip_address, user_agent,
                         source_app_id, http_method, route_path,
                         auth_outcome, auth_decision_reason, envelope
                     ) VALUES (
                         @eventId, @eventType, @topicName, @resourceKind,
+                        @resourceId, @resourceLabel,
                         @actorId, @actorUserName, @occurredAt,
                         @requestId, @correlationId, @ipAddress, @userAgent,
                         @sourceAppId, @httpMethod, @routePath,
@@ -133,6 +301,8 @@ public sealed class Auditor : IAutoNatePlugin
                         eventType = notification.EventType,
                         topicName = notification.TopicName,
                         resourceKind = notification.ResourceKind,
+                        resourceId = (object?)notification.ResourceId ?? DBNull.Value,
+                        resourceLabel = (object?)notification.ResourceLabel ?? DBNull.Value,
                         actorId = (object?)notification.ActorId ?? DBNull.Value,
                         actorUserName = (object?)notification.ActorUserName ?? DBNull.Value,
                         occurredAt = notification.OccurredAtUtc.UtcDateTime,
@@ -207,6 +377,107 @@ public sealed class Auditor : IAutoNatePlugin
                 _logger?.LogWarning(ex, "Auditor retention prune failed.");
             }
         }
+
+        // Backs the AuditLog page template's data fetch. Returns the most
+        // recent rows ordered by occurred_at DESC plus the total count, so
+        // the table can render pagination controls.
+        public async Task<PluginDataResponse> QueryAuditLogAsync(
+            PluginDataRequest req, CancellationToken ct)
+        {
+            const int DefaultLimit = 50;
+            const int MaxLimit = 500;
+
+            int limit = DefaultLimit;
+            int offset = 0;
+            if (req.Query.TryGetValue("limit", out var rawLimit)
+                && int.TryParse(rawLimit, out var parsedLimit) && parsedLimit > 0)
+            {
+                limit = Math.Min(parsedLimit, MaxLimit);
+            }
+            if (req.Query.TryGetValue("offset", out var rawOffset)
+                && int.TryParse(rawOffset, out var parsedOffset) && parsedOffset >= 0)
+            {
+                offset = parsedOffset;
+            }
+
+            try
+            {
+                var rows = await _data.QueryAsync<AuditLogRow>(
+                    """
+                    SELECT
+                        id              AS Id,
+                        event_id        AS EventId,
+                        event_type      AS EventType,
+                        topic_name      AS TopicName,
+                        resource_kind   AS ResourceKind,
+                        resource_id     AS ResourceId,
+                        resource_label  AS ResourceLabel,
+                        actor_id        AS ActorId,
+                        actor_user_name AS ActorUserName,
+                        occurred_at     AS OccurredAt,
+                        request_id      AS RequestId,
+                        correlation_id  AS CorrelationId,
+                        ip_address      AS IpAddress,
+                        user_agent      AS UserAgent,
+                        source_app_id   AS SourceAppId,
+                        http_method     AS HttpMethod,
+                        route_path      AS RoutePath,
+                        auth_outcome    AS AuthOutcome,
+                        auth_decision_reason AS AuthDecisionReason
+                    FROM audit_log
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT @limit OFFSET @offset;
+                    """,
+                    new { limit, offset },
+                    ct).ConfigureAwait(false);
+
+                var total = await _data.QuerySingleOrDefaultAsync<long>(
+                    "SELECT COUNT(*) FROM audit_log;", ct: ct).ConfigureAwait(false);
+
+                var json = JsonSerializer.Serialize(new { rows, total, limit, offset }, JsonOptions);
+                return new PluginDataResponse
+                {
+                    StatusCode = 200,
+                    ContentJson = json,
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Auditor failed to query audit_log.");
+                var errJson = JsonSerializer.Serialize(new { error = "audit-log query failed" }, JsonOptions);
+                return new PluginDataResponse
+                {
+                    StatusCode = 500,
+                    ContentJson = errJson,
+                };
+            }
+        }
+    }
+
+    // Row shape returned to the AuditLog page template. Field names are
+    // Pascal-cased to match the SQL aliases above; System.Text.Json's web
+    // defaults camelCase them on the wire.
+    private sealed class AuditLogRow
+    {
+        public long Id { get; set; }
+        public Guid EventId { get; set; }
+        public string EventType { get; set; } = string.Empty;
+        public string TopicName { get; set; } = string.Empty;
+        public string ResourceKind { get; set; } = string.Empty;
+        public string? ResourceId { get; set; }
+        public string? ResourceLabel { get; set; }
+        public Guid? ActorId { get; set; }
+        public string? ActorUserName { get; set; }
+        public DateTime OccurredAt { get; set; }
+        public string RequestId { get; set; } = string.Empty;
+        public string? CorrelationId { get; set; }
+        public string IpAddress { get; set; } = string.Empty;
+        public string UserAgent { get; set; } = string.Empty;
+        public string SourceAppId { get; set; } = string.Empty;
+        public string HttpMethod { get; set; } = string.Empty;
+        public string RoutePath { get; set; } = string.Empty;
+        public string AuthOutcome { get; set; } = string.Empty;
+        public string? AuthDecisionReason { get; set; }
     }
 
     // JSX page rendered via the host's JsxPage component. Reads/writes settings

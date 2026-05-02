@@ -148,6 +148,12 @@ public sealed class PluginRuntime
                     // where rows exist from a prior process.
                     await DeletePluginMenuItemsAsync(row.Id, ct).ConfigureAwait(false);
                     menus = new PluginMenus(_dbFactory, row.Id, _loggerFactory.CreateLogger<PluginMenus>());
+
+                    // Sync any .template files this plugin ships under
+                    // PageTemplates/ into the host's page_templates table.
+                    // Idempotent across enables — UPSERTs by key on rows the
+                    // plugin owns, sweeps templates that no longer have a file.
+                    await SyncPluginPageTemplatesAsync(row, folder, ct).ConfigureAwait(false);
                 }
                 else
                 {
@@ -194,6 +200,116 @@ public sealed class PluginRuntime
         }
     }
 
+    // Calls IAutoNatePlugin.Cleanup(context) for the given plugin row. Used by
+    // PluginManagementService.DeleteAsync to give the plugin a chance to remove
+    // any artifacts it created outside the host's automatic teardown paths
+    // (record types, app-level menu rows it owns explicitly, files in shared
+    // folders, etc.). Runs whether the plugin is currently enabled or not — we
+    // load the assembly into a transient ALC just for this call so the
+    // semantics are identical in both cases.
+    //
+    // Errors are logged and swallowed; cleanup failure must not block the
+    // delete that called us.
+    public async Task CleanupAsync(Plugin row, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var folder = Path.Combine(_pluginRoot, row.Id.ToString("D"));
+            var entryPath = Path.Combine(folder, row.EntryAssembly);
+            if (!File.Exists(entryPath))
+            {
+                _log.LogWarning(
+                    "Cleanup skipped for plugin {Id}: entry assembly not found at '{Path}'.",
+                    row.Id, entryPath);
+                return;
+            }
+
+            var alc = new PluginAssemblyLoadContext(entryPath);
+            ScopedHookRegistrar? scoped = null;
+            try
+            {
+                var assembly = alc.LoadFromAssemblyPath(entryPath);
+                Type? pluginType;
+                if (!string.IsNullOrWhiteSpace(row.EntryType))
+                {
+                    pluginType = assembly.GetType(row.EntryType, throwOnError: false);
+                }
+                else
+                {
+                    pluginType = FindSinglePluginType(assembly);
+                }
+                if (pluginType is null)
+                {
+                    _log.LogWarning(
+                        "Cleanup skipped for plugin {Id}: no IAutoNatePlugin type resolved.", row.Id);
+                    return;
+                }
+
+                if (Activator.CreateInstance(pluginType) is not IAutoNatePlugin instance)
+                {
+                    _log.LogWarning(
+                        "Cleanup skipped for plugin {Id}: type '{Type}' could not be activated.",
+                        row.Id, pluginType.FullName);
+                    return;
+                }
+
+                IPluginDataAccess data;
+                string contextCode;
+                if (!string.IsNullOrEmpty(row.Code)
+                    && row.RolePasswordEncrypted is not null
+                    && _dataRegistry is not null)
+                {
+                    data = _dataRegistry.GetOrCreate(row.Code, row.RolePasswordEncrypted);
+                    contextCode = row.Code;
+                }
+                else
+                {
+                    data = new UnprovisionedPluginDataAccess();
+                    contextCode = string.Empty;
+                }
+
+                IPluginMenus menus = _dbFactory is not null
+                    ? new PluginMenus(_dbFactory, row.Id, _loggerFactory.CreateLogger<PluginMenus>())
+                    : new NoopPluginMenus();
+
+                // Wrap the registrar so anything Cleanup() accidentally
+                // subscribes to gets dropped immediately afterwards. We don't
+                // want a cleanup callback to leak hooks into a plugin that's
+                // about to be deleted.
+                scoped = new ScopedHookRegistrar(_registrar);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, _hostServices);
+
+                try
+                {
+                    instance.Cleanup(context);
+                    _log.LogInformation(
+                        "Ran Cleanup() for plugin {Id} ({Name} v{Version}).",
+                        row.Id, instance.Name, instance.Version);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogError(ex,
+                        "Plugin {Id} Cleanup() threw; continuing with delete.", row.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "Failed to load plugin {Id} for Cleanup(); continuing with delete.", row.Id);
+            }
+            finally
+            {
+                scoped?.RemoveAllForPlugin();
+                alc.Unload();
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     // Releases the per-plugin NpgsqlDataSource. Called by the management
     // service after DisableAsync (data preserved) and again before delete
     // (so the role can be dropped without dangling pooled connections).
@@ -219,6 +335,114 @@ public sealed class PluginRuntime
         {
             _log.LogInformation("Removed {Count} menu item(s) registered by plugin {PluginId}.", removed, pluginId);
         }
+    }
+
+    // Ingest <pluginFolder>/PageTemplates/*.template files into
+    // public.page_templates as plugin-owned rows. The .template file extension
+    // is reserved for plugin JSX templates; the file name (without extension)
+    // becomes the template key. Two placeholders are substituted before the
+    // JSX is persisted so the plugin's source can address its own host
+    // endpoints without knowing its provisioned code at build time:
+    //   {{pluginCode}} -> the plugin's 8-char code
+    //   {{pluginId}}   -> the plugin's UUID
+    //
+    // Idempotent: the row's `created_by_plugin_id` makes ownership explicit,
+    // which lets us safely UPSERT (and never trample built-in or other-plugin
+    // templates with the same key). Templates the plugin previously shipped
+    // but no longer carries are deleted — keeps the list in sync with the zip.
+    private async Task SyncPluginPageTemplatesAsync(Plugin row, string folder, CancellationToken ct)
+    {
+        if (_dbFactory is null) return;
+
+        var dir = Path.Combine(folder, "PageTemplates");
+        var files = Directory.Exists(dir)
+            ? Directory.EnumerateFiles(dir, "*.template")
+                .OrderBy(p => Path.GetFileName(p), StringComparer.Ordinal)
+                .ToList()
+            : new List<string>();
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        var keepKeys = new HashSet<string>(StringComparer.Ordinal);
+        var pluginCode = row.Code ?? string.Empty;
+        var pluginIdString = row.Id.ToString();
+
+        foreach (var file in files)
+        {
+            var key = Path.GetFileNameWithoutExtension(file);
+            if (string.IsNullOrEmpty(key))
+            {
+                _log.LogWarning("Plugin {Id} skipping template file with empty stem: {Path}", row.Id, file);
+                continue;
+            }
+
+            var content = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
+            content = content
+                .Replace("{{pluginCode}}", pluginCode, StringComparison.Ordinal)
+                .Replace("{{pluginId}}", pluginIdString, StringComparison.Ordinal);
+
+            // Default path is namespaced by code so two plugins can't collide
+            // on the unique default_path constraint. Lower-cased for stability.
+            var defaultPath = string.IsNullOrEmpty(pluginCode)
+                ? $"/plugins/_unprovisioned/{key.ToLowerInvariant()}"
+                : $"/plugins/{pluginCode}/{key.ToLowerInvariant()}";
+            keepKeys.Add(key);
+
+            var existing = await db.PageTemplates
+                .FirstOrDefaultAsync(t => t.Key == key, ct)
+                .ConfigureAwait(false);
+            var now = DateTime.UtcNow;
+            if (existing is null)
+            {
+                db.PageTemplates.Add(new Persistence.Scaffolded.PageTemplate
+                {
+                    Id = Guid.NewGuid(),
+                    Key = key,
+                    Name = key,
+                    Description = null,
+                    DefaultPath = defaultPath,
+                    IsEnabled = true,
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                    CreatedByPluginId = row.Id,
+                    ContentType = "jsx",
+                    Content = content,
+                });
+                _log.LogInformation(
+                    "Plugin {Id} registered page template '{Key}' (default path '{DefaultPath}').",
+                    row.Id, key, defaultPath);
+            }
+            else if (existing.CreatedByPluginId == row.Id)
+            {
+                existing.Name = string.IsNullOrEmpty(existing.Name) ? key : existing.Name;
+                existing.DefaultPath = defaultPath;
+                existing.IsEnabled = true;
+                existing.ContentType = "jsx";
+                existing.Content = content;
+                existing.UpdatedAtUtc = now;
+            }
+            else
+            {
+                _log.LogWarning(
+                    "Plugin {Id} cannot register page template '{Key}' — key is already owned by {Owner}.",
+                    row.Id, key, existing.CreatedByPluginId?.ToString() ?? "the host");
+            }
+        }
+
+        // Sweep stale plugin templates whose source file is gone.
+        var stale = await db.PageTemplates
+            .Where(t => t.CreatedByPluginId == row.Id && !keepKeys.Contains(t.Key))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (stale.Count > 0)
+        {
+            db.PageTemplates.RemoveRange(stale);
+            _log.LogInformation(
+                "Plugin {Id} removed {Count} stale page template(s) no longer in the zip: {Keys}",
+                row.Id, stale.Count, string.Join(", ", stale.Select(s => s.Key)));
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<bool> TryDeleteFilesAsync(Guid id, CancellationToken ct)

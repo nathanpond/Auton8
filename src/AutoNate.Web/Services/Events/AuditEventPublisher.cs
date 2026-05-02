@@ -105,12 +105,17 @@ public sealed class DaprAuditEventPublisher(
     }
 
     private static AuditEventNotification BuildNotification(
-        string topicName, AuditEventEnvelope envelope, string envelopeJson) => new()
+        string topicName, AuditEventEnvelope envelope, string envelopeJson)
+    {
+        var (resourceId, resourceLabel) = ExtractResourceFields(envelopeJson);
+        return new AuditEventNotification
         {
             EventId = envelope.EventId,
             EventType = envelope.EventType,
             TopicName = topicName,
             ResourceKind = envelope.ResourceKind,
+            ResourceId = resourceId,
+            ResourceLabel = resourceLabel,
             EnvelopeJson = envelopeJson,
             ActorId = envelope.AuditContext.ActorId,
             ActorUserName = envelope.AuditContext.ActorUserName,
@@ -131,6 +136,79 @@ public sealed class DaprAuditEventPublisher(
             },
             AuthDecisionReason = envelope.AuditContext.AuthDecisionReason,
         };
+    }
+
+    // Walks envelope.resource for an identifying id and human-readable label.
+    // Re-parses the already-serialized envelope JSON instead of poking at the
+    // anonymous resource object so the convention works for any shape — the
+    // audit consumer only needs JSON, never strongly-typed types.
+    private static readonly string[] LabelFieldOrder =
+        { "label", "displayName", "name", "key", "recordKey", "processKey",
+          "username", "email", "path", "status" };
+
+    private static (string? Id, string? Label) ExtractResourceFields(string envelopeJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(envelopeJson);
+            if (!doc.RootElement.TryGetProperty("resource", out var resource)
+                || resource.ValueKind != JsonValueKind.Object)
+            {
+                return (null, null);
+            }
+
+            string? id = null;
+            // Prefer an explicit "id" property; fall back to the first *Id field.
+            foreach (var prop in resource.EnumerateObject())
+            {
+                if (prop.NameEquals("id"))
+                {
+                    id = StringValueOf(prop.Value);
+                    break;
+                }
+            }
+            if (id is null)
+            {
+                foreach (var prop in resource.EnumerateObject())
+                {
+                    if (prop.Name.EndsWith("Id", StringComparison.Ordinal))
+                    {
+                        id = StringValueOf(prop.Value);
+                        if (id is not null) break;
+                    }
+                }
+            }
+
+            string? label = null;
+            foreach (var fieldName in LabelFieldOrder)
+            {
+                foreach (var prop in resource.EnumerateObject())
+                {
+                    if (prop.NameEquals(fieldName) && prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        label = prop.Value.GetString();
+                        break;
+                    }
+                }
+                if (label is not null) break;
+            }
+
+            return (id, label);
+        }
+        catch (JsonException)
+        {
+            return (null, null);
+        }
+    }
+
+    private static string? StringValueOf(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.String => el.GetString(),
+        JsonValueKind.Number => el.ToString(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        _ => null,
+    };
 }
 
 public sealed class NoopAuditEventPublisher : IAuditEventPublisher

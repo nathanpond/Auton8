@@ -157,13 +157,16 @@ public static class GroupEndpoints
             Guid id, IGroupStore store,
             IAuditEventPublisher auditPublisher, CancellationToken ct) =>
         {
+            // Snapshot the group before delete so the audit log can show
+            // the group name instead of a UUID.
+            var snapshot = await store.GetAsync(id, ct);
             var ok = await store.DeleteAsync(id, ct);
             if (!ok) return Results.NotFound();
             await auditPublisher.PublishAsync(
                 IamEventTopic.TopicName,
                 IamEventTypes.GroupDeleted,
                 IamResourceKinds.Group,
-                resource: new { id },
+                resource: new { id, name = snapshot?.Name },
                 details: null,
                 ct);
             return Results.NoContent();

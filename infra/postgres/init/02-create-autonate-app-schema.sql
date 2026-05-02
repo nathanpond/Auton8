@@ -461,8 +461,20 @@ CREATE TABLE IF NOT EXISTS page_templates (
     default_path TEXT NOT NULL UNIQUE,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at_utc TIMESTAMPTZ NOT NULL,
-    updated_at_utc TIMESTAMPTZ NOT NULL
+    updated_at_utc TIMESTAMPTZ NOT NULL,
+    -- Plugin-supplied page templates extend the host's built-in set. Content
+    -- is JSX source compiled at request time via the SPA's JsxPage component.
+    -- created_by_plugin_id is set when a plugin auto-registered the row from
+    -- its <pluginFolder>/PageTemplates/*.template files; FK CASCADE on
+    -- plugins ensures these templates go away with the plugin that owns them.
+    content TEXT NULL,
+    content_type TEXT NOT NULL DEFAULT 'builtin',
+    created_by_plugin_id UUID NULL
 );
+
+CREATE INDEX IF NOT EXISTS ix_page_templates_created_by_plugin_id
+    ON page_templates (created_by_plugin_id)
+    WHERE created_by_plugin_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS menus (
     id UUID PRIMARY KEY,

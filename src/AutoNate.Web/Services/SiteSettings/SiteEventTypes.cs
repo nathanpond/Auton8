@@ -19,6 +19,9 @@ public static class SiteResourceKinds
     public const string Settings = "settings";
     public const string Appearance = "appearance";
     public const string StatusAppearance = "status.appearance";
+    public const string Page = "page";
+    public const string PageTemplate = "page.template";
+    public const string EventCatalog = "event.catalog";
 }
 
 public static class SiteEventTypes
@@ -49,4 +52,12 @@ public static class SiteEventTypes
     public const string SettingsListViewed = "site.settings.list.viewed";
     public const string AppearanceViewed = "site.appearance.viewed";
     public const string StatusAppearanceListViewed = "site.status-appearance.list.viewed";
+
+    // Pages registry / templates / event catalog reads. Surfaced so the
+    // audit log captures who walked the page registry, who browsed the
+    // page-template picker, and who opened the event catalog modal.
+    public const string PageListViewed = "site.page.list.viewed";
+    public const string PageLookupViewed = "site.page.lookup.viewed";
+    public const string PageTemplateListViewed = "site.page-template.list.viewed";
+    public const string EventCatalogViewed = "site.event-catalog.viewed";
 }

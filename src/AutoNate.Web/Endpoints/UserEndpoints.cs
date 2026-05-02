@@ -107,13 +107,16 @@ public static class UserEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
+            // Snapshot the username before delete so the audit log shows
+            // "alice" instead of a bare numeric id.
+            var snapshot = await store.GetByIdAsync(id, cancellationToken);
             var ok = await store.DeleteAsync(id, cancellationToken);
             if (!ok) return Results.NotFound();
             await auditPublisher.PublishAsync(
                 IamEventTopic.TopicName,
                 IamEventTypes.UserDeleted,
                 IamResourceKinds.User,
-                resource: new { id },
+                resource: new { id, username = snapshot?.Username, userId = snapshot?.UserId },
                 details: null,
                 cancellationToken);
             return Results.NoContent();

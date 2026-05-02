@@ -33,6 +33,15 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
         return entity?.ToModel();
     }
 
+    public async Task<LocalUser?> GetByIdAsync(long id, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.LocalUsers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(localUser => localUser.Id == id, cancellationToken);
+        return entity?.ToModel();
+    }
+
     public async Task<LocalUser?> ValidateCredentialsAsync(
         string username,
         string password,

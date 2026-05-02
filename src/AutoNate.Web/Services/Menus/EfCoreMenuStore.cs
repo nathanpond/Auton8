@@ -159,6 +159,20 @@ public sealed class EfCoreMenuStore(
         return true;
     }
 
+    public async Task<Menu?> GetMenuByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.Menus.AsNoTracking().SingleOrDefaultAsync(m => m.Id == id, cancellationToken);
+        return entity is null ? null : ToMenuModel(entity);
+    }
+
+    public async Task<MenuItem?> GetItemByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.MenuItems.AsNoTracking().SingleOrDefaultAsync(i => i.Id == id, cancellationToken);
+        return entity is null ? null : ToItemModel(entity);
+    }
+
     public async Task<MenuItem> CreateItemAsync(string menuKey, CreateMenuItemInput input, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);
@@ -409,14 +423,14 @@ public sealed class EfCoreMenuStore(
             .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
             .ToListAsync(cancellationToken);
 
-        var templateDefaultPaths = await LoadTemplateDefaultPathsAsync(db, rows, cancellationToken);
+        var templateInfo = await LoadTemplateInfoAsync(db, rows, cancellationToken);
 
         var permissionCache = new Dictionary<string, bool>(StringComparer.Ordinal);
         var entries = new List<PageRegistryEntry>(rows.Count);
         foreach (var row in rows)
         {
             if (!await IsAllowedAsync(row.PermissionRequired, permissionCache, actor, cancellationToken)) continue;
-            var (path, contentType) = ParseRegistryEntry(row, templateDefaultPaths);
+            var (path, contentType) = ParseRegistryEntry(row, templateInfo);
             if (path is null) continue;
             entries.Add(new PageRegistryEntry(row.Id, path, contentType));
         }
@@ -431,12 +445,12 @@ public sealed class EfCoreMenuStore(
             .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
             .ToListAsync(cancellationToken);
 
-        var templateDefaultPaths = await LoadTemplateDefaultPathsAsync(db, rows, cancellationToken);
+        var templateInfo = await LoadTemplateInfoAsync(db, rows, cancellationToken);
 
         var permissionCache = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
-            var (rowPath, contentType, content) = ParsePageOrAlias(row, templateDefaultPaths);
+            var (rowPath, contentType, content) = ParsePageOrAlias(row, templateInfo);
             if (rowPath is null) continue;
             if (!string.Equals(rowPath, path, StringComparison.Ordinal)) continue;
             if (!await IsAllowedAsync(row.PermissionRequired, permissionCache, actor, cancellationToken)) return null;
@@ -445,10 +459,14 @@ public sealed class EfCoreMenuStore(
         return null;
     }
 
-    // Build a dictionary of templateKey -> default_path for every template
-    // referenced by a template-typed menu item. Used to resolve paths when a
-    // template item omits config.path.
-    private static async Task<IReadOnlyDictionary<string, string>> LoadTemplateDefaultPathsAsync(
+    // Snapshot of every page_templates row referenced by a template-typed menu
+    // item: default path (used when the menu item omits config.path), the
+    // optional plugin-supplied JSX content, and the row's content_type. Lets
+    // ParseTemplateConfig serve plugin templates as JSX directly without the
+    // SPA needing a per-key React component lookup.
+    private readonly record struct TemplateRow(string DefaultPath, string ContentType, string? Content);
+
+    private static async Task<IReadOnlyDictionary<string, TemplateRow>> LoadTemplateInfoAsync(
         AutoNateDbContext db,
         IReadOnlyList<MenuItemEntity> rows,
         CancellationToken cancellationToken)
@@ -462,23 +480,27 @@ public sealed class EfCoreMenuStore(
         }
         if (keys.Count == 0)
         {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
+            return new Dictionary<string, TemplateRow>(StringComparer.Ordinal);
         }
         var templates = await db.PageTemplates.AsNoTracking()
             .Where(t => keys.Contains(t.Key))
-            .Select(t => new { t.Key, t.DefaultPath })
+            .Select(t => new { t.Key, t.DefaultPath, t.ContentType, t.Content })
             .ToListAsync(cancellationToken);
-        return templates.ToDictionary(t => t.Key, t => t.DefaultPath, StringComparer.Ordinal);
+        return templates.ToDictionary(
+            t => t.Key,
+            t => new TemplateRow(t.DefaultPath, t.ContentType ?? "builtin", t.Content),
+            StringComparer.Ordinal);
     }
 
     // For an alias-route item, the registry path is the aliasPath and the
     // content type is "alias" (the SPA renders the target component there).
     // For a page item, fall through to the existing page parsing.
     // For a template item, the path is config.path or the template's
-    // default_path; content type is "template".
+    // default_path; content type is "template" for built-in templates and
+    // "jsx" for plugin templates (so the SPA's JsxPage renders them).
     private static (string? Path, string ContentType) ParseRegistryEntry(
         MenuItemEntity row,
-        IReadOnlyDictionary<string, string> templateDefaultPaths)
+        IReadOnlyDictionary<string, TemplateRow> templateInfo)
     {
         if (row.ItemType == "route")
         {
@@ -487,8 +509,8 @@ public sealed class EfCoreMenuStore(
         }
         if (row.ItemType == "template")
         {
-            var (path, _, _) = ParseTemplateConfig(row.Config, templateDefaultPaths);
-            return (path, "template");
+            var (path, contentType, _) = ParseTemplateConfig(row.Config, templateInfo);
+            return (path, contentType);
         }
         var (p, ct, _) = ParsePageConfig(row.Config);
         return (p, ct);
@@ -496,7 +518,7 @@ public sealed class EfCoreMenuStore(
 
     private static (string? Path, string ContentType, string? Content) ParsePageOrAlias(
         MenuItemEntity row,
-        IReadOnlyDictionary<string, string> templateDefaultPaths)
+        IReadOnlyDictionary<string, TemplateRow> templateInfo)
     {
         if (row.ItemType == "route")
         {
@@ -509,21 +531,30 @@ public sealed class EfCoreMenuStore(
         }
         if (row.ItemType == "template")
         {
-            return ParseTemplateConfig(row.Config, templateDefaultPaths);
+            return ParseTemplateConfig(row.Config, templateInfo);
         }
         return ParsePageConfig(row.Config);
     }
 
     private static (string? Path, string ContentType, string? Content) ParseTemplateConfig(
         string config,
-        IReadOnlyDictionary<string, string> templateDefaultPaths)
+        IReadOnlyDictionary<string, TemplateRow> templateInfo)
     {
         var key = ReadStringField(config, "templateKey");
         if (string.IsNullOrWhiteSpace(key)) return (null, "template", null);
         var path = ReadStringField(config, "path");
-        if (string.IsNullOrWhiteSpace(path) && templateDefaultPaths.TryGetValue(key, out var defaultPath))
+        templateInfo.TryGetValue(key, out var info);
+        if (string.IsNullOrWhiteSpace(path) && !string.IsNullOrEmpty(info.DefaultPath))
         {
-            path = defaultPath;
+            path = info.DefaultPath;
+        }
+        // Plugin-supplied templates carry their own JSX source; serve it as a
+        // jsx page so DynamicPageRoute compiles it via JsxPage instead of
+        // looking the key up in the SPA's static PAGE_TEMPLATES map.
+        if (string.Equals(info.ContentType, "jsx", StringComparison.Ordinal)
+            && !string.IsNullOrEmpty(info.Content))
+        {
+            return (path, "jsx", info.Content);
         }
         return (path, "template", key);
     }

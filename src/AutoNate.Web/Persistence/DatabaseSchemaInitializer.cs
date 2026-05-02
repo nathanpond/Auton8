@@ -656,6 +656,46 @@ internal static class DatabaseSchemaInitializer
             WHERE item_type = 'template';
         """;
 
+    // Plugin-supplied page templates extend the host's built-in template set.
+    // The plugin ships .template files under <pluginFolder>/PageTemplates and
+    // PluginRuntime upserts a row here on each enable; the rendered content
+    // travels in this table (not in the file system at request time) so the
+    // SPA's existing /api/pages/lookup pipeline serves it as JSX. Ownership
+    // is tracked by created_by_plugin_id with FK CASCADE on the plugins row,
+    // so deleting a plugin sweeps every template it ever registered.
+    //
+    // The block runs *after* PluginsSchemaSql (so the FK target exists) and is
+    // idempotent: every column add is `IF NOT EXISTS`, the FK is gated by a
+    // pg_constraint lookup, and the index uses `IF NOT EXISTS`.
+    private const string PageTemplatesPluginColumnsSql =
+        """
+        ALTER TABLE page_templates
+            ADD COLUMN IF NOT EXISTS content TEXT NULL;
+
+        ALTER TABLE page_templates
+            ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'builtin';
+
+        ALTER TABLE page_templates
+            ADD COLUMN IF NOT EXISTS created_by_plugin_id UUID NULL;
+
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'page_templates_created_by_plugin_id_fkey'
+            ) THEN
+                ALTER TABLE page_templates
+                    ADD CONSTRAINT page_templates_created_by_plugin_id_fkey
+                    FOREIGN KEY (created_by_plugin_id)
+                    REFERENCES plugins (id) ON DELETE CASCADE;
+            END IF;
+        END $$;
+
+        CREATE INDEX IF NOT EXISTS ix_page_templates_created_by_plugin_id
+            ON page_templates (created_by_plugin_id)
+            WHERE created_by_plugin_id IS NOT NULL;
+        """;
+
     private const string MenusSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS menus (
@@ -1596,6 +1636,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginDataIsolationSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(MenuItemsPluginColumnSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesPluginColumnsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsIconMenuRemovalSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSiteConfigMenuSql, cancellationToken);

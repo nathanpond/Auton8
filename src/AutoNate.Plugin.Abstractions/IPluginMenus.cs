@@ -30,6 +30,21 @@ public interface IPluginMenus
     // disable removes it, delete removes it, and the plugin re-adds it on the
     // next enable inside Configure().
     Guid AddMenuItem(string menuKey, Guid? parentId, NewMenuItem item);
+
+    // Removes every menu_items row this plugin previously added (matched by
+    // created_by_plugin_id). Mirrors the sweep the host does on disable and
+    // the FK CASCADE on delete; expose it so plugins can call it explicitly
+    // from Cleanup() when they want their menus gone before the host's own
+    // teardown runs. Returns the number of rows removed.
+    int RemoveAll();
+
+    // Removes a single menu_items row by id IF it was added by this plugin.
+    // Items the plugin doesn't own are left alone (returns false), so a
+    // plugin can't sweep host or other-plugin menu items with this call —
+    // useful for surgical cleanup like "remove the trailing separator I
+    // added under the Settings group". Returns true when the row was
+    // actually deleted.
+    bool RemoveMenuItem(Guid id);
 }
 
 // Description of a menu item the plugin wants to insert. Mirrors the columns

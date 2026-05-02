@@ -63,6 +63,13 @@ public interface IMenuStore
 
     Task<bool> DeleteMenuAsync(Guid id, CancellationToken cancellationToken = default);
 
+    // Cheap by-id lookups callers use to snapshot a row's name into audit
+    // events before deletion, so the audit log shows "Site Menu" instead of
+    // a bare UUID. Both return null when the id doesn't resolve.
+    Task<Menu?> GetMenuByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<MenuItem?> GetItemByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
     Task<MenuItem> CreateItemAsync(string menuKey, CreateMenuItemInput input, CancellationToken cancellationToken = default);
 
     Task<MenuItem> UpdateItemAsync(Guid id, UpdateMenuItemInput input, CancellationToken cancellationToken = default);

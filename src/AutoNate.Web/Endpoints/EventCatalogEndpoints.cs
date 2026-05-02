@@ -1,4 +1,5 @@
 using AutoNate.Web.Services.Events;
+using AutoNate.Web.Services.SiteSettings;
 using AutoNate.Web.Services.Workflow;
 
 namespace AutoNate.Web.Endpoints;
@@ -21,7 +22,10 @@ public static class EventCatalogEndpoints
         var group = app.MapGroup("/api/event-catalog")
             .RequireAuthorization();
 
-        group.MapGet("/", (IWorkflowSignalRegistry signalRegistry) =>
+        group.MapGet("/", async (
+            IWorkflowSignalRegistry signalRegistry,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
             var registrations = signalRegistry
                 .GetSubscribedTopics()
@@ -31,6 +35,19 @@ public static class EventCatalogEndpoints
                 .OrderBy(entry => entry.Topic, StringComparer.Ordinal)
                 .ThenBy(entry => entry.EventType, StringComparer.Ordinal)
                 .ToArray();
+
+            await auditPublisher.PublishAsync(
+                SiteEventTopic.TopicName,
+                SiteEventTypes.EventCatalogViewed,
+                SiteResourceKinds.EventCatalog,
+                resource: null,
+                details: new
+                {
+                    transportCount = EventCatalog.Transports.Length,
+                    categoryCount = EventCatalog.Categories.Length,
+                    workflowRegistrationCount = registrations.Length
+                },
+                ct);
 
             return Results.Ok(new EventCatalogResponse(
                 EventCatalog.Transports,

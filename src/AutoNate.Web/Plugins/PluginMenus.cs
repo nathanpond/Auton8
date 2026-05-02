@@ -175,6 +175,48 @@ internal sealed class PluginMenus : IPluginMenus
         return InsertMenuItem(connection, menuId, parentId, item);
     }
 
+    public int RemoveAll()
+    {
+        using var db = _dbFactory.CreateDbContext();
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            connection.Open();
+        }
+        var removed = DeleteAllForPlugin(connection, _pluginId);
+        if (removed > 0)
+        {
+            _log.LogInformation(
+                "Plugin {PluginId} removed {Count} of its own menu item(s) via Menus.RemoveAll().",
+                _pluginId, removed);
+        }
+        return removed;
+    }
+
+    public bool RemoveMenuItem(Guid id)
+    {
+        using var db = _dbFactory.CreateDbContext();
+        var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            connection.Open();
+        }
+        // Ownership predicate keeps a buggy or malicious plugin from sweeping
+        // menu items it never created — only its own rows are touched.
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText =
+            "DELETE FROM menu_items WHERE id = @id AND created_by_plugin_id = @plugin_id;";
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@plugin_id", _pluginId);
+        var rows = cmd.ExecuteNonQuery();
+        if (rows > 0)
+        {
+            _log.LogInformation(
+                "Plugin {PluginId} removed menu item {Id}.", _pluginId, id);
+        }
+        return rows > 0;
+    }
+
     private Guid InsertMenuItem(
         NpgsqlConnection connection,
         Guid menuId,

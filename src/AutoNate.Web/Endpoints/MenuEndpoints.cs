@@ -130,13 +130,16 @@ public static class MenuEndpoints
         {
             try
             {
+                // Snapshot the menu before delete so the audit log shows
+                // "Site Menu" instead of a bare UUID.
+                var snapshot = await store.GetMenuByIdAsync(id, ct);
                 var deleted = await store.DeleteMenuAsync(id, ct);
                 if (!deleted) return Results.NotFound();
                 await auditPublisher.PublishAsync(
                     SiteEventTopic.TopicName,
                     SiteEventTypes.MenuDeleted,
                     SiteResourceKinds.Menu,
-                    resource: new { id },
+                    resource: new { id, key = snapshot?.Key, name = snapshot?.Name },
                     details: null,
                     ct);
                 return Results.NoContent();
@@ -220,13 +223,14 @@ public static class MenuEndpoints
         {
             try
             {
+                var snapshot = await store.GetItemByIdAsync(id, ct);
                 var deleted = await store.DeleteItemAsync(id, ct);
                 if (!deleted) return Results.NotFound();
                 await auditPublisher.PublishAsync(
                     SiteEventTopic.TopicName,
                     SiteEventTypes.MenuItemDeleted,
                     SiteResourceKinds.MenuItem,
-                    resource: new { id },
+                    resource: new { id, displayName = snapshot?.DisplayName },
                     details: null,
                     ct);
                 return Results.NoContent();
