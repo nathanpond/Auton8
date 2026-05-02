@@ -14,7 +14,9 @@ using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.Workflow;
+using AutoNate.Web.Storage;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -235,7 +237,31 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         new(CreateDbContextFactory());
 
     public AutoNate.Web.Services.Menus.EfCorePageTemplateStore CreatePageTemplateStore() =>
-        new(CreateDbContextFactory());
+        new(CreateDbContextFactory(), CreateTestDataPaths(out var dataOptions), Options.Create(dataOptions));
+
+    private static IDataPaths CreateTestDataPaths(out DataOptions dataOptions)
+    {
+        // Per-call temp root keeps tests isolated; the directory is fine to
+        // leak — xUnit's TempPath is swept periodically by the OS.
+        var contentRoot = Path.Combine(Path.GetTempPath(), "autonate-pgtests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(contentRoot);
+        dataOptions = new DataOptions { Root = "data", PublicUrlPrefix = "/files" };
+        return new DataPaths(Options.Create(dataOptions), new TestHostEnvironment(contentRoot));
+    }
+
+    private sealed class TestHostEnvironment : IHostEnvironment
+    {
+        public TestHostEnvironment(string contentRoot)
+        {
+            ContentRootPath = contentRoot;
+            ContentRootFileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(contentRoot);
+        }
+
+        public string EnvironmentName { get; set; } = Environments.Development;
+        public string ApplicationName { get; set; } = "AutoNate.Web.Tests";
+        public string ContentRootPath { get; set; }
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; }
+    }
 
     public AutoNate.Web.Services.Menus.EfCoreMenuStore CreateMenuStore(bool authorizationEnabled = false) =>
         new(CreateDbContextFactory(), CreateAuthorizer(authorizationEnabled));

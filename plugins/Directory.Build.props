@@ -43,9 +43,15 @@
          /PageTemplates. PluginRuntime.SyncPluginPageTemplatesAsync ingests
          each on enable and registers it as a plugin-owned page_templates row
          that the SPA's menu-item picker exposes alongside the host's
-         built-in templates. -->
+         built-in templates. A sibling .png with the same stem (e.g.
+         AuditLog.template + AuditLog.png) is treated as the picker thumbnail
+         and copied into the host's public data folder on enable. -->
     <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\PageTemplates')">
         <None Include="PageTemplates\*.template">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>PageTemplates\%(Filename)%(Extension)</Link>
+        </None>
+        <None Include="PageTemplates\*.png">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <Link>PageTemplates\%(Filename)%(Extension)</Link>
         </None>

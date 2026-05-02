@@ -2,5 +2,12 @@
   "name": "Auditor",
   "version": "1.0.0",
   "entryAssembly": "Auditor.dll",
-  "entryType": "AutoNate.Plugins.Auditor.Auditor"
+  "entryType": "AutoNate.Plugins.Auditor.Auditor",
+  "templates": {
+    "AuditLog": {
+      "name": "Audit Log",
+      "description": "Tabular view of audit-grade events captured by the Auditor plugin.",
+      "category": "Plugins"
+    }
+  }
 }

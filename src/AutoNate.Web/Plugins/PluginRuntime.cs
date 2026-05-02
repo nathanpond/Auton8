@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Text.Json;
 using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Hooks;
 using AutoNate.Web.Persistence;
@@ -27,12 +28,20 @@ public sealed class PluginRuntime
     private readonly PluginDataAccessRegistry? _dataRegistry;
     private readonly PluginMigrationRunner? _migrationRunner;
     private readonly IDbContextFactory<AutoNateDbContext>? _dbFactory;
+    private readonly IDataPaths _dataPaths;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginRuntime> _log;
     private readonly string _pluginRoot;
 
     private readonly ConcurrentDictionary<Guid, LoadedPlugin> _loaded = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new(JsonSerializerDefaults.Web);
+
+    // Folder under IDataPaths.PublicRoot that holds page-template thumbnails
+    // copied out of plugin zips. Sub-foldered by plugin code so two plugins
+    // can both ship a thumbnail for the same template stem without colliding.
+    private const string PageTemplateThumbnailFolder = "page-templates";
 
     public PluginRuntime(
         HookRegistrar registrar,
@@ -49,6 +58,7 @@ public sealed class PluginRuntime
         _dataRegistry = dataRegistry;
         _migrationRunner = migrationRunner;
         _dbFactory = dbFactory;
+        _dataPaths = dataPaths;
         _loggerFactory = loggerFactory;
         _log = loggerFactory.CreateLogger<PluginRuntime>();
         var configured = options.Value.Folder;
@@ -355,6 +365,13 @@ public sealed class PluginRuntime
     //   {{pluginCode}} -> the plugin's 8-char code
     //   {{pluginId}}   -> the plugin's UUID
     //
+    // Per-template presentation metadata (name/description/category) is
+    // pulled from plugin.json's `templates` map, keyed by template stem.
+    // A sibling <stem>.png is copied into IDataPaths.PublicRoot/page-templates/
+    // <code>/<stem>.png and the on-disk path is stored in thumbnail_url; the
+    // EfCorePageTemplateStore rewrites the disk path to a public URL before
+    // returning rows to the SPA picker.
+    //
     // Idempotent: the row's `created_by_plugin_id` makes ownership explicit,
     // which lets us safely UPSERT (and never trample built-in or other-plugin
     // templates with the same key). Templates the plugin previously shipped
@@ -369,6 +386,8 @@ public sealed class PluginRuntime
                 .OrderBy(p => Path.GetFileName(p), StringComparer.Ordinal)
                 .ToList()
             : new List<string>();
+
+        var manifestTemplates = TryReadManifestTemplates(folder);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
@@ -392,6 +411,19 @@ public sealed class PluginRuntime
 
             keepKeys.Add(key);
 
+            manifestTemplates.TryGetValue(key, out var meta);
+            var displayName = !string.IsNullOrWhiteSpace(meta?.Name) ? meta!.Name! : key;
+            var description = string.IsNullOrWhiteSpace(meta?.Description) ? null : meta!.Description;
+            var category = string.IsNullOrWhiteSpace(meta?.Category) ? null : meta!.Category;
+
+            // Copy the optional sibling thumbnail into the host's public data
+            // folder and remember the on-disk path. SyncThumbnail returns
+            // null both when no .png exists and when the copy failed (the
+            // latter is logged inside).
+            var thumbnailDiskPath = string.IsNullOrEmpty(pluginCode)
+                ? null
+                : SyncThumbnail(pluginCode, key, file);
+
             var existing = await db.PageTemplates
                 .FirstOrDefaultAsync(t => t.Key == key, ct)
                 .ConfigureAwait(false);
@@ -402,8 +434,10 @@ public sealed class PluginRuntime
                 {
                     Id = Guid.NewGuid(),
                     Key = key,
-                    Name = key,
-                    Description = null,
+                    Name = displayName,
+                    Description = description,
+                    Category = category,
+                    ThumbnailUrl = thumbnailDiskPath,
                     IsEnabled = true,
                     CreatedAtUtc = now,
                     UpdatedAtUtc = now,
@@ -417,7 +451,10 @@ public sealed class PluginRuntime
             }
             else if (existing.CreatedByPluginId == row.Id)
             {
-                existing.Name = string.IsNullOrEmpty(existing.Name) ? key : existing.Name;
+                existing.Name = displayName;
+                existing.Description = description;
+                existing.Category = category;
+                existing.ThumbnailUrl = thumbnailDiskPath;
                 existing.IsEnabled = true;
                 existing.ContentType = "jsx";
                 existing.Content = content;
@@ -445,6 +482,99 @@ public sealed class PluginRuntime
         }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // After the DB sweep, prune thumbnail files for templates we just
+        // dropped or that the plugin no longer ships. Done last so a failed
+        // SaveChangesAsync doesn't leave the public folder in an inconsistent
+        // state where the URL still resolves to a file the picker won't see.
+        if (!string.IsNullOrEmpty(pluginCode))
+        {
+            PruneStaleThumbnails(pluginCode, keepKeys);
+        }
+    }
+
+    // Loads plugin.json from the extracted plugin folder and returns its
+    // `templates` map. Returns an empty dictionary on any failure — the
+    // sync still runs, templates just go in without metadata. We don't
+    // reuse PluginManagementService's already-validated manifest because
+    // PluginRuntime is also called by enable-on-startup paths that don't
+    // route through the upload validator.
+    private Dictionary<string, PluginManifestTemplate> TryReadManifestTemplates(string folder)
+    {
+        var path = Path.Combine(folder, PluginUploadValidator.ManifestFileName);
+        if (!File.Exists(path)) return new(StringComparer.Ordinal);
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var manifest = JsonSerializer.Deserialize<PluginManifest>(stream, ManifestJsonOptions);
+            if (manifest?.Templates is null) return new(StringComparer.Ordinal);
+            return new Dictionary<string, PluginManifestTemplate>(manifest.Templates, StringComparer.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Plugin manifest at {Path} could not be parsed for template metadata; continuing without it.", path);
+            return new(StringComparer.Ordinal);
+        }
+    }
+
+    // Copies <stem>.png next to a .template file into the host's public
+    // data folder and returns the destination's absolute disk path. Returns
+    // null when no PNG ships alongside the template, or when the copy
+    // fails. Storing the disk path (rather than the URL) keeps the public
+    // URL prefix out of the database — the page-template store rewrites
+    // it to the live URL at read time.
+    private string? SyncThumbnail(string pluginCode, string key, string templateFilePath)
+    {
+        var sourceDir = Path.GetDirectoryName(templateFilePath);
+        if (string.IsNullOrEmpty(sourceDir)) return null;
+        var sourcePng = Path.Combine(sourceDir, key + ".png");
+        if (!File.Exists(sourcePng)) return null;
+
+        try
+        {
+            var destDir = Path.Combine(_dataPaths.PublicRoot, PageTemplateThumbnailFolder, pluginCode);
+            Directory.CreateDirectory(destDir);
+            var destPath = Path.Combine(destDir, key + ".png");
+            File.Copy(sourcePng, destPath, overwrite: true);
+            return destPath;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Failed to copy page-template thumbnail for plugin {Code} key '{Key}' from {Source}.",
+                pluginCode, key, sourcePng);
+            return null;
+        }
+    }
+
+    // Removes thumbnail files in the plugin's public folder whose stem isn't
+    // in `keepKeys`. The plugin folder itself is left in place even when
+    // empty so future re-enables don't have to re-create it. Best-effort —
+    // any IO failure here only leaves an orphaned PNG, never breaks sync.
+    private void PruneStaleThumbnails(string pluginCode, HashSet<string> keepKeys)
+    {
+        var dir = Path.Combine(_dataPaths.PublicRoot, PageTemplateThumbnailFolder, pluginCode);
+        if (!Directory.Exists(dir)) return;
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(dir, "*.png"))
+            {
+                var stem = Path.GetFileNameWithoutExtension(path);
+                if (string.IsNullOrEmpty(stem)) continue;
+                if (keepKeys.Contains(stem)) continue;
+                try { File.Delete(path); }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex,
+                        "Failed to delete stale plugin thumbnail {Path}.", path);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Failed to enumerate thumbnail folder for plugin {Code}.", pluginCode);
+        }
     }
 
     public async Task<bool> TryDeleteFilesAsync(Guid id, CancellationToken ct)
