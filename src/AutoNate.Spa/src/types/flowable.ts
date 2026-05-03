@@ -159,6 +159,16 @@ export type WorkflowDeploymentInfo = {
   deployedAtUtc: string;
 };
 
+export type WorkflowDefaultVariableType = "string" | "number" | "boolean" | "json";
+
+export type WorkflowDefaultVariable = {
+  name: string;
+  type: WorkflowDefaultVariableType;
+  // Stored as a JSON-typed value: string for "string"/"json", number for
+  // "number", boolean for "boolean". Null when the user hasn't entered one.
+  value: string | number | boolean | null;
+};
+
 export type WorkflowModel = {
   id: string;
   name: string;
@@ -175,6 +185,7 @@ export type WorkflowModel = {
   activeProcessInstanceId: string | null;
   createdAtUtc: string;
   updatedAtUtc: string;
+  defaultVariables: WorkflowDefaultVariable[] | null;
 };
 
 export type WorkflowModelVersion = {

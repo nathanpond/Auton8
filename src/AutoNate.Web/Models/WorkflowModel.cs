@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace AutoNate.Web.Models;
 
 public sealed record class WorkflowModel
@@ -29,6 +31,24 @@ public sealed record class WorkflowModel
     public DateTimeOffset CreatedAtUtc { get; init; }
 
     public DateTimeOffset UpdatedAtUtc { get; init; }
+
+    // Per-model defaults that get merged in at process-instance start (under
+    // any explicit values the caller passes). Null when the user hasn't
+    // configured any. Round-tripped through the workflow_models.default_variables
+    // jsonb column.
+    public IReadOnlyList<WorkflowDefaultVariable>? DefaultVariables { get; init; }
+}
+
+public sealed record class WorkflowDefaultVariable
+{
+    public string Name { get; init; } = string.Empty;
+
+    // One of: "string", "number", "boolean", "json". The SPA picks the
+    // type when authoring; the start-instance handler uses it to coerce
+    // the JsonElement Value into the right CLR shape for Flowable.
+    public string Type { get; init; } = "string";
+
+    public JsonElement? Value { get; init; }
 }
 
 public sealed record class WorkflowModelVersion

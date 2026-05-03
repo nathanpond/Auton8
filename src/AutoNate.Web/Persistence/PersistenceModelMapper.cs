@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AutoNate.Web.Models;
 using LocalUserEntity = AutoNate.Web.Persistence.Scaffolded.LocalUser;
 using WorkflowModelEntity = AutoNate.Web.Persistence.Scaffolded.WorkflowModel;
@@ -7,6 +8,12 @@ namespace AutoNate.Web.Persistence;
 
 internal static class PersistenceModelMapper
 {
+    private static readonly JsonSerializerOptions DefaultVariablesJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+
     public static LocalUser ToModel(this LocalUserEntity entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -55,7 +62,8 @@ internal static class PersistenceModelMapper
                     DeployedAtUtc = entity.LastDeployedAtUtc is null
                         ? DateTimeOffset.MinValue
                         : ToDateTimeOffset(entity.LastDeployedAtUtc.Value)
-                }
+                },
+            DefaultVariables = DeserializeDefaultVariables(entity.DefaultVariables)
         };
     }
 
@@ -79,6 +87,34 @@ internal static class PersistenceModelMapper
         entity.LastProcessDefinitionKey = model.LastDeployment?.ProcessDefinitionKey;
         entity.LastProcessDefinitionVersion = model.LastDeployment?.ProcessDefinitionVersion;
         entity.LastDeployedAtUtc = model.LastDeployment?.DeployedAtUtc.UtcDateTime;
+        entity.DefaultVariables = SerializeDefaultVariables(model.DefaultVariables);
+    }
+
+    private static IReadOnlyList<WorkflowDefaultVariable>? DeserializeDefaultVariables(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<WorkflowDefaultVariable>>(json, DefaultVariablesJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? SerializeDefaultVariables(IReadOnlyList<WorkflowDefaultVariable>? variables)
+    {
+        if (variables is null || variables.Count == 0)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Serialize(variables, DefaultVariablesJsonOptions);
     }
 
     public static WorkflowModelVersion ToModel(this WorkflowModelVersionEntity entity)

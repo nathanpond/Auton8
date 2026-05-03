@@ -109,6 +109,12 @@ internal static class DatabaseSchemaInitializer
         ON CONFLICT (workflow_model_id, version_number) DO NOTHING;
         """;
 
+    private const string WorkflowDefaultVariablesSql =
+        """
+        ALTER TABLE workflow_models
+            ADD COLUMN IF NOT EXISTS default_variables JSONB NULL;
+        """;
+
     private const string RecordsSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS record_types (
@@ -1863,6 +1869,7 @@ internal static class DatabaseSchemaInitializer
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AutoNateDbContext>();
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowVersioningSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(WorkflowDefaultVariablesSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowExecutionErrorsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowTaskCompletionsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsSchemaSql, cancellationToken);

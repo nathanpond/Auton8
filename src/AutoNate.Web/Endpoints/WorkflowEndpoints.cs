@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
@@ -216,17 +217,24 @@ public static class WorkflowEndpoints
                 name = await TryGenerateInstanceNameAsync(flowable, store, processKey, cancellationToken);
             }
 
+            var model = await store.GetByProcessKeyAsync(processKey, cancellationToken);
+            var mergedVariables = MergeDefaultVariables(model?.DefaultVariables, request?.Variables);
+
             var instance = await flowable.StartProcessInstanceAsync(
                 processKey,
                 name,
-                request?.Variables,
+                mergedVariables,
                 cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ModelStarted,
                 WorkflowResourceKinds.Execution,
                 resource: new { processKey, processInstanceId = instance.Id, name },
-                details: new { hadVariables = request?.Variables is { Count: > 0 } },
+                details: new
+                {
+                    hadVariables = request?.Variables is { Count: > 0 },
+                    appliedDefaultsCount = model?.DefaultVariables?.Count ?? 0
+                },
                 cancellationToken);
             return Results.Ok(instance);
         }).DisableAntiforgery();
@@ -358,4 +366,81 @@ public static class WorkflowEndpoints
     public sealed record PublishResponse(WorkflowModel Model, WorkflowDeploymentInfo Deployment);
 
     public sealed record StartInstanceRequest(string? Name, Dictionary<string, object?>? Variables);
+
+    private static Dictionary<string, object?>? MergeDefaultVariables(
+        IReadOnlyList<WorkflowDefaultVariable>? defaults,
+        IReadOnlyDictionary<string, object?>? overrides)
+    {
+        var hasDefaults = defaults is { Count: > 0 };
+        var hasOverrides = overrides is { Count: > 0 };
+        if (!hasDefaults && !hasOverrides)
+        {
+            return null;
+        }
+
+        var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (hasDefaults)
+        {
+            foreach (var variable in defaults!)
+            {
+                if (string.IsNullOrWhiteSpace(variable.Name)) continue;
+                merged[variable.Name] = ConvertDefaultVariableValue(variable);
+            }
+        }
+
+        if (hasOverrides)
+        {
+            // Caller-supplied values win over the model's defaults.
+            foreach (var (name, value) in overrides!)
+            {
+                merged[name] = value;
+            }
+        }
+
+        return merged;
+    }
+
+    private static object? ConvertDefaultVariableValue(WorkflowDefaultVariable variable)
+    {
+        if (variable.Value is not { } element || element.ValueKind == JsonValueKind.Null
+            || element.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return variable.Type switch
+        {
+            "boolean" => element.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.String when bool.TryParse(element.GetString(), out var b) => b,
+                _ => null
+            },
+            "number" => element.ValueKind switch
+            {
+                JsonValueKind.Number when element.TryGetInt64(out var i) => i,
+                JsonValueKind.Number => element.GetDouble(),
+                JsonValueKind.String when double.TryParse(element.GetString(), out var d) => d,
+                _ => null
+            },
+            "string" => element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Null => null,
+                _ => element.GetRawText()
+            },
+            "json" => element,
+            _ => element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Number when element.TryGetInt64(out var i) => i,
+                JsonValueKind.Number => element.GetDouble(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Null => null,
+                _ => element
+            }
+        };
+    }
 }

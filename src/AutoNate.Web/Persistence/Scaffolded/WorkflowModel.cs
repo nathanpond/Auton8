@@ -34,4 +34,6 @@ public partial class WorkflowModel
     public int? LastProcessDefinitionVersion { get; set; }
 
     public DateTime? LastDeployedAtUtc { get; set; }
+
+    public string? DefaultVariables { get; set; }
 }

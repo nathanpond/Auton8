@@ -137,6 +137,9 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.ProcessKey).HasColumnName("process_key");
             entity.Property(e => e.PublishedVersionNumber).HasColumnName("published_version_number");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.DefaultVariables)
+                .HasColumnName("default_variables")
+                .HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<WorkflowModelVersion>(entity =>

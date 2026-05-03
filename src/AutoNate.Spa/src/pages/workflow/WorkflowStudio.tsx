@@ -20,8 +20,13 @@ import {
   prepareWorkflow,
   saveWorkflow
 } from "@/api/workflows";
-import { WorkflowModel } from "@/types/flowable";
+import {
+  WorkflowDefaultVariable,
+  WorkflowDefaultVariableType,
+  WorkflowModel
+} from "@/types/flowable";
 import * as workflow from "@/lib/bpmn/workflow.js";
+import { extractProcessVariables } from "@/lib/bpmn/processVariables";
 import {
   defaultRecurrenceState,
   describeRecurrence,
@@ -801,7 +806,18 @@ export default function WorkflowStudio() {
     !busy && !!currentModel && !!currentModel.lastDeployment;
   const isPaused = currentModel?.isSuspended === true;
 
-  const sidebarPanels = useWorkflowSidebarPanels({ currentModel, dirty });
+  const onUpdateModelFromSidebar = useCallback(
+    (next: WorkflowModel) => {
+      setCurrentModel(next);
+      setDirty(true);
+    },
+    [setCurrentModel, setDirty]
+  );
+  const sidebarPanels = useWorkflowSidebarPanels({
+    currentModel,
+    dirty,
+    onUpdateModel: onUpdateModelFromSidebar
+  });
   const activeSidebar =
     sidebarPanels.find((p) => p.id === sidebarActiveId) ?? null;
 
@@ -1104,10 +1120,12 @@ type WorkflowSidebarPanel = {
 
 function useWorkflowSidebarPanels({
   currentModel,
-  dirty
+  dirty,
+  onUpdateModel
 }: {
   currentModel: WorkflowModel | null;
   dirty: boolean;
+  onUpdateModel: (model: WorkflowModel) => void;
 }): WorkflowSidebarPanel[] {
   const { data: executions = [] } = useExecutions();
 
@@ -1131,9 +1149,20 @@ function useWorkflowSidebarPanels({
             runningCount={runningCount}
           />
         )
+      },
+      {
+        id: "model-config",
+        icon: "bi-gear",
+        label: "Model Configuration",
+        render: () => (
+          <ModelConfigurationPanel
+            currentModel={currentModel}
+            onUpdateModel={onUpdateModel}
+          />
+        )
       }
     ],
-    [currentModel, dirty, runningCount]
+    [currentModel, dirty, runningCount, onUpdateModel]
   );
 }
 
@@ -1158,7 +1187,7 @@ function WorkflowSidebarRail({
             aria-selected={selected}
             className={`workflow-rsb-rail-btn${selected ? " is-active" : ""}`}
             onClick={() => onSelect(selected ? null : p.id)}
-            title={p.label}
+            data-tooltip={p.label}
             aria-label={p.label}
           >
             <i className={`bi ${p.icon}`} aria-hidden="true"></i>
@@ -1288,6 +1317,386 @@ function ModelInformationPanel({
   );
 }
 
+function ModelConfigurationPanel({
+  currentModel,
+  onUpdateModel
+}: {
+  currentModel: WorkflowModel | null;
+  onUpdateModel: (model: WorkflowModel) => void;
+}) {
+  if (!currentModel) {
+    return <p className="workflow-muted">No workflow model is selected.</p>;
+  }
+
+  return (
+    <div className="workflow-config-sections">
+      <DefaultProcessVariablesSection
+        currentModel={currentModel}
+        onUpdateModel={onUpdateModel}
+      />
+    </div>
+  );
+}
+
+const DEFAULT_VARIABLE_TYPES: WorkflowDefaultVariableType[] = [
+  "string",
+  "number",
+  "boolean",
+  "json"
+];
+
+function DefaultProcessVariablesSection({
+  currentModel,
+  onUpdateModel
+}: {
+  currentModel: WorkflowModel;
+  onUpdateModel: (model: WorkflowModel) => void;
+}) {
+  const referenced = useMemo(
+    () => extractProcessVariables(currentModel.bpmnXml),
+    [currentModel.bpmnXml]
+  );
+  const referencedNames = useMemo(
+    () => referenced.map((r) => r.name),
+    [referenced]
+  );
+
+  // Merge: every referenced variable gets a row (creating an empty default
+  // entry on the fly with a usage-inferred type), plus any saved defaults
+  // that aren't currently referenced (so the user doesn't lose them just
+  // because the BPMN changed).
+  const rows = useMemo(() => {
+    const saved = currentModel.defaultVariables ?? [];
+    const byName = new Map<string, WorkflowDefaultVariable>();
+    for (const v of saved) byName.set(v.name, v);
+
+    const referencedRows: {
+      variable: WorkflowDefaultVariable;
+      referenced: true;
+      inferredType?: WorkflowDefaultVariableType;
+    }[] = referenced.map(({ name, inferredType }) => ({
+      variable:
+        byName.get(name) ?? {
+          name,
+          type: inferredType ?? "string",
+          value: null
+        },
+      referenced: true,
+      inferredType
+    }));
+
+    const referencedSet = new Set(referencedNames);
+    const orphanRows: {
+      variable: WorkflowDefaultVariable;
+      referenced: false;
+      inferredType?: undefined;
+    }[] = saved
+      .filter((v) => !referencedSet.has(v.name))
+      .map((v) => ({ variable: v, referenced: false }));
+
+    return [...referencedRows, ...orphanRows];
+  }, [currentModel.defaultVariables, referenced, referencedNames]);
+
+  const updateVariable = (
+    name: string,
+    patch: Partial<Pick<WorkflowDefaultVariable, "type" | "value">>,
+    seedType: WorkflowDefaultVariableType = "string"
+  ) => {
+    const current = currentModel.defaultVariables ?? [];
+    let next: WorkflowDefaultVariable[];
+    const existing = current.find((v) => v.name === name);
+    if (existing) {
+      next = current.map((v) => (v.name === name ? { ...v, ...patch } : v));
+    } else {
+      next = [
+        ...current,
+        { name, type: seedType, value: null, ...patch } as WorkflowDefaultVariable
+      ];
+    }
+    onUpdateModel({
+      ...currentModel,
+      defaultVariables: next.length === 0 ? null : next
+    });
+  };
+
+  const removeVariable = (name: string) => {
+    const next = (currentModel.defaultVariables ?? []).filter(
+      (v) => v.name !== name
+    );
+    onUpdateModel({
+      ...currentModel,
+      defaultVariables: next.length === 0 ? null : next
+    });
+  };
+
+  const addCustomVariable = (name: string): string | null => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return "Enter a variable name.";
+    }
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
+      return "Variable names must start with a letter, _, or $ and contain only letters, digits, _, or $.";
+    }
+    const referencedSet = new Set(referencedNames);
+    const savedNames = new Set(
+      (currentModel.defaultVariables ?? []).map((v) => v.name)
+    );
+    if (referencedSet.has(trimmed) || savedNames.has(trimmed)) {
+      return `'${trimmed}' is already in the list.`;
+    }
+    const next: WorkflowDefaultVariable[] = [
+      ...(currentModel.defaultVariables ?? []),
+      { name: trimmed, type: "string", value: null }
+    ];
+    onUpdateModel({ ...currentModel, defaultVariables: next });
+    return null;
+  };
+
+  return (
+    <section className="workflow-config-section">
+      <h3 className="workflow-config-section-title">Default Process Variables</h3>
+      <p className="workflow-config-section-copy">
+        Variables referenced by scripts and expressions in this model, plus any
+        custom ones you add. The default you set here is applied when an
+        instance starts (callers can still override per-start).
+      </p>
+      {rows.length === 0 ? (
+        <p className="workflow-muted">
+          No process variables are referenced in this model yet — add a custom
+          one below if your workflow needs an initial seed value.
+        </p>
+      ) : (
+        <ul className="workflow-default-vars">
+          {rows.map(({ variable, referenced, inferredType }) => {
+            const saved = (currentModel.defaultVariables ?? []).some(
+              (v) => v.name === variable.name
+            );
+            const showInferredHint =
+              referenced && !saved && inferredType !== undefined;
+            return (
+              <li
+                key={variable.name}
+                className={`workflow-default-var${referenced ? "" : " is-custom"}`}
+              >
+                <div className="workflow-default-var-name">
+                  <span title={variable.name}>{variable.name}</span>
+                  <div className="workflow-default-var-name-tags">
+                    {!referenced && (
+                      <span
+                        className="workflow-default-var-tag"
+                        title="This variable isn't referenced by the BPMN — it'll still be passed in at start time."
+                      >
+                        Custom
+                      </span>
+                    )}
+                    {showInferredHint && (
+                      <span
+                        className="workflow-default-var-tag workflow-default-var-tag-info"
+                        title={`Type inferred from how '${variable.name}' is used in scripts and expressions.`}
+                      >
+                        inferred
+                      </span>
+                    )}
+                    {!referenced && (
+                      <button
+                        type="button"
+                        className="workflow-default-var-remove"
+                        onClick={() => removeVariable(variable.name)}
+                        aria-label={`Remove ${variable.name}`}
+                        title="Remove this variable"
+                      >
+                        <i className="bi bi-x-lg" aria-hidden="true"></i>
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="workflow-default-var-controls">
+                  <select
+                    className="form-select form-select-sm"
+                    value={variable.type}
+                    onChange={(e) =>
+                      updateVariable(
+                        variable.name,
+                        {
+                          type: e.target.value as WorkflowDefaultVariableType,
+                          value: coerceDefaultValue(
+                            variable.value,
+                            e.target.value as WorkflowDefaultVariableType
+                          )
+                        },
+                        inferredType ?? "string"
+                      )
+                    }
+                    aria-label={`Type for ${variable.name}`}
+                  >
+                    {DEFAULT_VARIABLE_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                  <DefaultVariableValueInput
+                    variable={variable}
+                    onChange={(value) =>
+                      updateVariable(
+                        variable.name,
+                        { value },
+                        inferredType ?? "string"
+                      )
+                    }
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <AddCustomVariableForm onAdd={addCustomVariable} />
+    </section>
+  );
+}
+
+function AddCustomVariableForm({
+  onAdd
+}: {
+  onAdd: (name: string) => string | null;
+}) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = () => {
+    const result = onAdd(name);
+    if (result) {
+      setError(result);
+      return;
+    }
+    setName("");
+    setError(null);
+  };
+
+  return (
+    <div className="workflow-default-var-add">
+      <div className="workflow-default-var-add-row">
+        <input
+          type="text"
+          className="form-control form-control-sm"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            if (error) setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder="Add a custom variable…"
+          aria-label="Custom variable name"
+        />
+        <button
+          type="button"
+          className="btn btn-sm btn-outline-primary"
+          onClick={submit}
+          disabled={name.trim() === ""}
+        >
+          <i className="bi bi-plus-lg" aria-hidden="true"></i> Add
+        </button>
+      </div>
+      {error && (
+        <p className="workflow-default-var-add-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DefaultVariableValueInput({
+  variable,
+  onChange
+}: {
+  variable: WorkflowDefaultVariable;
+  onChange: (value: WorkflowDefaultVariable["value"]) => void;
+}) {
+  const ariaLabel = `Default value for ${variable.name}`;
+  if (variable.type === "boolean") {
+    return (
+      <select
+        className="form-select form-select-sm"
+        value={variable.value === true ? "true" : variable.value === false ? "false" : ""}
+        onChange={(e) =>
+          onChange(e.target.value === "" ? null : e.target.value === "true")
+        }
+        aria-label={ariaLabel}
+      >
+        <option value="">(not set)</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+    );
+  }
+  if (variable.type === "number") {
+    return (
+      <input
+        type="number"
+        className="form-control form-control-sm"
+        value={variable.value === null || variable.value === undefined ? "" : String(variable.value)}
+        onChange={(e) => {
+          const raw = e.target.value;
+          if (raw === "") {
+            onChange(null);
+            return;
+          }
+          const n = Number(raw);
+          onChange(Number.isNaN(n) ? raw : n);
+        }}
+        aria-label={ariaLabel}
+        placeholder="(not set)"
+      />
+    );
+  }
+  // string + json both edit as text. JSON is left as a raw string so the
+  // user can author objects/arrays without us imposing a parser here; the
+  // backend treats type="json" as raw JSON when applied at start.
+  return (
+    <input
+      type="text"
+      className="form-control form-control-sm"
+      value={variable.value === null || variable.value === undefined ? "" : String(variable.value)}
+      onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+      aria-label={ariaLabel}
+      placeholder={variable.type === "json" ? '{"...":...}' : "(not set)"}
+    />
+  );
+}
+
+function coerceDefaultValue(
+  value: WorkflowDefaultVariable["value"],
+  toType: WorkflowDefaultVariableType
+): WorkflowDefaultVariable["value"] {
+  if (value === null || value === undefined) return null;
+  if (toType === "boolean") {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      if (value === "true") return true;
+      if (value === "false") return false;
+      return null;
+    }
+    return null;
+  }
+  if (toType === "number") {
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && value !== "") {
+      const n = Number(value);
+      return Number.isNaN(n) ? null : n;
+    }
+    return null;
+  }
+  // string / json
+  return typeof value === "string" ? value : String(value);
+}
+
 function CreateWorkflowModal({
   onClose,
   onCreated,
@@ -1324,6 +1733,7 @@ function CreateWorkflowModal({
           lastDeployment: null,
           isSuspended: null,
           activeProcessInstanceId: null,
+          defaultVariables: null,
           createdAtUtc: new Date().toISOString(),
           updatedAtUtc: new Date().toISOString()
         },
