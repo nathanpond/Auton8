@@ -510,7 +510,7 @@ export async function createModeler(container, xml, dotNetRef) {
   suppressDirtyEvents = true;
   try {
     const importResult = await modeler.importXML(xml);
-    modeler.get("canvas").zoom("fit-viewport");
+    fitAndCenter(modeler);
     lastImportDebug = buildImportDebug(modeler, container, importResult?.warnings ?? []);
     await notifySelectionChanged(null);
   } finally {
@@ -1605,7 +1605,7 @@ export async function loadXml(modelerHandle, xml) {
   modelerHandle.setSuppressDirtyEvents(true);
   try {
     await modelerHandle.modeler.importXML(xml);
-    modelerHandle.modeler.get("canvas").zoom("fit-viewport");
+    fitAndCenter(modelerHandle.modeler);
   } finally {
     modelerHandle.setSuppressDirtyEvents(false);
   }
@@ -1625,9 +1625,9 @@ export async function loadReadonlyDiagram(viewerHandle, xml) {
 // animation frame so layout has settled — at import time the container often
 // hasn't reached its final size yet, which causes fit-viewport to size
 // against a stale (smaller) viewport and pin the diagram to the top-left.
-function fitAndCenter(viewer) {
+function fitAndCenter(instance) {
   const apply = () => {
-    const canvas = viewer.get("canvas");
+    const canvas = instance.get("canvas");
     if (typeof canvas.resized === "function") {
       canvas.resized();
     }
