@@ -1280,6 +1280,7 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configBusWatcher', 'Bus Watcher (Site Config)', 'Bus watcher mounted inside Site Config.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configEvents', 'Events (Site Config)', 'Event subscriptions and topics.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSystemHealth', 'System Health (Site Config)', 'Live status of every component and its connections.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configSystemIssues', 'System Issues (Site Config)', 'Persistent log of issues detectors have surfaced; ack/resolve/auto-remediate.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityUsers', 'Manage Users (Site Config)', 'User management mounted inside Site Config.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityGroups', 'Manage Groups (Site Config)', 'Group management mounted inside Site Config.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityRoles', 'Manage Roles (Site Config)', 'Role management mounted inside Site Config.', TRUE, NOW(), NOW()),
@@ -1323,6 +1324,7 @@ internal static class DatabaseSchemaInitializer
               ('/admin/config/bus-watcher', 'configBusWatcher'),
               ('/admin/config/events', 'configEvents'),
               ('/admin/config/system-health', 'configSystemHealth'),
+              ('/admin/config/system-issues', 'configSystemIssues'),
               ('/admin/config/users', 'configSecurityUsers'),
               ('/admin/config/groups', 'configSecurityGroups'),
               ('/admin/config/roles', 'configSecurityRoles'),
@@ -1627,6 +1629,19 @@ internal static class DatabaseSchemaInitializer
 
         CREATE INDEX IF NOT EXISTS ix_notifications_user_unread
             ON notifications (user_id, is_read);
+
+        -- Optional parent reference so a notification can be cleared in bulk
+        -- when its container is closed out (e.g. all task-assignment rows for
+        -- a workflow execution dropping when the execution completes).
+        ALTER TABLE notifications
+            ADD COLUMN IF NOT EXISTS parent_entity_kind TEXT NULL;
+
+        ALTER TABLE notifications
+            ADD COLUMN IF NOT EXISTS parent_entity_id TEXT NULL;
+
+        CREATE INDEX IF NOT EXISTS ix_notifications_parent
+            ON notifications (parent_entity_kind, parent_entity_id)
+            WHERE parent_entity_id IS NOT NULL;
         """;
 
     // Lockout columns for local_users — added when the failed-login lockout
@@ -1668,6 +1683,165 @@ internal static class DatabaseSchemaInitializer
             WHERE dispatched_at_utc IS NULL;
         """;
 
+    // Phase 4 of the self-healing plan: when AuditOutboxDeadLetterParkRemediator
+    // gives up on a row (the dispatcher already abandoned it at MaxAttempts),
+    // it parks the row here with a reason and removes it from audit_outbox so
+    // the live table doesn't grow forever. Operators can inspect this table for
+    // forensic analysis without slowing the dispatcher's hot path.
+    private const string AuditOutboxDeadLettersSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS audit_outbox_dead_letters (
+            id BIGSERIAL PRIMARY KEY,
+            original_outbox_id BIGINT NOT NULL,
+            topic TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            original_created_at_utc TIMESTAMPTZ NOT NULL,
+            attempt_count INTEGER NOT NULL,
+            last_error TEXT NULL,
+            parked_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            parked_reason TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_audit_outbox_dead_letters_parked_at
+            ON audit_outbox_dead_letters (parked_at_utc DESC);
+        CREATE INDEX IF NOT EXISTS ix_audit_outbox_dead_letters_topic
+            ON audit_outbox_dead_letters (topic, event_type);
+        """;
+
+    // Self-healing platform: every detector writes one row per distinct issue
+    // it finds. The partial unique index on `fingerprint` is the dedup contract
+    // — re-detecting the same issue bumps occurrence_count instead of
+    // inserting. Re-occurrence after resolution opens a fresh row because the
+    // index only covers open/acknowledged states.
+    private const string SystemIssuesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS system_issues (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            detector_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT NULL,
+            related_entity_kind TEXT NULL,
+            related_entity_id TEXT NULL,
+            facts_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            state TEXT NOT NULL DEFAULT 'open',
+            first_seen_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            occurrence_count INTEGER NOT NULL DEFAULT 1,
+            acknowledged_at_utc TIMESTAMPTZ NULL,
+            acknowledged_by UUID NULL,
+            resolved_at_utc TIMESTAMPTZ NULL,
+            resolution_kind TEXT NULL,
+            resolution_notes TEXT NULL,
+            auto_remediation_attempt_count INTEGER NOT NULL DEFAULT 0,
+            auto_remediation_last_error TEXT NULL,
+            next_remediation_after_utc TIMESTAMPTZ NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_system_issues_open_fingerprint
+            ON system_issues (fingerprint)
+            WHERE state IN ('open', 'acknowledged');
+
+        CREATE INDEX IF NOT EXISTS ix_system_issues_open
+            ON system_issues (severity, last_seen_at_utc DESC)
+            WHERE state = 'open';
+
+        CREATE INDEX IF NOT EXISTS ix_system_issues_related
+            ON system_issues (related_entity_kind, related_entity_id)
+            WHERE related_entity_id IS NOT NULL;
+
+        CREATE INDEX IF NOT EXISTS ix_system_issues_remediation_due
+            ON system_issues (next_remediation_after_utc)
+            WHERE state = 'open' AND next_remediation_after_utc IS NOT NULL;
+        """;
+
+    // Self-installing menu item under Site Configuration → Site Information.
+    // Template menu items must carry both `templateKey` and `path` in their
+    // config — `path` is what the SPA's nav uses to wire the NavLink and what
+    // EfCoreMenuStore exposes as the registry path. v1/v2 only set
+    // templateKey, so the entry was in the DB but invisible in the nav (the
+    // nav drops items whose resolved path is null). v3 fixes that and forces
+    // a re-install on databases carrying the broken row by patching it in
+    // place.
+    //
+    // Idempotency: the v3 marker gates the whole block. Within the block,
+    // ON CONFLICT keeps INSERT safe; the patch path uses jsonb_set with a
+    // WHERE clause that only matches incomplete rows.
+    private const string SiteConfigSystemIssuesSql =
+        """
+        DO $$
+        DECLARE
+            site_id UUID := '00000000-0000-0000-0001-000000000004';
+            site_information_group_id UUID;
+            next_sort INT;
+            already_present BOOLEAN := FALSE;
+            inserted BOOLEAN := FALSE;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'site_config_system_issues_v3') THEN
+                -- Patch any v1/v2 row that landed without a path so it
+                -- becomes navigable. Safe: only matches the configSystemIssues
+                -- template row that's missing or has an empty path.
+                UPDATE menu_items
+                SET config = jsonb_set(config, '{{path}}', '"/admin/config/system-issues"'::jsonb, true),
+                    updated_at_utc = NOW()
+                WHERE config->>'templateKey' = 'configSystemIssues'
+                  AND COALESCE(config->>'path', '') = '';
+
+                IF EXISTS (SELECT 1 FROM menus WHERE id = site_id) THEN
+                    SELECT id INTO site_information_group_id
+                    FROM menu_items
+                    WHERE menu_id = site_id
+                      AND parent_id IS NULL
+                      AND display_name = 'Site Information'
+                      AND item_type = 'group'
+                    LIMIT 1;
+
+                    IF site_information_group_id IS NOT NULL THEN
+                        SELECT EXISTS (
+                            SELECT 1 FROM menu_items
+                            WHERE menu_id = site_id
+                              AND parent_id = site_information_group_id
+                              AND config->>'templateKey' = 'configSystemIssues'
+                        ) INTO already_present;
+
+                        IF NOT already_present THEN
+                            SELECT COALESCE(MAX(sort_order), -1) + 1 INTO next_sort
+                            FROM menu_items
+                            WHERE menu_id = site_id
+                              AND parent_id = site_information_group_id;
+
+                            INSERT INTO menu_items (
+                                id, menu_id, parent_id, sort_order, display_name, icon,
+                                item_type, config, is_visible, is_system,
+                                created_at_utc, updated_at_utc
+                            )
+                            VALUES (
+                                gen_random_uuid(), site_id, site_information_group_id, next_sort,
+                                'System Issues', 'fa fa-triangle-exclamation',
+                                'template',
+                                '{{"templateKey":"configSystemIssues","path":"/admin/config/system-issues"}}'::jsonb,
+                                TRUE, TRUE, NOW(), NOW()
+                            );
+                            inserted := TRUE;
+                        END IF;
+                    END IF;
+                END IF;
+
+                -- Only mark v3 done when the menu item is actually in place
+                -- (either we just inserted it, or it was already present and
+                -- has now been patched to include the path).
+                IF inserted OR already_present THEN
+                    INSERT INTO auth_seed_state (key, applied_at_utc)
+                    VALUES ('site_config_system_issues_v3', NOW())
+                    ON CONFLICT (key) DO NOTHING;
+                END IF;
+            END IF;
+        END $$;
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -1698,9 +1872,12 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(PluginsIconMenuRemovalSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSiteConfigMenuSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemIssuesSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxDeadLettersSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SystemIssuesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(LocalUserLockoutSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider

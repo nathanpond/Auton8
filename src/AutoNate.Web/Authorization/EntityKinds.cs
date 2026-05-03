@@ -12,4 +12,11 @@ public static class EntityKinds
     public const string WorkflowTask = "workflowtask";
     public const string SiteConfig = "siteconfig";
     public const string Plugin = "plugin";
+
+    // Self-healing platform: rows in system_issues. Kind-only gate (no
+    // instance authorizer) — every issue is administrative and we
+    // currently grant access at the kind level. If per-row visibility is
+    // ever needed (e.g. plugin-scoped issues), add an instance authorizer
+    // alongside this kind.
+    public const string SystemIssue = "systemissue";
 }

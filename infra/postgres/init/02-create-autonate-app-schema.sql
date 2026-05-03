@@ -948,3 +948,136 @@ CREATE TABLE IF NOT EXISTS audit_outbox (
 CREATE INDEX IF NOT EXISTS ix_audit_outbox_pending
     ON audit_outbox (next_attempt_after_utc)
     WHERE dispatched_at_utc IS NULL;
+
+-- workflow_execution_errors table. Mirrored in DatabaseSchemaInitializer
+-- (WorkflowExecutionErrorsSql). WorkflowExecutionErrorRecorder writes one row
+-- per job.execution.failed event so the executions UI and the
+-- WorkflowExecutionErrorOpenDetector can surface stuck-process states.
+CREATE TABLE IF NOT EXISTS workflow_execution_errors (
+    id UUID PRIMARY KEY,
+    process_instance_id TEXT NOT NULL,
+    activity_id TEXT NOT NULL,
+    activity_name TEXT NULL,
+    error_message TEXT NULL,
+    raw_flowable_event_type TEXT NULL,
+    occurred_at_utc TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_workflow_execution_errors_process_instance_id
+    ON workflow_execution_errors (process_instance_id);
+
+-- Plugins table. Mirrored in DatabaseSchemaInitializer (PluginsSchemaSql) —
+-- needed at bootstrap time so OrphanReferenceDetector can scan
+-- menu_items.created_by_plugin_id orphans even before any plugin work runs.
+CREATE TABLE IF NOT EXISTS plugins (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    entry_assembly TEXT NOT NULL,
+    entry_type TEXT NULL,
+    status INTEGER NOT NULL DEFAULT 0,
+    uploaded_at TIMESTAMPTZ NOT NULL,
+    uploaded_by UUID NOT NULL,
+    last_enabled_at TIMESTAMPTZ NULL,
+    last_disabled_at TIMESTAMPTZ NULL,
+    last_error TEXT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_plugins_status ON plugins (status);
+
+-- Notifications inbox. Mirrored in DatabaseSchemaInitializer (NotificationsSql).
+-- One row per delivered notification; cleared by event-driven hooks +
+-- OrphanedNotificationCleanupService + OrphanReferenceDetector remediator.
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    related_entity_kind TEXT NULL,
+    related_entity_id TEXT NULL,
+    link_path TEXT NULL,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    read_at_utc TIMESTAMPTZ NULL,
+    parent_entity_kind TEXT NULL,
+    parent_entity_id TEXT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_notifications_user_created
+    ON notifications (user_id, created_at_utc DESC);
+
+CREATE INDEX IF NOT EXISTS ix_notifications_user_unread
+    ON notifications (user_id, is_read);
+
+CREATE INDEX IF NOT EXISTS ix_notifications_parent
+    ON notifications (parent_entity_kind, parent_entity_id)
+    WHERE parent_entity_id IS NOT NULL;
+
+-- Phase 4 of the self-healing plan: parking lot for audit_outbox rows the
+-- dispatcher has given up on. AuditOutboxDeadLetterParkRemediator moves rows
+-- here so the live audit_outbox stays small. Mirrored in
+-- DatabaseSchemaInitializer.
+CREATE TABLE IF NOT EXISTS audit_outbox_dead_letters (
+    id BIGSERIAL PRIMARY KEY,
+    original_outbox_id BIGINT NOT NULL,
+    topic TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    original_created_at_utc TIMESTAMPTZ NOT NULL,
+    attempt_count INTEGER NOT NULL,
+    last_error TEXT NULL,
+    parked_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    parked_reason TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_audit_outbox_dead_letters_parked_at
+    ON audit_outbox_dead_letters (parked_at_utc DESC);
+CREATE INDEX IF NOT EXISTS ix_audit_outbox_dead_letters_topic
+    ON audit_outbox_dead_letters (topic, event_type);
+
+-- Self-healing platform: every detector writes one row per distinct issue it
+-- finds. The partial unique index on `fingerprint` is the dedup contract — re-
+-- detecting the same issue bumps occurrence_count instead of inserting. Re-
+-- occurrence after resolution opens a fresh row because the index only covers
+-- open/acknowledged states. Mirrored in DatabaseSchemaInitializer.
+CREATE TABLE IF NOT EXISTS system_issues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    detector_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NULL,
+    related_entity_kind TEXT NULL,
+    related_entity_id TEXT NULL,
+    facts_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    state TEXT NOT NULL DEFAULT 'open',
+    first_seen_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    acknowledged_at_utc TIMESTAMPTZ NULL,
+    acknowledged_by UUID NULL,
+    resolved_at_utc TIMESTAMPTZ NULL,
+    resolution_kind TEXT NULL,
+    resolution_notes TEXT NULL,
+    auto_remediation_attempt_count INTEGER NOT NULL DEFAULT 0,
+    auto_remediation_last_error TEXT NULL,
+    next_remediation_after_utc TIMESTAMPTZ NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_system_issues_open_fingerprint
+    ON system_issues (fingerprint)
+    WHERE state IN ('open', 'acknowledged');
+
+CREATE INDEX IF NOT EXISTS ix_system_issues_open
+    ON system_issues (severity, last_seen_at_utc DESC)
+    WHERE state = 'open';
+
+CREATE INDEX IF NOT EXISTS ix_system_issues_related
+    ON system_issues (related_entity_kind, related_entity_id)
+    WHERE related_entity_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_system_issues_remediation_due
+    ON system_issues (next_remediation_after_utc)
+    WHERE state = 'open' AND next_remediation_after_utc IS NOT NULL;

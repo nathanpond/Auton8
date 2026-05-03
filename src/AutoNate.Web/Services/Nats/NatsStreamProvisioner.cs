@@ -6,6 +6,7 @@ using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.SiteSettings;
+using AutoNate.Web.Services.SystemIssues;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.Options;
 using NATS.Client.Core;
@@ -55,7 +56,12 @@ public sealed class NatsStreamProvisioner(
             $"{IamEventTopic.TopicRoot}.>",
             $"{RecordSchemaEventTopic.TopicRoot}.>",
             $"{SiteEventTopic.TopicRoot}.>",
-            $"{WorkflowAdminEventTopic.TopicRoot}.>"
+            $"{WorkflowAdminEventTopic.TopicRoot}.>",
+            // system.issues lifecycle events from the self-healing platform.
+            // SiteEventTopic uses TopicRoot="site" and SystemIssueEventTopic
+            // uses TopicRoot="system" — distinct prefixes so the wildcards
+            // don't overlap.
+            $"{SystemIssueEventTopic.TopicRoot}.>"
         })
         {
             MaxAge = StreamMaxAge

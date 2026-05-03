@@ -10,6 +10,7 @@ namespace AutoNate.Web.Services.Notifications;
 public static class NotificationEventTypes
 {
     public const string Created = "notification.created";
+    public const string Removed = "notification.removed";
     public const string Read = "notification.read";
     public const string AllRead = "notification.all.read";
 
@@ -43,6 +44,8 @@ public sealed record class NotificationEventEnvelope(
 public interface INotificationEventPublisher
 {
     Task PublishAsync(Notification notification, CancellationToken cancellationToken = default);
+
+    Task PublishRemovedAsync(Notification notification, CancellationToken cancellationToken = default);
 }
 
 // Posts notification.created events to a Dapr pub/sub topic. Mirrors
@@ -72,14 +75,23 @@ public sealed class DaprNotificationEventPublisher(
         ? "autonate.web"
         : _daprOptions.AppId;
 
-    public async Task PublishAsync(Notification notification, CancellationToken cancellationToken = default)
+    public Task PublishAsync(Notification notification, CancellationToken cancellationToken = default) =>
+        PublishEnvelopeAsync(notification, NotificationEventTypes.Created, cancellationToken);
+
+    public Task PublishRemovedAsync(Notification notification, CancellationToken cancellationToken = default) =>
+        PublishEnvelopeAsync(notification, NotificationEventTypes.Removed, cancellationToken);
+
+    private async Task PublishEnvelopeAsync(
+        Notification notification,
+        string eventType,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(notification);
 
         var occurredAt = DateTimeOffset.UtcNow;
         var envelope = new NotificationEventEnvelope(
             EventId: Guid.NewGuid(),
-            EventType: NotificationEventTypes.Created,
+            EventType: eventType,
             OccurredAtUtc: occurredAt,
             NotificationId: notification.Id,
             UserId: notification.UserId,
@@ -99,13 +111,14 @@ public sealed class DaprNotificationEventPublisher(
             var payloadJson = JsonSerializer.Serialize(envelope, SerializerOptions);
             await outbox.EnqueueAsync(TopicName, envelope.EventType, payloadJson, cancellationToken);
             logger.LogInformation(
-                "Enqueued notification.created for {NotificationId} (user {UserId}) to topic {Topic}.",
-                notification.Id, notification.UserId, TopicName);
+                "Enqueued {EventType} for {NotificationId} (user {UserId}) to topic {Topic}.",
+                eventType, notification.Id, notification.UserId, TopicName);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "Failed to enqueue notification event for {NotificationId}.", notification.Id);
+                "Failed to enqueue notification event {EventType} for {NotificationId}.",
+                eventType, notification.Id);
             AuditEventPublishMetrics.RecordFailure(TopicName, ex.GetType().Name);
         }
     }
@@ -114,5 +127,8 @@ public sealed class DaprNotificationEventPublisher(
 public sealed class NoopNotificationEventPublisher : INotificationEventPublisher
 {
     public Task PublishAsync(Notification notification, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task PublishRemovedAsync(Notification notification, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }

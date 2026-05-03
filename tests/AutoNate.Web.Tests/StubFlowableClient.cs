@@ -100,12 +100,16 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(summary);
     }
 
+    // Tests that exercise the workflow detectors set this list to control
+    // what GetWorkflowExecutionsAsync returns. Default is empty (existing
+    // tests rely on the no-op shape).
+    public List<WorkflowExecutionSummary> Executions { get; } = new();
+
     public Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(
         CancellationToken cancellationToken = default)
     {
         Calls.Add("ListExecutions");
-        return Task.FromResult<IReadOnlyList<WorkflowExecutionSummary>>(
-            Array.Empty<WorkflowExecutionSummary>());
+        return Task.FromResult<IReadOnlyList<WorkflowExecutionSummary>>(Executions.ToArray());
     }
 
     public Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(
@@ -165,12 +169,17 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    // Tests that need GetTasksByProcessInstanceAsync to return tasks
+    // populate this dictionary keyed by process instance id. Default empty.
+    public Dictionary<string, List<FlowableTaskSummary>> TasksByProcess { get; } = new();
+
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksByProcessInstanceAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {
         Calls.Add($"TasksByInstance:{processInstanceId}");
+        TasksByProcess.TryGetValue(processInstanceId, out var tasks);
         return Task.FromResult<IReadOnlyList<FlowableTaskSummary>>(
-            Array.Empty<FlowableTaskSummary>());
+            (IReadOnlyList<FlowableTaskSummary>?)tasks ?? Array.Empty<FlowableTaskSummary>());
     }
 
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(

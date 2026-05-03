@@ -44,4 +44,11 @@ public static class Actions
     public const string MoveState = "movestate";
 
     public const string Manage = "manage";
+
+    // System issues lifecycle (Phase 3 wires Acknowledge/Resolve into the API;
+    // Remediate gates the on-demand POST /system-issues/{id}/remediate endpoint
+    // landing in Phase 4. Read is the Phase 1 list/detail gate).
+    public const string Acknowledge = "acknowledge";
+    public const string Resolve = "resolve";
+    public const string Remediate = "remediate";
 }

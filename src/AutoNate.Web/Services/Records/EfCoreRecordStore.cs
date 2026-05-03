@@ -656,6 +656,25 @@ public sealed class EfCoreRecordStore(
                 await EmitAssignmentNotificationsAsync(
                     entity.Id, entity.Key, entity.Name, addedAssignees, actorId, cancellationToken);
             }
+
+            var removedAssignees = assigneeEdgeOld.Except(assigneeEdgeNew).ToArray();
+            foreach (var userId in removedAssignees)
+            {
+                try
+                {
+                    await notificationStore.DeleteByRelatedEntityAsync(
+                        userId,
+                        NotificationEntityKinds.Record,
+                        entity.Id.ToString(),
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex,
+                        "Failed to clear record-assignment notifications for user {UserId} on record {RecordId}.",
+                        userId, entity.Id);
+                }
+            }
         }
 
         return entity.ToModel();

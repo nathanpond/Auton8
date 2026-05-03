@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { usePublicMenu } from "@/hooks/useMenus";
 import { usePageTemplates } from "@/hooks/usePageTemplates";
 import { resolveItemPath } from "@/menus/resolveItemPath";
+import { reportMenuRenderFailure } from "@/api/systemIssues";
 import { MenuItem } from "@/types/menus";
 import { PageTemplateInfo } from "@/api/pageTemplates";
 import "./ConfigLayout.css";
@@ -100,7 +101,13 @@ function ConfigLeaf({
 }) {
   void templates;
   const path = resolveItemPath(item);
-  if (!path) return null;
+  if (!path) {
+    // Same render-time report as NavMenu — Site Configuration sidenav
+    // also silently drops misconfigured items, so the System Issues page
+    // surfaces them within seconds of someone loading this layout.
+    reportMenuRenderFailure(item.id);
+    return null;
+  }
   return (
     <li>
       <NavLink

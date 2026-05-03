@@ -27,6 +27,8 @@ public sealed class EfCoreNotificationStore(
             Body = input.Body,
             RelatedEntityKind = input.RelatedEntityKind,
             RelatedEntityId = input.RelatedEntityId,
+            ParentEntityKind = input.ParentEntityKind,
+            ParentEntityId = input.ParentEntityId,
             LinkPath = input.LinkPath,
             IsRead = false,
             CreatedAtUtc = now.UtcDateTime
@@ -94,6 +96,91 @@ public sealed class EfCoreNotificationStore(
         return ToModel(entity);
     }
 
+    public async Task<IReadOnlyList<Notification>> DeleteByRelatedEntityAsync(
+        Guid? userId,
+        string relatedEntityKind,
+        string relatedEntityId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relatedEntityKind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(relatedEntityId);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var query = dbContext.Notifications
+            .Where(n => n.RelatedEntityKind == relatedEntityKind
+                        && n.RelatedEntityId == relatedEntityId);
+        if (userId.HasValue)
+        {
+            var uid = userId.Value;
+            query = query.Where(n => n.UserId == uid);
+        }
+
+        var rows = await query.ToListAsync(cancellationToken);
+        if (rows.Count == 0)
+        {
+            return Array.Empty<Notification>();
+        }
+
+        dbContext.Notifications.RemoveRange(rows);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var models = rows.Select(ToModel).ToList();
+        foreach (var model in models)
+        {
+            try
+            {
+                await eventPublisher.PublishRemovedAsync(model, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Persisted delete is the source of truth; fan-out is best-effort.
+                logger.LogWarning(ex,
+                    "Failed to publish notification.removed event for {NotificationId}.", model.Id);
+            }
+        }
+
+        return models;
+    }
+
+    public async Task<IReadOnlyList<Notification>> DeleteByParentEntityAsync(
+        string parentEntityKind,
+        string parentEntityId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentEntityKind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentEntityId);
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await dbContext.Notifications
+            .Where(n => n.ParentEntityKind == parentEntityKind
+                        && n.ParentEntityId == parentEntityId)
+            .ToListAsync(cancellationToken);
+
+        if (rows.Count == 0)
+        {
+            return Array.Empty<Notification>();
+        }
+
+        dbContext.Notifications.RemoveRange(rows);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var models = rows.Select(ToModel).ToList();
+        foreach (var model in models)
+        {
+            try
+            {
+                await eventPublisher.PublishRemovedAsync(model, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "Failed to publish notification.removed event for {NotificationId}.", model.Id);
+            }
+        }
+
+        return models;
+    }
+
     public async Task<int> MarkAllReadAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -122,6 +209,8 @@ public sealed class EfCoreNotificationStore(
         Body = entity.Body,
         RelatedEntityKind = entity.RelatedEntityKind,
         RelatedEntityId = entity.RelatedEntityId,
+        ParentEntityKind = entity.ParentEntityKind,
+        ParentEntityId = entity.ParentEntityId,
         LinkPath = entity.LinkPath,
         IsRead = entity.IsRead,
         CreatedAtUtc = DateTime.SpecifyKind(entity.CreatedAtUtc, DateTimeKind.Utc),

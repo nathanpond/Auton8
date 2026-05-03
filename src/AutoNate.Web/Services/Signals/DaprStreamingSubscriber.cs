@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Services.ApplicationEvents;
+using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
@@ -388,7 +389,11 @@ public sealed class DaprStreamingSubscriber(
                 BusWatcherStreamService.TopicName,
                 DaprRecordEventPublisher.TopicName,
                 DaprApplicationEventPublisher.TopicName,
-                DaprNotificationEventPublisher.TopicName
+                DaprNotificationEventPublisher.TopicName,
+                // Self-healing platform Phase 5: RepeatedAuthFailureDetector
+                // listens to auth.events in-process. Subscribing here is the
+                // only way to fan that topic into BusWatcherStreamService.
+                AuthEventTopic.TopicName
             };
 
             foreach (var topic in desired)

@@ -5,6 +5,7 @@ using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.SiteSettings;
+using AutoNate.Web.Services.SystemIssues;
 using AutoNate.Web.Services.Workflow;
 
 namespace AutoNate.Web.Services.Events;
@@ -171,7 +172,11 @@ public static class EventCatalog
         new(
             WorkflowAdminEventTopic.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
-            "AutoNate.Web — published from the workflow admin surface for user-initiated commands. Distinct from the system-generated Flowable telemetry on workflow.execution.events.")
+            "AutoNate.Web — published from the workflow admin surface for user-initiated commands. Distinct from the system-generated Flowable telemetry on workflow.execution.events."),
+        new(
+            SystemIssueEventTopic.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from the self-healing platform whenever a system_issues row is opened, escalated, acknowledged, resolved (manual), auto-resolved (machine), or fails remediation.")
     ];
 
     public static readonly EventCatalogCategory[] Categories =
@@ -761,6 +766,11 @@ public static class EventCatalog
                     "Fires from DaprNotificationEventPublisher.PublishAsync after the notification row commits.",
                     ["Carries the full notification payload — title, body, relatedEntityKind/id, linkPath."]),
                 new EventCatalogEntry(
+                    DaprNotificationEventPublisher.TopicName, NotificationEventTypes.Removed,
+                    "A previously-persisted notification was deleted because its trigger is no longer actionable.",
+                    "Fires from EfCoreNotificationStore.DeleteByRelatedEntityAsync / DeleteByParentEntityAsync when a record is unassigned, a workflow task is completed, or its parent workflow execution is completed/cancelled/deleted.",
+                    ["Carries the same payload shape as notification.created so SPA caches can target the row."]),
+                new EventCatalogEntry(
                     DaprNotificationEventPublisher.TopicName, NotificationEventTypes.Read,
                     "A user marked a single notification as read.",
                     "Fires from POST /api/notifications/{id}/read on success.",
@@ -1046,6 +1056,37 @@ public static class EventCatalog
                 new EventCatalogEntry(DaprApplicationEventPublisher.TopicName, ApplicationEventTypes.PluginViewed,
                     "An admin fetched a single plugin.", "Fires from GET /api/admin/plugins/{id}.",
                     ["resource: { id, name, version }."])
+            ]),
+
+        new(
+            "System Issues",
+            "Lifecycle events for the self-healing platform. The system_issues table is the source of truth; these events make every state transition observable on the bus so downstream alerters / dashboards / chat-bot integrations can react.",
+            EnvelopeFields,
+            [
+                new EventCatalogEntry(SystemIssueEventTopic.TopicName, SystemIssueEventTypes.Opened,
+                    "A detector opened a fresh system_issues row (no existing open issue with the same fingerprint).",
+                    "Fires from EfCoreSystemIssueStore.RecordAsync when the upsert resulted in a new insert (occurrence_count == 1).",
+                    ["resource: { id, fingerprint, detectorId, category, severity, title }. details: { relatedEntityKind, relatedEntityId, summary }."]),
+                new EventCatalogEntry(SystemIssueEventTopic.TopicName, SystemIssueEventTypes.SeverityEscalated,
+                    "An open issue's severity changed on a subsequent detector tick (e.g. backlog detector ramps from warning → error as count grows).",
+                    "Fires from EfCoreSystemIssueStore.RecordAsync when the upsert hit an existing open/acknowledged row whose severity was different from the incoming one.",
+                    ["resource: { id, fingerprint, detectorId, severity, title }. details: { previousSeverity, occurrenceCount }."]),
+                new EventCatalogEntry(SystemIssueEventTopic.TopicName, SystemIssueEventTypes.Acknowledged,
+                    "An operator acknowledged an issue from the SPA — visible but no longer in the default \"open\" filter.",
+                    "Fires from POST /api/system-issues/{id}/acknowledge.",
+                    ["resource: { id, fingerprint, severity }. details: { acknowledgedBy }."]),
+                new EventCatalogEntry(SystemIssueEventTopic.TopicName, SystemIssueEventTypes.Resolved,
+                    "An operator resolved an issue manually with optional notes.",
+                    "Fires from POST /api/system-issues/{id}/resolve.",
+                    ["resource: { id, fingerprint, severity }. details: { resolvedBy, notes }."]),
+                new EventCatalogEntry(SystemIssueEventTopic.TopicName, SystemIssueEventTypes.AutoResolved,
+                    "A machine action closed the issue (detector saw the condition clear, or a remediator successfully ran).",
+                    "Fires from EfCoreSystemIssueStore.MarkResolvedByFingerprintAsync (detector path) and from SystemIssueRemediationDispatcher on remediator success (Phase 4).",
+                    ["resource: { id, fingerprint, severity }. details: { resolutionKind, notes }."]),
+                new EventCatalogEntry(SystemIssueEventTopic.TopicName, SystemIssueEventTypes.RemediationFailed,
+                    "A remediator attempt failed; if MaxRemediationAttempts is reached the issue stays open for human triage.",
+                    "Fires from SystemIssueRemediationDispatcher when an IIssueRemediator throws or returns Failure (Phase 4).",
+                    ["resource: { id, fingerprint, detectorId }. details: { attemptCount, maxAttempts, error }."])
             ])
     ];
 

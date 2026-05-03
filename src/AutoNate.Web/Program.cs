@@ -25,6 +25,9 @@ using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.SiteSettings;
+using AutoNate.Web.Services.SystemIssues;
+using AutoNate.Web.Services.SystemIssues.Detectors;
+using AutoNate.Web.Services.SystemIssues.Remediators;
 using AutoNate.Web.Services.Workflow;
 using AutoNate.Web.Services.Workflow.Behaviors;
 using AutoNate.Web.Storage;
@@ -139,6 +142,8 @@ builder.Services.AddSingleton<NatsStreamProvisioner>();
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddSingleton<DaprSidecarProbe>();
 builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.SystemHealthService>();
+builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.ISystemHealthProbe>(
+    sp => sp.GetRequiredService<AutoNate.Web.Services.SystemHealth.SystemHealthService>());
 builder.Services.AddSingleton<IWorkflowSignalRegistry, EfCoreWorkflowSignalRegistry>();
 builder.Services.AddSingleton<WorkflowSignalDispatcher>();
 builder.Services.AddDaprPubSubClient((sp, b) =>
@@ -233,6 +238,71 @@ builder.Services.AddSingleton<INotificationEventPublisher, DaprNotificationEvent
 builder.Services.AddScoped<INotificationStore, EfCoreNotificationStore>();
 builder.Services.AddScoped<ISiteSettingsStore, EfCoreSiteSettingsStore>();
 builder.Services.AddHostedService<WorkflowTaskNotificationListener>();
+builder.Services.AddHostedService<OrphanedNotificationCleanupService>();
+
+// Self-healing platform: persistent issue store + remediator dispatcher.
+// Detectors land in Phase 2; the dispatcher is harmless at zero remediators
+// (loop logs once and skips rows with no matching IIssueRemediator).
+builder.Services.AddOptions<SystemIssueOptions>()
+    .BindConfiguration(SystemIssueOptions.SectionName);
+// EfCoreSystemIssueStore is stateless and uses IDbContextFactory (singleton)
+// to create a fresh DbContext per call — safe to register as a singleton so
+// hosted-service detectors can consume it without their own DI scope.
+builder.Services.AddSingleton<ICriticalIssueNotifier, CriticalIssueNotifier>();
+builder.Services.AddSingleton<EfCoreSystemIssueStore>();
+builder.Services.AddSingleton<ISystemIssueRecorder>(sp => sp.GetRequiredService<EfCoreSystemIssueStore>());
+builder.Services.AddSingleton<ISystemIssueStore>(sp => sp.GetRequiredService<EfCoreSystemIssueStore>());
+// Singleton + hosted-service-factory so the on-demand remediate endpoint
+// can resolve the same dispatcher instance the loop runs on. Plain
+// AddHostedService<T>() registers T only as IHostedService, which doesn't
+// compose with concrete-type DI from minimal-API endpoints.
+builder.Services.AddSingleton<SystemIssueRemediationDispatcher>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemIssueRemediationDispatcher>());
+
+// Phase 2 detectors. Each one is a BackgroundService that respects
+// SystemIssues:DetectorsEnabled. Tests opt out via that flag.
+builder.Services.AddOptions<SystemHealthSnapshotOptions>()
+    .BindConfiguration(SystemHealthSnapshotOptions.SectionName);
+builder.Services.AddOptions<AuditOutboxBacklogDetectorOptions>()
+    .BindConfiguration(AuditOutboxBacklogDetectorOptions.SectionName);
+builder.Services.AddOptions<AuditOutboxDeadLetterDetectorOptions>()
+    .BindConfiguration(AuditOutboxDeadLetterDetectorOptions.SectionName);
+builder.Services.AddOptions<OrphanReferenceDetectorOptions>()
+    .BindConfiguration(OrphanReferenceDetectorOptions.SectionName);
+// Phase 5 detectors — workflow + plugin + auth lifecycle.
+builder.Services.AddOptions<WorkflowExecutionErrorOpenDetectorOptions>()
+    .BindConfiguration(WorkflowExecutionErrorOpenDetectorOptions.SectionName);
+builder.Services.AddOptions<LockedAccountDetectorOptions>()
+    .BindConfiguration(LockedAccountDetectorOptions.SectionName);
+builder.Services.AddOptions<RepeatedAuthFailureDetectorOptions>()
+    .BindConfiguration(RepeatedAuthFailureDetectorOptions.SectionName);
+builder.Services.AddOptions<StuckWorkflowExecutionDetectorOptions>()
+    .BindConfiguration(StuckWorkflowExecutionDetectorOptions.SectionName);
+builder.Services.AddOptions<MisconfiguredMenuItemDetectorOptions>()
+    .BindConfiguration(MisconfiguredMenuItemDetectorOptions.SectionName);
+builder.Services.AddHostedService<SystemHealthSnapshotDetector>();
+builder.Services.AddHostedService<AuditOutboxBacklogDetector>();
+builder.Services.AddHostedService<AuditOutboxDeadLetterDetector>();
+builder.Services.AddHostedService<OrphanReferenceDetector>();
+builder.Services.AddHostedService<PluginEnableFailureDetector>();
+builder.Services.AddHostedService<WorkflowExecutionErrorOpenDetector>();
+builder.Services.AddHostedService<LockedAccountDetector>();
+builder.Services.AddHostedService<RepeatedAuthFailureDetector>();
+builder.Services.AddHostedService<StuckWorkflowExecutionDetector>();
+// Singleton + hosted-service factory so EfCoreMenuStore can resolve the
+// same detector instance the periodic loop runs through. Sharing the
+// instance lets the auto-resolve fingerprint set survive across triggers
+// (operator-save and periodic tick converge on one source of truth).
+builder.Services.AddSingleton<MisconfiguredMenuItemDetector>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MisconfiguredMenuItemDetector>());
+
+// Phase 4 remediators. Each registered as IIssueRemediator; the dispatcher
+// picks the right one by DetectorId + CanRemediate. Only safe deterministic
+// remediators are registered here — anything that mutates business data
+// without a full audit trail (records, record_edges) is intentionally
+// excluded per the plan's risk analysis.
+builder.Services.AddSingleton<IIssueRemediator, AuditOutboxDeadLetterParkRemediator>();
+builder.Services.AddSingleton<IIssueRemediator, OrphanReferenceRemediator>();
 
 // Hook system: HookRegistrar is the singleton root that owns both hubs.
 // Plugins receive IHookRegistrar (write surface); host services consume
@@ -572,6 +642,7 @@ app.MapRecordEndpoints();
 app.MapRecordEdgeEndpoints();
 app.MapRecordCommentEndpoints();
 app.MapNotificationEndpoints();
+app.MapSystemIssueEndpoints();
 app.MapRoleEndpoints();
 app.MapGroupEndpoints();
 app.MapRoleAssignmentEndpoints();

@@ -129,6 +129,8 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
                 Body = input.Body,
                 RelatedEntityKind = input.RelatedEntityKind,
                 RelatedEntityId = input.RelatedEntityId,
+                ParentEntityKind = input.ParentEntityKind,
+                ParentEntityId = input.ParentEntityId,
                 LinkPath = input.LinkPath,
                 IsRead = false,
                 CreatedAtUtc = now
@@ -151,6 +153,40 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             Task.FromResult<Notification?>(_notifications.FirstOrDefault(n => n.Id == notificationId && n.UserId == userId));
 
         public Task<int> MarkAllReadAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(0);
+
+        public Task<IReadOnlyList<Notification>> DeleteByRelatedEntityAsync(
+            Guid? userId,
+            string relatedEntityKind,
+            string relatedEntityId,
+            CancellationToken cancellationToken = default)
+        {
+            var matched = _notifications
+                .Where(n => n.RelatedEntityKind == relatedEntityKind
+                            && n.RelatedEntityId == relatedEntityId
+                            && (!userId.HasValue || n.UserId == userId.Value))
+                .ToList();
+            foreach (var n in matched)
+            {
+                _notifications.Remove(n);
+            }
+            return Task.FromResult<IReadOnlyList<Notification>>(matched);
+        }
+
+        public Task<IReadOnlyList<Notification>> DeleteByParentEntityAsync(
+            string parentEntityKind,
+            string parentEntityId,
+            CancellationToken cancellationToken = default)
+        {
+            var matched = _notifications
+                .Where(n => n.ParentEntityKind == parentEntityKind
+                            && n.ParentEntityId == parentEntityId)
+                .ToList();
+            foreach (var n in matched)
+            {
+                _notifications.Remove(n);
+            }
+            return Task.FromResult<IReadOnlyList<Notification>>(matched);
+        }
     }
 
     // Captures every published event so tests can assert publication shape.

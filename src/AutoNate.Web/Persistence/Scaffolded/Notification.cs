@@ -18,6 +18,10 @@ public partial class Notification
 
     public string? RelatedEntityId { get; set; }
 
+    public string? ParentEntityKind { get; set; }
+
+    public string? ParentEntityId { get; set; }
+
     public string? LinkPath { get; set; }
 
     public bool IsRead { get; set; }

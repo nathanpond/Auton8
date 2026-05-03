@@ -118,6 +118,9 @@ function flattenAppRoutes(
   const out: string[] = [];
   for (const r of routes) {
     if (r.index || !r.path) continue;
+    // Skip splat catch-alls ("*") — they exist as fallbacks for admin-authored
+    // pages, so the paths they "match" are exactly the paths we want to allow.
+    if (r.path === "*") continue;
     const full = `/${prefix}/${r.path}`.replace(/\/+/g, "/");
     out.push(full);
     if (r.children) {

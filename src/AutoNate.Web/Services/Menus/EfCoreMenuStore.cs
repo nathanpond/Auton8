@@ -4,16 +4,44 @@ using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models.Menus;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.SystemIssues.Detectors;
 using Microsoft.EntityFrameworkCore;
 using MenuEntity = AutoNate.Web.Persistence.Scaffolded.Menu;
 using MenuItemEntity = AutoNate.Web.Persistence.Scaffolded.MenuItem;
 
 namespace AutoNate.Web.Services.Menus;
 
+// `menuMisconfigurationDetector` is optional so the store stays usable in
+// unit/test contexts that don't wire the self-healing platform (e.g. the
+// PostgresTestDatabase factory used by EfCoreMenuStoreTests). When present,
+// the store fires the detector after every menu_item mutation so a save
+// that produces an invisible-in-nav row surfaces an issue within seconds
+// instead of waiting for the 30-min periodic sweep.
 public sealed class EfCoreMenuStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
-    IAuthorizer authorizer) : IMenuStore
+    IAuthorizer authorizer,
+    MisconfiguredMenuItemDetector? menuMisconfigurationDetector = null,
+    ILogger<EfCoreMenuStore>? logger = null) : IMenuStore
 {
+    // Fire-and-forget so the operator's save returns immediately even if
+    // the detector is briefly slow. Exceptions are logged, never thrown.
+    private void TriggerMenuMisconfigurationScan()
+    {
+        if (menuMisconfigurationDetector is null) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await menuMisconfigurationDetector.RunOnceAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex,
+                    "Post-mutation MisconfiguredMenuItemDetector tick failed; the periodic sweep will pick up any drift.");
+            }
+        });
+    }
+
     private static readonly HashSet<string> AllowedItemTypes = new(StringComparer.Ordinal)
     {
         "group", "link", "route", "page", "action", "separator", "template"
@@ -156,6 +184,9 @@ public sealed class EfCoreMenuStore(
         if (entity.IsSystem) throw new MenuValidationException("System menus cannot be deleted.");
         db.Menus.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
+        // Cascade-deletes menu_items, which can resolve open misconfiguration
+        // issues; trigger a fresh scan so they auto-resolve immediately.
+        TriggerMenuMisconfigurationScan();
         return true;
     }
 
@@ -216,6 +247,7 @@ public sealed class EfCoreMenuStore(
         };
         db.MenuItems.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
+        TriggerMenuMisconfigurationScan();
         return ToItemModel(entity);
     }
 
@@ -330,6 +362,7 @@ public sealed class EfCoreMenuStore(
         {
             entity.UpdatedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
+            TriggerMenuMisconfigurationScan();
         }
 
         return ToItemModel(entity);
@@ -342,6 +375,7 @@ public sealed class EfCoreMenuStore(
         if (entity is null) return false;
         db.MenuItems.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
+        TriggerMenuMisconfigurationScan();
         return true;
     }
 
@@ -409,6 +443,7 @@ public sealed class EfCoreMenuStore(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        TriggerMenuMisconfigurationScan();
     }
 
     public async Task<IReadOnlyList<PageRegistryEntry>> ListPagesAsync(ClaimsPrincipal actor, CancellationToken cancellationToken = default)

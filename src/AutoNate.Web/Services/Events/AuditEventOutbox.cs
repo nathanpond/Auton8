@@ -29,15 +29,27 @@ public sealed class EfCoreAuditEventOutbox(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
     ILogger<EfCoreAuditEventOutbox> logger) : IAuditEventOutbox
 {
+    // Cap the enqueue at a finite duration so a wedged DB can't hang the caller forever,
+    // but don't tie the cap to the request's CancellationToken — see EnqueueAsync below.
+    private static readonly TimeSpan EnqueueTimeout = TimeSpan.FromSeconds(30);
+
     public async Task EnqueueAsync(
         string topic,
         string eventType,
         string payloadJson,
         CancellationToken cancellationToken = default)
     {
+        // Deliberately ignore the caller's cancellationToken for the DB write.
+        // Publishers call us AFTER the upstream domain transaction has committed,
+        // so the audit row must be persisted even if the originating HTTP request
+        // is being torn down (e.g. user navigated away). Honoring the request token
+        // here causes Npgsql to abort SaveChangesAsync with OperationCanceledException
+        // and silently drop the event.
+        using var timeoutCts = new CancellationTokenSource(EnqueueTimeout);
+        var writeToken = timeoutCts.Token;
         try
         {
-            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync(writeToken);
             var now = DateTime.UtcNow;
             dbContext.AuditOutbox.Add(new AuditOutboxEntry
             {
@@ -50,7 +62,7 @@ public sealed class EfCoreAuditEventOutbox(
                 LastError = null,
                 NextAttemptAfterUtc = now
             });
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await dbContext.SaveChangesAsync(writeToken);
             AuditEventPublishMetrics.RecordEnqueue(topic);
         }
         catch (Exception ex)

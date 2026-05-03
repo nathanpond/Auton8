@@ -47,6 +47,13 @@ public sealed record SystemHealthReport(
     IReadOnlyList<ComponentHealth> Components,
     IReadOnlyList<ConnectionHealth> Connections);
 
+// Tiny probe contract so detectors and other consumers can depend on the
+// abstract probe instead of the concrete (sealed) SystemHealthService.
+public interface ISystemHealthProbe
+{
+    Task<SystemHealthReport> CheckAsync(CancellationToken cancellationToken = default);
+}
+
 // Probes every external dependency and reports both component-level health
 // (is each service alive?) and connection-level health (is each expected
 // edge between services actually working?). Used by the SPA's System Health
@@ -60,7 +67,7 @@ public sealed class SystemHealthService(
     IOptions<DaprOptions> daprOptions,
     IOptions<NatsOptions> natsOptions,
     IOptions<FlowableOptions> flowableOptions,
-    ILogger<SystemHealthService> logger)
+    ILogger<SystemHealthService> logger) : ISystemHealthProbe
 {
     private readonly DaprOptions _daprOptions = daprOptions.Value;
     private readonly NatsOptions _natsOptions = natsOptions.Value;

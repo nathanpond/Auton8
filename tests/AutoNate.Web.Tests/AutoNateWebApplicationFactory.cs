@@ -65,6 +65,15 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
                 ["Authorization:Enabled"] = "false",
                 ["Authorization:Enforcement"] = "off",
                 ["Authorization:AssignSuperAdminToAllExistingUsers"] = "false",
+                // Self-healing platform: silence detector hosted services
+                // during tests. Tests that exercise detectors call
+                // RunOnceAsync directly rather than relying on the loop, so
+                // ticking in the background just adds noise and racing.
+                ["SystemIssues:DetectorsEnabled"] = "false",
+                // The remediation dispatcher is harmless without registered
+                // remediators (Phase 1 has none), but turning it off here
+                // keeps the host quieter and matches the detector switch.
+                ["SystemIssues:RemediationEnabled"] = "false",
             };
 
             foreach (var (key, value) in _extraConfig)

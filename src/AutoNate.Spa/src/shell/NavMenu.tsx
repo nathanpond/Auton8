@@ -10,8 +10,19 @@ import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { MenuItem } from "@/types/menus";
 import { PageTemplateInfo } from "@/api/pageTemplates";
 import { resolveItemPath } from "@/menus/resolveItemPath";
+import { reportMenuRenderFailure } from "@/api/systemIssues";
 import SiteBrand from "@/components/SiteBrand";
 import NotificationBell from "@/components/notifications/NotificationBell";
+
+// Tiny helper used by the silent-drop sites in IconMenuItem / DropdownEntry /
+// UserDropdownEntry. Reporting at the moment we drop the item is what makes
+// "the SPA can't render this" surface as a System Issue even when the row
+// was modified directly in the DB after the app started — no detector tick,
+// no operator save, just the SPA noticing at render time.
+function dropAndReport(itemId: string): null {
+  reportMenuRenderFailure(itemId);
+  return null;
+}
 
 type RecordTypeChild = { key: string; path: string; label: string; shortCode: string };
 
@@ -178,25 +189,31 @@ export default function NavMenu() {
     return renderUnconfigured(item, className, `unknown type '${item.itemType}'`);
   };
 
-  const renderUnconfigured = (item: MenuItem, className: string, why: string) => (
-    <a
-      href="#"
-      className={className}
-      title={`Misconfigured: ${why}`}
-      onClick={preventDefault}
-    >
-      {item.icon ? (
-        <div className="menu-icon">
-          <i className={item.icon}></i>
-        </div>
-      ) : (
-        <div className="menu-icon">
-          <i className="fa fa-triangle-exclamation text-warning"></i>
-        </div>
-      )}
-      <div className="menu-text">{item.displayName}</div>
-    </a>
-  );
+  const renderUnconfigured = (item: MenuItem, className: string, why: string) => {
+    // Tell the backend the SPA dropped this item. Per-tab dedup inside the
+    // helper means we POST at most once per (item, tab); the backend's
+    // fingerprint dedup handles cross-session collisions.
+    reportMenuRenderFailure(item.id);
+    return (
+      <a
+        href="#"
+        className={className}
+        title={`Misconfigured: ${why}`}
+        onClick={preventDefault}
+      >
+        {item.icon ? (
+          <div className="menu-icon">
+            <i className={item.icon}></i>
+          </div>
+        ) : (
+          <div className="menu-icon">
+            <i className="fa fa-triangle-exclamation text-warning"></i>
+          </div>
+        )}
+        <div className="menu-text">{item.displayName}</div>
+      </a>
+    );
+  };
 
   return (
     <div id="top-menu" className="app-top-menu" data-bs-theme="dark">
@@ -314,7 +331,7 @@ function IconMenuTopItem({
   if (item.itemType === "link") {
     const href = stringFrom(item.config?.href);
     const newTab = Boolean(item.config?.openInNewTab);
-    if (!href) return null;
+    if (!href) return dropAndReport(item.id);
     return (
       <div className={wrapperClass}>
         <a
@@ -333,7 +350,7 @@ function IconMenuTopItem({
   }
   if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
     const path = pathOf(item, templates);
-    if (!path) return null;
+    if (!path) return dropAndReport(item.id);
     return (
       <div className={wrapperClass}>
         <NavLink to={path} className="menu-link menu-link-tight" title={item.displayName}>
@@ -377,7 +394,7 @@ function DropdownEntry({
   }
   if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
     const path = pathOf(item, templates);
-    if (!path) return null;
+    if (!path) return dropAndReport(item.id);
     return (
       <NavLink className="dropdown-item" to={path}>
         {item.icon && <i className={`${item.icon} me-2`} />}
@@ -414,7 +431,7 @@ function UserDropdownEntry({
   }
   if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
     const path = pathOf(item, templates);
-    if (!path) return null;
+    if (!path) return dropAndReport(item.id);
     return (
       <NavLink className="dropdown-item" to={path}>
         {item.icon && <i className={`${item.icon} me-2`} />}

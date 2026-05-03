@@ -72,6 +72,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<AuditOutboxEntry> AuditOutbox { get; set; }
 
+    public virtual DbSet<SystemIssue> SystemIssues { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -770,6 +772,8 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Body).HasColumnName("body");
             entity.Property(e => e.RelatedEntityKind).HasColumnName("related_entity_kind");
             entity.Property(e => e.RelatedEntityId).HasColumnName("related_entity_id");
+            entity.Property(e => e.ParentEntityKind).HasColumnName("parent_entity_kind");
+            entity.Property(e => e.ParentEntityId).HasColumnName("parent_entity_id");
             entity.Property(e => e.LinkPath).HasColumnName("link_path");
             entity.Property(e => e.IsRead).HasColumnName("is_read");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
@@ -809,6 +813,44 @@ public partial class AutoNateDbContext : DbContext
             // rows whose backoff has expired.
             entity.HasIndex(e => new { e.NextAttemptAfterUtc }, "ix_audit_outbox_pending")
                 .HasFilter("dispatched_at_utc IS NULL");
+        });
+
+        modelBuilder.Entity<SystemIssue>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("system_issues_pkey");
+            entity.ToTable("system_issues");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.DetectorId).HasColumnName("detector_id");
+            entity.Property(e => e.Category).HasColumnName("category");
+            entity.Property(e => e.Severity).HasColumnName("severity");
+            entity.Property(e => e.Fingerprint).HasColumnName("fingerprint");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Summary).HasColumnName("summary");
+            entity.Property(e => e.RelatedEntityKind).HasColumnName("related_entity_kind");
+            entity.Property(e => e.RelatedEntityId).HasColumnName("related_entity_id");
+            entity.Property(e => e.FactsJson)
+                .HasColumnName("facts_json")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.State).HasColumnName("state");
+            entity.Property(e => e.FirstSeenAtUtc).HasColumnName("first_seen_at_utc");
+            entity.Property(e => e.LastSeenAtUtc).HasColumnName("last_seen_at_utc");
+            entity.Property(e => e.OccurrenceCount).HasColumnName("occurrence_count");
+            entity.Property(e => e.AcknowledgedAtUtc).HasColumnName("acknowledged_at_utc");
+            entity.Property(e => e.AcknowledgedBy).HasColumnName("acknowledged_by");
+            entity.Property(e => e.ResolvedAtUtc).HasColumnName("resolved_at_utc");
+            entity.Property(e => e.ResolutionKind).HasColumnName("resolution_kind");
+            entity.Property(e => e.ResolutionNotes).HasColumnName("resolution_notes");
+            entity.Property(e => e.AutoRemediationAttemptCount).HasColumnName("auto_remediation_attempt_count");
+            entity.Property(e => e.AutoRemediationLastError).HasColumnName("auto_remediation_last_error");
+            entity.Property(e => e.NextRemediationAfterUtc).HasColumnName("next_remediation_after_utc");
+
+            // Mirror the partial unique index used for upsert dedup. The
+            // schema initializer creates these — declaring them here lets EF
+            // know about them without trying to recreate them.
+            entity.HasIndex(e => e.Fingerprint, "ux_system_issues_open_fingerprint")
+                .IsUnique()
+                .HasFilter("state IN ('open', 'acknowledged')");
         });
 
         OnModelCreatingPartial(modelBuilder);
