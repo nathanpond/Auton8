@@ -11,7 +11,25 @@ export const api = axios.create({
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // The .NET host has a SPA fallback (`MapFallbackToFile("{*path:nonfile}", "index.html")`)
+    // that serves the React index.html for any unmatched route. If a request to /api
+    // ever falls through to that, axios receives HTML and — because its default JSON
+    // parser silently returns the raw string on parse failure — callers think they
+    // got valid data and iterate over a string, producing garbage UI. Treat any
+    // HTML response on /api as a hard error so the UI shows "failed to load" rather
+    // than rendering character-by-character.
+    const url = response.config?.url ?? "";
+    if (url.startsWith("/api")) {
+      const contentType = response.headers?.["content-type"];
+      if (typeof contentType === "string" && contentType.toLowerCase().includes("text/html")) {
+        return Promise.reject(
+          new Error(`Unexpected HTML response from API endpoint ${url} (likely an unmatched route or stale bundle)`)
+        );
+      }
+    }
+    return response;
+  },
   (error: AxiosError) => {
     const status = error.response?.status;
     const url = error.config?.url ?? "";

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import MyTasksPanel from "./MyTasksPanel";
+import TeamTasksPanel from "./TeamTasksPanel";
 
 export default function Home() {
   return (
@@ -60,6 +61,9 @@ export default function Home() {
       <div className="row g-3">
         <div className="col-12">
           <MyTasksPanel />
+        </div>
+        <div className="col-12">
+          <TeamTasksPanel />
         </div>
       </div>
     </>

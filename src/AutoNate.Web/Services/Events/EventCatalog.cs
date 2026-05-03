@@ -1024,10 +1024,10 @@ public static class EventCatalog
                 new EventCatalogEntry(WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.TasksAssignedToMeViewed,
                     "A user viewed their own task inbox.", "Fires from GET /api/tasks/assigned-to-me.",
                     ["details: { resultCount }."]),
-                new EventCatalogEntry(WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.TasksVisibleToMeViewed,
-                    "A user viewed the inbox they can see (own + supervised users).",
-                    "Fires from GET /api/tasks/visible-to-me.",
-                    ["details: { resultCount, includesSupervisedCount }."]),
+                new EventCatalogEntry(WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.TasksAssignedToTeamViewed,
+                    "A user viewed the inbox of users they supervise (excludes their own tasks).",
+                    "Fires from GET /api/tasks/assigned-to-team.",
+                    ["details: { resultCount, superviseeCount }."]),
 
                 // Notifications reads (with coalesce on unread-count).
                 new EventCatalogEntry(DaprNotificationEventPublisher.TopicName, NotificationEventTypes.ListViewed,

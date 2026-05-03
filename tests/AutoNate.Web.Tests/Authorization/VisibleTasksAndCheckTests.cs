@@ -17,7 +17,7 @@ public sealed class VisibleTasksAndCheckTests
     private static readonly Guid AdminUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     [Fact]
-    public async Task VisibleToMe_IncludesActorOwnTasks()
+    public async Task AssignedToTeam_EmptyWhenNoSupervisees()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
         factory.FlowableStub.TasksByUser[AdminUserId.ToString()] = new()
@@ -27,18 +27,18 @@ public sealed class VisibleTasksAndCheckTests
         var client = factory.CreateClient();
         await client.GetAsync("/api/auth/me");
 
-        var tasks = await client.GetFromJsonAsync<FlowableTaskSummary[]>("/api/tasks/visible-to-me");
+        var tasks = await client.GetFromJsonAsync<FlowableTaskSummary[]>("/api/tasks/assigned-to-team");
         Assert.NotNull(tasks);
-        Assert.Single(tasks!);
-        Assert.Equal("own-1", tasks![0].Id);
+        Assert.Empty(tasks!);
     }
 
     [Fact]
-    public async Task VisibleToMe_IncludesSuperviseesTasks()
+    public async Task AssignedToTeam_IncludesSuperviseesButExcludesActor()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
 
         // Hierarchy: admin supervises Alice. Tasks: one for admin, one for Alice.
+        // Only Alice's task should appear under the actor's team view.
         var alice = Guid.NewGuid();
         await using (var scope = factory.Services.CreateAsyncScope())
         {
@@ -72,11 +72,11 @@ public sealed class VisibleTasksAndCheckTests
         var client = factory.CreateClient();
         await client.GetAsync("/api/auth/me");
 
-        var tasks = await client.GetFromJsonAsync<FlowableTaskSummary[]>("/api/tasks/visible-to-me");
+        var tasks = await client.GetFromJsonAsync<FlowableTaskSummary[]>("/api/tasks/assigned-to-team");
         Assert.NotNull(tasks);
         var ids = tasks!.Select(t => t.Id).ToHashSet();
-        Assert.Contains("own-1", ids);
         Assert.Contains("alice-1", ids);
+        Assert.DoesNotContain("own-1", ids);
     }
 
     [Fact]

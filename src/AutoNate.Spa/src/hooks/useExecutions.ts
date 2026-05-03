@@ -13,7 +13,7 @@ import {
   getExecutionTasks,
   listExecutions,
   listMyAssignedTasks,
-  listTasksVisibleToMe,
+  listTeamAssignedTasks,
   moveExecutionState,
   reassignTaskAtNode,
   updateExecutionVariables,
@@ -34,7 +34,7 @@ export const executionHistoryQueryKey = (id: string) => ["executions", "history"
 export const executionLogQueryKey = (id: string) => ["executions", "log", id] as const;
 export const executionTasksQueryKey = (id: string) => ["executions", "tasks", id] as const;
 export const ASSIGNED_TASKS_QUERY_KEY = ["tasks", "assigned-to-me"] as const;
-export const VISIBLE_TASKS_QUERY_KEY = ["tasks", "visible-to-me"] as const;
+export const TEAM_TASKS_QUERY_KEY = ["tasks", "assigned-to-team"] as const;
 
 export function useExecutions() {
   return useQuery<WorkflowExecutionSummary[]>({
@@ -103,7 +103,7 @@ export function useCancelExecution() {
       qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
-      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
     }
   });
 }
@@ -116,7 +116,7 @@ export function useCompleteTask() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
-      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
     }
   });
 }
@@ -128,10 +128,10 @@ export function useMyAssignedTasks() {
   });
 }
 
-export function useTasksVisibleToMe() {
+export function useTeamAssignedTasks() {
   return useQuery<FlowableTaskSummary[]>({
-    queryKey: VISIBLE_TASKS_QUERY_KEY,
-    queryFn: ({ signal }) => listTasksVisibleToMe(signal)
+    queryKey: TEAM_TASKS_QUERY_KEY,
+    queryFn: ({ signal }) => listTeamAssignedTasks(signal)
   });
 }
 
@@ -175,7 +175,7 @@ export function useForceCompleteTask(processInstanceId: string) {
       qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
-      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
     }
   });
 }
@@ -189,7 +189,7 @@ export function useReassignTask(processInstanceId: string) {
       qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
-      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
     }
   });
 }
@@ -203,7 +203,7 @@ export function useUpdateTaskDueDate(processInstanceId: string) {
       qc.invalidateQueries({ queryKey: executionLogQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
-      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
     }
   });
 }
@@ -220,7 +220,7 @@ export function useMoveExecutionState(processInstanceId: string) {
       qc.invalidateQueries({ queryKey: executionTasksQueryKey(processInstanceId) });
       qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
-      qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
+      qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
     }
   });
 }

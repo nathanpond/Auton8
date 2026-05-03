@@ -5,12 +5,11 @@ import { useMyAssignedRecords } from "@/hooks/useRecords";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import {
   ASSIGNED_TASKS_QUERY_KEY,
+  TEAM_TASKS_QUERY_KEY,
   useCompleteTask,
-  useTasksVisibleToMe,
-  VISIBLE_TASKS_QUERY_KEY
+  useMyAssignedTasks
 } from "@/hooks/useExecutions";
 import { useBusConnection } from "@/hooks/useBusConnection";
-import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { RecordModel, RecordType } from "@/types/records";
 import { FlowableTaskSummary } from "@/types/flowable";
@@ -49,40 +48,28 @@ export default function MyTasksPanel() {
     data: workflowTasks = [],
     isLoading: tasksLoading,
     isError: tasksError
-  } = useTasksVisibleToMe();
+  } = useMyAssignedTasks();
   const completeTask = useCompleteTask();
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
 
   // Refetch on any record or workflow-execution bus event. The server-side
-  // /assigned-to-me and /visible-to-me endpoints already filter by the current
-  // user, so we don't need to inspect payloads to decide whether to act —
-  // assignments and reassignments both flow through these topics.
+  // /assigned-to-me endpoints already filter by the current user, so we don't
+  // need to inspect payloads to decide whether to act — assignments and
+  // reassignments both flow through these topics. Team Tasks is invalidated
+  // too since reassignments may move work in or out of a supervisee's queue.
   const onBusMessage = useCallback(
     (msg: { topic: string }) => {
       const topic = msg.topic ?? "";
       if (topic.startsWith("record.")) {
         qc.invalidateQueries({ queryKey: ["records", "assigned-to-me"] });
       } else if (topic.startsWith("workflow.execution")) {
-        qc.invalidateQueries({ queryKey: VISIBLE_TASKS_QUERY_KEY });
         qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
+        qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
       }
     },
     [qc]
   );
   useBusConnection({ onMessage: onBusMessage });
-
-  // Whether the current actor can complete each visible task. Tasks the
-  // actor sees only because they supervise the assignee return false here,
-  // so we render those rows without the Complete button.
-  const completeChecks = useMemo(
-    () => workflowTasks.map((t) => ({
-      kind: "workflowtask",
-      action: "complete",
-      id: t.id
-    })),
-    [workflowTasks]
-  );
-  const { data: completePermissions } = usePermissionChecks(completeChecks);
 
   const onCompleteTask = async (taskId: string) => {
     setCompletingTaskId(taskId);
@@ -180,11 +167,6 @@ export default function MyTasksPanel() {
                     task={row.task}
                     onComplete={onCompleteTask}
                     isCompleting={completingTaskId === row.task.id}
-                    canComplete={
-                      completePermissions?.get(
-                        permissionKey({ kind: "workflowtask", action: "complete", id: row.task.id })
-                      ) ?? false
-                    }
                     statusAppearance={statusAppearance}
                   />
                 )
@@ -283,13 +265,11 @@ function WorkflowRow({
   task,
   onComplete,
   isCompleting,
-  canComplete,
   statusAppearance
 }: {
   task: FlowableTaskSummary;
   onComplete: (taskId: string) => void;
   isCompleting: boolean;
-  canComplete: boolean;
   statusAppearance: StatusAppearanceEntry[];
 }) {
   // Prefer the per-execution display name (set at start time) over the
@@ -341,18 +321,14 @@ function WorkflowRow({
       </td>
       <td>{formatWhen(task.createdAtUtc)}</td>
       <td>
-        {canComplete ? (
-          <button
-            type="button"
-            className="btn btn-sm btn-success"
-            onClick={() => onComplete(task.id)}
-            disabled={isCompleting}
-          >
-            Complete
-          </button>
-        ) : (
-          <span className="text-body text-opacity-50 small">View only</span>
-        )}
+        <button
+          type="button"
+          className="btn btn-sm btn-success"
+          onClick={() => onComplete(task.id)}
+          disabled={isCompleting}
+        >
+          Complete
+        </button>
       </td>
     </tr>
   );

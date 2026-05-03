@@ -58,5 +58,5 @@ public static class WorkflowAdminEventTypes
     public const string ExecutionTasksViewed = "workflow.execution.tasks.viewed";
     public const string ExecutionCompletedAssigneesViewed = "workflow.execution.completed-assignees.viewed";
     public const string TasksAssignedToMeViewed = "workflow.task.assigned-to-me.viewed";
-    public const string TasksVisibleToMeViewed = "workflow.task.visible-to-me.viewed";
+    public const string TasksAssignedToTeamViewed = "workflow.task.assigned-to-team.viewed";
 }

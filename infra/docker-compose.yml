@@ -76,8 +76,16 @@ services:
       - --scheduler-host-address
       - dapr-scheduler:50007
     depends_on:
+      # `network_mode: service:flowable` binds this sidecar to the flowable
+      # container's network namespace at start time. When flowable restarts,
+      # Docker recreates that namespace and we end up bound to the old,
+      # defunct one — port 3500 is no longer reachable from the new flowable
+      # JVM and every workflow-event publish fails with ConnectException.
+      # `restart: true` makes Compose cascade a restart so the sidecar
+      # re-attaches to the live namespace.
       flowable:
         condition: service_healthy
+        restart: true
       nats:
         condition: service_healthy
       nats-init:

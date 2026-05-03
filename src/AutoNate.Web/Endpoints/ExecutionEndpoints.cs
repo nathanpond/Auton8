@@ -570,12 +570,12 @@ public static class ExecutionEndpoints
             return Results.Ok(list);
         });
 
-        // Tasks the actor can see — their own plus tasks of any user they
-        // supervise (entity_edges, edge_kind='supervisor', from = actor).
-        // The Complete button on each row is gated separately via
-        // POST /api/auth/check, so the same list serves "I can act" and
-        // "I can only watch" cases.
-        tasks.MapGet("/visible-to-me", async (
+        // Tasks assigned to anyone the actor supervises (entity_edges,
+        // edge_kind='supervisor', from = actor). Excludes the actor's own
+        // tasks — those go through /assigned-to-me. Surfaced as a separate
+        // "Team Tasks" view so supervisors can spot work piling up on their
+        // reports without it bleeding into their personal inbox.
+        tasks.MapGet("/assigned-to-team", async (
             HttpContext http,
             IFlowableClient flowable,
             IDbContextFactory<AutoNateDbContext> dbFactory,
@@ -597,16 +597,15 @@ public static class ExecutionEndpoints
                 .Select(e => e.ToId)
                 .ToListAsync(cancellationToken);
 
-            var users = new List<string>(supervisees.Count + 1) { actorId };
-            users.AddRange(supervisees);
-
-            var list = await flowable.GetTasksAssignedToUsersAsync(users, cancellationToken);
+            var list = supervisees.Count == 0
+                ? Array.Empty<FlowableTaskSummary>()
+                : await flowable.GetTasksAssignedToUsersAsync(supervisees, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
-                WorkflowAdminEventTypes.TasksVisibleToMeViewed,
+                WorkflowAdminEventTypes.TasksAssignedToTeamViewed,
                 WorkflowResourceKinds.Task,
                 resource: null,
-                details: new { resultCount = list.Count, includesSupervisedCount = supervisees.Count },
+                details: new { resultCount = list.Count, superviseeCount = supervisees.Count },
                 cancellationToken);
             return Results.Ok(list);
         });
