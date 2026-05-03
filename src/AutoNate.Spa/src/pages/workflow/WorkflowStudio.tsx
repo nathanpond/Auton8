@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
-import {
-  EXECUTIONS_QUERY_KEY,
-  useCompleteTask,
-  useExecutionTasks,
-  useExecutions
-} from "@/hooks/useExecutions";
+import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
 import {
   usePauseWorkflow,
   usePublishWorkflow,
@@ -267,6 +262,7 @@ export default function WorkflowStudio() {
   const [currentModel, setCurrentModel] = useState<WorkflowModel | null>(null);
   const [loadedXml, setLoadedXml] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [sidebarActiveId, setSidebarActiveId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -805,6 +801,10 @@ export default function WorkflowStudio() {
     !busy && !!currentModel && !!currentModel.lastDeployment;
   const isPaused = currentModel?.isSuspended === true;
 
+  const sidebarPanels = useWorkflowSidebarPanels({ currentModel, dirty });
+  const activeSidebar =
+    sidebarPanels.find((p) => p.id === sidebarActiveId) ?? null;
+
   return (
     <>
       <div className="page-head">
@@ -927,7 +927,9 @@ export default function WorkflowStudio() {
 
       {busy && <p className="workflow-busy">Working on {busy}...</p>}
 
-      <div className="workflow-layout">
+      <div
+        className={`workflow-layout${activeSidebar ? " workflow-layout--sidebar-open" : ""}`}
+      >
         <section className="workflow-main">
           {!currentModel ? (
             <div className="workflow-empty-state">
@@ -961,11 +963,21 @@ export default function WorkflowStudio() {
               {modelerError && (
                 <p className="text-danger px-3 py-2">{modelerError.message}</p>
               )}
+              <WorkflowSidebarRail
+                panels={sidebarPanels}
+                activeId={sidebarActiveId}
+                onSelect={setSidebarActiveId}
+              />
             </div>
           )}
         </section>
 
-        <WorkflowSidebar currentModel={currentModel} dirty={dirty} />
+        {activeSidebar && (
+          <WorkflowSidebarPanel
+            panel={activeSidebar}
+            onClose={() => setSidebarActiveId(null)}
+          />
+        )}
       </div>
 
       {showCreateModal && (
@@ -1083,185 +1095,196 @@ export default function WorkflowStudio() {
   );
 }
 
-function WorkflowSidebar({
+type WorkflowSidebarPanel = {
+  id: string;
+  icon: string;
+  label: string;
+  render: () => React.ReactNode;
+};
+
+function useWorkflowSidebarPanels({
   currentModel,
   dirty
 }: {
   currentModel: WorkflowModel | null;
   dirty: boolean;
-}) {
+}): WorkflowSidebarPanel[] {
   const { data: executions = [] } = useExecutions();
-  const { data: runtimeTasks = [] } = useExecutionTasks(currentModel?.activeProcessInstanceId ?? null);
-  const completeTask = useCompleteTask();
-  const [completing, setCompleting] = useState<string | null>(null);
 
-  const activeExecution = currentModel?.activeProcessInstanceId
-    ? executions.find((e) => e.id === currentModel.activeProcessInstanceId)
-    : null;
+  const runningCount = useMemo(() => {
+    if (!currentModel) return 0;
+    return executions.filter(
+      (e) => e.workflowModelName === currentModel.name && e.status === "Running"
+    ).length;
+  }, [executions, currentModel]);
 
-  const runtimeStatus = useMemo(() => {
-    if (!currentModel) return "No workflow model selected";
-    if (!currentModel.activeProcessInstanceId) return "Not started";
-    if (activeExecution) {
-      if (activeExecution.status === "Running" && runtimeTasks.length > 0) {
-        return "Waiting on user task";
+  return useMemo<WorkflowSidebarPanel[]>(
+    () => [
+      {
+        id: "model-info",
+        icon: "bi-info-circle",
+        label: "Model Information",
+        render: () => (
+          <ModelInformationPanel
+            currentModel={currentModel}
+            dirty={dirty}
+            runningCount={runningCount}
+          />
+        )
       }
-      return activeExecution.status;
-    }
-    return runtimeTasks.length > 0 ? "Waiting on user task" : "Completed";
-  }, [currentModel, activeExecution, runtimeTasks]);
+    ],
+    [currentModel, dirty, runningCount]
+  );
+}
 
-  const onComplete = async (taskId: string) => {
-    setCompleting(taskId);
-    try {
-      await completeTask.mutateAsync({ taskId });
-    } finally {
-      setCompleting(null);
-    }
-  };
+function WorkflowSidebarRail({
+  panels,
+  activeId,
+  onSelect
+}: {
+  panels: WorkflowSidebarPanel[];
+  activeId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  return (
+    <div className="workflow-rsb-rail" role="tablist" aria-orientation="vertical">
+      {panels.map((p) => {
+        const selected = activeId === p.id;
+        return (
+          <button
+            key={p.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            className={`workflow-rsb-rail-btn${selected ? " is-active" : ""}`}
+            onClick={() => onSelect(selected ? null : p.id)}
+            title={p.label}
+            aria-label={p.label}
+          >
+            <i className={`bi ${p.icon}`} aria-hidden="true"></i>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-  const draftStatusLabel = !currentModel
-    ? "No model"
-    : dirty
-      ? `Unsaved changes for v${currentModel.draftVersionNumber}`
-      : currentModel.isDraft
-        ? `Draft v${currentModel.draftVersionNumber}`
-        : `Published v${currentModel.draftVersionNumber}`;
+function WorkflowSidebarPanel({
+  panel,
+  onClose
+}: {
+  panel: WorkflowSidebarPanel;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="workflow-rsb-panel" role="region" aria-label={panel.label}>
+      <div className="workflow-rsb-panel-header">
+        <h2 className="workflow-rsb-panel-title">
+          <i className={`bi ${panel.icon}`} aria-hidden="true"></i>
+          <span>{panel.label}</span>
+        </h2>
+        <button
+          type="button"
+          className="workflow-rsb-collapse-btn"
+          onClick={onClose}
+          aria-label="Collapse sidebar"
+          title="Collapse"
+        >
+          <i className="bi bi-chevron-double-right" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div className="workflow-rsb-panel-body">{panel.render()}</div>
+    </aside>
+  );
+}
+
+function ModelInformationPanel({
+  currentModel,
+  dirty,
+  runningCount
+}: {
+  currentModel: WorkflowModel | null;
+  dirty: boolean;
+  runningCount: number;
+}) {
+  if (!currentModel) {
+    return <p className="workflow-muted">No workflow model is selected.</p>;
+  }
+
+  const stateLabel: "Draft / unpublished" | "Active" | "Paused" | "Unknown" =
+    currentModel.publishedVersionNumber === null || !currentModel.lastDeployment
+      ? "Draft / unpublished"
+      : currentModel.isSuspended === true
+        ? "Paused"
+        : currentModel.isSuspended === false
+          ? "Active"
+          : "Unknown";
+
+  const stateClassName =
+    stateLabel === "Active"
+      ? "workflow-state-active"
+      : stateLabel === "Paused"
+        ? "workflow-state-paused"
+        : stateLabel === "Draft / unpublished"
+          ? "workflow-state-draft"
+          : "workflow-state-unknown";
+
+  const saveVersionDisplay = dirty
+    ? `v${currentModel.draftVersionNumber} (unsaved)`
+    : `v${currentModel.draftVersionNumber}`;
 
   return (
-    <aside className="workflow-sidebar">
-      <section className="workflow-card">
-        <h2>Model</h2>
-        {!currentModel ? (
-          <p className="workflow-muted">No workflow model is selected.</p>
-        ) : (
-          <dl className="workflow-meta">
-            <div>
-              <dt>Model ID</dt>
-              <dd>{currentModel.id}</dd>
-            </div>
-            <div>
-              <dt>Name</dt>
-              <dd>{currentModel.name}</dd>
-            </div>
-            <div>
-              <dt>Draft Status</dt>
-              <dd>{draftStatusLabel}</dd>
-            </div>
-            <div>
-              <dt>Draft Version</dt>
-              <dd>v{currentModel.draftVersionNumber}</dd>
-            </div>
-            <div>
-              <dt>Published Version</dt>
-              <dd>
-                {currentModel.publishedVersionNumber === null
-                  ? "Not published"
-                  : `v${currentModel.publishedVersionNumber}`}
-              </dd>
-            </div>
-            <div>
-              <dt>Updated</dt>
-              <dd>{formatTimestamp(currentModel.updatedAtUtc)}</dd>
-            </div>
-          </dl>
-        )}
-      </section>
-
-      <section className="workflow-card">
-        <h2>Deployment</h2>
-        {!currentModel?.lastDeployment ? (
-          <p className="workflow-muted">This workflow model has not been published to Flowable yet.</p>
-        ) : (
-          <>
-            {(currentModel.isDraft || dirty) && (
-              <p className="workflow-muted">
-                The current workflow is in draft state. Publish it to deploy this version to
-                Flowable.
-              </p>
-            )}
-            {currentModel.isSuspended === true && (
-              <div className="alert alert-warning py-2 mb-2" role="status">
-                <i className="bi bi-pause-circle-fill me-1" aria-hidden="true"></i>
-                Paused — new instances are blocked. Existing runs continue.
-              </div>
-            )}
-            <dl className="workflow-meta">
-              <div>
-                <dt>Definition ID</dt>
-                <dd>{currentModel.lastDeployment.processDefinitionId}</dd>
-              </div>
-              <div>
-                <dt>Version</dt>
-                <dd>{currentModel.lastDeployment.processDefinitionVersion}</dd>
-              </div>
-              <div>
-                <dt>Deployment ID</dt>
-                <dd>{currentModel.lastDeployment.deploymentId}</dd>
-              </div>
-              <div>
-                <dt>Published</dt>
-                <dd>{formatTimestamp(currentModel.lastDeployment.deployedAtUtc)}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>
-                  {currentModel.isSuspended === true
-                    ? "Paused"
-                    : currentModel.isSuspended === false
-                      ? "Active"
-                      : "Unknown"}
-                </dd>
-              </div>
-            </dl>
-          </>
-        )}
-      </section>
-
-      <section className="workflow-card">
-        <h2>Runtime</h2>
-        <dl className="workflow-meta">
-          <div>
-            <dt>Instance</dt>
-            <dd>{currentModel?.activeProcessInstanceId ?? "Not started"}</dd>
-          </div>
-          <div>
-            <dt>Status</dt>
-            <dd>{runtimeStatus}</dd>
-          </div>
-          <div>
-            <dt>Active Tasks</dt>
-            <dd>{runtimeTasks.length}</dd>
-          </div>
-        </dl>
-
-        {runtimeTasks.length > 0 ? (
-          <div className="workflow-task-list">
-            {runtimeTasks.map((task) => (
-              <div key={task.id} className="workflow-task">
-                <div>
-                  <strong>{task.name}</strong>
-                  <div className="workflow-task-meta">Task ID: {task.id}</div>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-success"
-                  onClick={() => onComplete(task.id)}
-                  disabled={completing === task.id}
-                  title={`Complete ${task.name}`}
-                >
-                  Complete {task.name}
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : currentModel?.activeProcessInstanceId ? (
-          <p className="workflow-muted">
-            No active tasks are currently available for the selected workflow instance.
-          </p>
-        ) : null}
-      </section>
-    </aside>
+    <div className="workflow-model-info">
+      <div className="workflow-model-info-header">
+        <div className="workflow-model-info-name" title={currentModel.name}>
+          {currentModel.name}
+        </div>
+        <div className="workflow-model-info-id" title={currentModel.id}>
+          {currentModel.id}
+        </div>
+      </div>
+      <dl className="workflow-meta">
+        <div>
+          <dt>Current Save Version</dt>
+          <dd>{saveVersionDisplay}</dd>
+        </div>
+        <div>
+          <dt>Current Publish Version</dt>
+          <dd>
+            {currentModel.publishedVersionNumber === null
+              ? "Not published"
+              : `v${currentModel.publishedVersionNumber}`}
+          </dd>
+        </div>
+        <div>
+          <dt>Last Updated</dt>
+          <dd>{formatTimestamp(currentModel.updatedAtUtc)}</dd>
+        </div>
+        <div>
+          <dt>Last Published</dt>
+          <dd>
+            {currentModel.lastDeployment
+              ? formatTimestamp(currentModel.lastDeployment.deployedAtUtc)
+              : "Never published"}
+          </dd>
+        </div>
+        <div>
+          <dt>Current State</dt>
+          <dd>
+            <span className={`workflow-state-pill ${stateClassName}`}>
+              {stateLabel === "Paused" && (
+                <i className="bi bi-pause-circle-fill" aria-hidden="true"></i>
+              )}
+              {stateLabel}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Running Executions</dt>
+          <dd>{runningCount}</dd>
+        </div>
+      </dl>
+    </div>
   );
 }
 
