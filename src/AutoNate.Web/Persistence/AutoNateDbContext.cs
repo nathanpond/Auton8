@@ -42,6 +42,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<RecordCommentRevision> RecordCommentRevisions { get; set; }
 
+    public virtual DbSet<RecordWatch> RecordWatches { get; set; }
+
     public virtual DbSet<Role> Roles { get; set; }
 
     public virtual DbSet<RoleAssignment> RoleAssignments { get; set; }
@@ -452,6 +454,21 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Body).HasColumnName("body");
             entity.Property(e => e.ReplacedAtUtc).HasColumnName("replaced_at_utc");
             entity.Property(e => e.ReplacedBy).HasColumnName("replaced_by");
+        });
+
+        modelBuilder.Entity<RecordWatch>(entity =>
+        {
+            entity.HasKey(e => new { e.UserId, e.RecordId }).HasName("record_watches_pkey");
+
+            entity.ToTable("record_watches");
+
+            entity.HasIndex(e => new { e.UserId, e.CreatedAtUtc }, "ix_record_watches_user")
+                .IsDescending(false, true);
+            entity.HasIndex(e => e.RecordId, "ix_record_watches_record");
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.RecordId).HasColumnName("record_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
         });
 
         modelBuilder.Entity<Role>(entity =>

@@ -329,6 +329,22 @@ internal static class DatabaseSchemaInitializer
             ON record_comment_revisions (comment_id, replaced_at_utc DESC);
         """;
 
+    private const string RecordWatchesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS record_watches (
+            user_id UUID NOT NULL,
+            record_id UUID NOT NULL REFERENCES records (id) ON DELETE CASCADE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (user_id, record_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_record_watches_user
+            ON record_watches (user_id, created_at_utc DESC);
+
+        CREATE INDEX IF NOT EXISTS ix_record_watches_record
+            ON record_watches (record_id);
+        """;
+
     private const string AuthorizationSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS entity_kinds (
@@ -1853,6 +1869,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(RecordsDataSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsEdgesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordsCommentsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(RecordWatchesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(AuthorizationSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordEdgeBackfillSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordEdgeShadowBackfillSql, cancellationToken);

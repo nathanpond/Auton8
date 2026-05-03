@@ -639,6 +639,7 @@ app.MapWorkflowBehaviorEndpoints();
 app.MapExecutionEndpoints();
 app.MapRecordTypeEndpoints();
 app.MapRecordEndpoints();
+app.MapRecordWatchEndpoints();
 app.MapRecordEdgeEndpoints();
 app.MapRecordCommentEndpoints();
 app.MapNotificationEndpoints();

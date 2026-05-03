@@ -135,3 +135,63 @@ function isNotFound(error: unknown): boolean {
   const response = (error as { response?: { status?: number } } | undefined)?.response;
   return response?.status === 404;
 }
+
+export type WatchedRecord = {
+  id: string;
+  recordTypeId: string;
+  key: string;
+  name: string;
+  status: string | null;
+  dueDate: string | null;
+  description: string | null;
+  assigneeIds: string[];
+  isArchived: boolean;
+  watchedAtUtc: string;
+  updatedAtUtc: string;
+};
+
+export type WatchedRecordsPage = {
+  items: WatchedRecord[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+export type ListWatchedParams = {
+  page?: number;
+  pageSize?: number;
+};
+
+export async function listWatchedRecords(
+  params: ListWatchedParams = {},
+  signal?: AbortSignal
+): Promise<WatchedRecordsPage> {
+  const { data } = await api.get<WatchedRecordsPage>(`${BASE}/watched-by-me`, {
+    params: {
+      page: params.page ?? 0,
+      pageSize: params.pageSize ?? 25
+    },
+    signal
+  });
+  return data;
+}
+
+export async function getWatchStatus(
+  recordId: string,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const { data } = await api.get<{ isWatching: boolean }>(`${BASE}/${recordId}/watch`, {
+    signal
+  });
+  return data.isWatching;
+}
+
+export async function watchRecord(recordId: string): Promise<boolean> {
+  const { data } = await api.post<{ isWatching: boolean }>(`${BASE}/${recordId}/watch`);
+  return data.isWatching;
+}
+
+export async function unwatchRecord(recordId: string): Promise<boolean> {
+  const { data } = await api.delete<{ isWatching: boolean }>(`${BASE}/${recordId}/watch`);
+  return data.isWatching;
+}

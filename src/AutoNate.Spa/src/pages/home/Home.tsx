@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import MyTasksPanel from "./MyTasksPanel";
 import TeamTasksPanel from "./TeamTasksPanel";
+import WatchedRecordsPanel from "./WatchedRecordsPanel";
 
 export default function Home() {
   return (
@@ -64,6 +65,9 @@ export default function Home() {
         </div>
         <div className="col-12">
           <TeamTasksPanel />
+        </div>
+        <div className="col-12">
+          <WatchedRecordsPanel />
         </div>
       </div>
     </>

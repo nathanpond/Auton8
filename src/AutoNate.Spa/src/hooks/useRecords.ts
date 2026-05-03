@@ -4,14 +4,20 @@ import {
   createRecord,
   getRecord,
   getRecordByKey,
+  getWatchStatus,
   listAssignedToMe,
   ListAssignedToMeParams,
   listRecordHistory,
   ListRecordsParams,
+  ListWatchedParams,
   listRecords,
+  listWatchedRecords,
   restoreRecord,
   searchRecords,
-  updateRecord
+  unwatchRecord,
+  updateRecord,
+  watchRecord,
+  WatchedRecordsPage
 } from "@/api/records";
 import {
   CreateRecordRequest,
@@ -117,5 +123,48 @@ export function useRestoreRecord() {
   return useMutation<RecordModel, Error, string>({
     mutationFn: restoreRecord,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["records"] })
+  });
+}
+
+export const watchedRecordsKey = (params: ListWatchedParams) =>
+  ["records", "watched-by-me", params] as const;
+export const watchStatusKey = (recordId: string) =>
+  ["records", "watch", recordId] as const;
+
+export function useWatchedRecords(params: ListWatchedParams = {}, enabled = true) {
+  return useQuery<WatchedRecordsPage>({
+    queryKey: watchedRecordsKey(params),
+    queryFn: ({ signal }) => listWatchedRecords(params, signal),
+    enabled
+  });
+}
+
+export function useWatchStatus(recordId: string | null) {
+  return useQuery<boolean>({
+    queryKey: watchStatusKey(recordId ?? "unset"),
+    queryFn: ({ signal }) => (recordId ? getWatchStatus(recordId, signal) : Promise.resolve(false)),
+    enabled: Boolean(recordId)
+  });
+}
+
+export function useWatchRecord(recordId: string) {
+  const qc = useQueryClient();
+  return useMutation<boolean, Error, void>({
+    mutationFn: () => watchRecord(recordId),
+    onSuccess: (isWatching) => {
+      qc.setQueryData(watchStatusKey(recordId), isWatching);
+      qc.invalidateQueries({ queryKey: ["records", "watched-by-me"] });
+    }
+  });
+}
+
+export function useUnwatchRecord(recordId: string) {
+  const qc = useQueryClient();
+  return useMutation<boolean, Error, void>({
+    mutationFn: () => unwatchRecord(recordId),
+    onSuccess: (isWatching) => {
+      qc.setQueryData(watchStatusKey(recordId), isWatching);
+      qc.invalidateQueries({ queryKey: ["records", "watched-by-me"] });
+    }
   });
 }

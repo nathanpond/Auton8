@@ -4,7 +4,10 @@ import {
   useArchiveRecord,
   useRecordByKey,
   useRestoreRecord,
-  useUpdateRecord
+  useUnwatchRecord,
+  useUpdateRecord,
+  useWatchRecord,
+  useWatchStatus
 } from "@/hooks/useRecords";
 import { useRecordTypeFields, useRecordTypes } from "@/hooks/useRecordTypes";
 import "./fields/renderers";
@@ -30,6 +33,9 @@ export default function RecordDetail() {
   const update = useUpdateRecord(record?.id ?? "");
   const archive = useArchiveRecord();
   const restore = useRestoreRecord();
+  const { data: isWatching = false } = useWatchStatus(record?.id ?? null);
+  const watch = useWatchRecord(record?.id ?? "");
+  const unwatch = useUnwatchRecord(record?.id ?? "");
 
   const [tab, setTab] = useState<Tab>("details");
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -48,6 +54,20 @@ export default function RecordDetail() {
       </div>
     );
   }
+
+  const toggleWatched = async () => {
+    try {
+      if (isWatching) {
+        await unwatch.mutateAsync();
+        setFlash({ kind: "success", message: "Unwatched." });
+      } else {
+        await watch.mutateAsync();
+        setFlash({ kind: "success", message: "Watching." });
+      }
+    } catch (err) {
+      setFlash({ kind: "error", message: describeError(err) });
+    }
+  };
 
   const toggleArchived = async () => {
     try {
@@ -76,7 +96,16 @@ export default function RecordDetail() {
             <Link to={`/records/${code}`}>&larr; Back to list</Link>
           </p>
         </div>
-        <div>
+        <div className="d-flex gap-2">
+          <button
+            type="button"
+            className={`btn ${isWatching ? "btn-primary" : "btn-outline-primary"}`}
+            onClick={toggleWatched}
+            disabled={watch.isPending || unwatch.isPending}
+          >
+            <i className={`fa ${isWatching ? "fa-eye-slash" : "fa-eye"} me-2`}></i>
+            {isWatching ? "Unwatch" : "Watch"}
+          </button>
           <button
             type="button"
             className={`btn ${record.isArchived ? "btn-outline-success" : "btn-outline-warning"}`}
