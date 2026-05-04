@@ -6,7 +6,11 @@
  */
 export type WorkflowCallbacks = {
   NotifyDiagramChanged?: () => void | Promise<void>;
-  NotifySelectionChanged?: (element: unknown) => void | Promise<void>;
+  // Fired when the user picks "Configure…" from the right-click context menu
+  // on a node or edge in the Workflow Studio. The element payload mirrors what
+  // describeBusinessObject returns so the React layer can route to the right
+  // editor modal.
+  RequestConfigureElement?: (element: unknown) => void | Promise<void>;
   // Single-task or single-assignee completion from the diagram context menu.
   CompleteTaskFromContextMenu?: (
     activityId: string,

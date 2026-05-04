@@ -301,7 +301,7 @@ export default function WorkflowStudio() {
     setDirty(true);
   }, []);
 
-  const onSelectionChanged = useCallback((raw: unknown) => {
+  const onRequestConfigure = useCallback((raw: unknown) => {
     const selection = raw as ElementSelection;
     const isTimerIntermediateCatch =
       !!selection &&
@@ -481,9 +481,9 @@ export default function WorkflowStudio() {
   const callbacks = useMemo(
     () => ({
       NotifyDiagramChanged: onDiagramChanged,
-      NotifySelectionChanged: onSelectionChanged
+      RequestConfigureElement: onRequestConfigure
     }),
-    [onDiagramChanged, onSelectionChanged]
+    [onDiagramChanged, onRequestConfigure]
   );
 
   const { containerRef, handle, loading: modelerLoading, error: modelerError } = useBpmnModeler({

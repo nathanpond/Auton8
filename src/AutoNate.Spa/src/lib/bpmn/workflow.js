@@ -491,12 +491,13 @@ export async function createModeler(container, xml, dotNetRef) {
 
   let suppressDirtyEvents = false;
   let lastImportDebug = null;
-  const notifySelectionChanged = async (element) => {
+  const cssScopeAttribute = getCssScopeAttribute(container);
+  const requestConfigure = async (element) => {
     if (!dotNetRef) {
       return;
     }
 
-    await dotNetRef.invokeMethodAsync("NotifySelectionChanged", describeElement(element));
+    await dotNetRef.invokeMethodAsync("RequestConfigureElement", describeElement(element));
   };
 
   modeler.on("commandStack.changed", async () => {
@@ -512,16 +513,75 @@ export async function createModeler(container, xml, dotNetRef) {
     const importResult = await modeler.importXML(xml);
     fitAndCenter(modeler);
     lastImportDebug = buildImportDebug(modeler, container, importResult?.warnings ?? []);
-    await notifySelectionChanged(null);
   } finally {
     suppressDirtyEvents = false;
   }
 
-  const onSelectionChanged = async (event) => {
-    await notifySelectionChanged(event?.newSelection?.[0] ?? null);
+  const configureMenu = createConfigureContextMenu(cssScopeAttribute);
+  const elementRegistry = modeler.get("elementRegistry", false);
+
+  // We listen at the DOM level rather than via eventBus("element.contextmenu")
+  // because bpmn-js's delegated event filter only fires for targets matching
+  // ".djs-element". Hovering a connection drops a bendpoints/segment-dragger
+  // overlay on top of the line — those overlays carry data-element-id but
+  // live in the .djs-overlays layer, so right-clicks on the connection never
+  // reach the eventBus handler. The DOM listener climbs to the nearest
+  // [data-element-id], which matches both shape groups and bendpoint
+  // overlays, so right-click on edges works regardless of overlay coverage.
+  const onContainerContextMenu = (originalEvent) => {
+    const target = originalEvent.target instanceof Element ? originalEvent.target : null;
+    if (!target) {
+      configureMenu.hide();
+      return;
+    }
+
+    const node = target.closest("[data-element-id]");
+    if (!node) {
+      configureMenu.hide();
+      return;
+    }
+
+    const elementId = node.getAttribute("data-element-id");
+    if (!elementId) {
+      configureMenu.hide();
+      return;
+    }
+
+    const element = elementRegistry?.get?.(elementId);
+    const businessObject = element?.businessObject;
+    if (!businessObject || typeof businessObject.$type !== "string") {
+      configureMenu.hide();
+      return;
+    }
+
+    // Right-clicking the canvas / pool / lane shouldn't surface "Configure…" —
+    // those aren't routable to any of our editor modals.
+    const $type = businessObject.$type;
+    if ($type === "bpmn:Process"
+      || $type === "bpmn:Collaboration"
+      || $type === "bpmn:Participant"
+      || $type === "bpmn:Lane"
+      || $type === "bpmn:LaneSet") {
+      configureMenu.hide();
+      return;
+    }
+
+    originalEvent.preventDefault();
+    originalEvent.stopPropagation();
+
+    configureMenu.show({
+      x: originalEvent.clientX,
+      y: originalEvent.clientY,
+      onConfigure: () => requestConfigure(element)
+    });
   };
 
-  eventBus?.on?.("selection.changed", onSelectionChanged);
+  const onCanvasClick = () => configureMenu.hide();
+  const onCanvasViewboxChanged = () => configureMenu.hide();
+
+  container?.addEventListener?.("contextmenu", onContainerContextMenu);
+  eventBus?.on?.("canvas.click", onCanvasClick);
+  eventBus?.on?.("canvas.viewbox.changed", onCanvasViewboxChanged);
 
   return {
     modeler,
@@ -531,7 +591,10 @@ export async function createModeler(container, xml, dotNetRef) {
       suppressDirtyEvents = value;
     },
     dispose() {
-      eventBus?.off?.("selection.changed", onSelectionChanged);
+      container?.removeEventListener?.("contextmenu", onContainerContextMenu);
+      eventBus?.off?.("canvas.click", onCanvasClick);
+      eventBus?.off?.("canvas.viewbox.changed", onCanvasViewboxChanged);
+      configureMenu.dispose();
       modeler.destroy();
     }
   };
@@ -1965,6 +2028,127 @@ export function disposeModeler(modelerHandle) {
 
 function getCssScopeAttribute(element) {
   return element?.getAttributeNames?.().find((name) => name.startsWith("b-")) || null;
+}
+
+// Minimal single-item context menu for the Workflow Studio. Right-clicking a
+// node or edge surfaces "Configure…" which the React layer routes to the
+// element's editor modal. Mirrors the structure of createExecutionContextMenu
+// but stays intentionally bare — no submenus, no async lookups — because the
+// only action is "open the modal for this element."
+function createConfigureContextMenu(cssScopeAttribute) {
+  const menu = document.createElement("div");
+  menu.className = "workflow-studio-context-menu";
+  menu.style.position = "fixed";
+  menu.style.zIndex = "1080";
+  if (cssScopeAttribute) {
+    menu.setAttribute(cssScopeAttribute, "");
+  }
+
+  const list = document.createElement("ul");
+  list.className = "dropdown-menu workflow-studio-context-menu__list";
+  list.hidden = true;
+  // Bootstrap's .dropdown-menu defaults to position:absolute and is normally
+  // placed by Popper. Without Popper, anchor it to the wrapper's origin so
+  // x/y coords on the wrapper place the list correctly.
+  list.style.position = "static";
+  list.style.margin = "0";
+  if (cssScopeAttribute) {
+    list.setAttribute(cssScopeAttribute, "");
+  }
+
+  menu.appendChild(list);
+  document.body.appendChild(menu);
+
+  let isDisposed = false;
+
+  const hide = () => {
+    if (isDisposed) {
+      return;
+    }
+
+    list.hidden = true;
+    list.classList.remove("show");
+    menu.setAttribute("aria-hidden", "true");
+    list.replaceChildren();
+  };
+
+  const setScope = (el) => {
+    if (cssScopeAttribute) {
+      el.setAttribute(cssScopeAttribute, "");
+    }
+  };
+
+  const buildItem = (label, handler) => {
+    const li = document.createElement("li");
+    setScope(li);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "dropdown-item workflow-studio-context-menu__item";
+    button.textContent = label;
+    button.addEventListener("click", handler);
+    setScope(button);
+    li.appendChild(button);
+    return li;
+  };
+
+  const onPointerDown = (event) => {
+    if (list.hidden) {
+      return;
+    }
+    // Right-clicks elsewhere are handled by the bpmn-js eventBus listener,
+    // which re-shows the menu at the new position. Suppress the close path
+    // here so we don't flicker.
+    if (event.button === 2) {
+      return;
+    }
+    if (menu.contains(event.target)) {
+      return;
+    }
+    hide();
+  };
+
+  const onWindowResize = () => hide();
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      hide();
+    }
+  };
+
+  document.addEventListener("pointerdown", onPointerDown, true);
+  window.addEventListener("resize", onWindowResize);
+  window.addEventListener("keydown", onKeyDown);
+
+  return {
+    show({ x, y, onConfigure }) {
+      if (isDisposed) {
+        return;
+      }
+
+      list.replaceChildren();
+      list.appendChild(buildItem("Configure…", async () => {
+        hide();
+        await onConfigure();
+      }));
+
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+      list.hidden = false;
+      list.classList.add("show");
+      menu.setAttribute("aria-hidden", "false");
+    },
+    hide,
+    dispose() {
+      if (isDisposed) {
+        return;
+      }
+
+      isDisposed = true;
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("resize", onWindowResize);
+      window.removeEventListener("keydown", onKeyDown);
+      menu.remove();
+    }
+  };
 }
 
 function createExecutionContextMenu(dotNetRef, cssScopeAttribute, contextOptions) {
