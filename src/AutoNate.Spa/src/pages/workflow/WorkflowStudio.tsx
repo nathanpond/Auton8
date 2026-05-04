@@ -310,6 +310,11 @@ export default function WorkflowStudio() {
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
 
+  const sortedWorkflows = useMemo(
+    () => [...workflows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [workflows]
+  );
+
   // Seed currentModel from the first workflow once the list query resolves. Gating on
   // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
   useEffect(() => {
@@ -987,7 +992,7 @@ export default function WorkflowStudio() {
                 <option value="">
                   {workflows.length === 0 ? "No workflow models yet" : "Select a workflow model"}
                 </option>
-                {workflows.map((w) => (
+                {sortedWorkflows.map((w) => (
                   <option key={w.id} value={w.id}>
                     {w.name}
                   </option>
@@ -3591,7 +3596,7 @@ const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
   },
   {
     category: "Gateways",
-    items: ["Exclusive Gateway (XOR)"]
+    items: ["Exclusive Gateway (XOR)", "Inclusive Gateway (OR)", "Parallel Gateway (AND)"]
   },
   {
     category: "Flows",
@@ -3665,12 +3670,7 @@ const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
   },
   {
     category: "Gateways",
-    items: [
-      "Parallel Gateway (AND)",
-      "Inclusive Gateway (OR)",
-      "Event-Based Gateway",
-      "Complex Gateway"
-    ]
+    items: ["Event-Based Gateway", "Complex Gateway"]
   },
   {
     category: "Activity Markers",
