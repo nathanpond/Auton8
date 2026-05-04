@@ -427,8 +427,35 @@
     color: #b03a2e;
 }
 
-.workflow-script-task-modal {
-    max-width: min(42rem, calc(100vw - 2rem));
+.workflow-modal.workflow-script-task-modal {
+    width: 80vw;
+    max-width: 80vw;
+    height: 80vh;
+    max-height: 80vh;
+    grid-template-rows: auto auto auto 1fr auto;
+    overflow: hidden;
+}
+
+.workflow-modal.workflow-script-task-modal > .workflow-field {
+    min-height: 0;
+    min-width: 0;
+}
+
+.workflow-modal.workflow-script-task-modal .workflow-script-task-editor {
+    flex: 1;
+    min-height: 0;
+    height: auto;
+}
+
+.workflow-script-task-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.85rem;
+}
+
+.workflow-script-task-row .workflow-field {
+    flex: 1 1 14rem;
+    min-width: 0;
 }
 
 .workflow-sequence-flow-modal {
@@ -628,11 +655,27 @@
 }
 
 .workflow-script-task-editor {
-    min-height: 18rem;
+    min-height: 22rem;
+    height: 60vh;
+    border: 1px solid #d9e2ec;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: #fff;
+}
+
+.workflow-script-task-editor .cm-editor {
+    height: 100%;
     font-family: "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 0.92rem;
     line-height: 1.45;
-    resize: vertical;
+}
+
+.workflow-script-task-editor .cm-editor.cm-focused {
+    outline: none;
+}
+
+.workflow-script-task-editor .cm-scroller {
+    font-family: inherit;
 }
 
 .workflow-expression-editor {

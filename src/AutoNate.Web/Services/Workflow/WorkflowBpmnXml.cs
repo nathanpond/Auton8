@@ -36,8 +36,6 @@ public static partial class WorkflowBpmnXml
     ];
     private static readonly HashSet<string> UnsupportedRuntimeControlElementNames =
     [
-        "inclusiveGateway",
-        "parallelGateway",
         "eventBasedGateway",
         "complexGateway",
         "boundaryEvent",
@@ -174,16 +172,11 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));
             errors.AddRange(BuildServiceTaskValidationErrors(document));
 
-            if (errors.Count > 0)
-            {
-                return new WorkflowBpmnValidationResult(
-                    errors,
-                    BuildUnsupportedRuntimeWarnings(document));
-            }
+            var warnings = new List<string>();
+            warnings.AddRange(BuildUnsupportedRuntimeWarnings(document));
+            warnings.AddRange(BuildGatewayWarnings(document));
 
-            return new WorkflowBpmnValidationResult(
-                [],
-                BuildUnsupportedRuntimeWarnings(document));
+            return new WorkflowBpmnValidationResult(errors, warnings);
         }
         catch (Exception exception)
         {
@@ -1252,6 +1245,61 @@ public static partial class WorkflowBpmnXml
         }
 
         return warnings;
+    }
+
+    private static IReadOnlyList<string> BuildGatewayWarnings(XDocument document)
+    {
+        var warnings = new List<string>();
+
+        var sequenceFlows = document.Descendants(BpmnNamespace + "sequenceFlow").ToList();
+        var flowsBySource = sequenceFlows
+            .GroupBy(f => f.Attribute("sourceRef")?.Value ?? string.Empty)
+            .Where(g => !string.IsNullOrEmpty(g.Key))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var inclusive in document.Descendants(BpmnNamespace + "inclusiveGateway"))
+        {
+            var gatewayId = inclusive.Attribute("id")?.Value ?? string.Empty;
+            if (!flowsBySource.TryGetValue(gatewayId, out var outgoing) || outgoing.Count == 0)
+            {
+                continue;
+            }
+
+            var hasDefault = !string.IsNullOrWhiteSpace(inclusive.Attribute("default")?.Value);
+            var hasAnyCondition = outgoing.Any(f => f.Element(BpmnNamespace + "conditionExpression") is not null);
+
+            if (!hasDefault && !hasAnyCondition)
+            {
+                warnings.Add($"Inclusive gateway '{GatewayLabel(inclusive)}' has no conditions on its outgoing flows and no default flow. All outgoing paths will fire at runtime.");
+            }
+        }
+
+        foreach (var parallel in document.Descendants(BpmnNamespace + "parallelGateway"))
+        {
+            var gatewayId = parallel.Attribute("id")?.Value ?? string.Empty;
+            if (!flowsBySource.TryGetValue(gatewayId, out var outgoing) || outgoing.Count == 0)
+            {
+                continue;
+            }
+
+            if (outgoing.Any(f => f.Element(BpmnNamespace + "conditionExpression") is not null))
+            {
+                warnings.Add($"Parallel gateway '{GatewayLabel(parallel)}' has condition expressions on outgoing flows. Flowable ignores conditions on parallel-gateway outflows; remove them to clarify intent.");
+            }
+        }
+
+        return warnings;
+    }
+
+    private static string GatewayLabel(XElement gateway)
+    {
+        var name = gateway.Attribute("name")?.Value;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            return name;
+        }
+
+        return gateway.Attribute("id")?.Value ?? "(unnamed)";
     }
 
     private static string ToFriendlyElementName(string localName)

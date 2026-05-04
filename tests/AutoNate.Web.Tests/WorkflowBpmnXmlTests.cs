@@ -1598,4 +1598,188 @@ public sealed class WorkflowBpmnXmlTests
             result.Warnings,
             w => w.Contains("intermediate catch events", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void ValidateProcess_DoesNotWarn_ForInclusiveGatewayWithConditions()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="inclusive_flow" name="Inclusive Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1" />
+                               <bpmn:inclusiveGateway id="Gateway_1" name="Branches" />
+                               <bpmn:endEvent id="EndEvent_A" />
+                               <bpmn:endEvent id="EndEvent_B" />
+                               <bpmn:sequenceFlow id="Flow_Start" sourceRef="StartEvent_1" targetRef="Gateway_1" />
+                               <bpmn:sequenceFlow id="Flow_A" sourceRef="Gateway_1" targetRef="EndEvent_A">
+                                 <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${pathA}</bpmn:conditionExpression>
+                               </bpmn:sequenceFlow>
+                               <bpmn:sequenceFlow id="Flow_B" sourceRef="Gateway_1" targetRef="EndEvent_B">
+                                 <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${pathB}</bpmn:conditionExpression>
+                               </bpmn:sequenceFlow>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("inclusive gateways", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("Inclusive gateway 'Branches'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_DoesNotWarn_ForParallelGateway()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="parallel_flow" name="Parallel Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1" />
+                               <bpmn:parallelGateway id="Gateway_1" name="Fork" />
+                               <bpmn:endEvent id="EndEvent_A" />
+                               <bpmn:endEvent id="EndEvent_B" />
+                               <bpmn:sequenceFlow id="Flow_Start" sourceRef="StartEvent_1" targetRef="Gateway_1" />
+                               <bpmn:sequenceFlow id="Flow_A" sourceRef="Gateway_1" targetRef="EndEvent_A" />
+                               <bpmn:sequenceFlow id="Flow_B" sourceRef="Gateway_1" targetRef="EndEvent_B" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("parallel gateways", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("Parallel gateway", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_Warns_ForInclusiveGatewayWithoutConditionsOrDefault()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="inclusive_flow" name="Inclusive Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1" />
+                               <bpmn:inclusiveGateway id="Gateway_1" name="Branches" />
+                               <bpmn:endEvent id="EndEvent_A" />
+                               <bpmn:endEvent id="EndEvent_B" />
+                               <bpmn:sequenceFlow id="Flow_Start" sourceRef="StartEvent_1" targetRef="Gateway_1" />
+                               <bpmn:sequenceFlow id="Flow_A" sourceRef="Gateway_1" targetRef="EndEvent_A" />
+                               <bpmn:sequenceFlow id="Flow_B" sourceRef="Gateway_1" targetRef="EndEvent_B" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+        Assert.Contains(result.Warnings, w => w.Contains("Inclusive gateway 'Branches'", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, w => w.Contains("no conditions on its outgoing flows and no default flow", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_DoesNotWarn_ForInclusiveGatewayWithDefaultFlow()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="inclusive_flow" name="Inclusive Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1" />
+                               <bpmn:inclusiveGateway id="Gateway_1" name="Branches" default="Flow_A" />
+                               <bpmn:endEvent id="EndEvent_A" />
+                               <bpmn:endEvent id="EndEvent_B" />
+                               <bpmn:sequenceFlow id="Flow_Start" sourceRef="StartEvent_1" targetRef="Gateway_1" />
+                               <bpmn:sequenceFlow id="Flow_A" sourceRef="Gateway_1" targetRef="EndEvent_A" />
+                               <bpmn:sequenceFlow id="Flow_B" sourceRef="Gateway_1" targetRef="EndEvent_B" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("Inclusive gateway", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateProcess_Warns_ForParallelGatewayWithConditionedOutflow()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="parallel_flow" name="Parallel Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1" />
+                               <bpmn:parallelGateway id="Gateway_1" name="Fork" />
+                               <bpmn:endEvent id="EndEvent_A" />
+                               <bpmn:endEvent id="EndEvent_B" />
+                               <bpmn:sequenceFlow id="Flow_Start" sourceRef="StartEvent_1" targetRef="Gateway_1" />
+                               <bpmn:sequenceFlow id="Flow_A" sourceRef="Gateway_1" targetRef="EndEvent_A">
+                                 <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${shouldGo}</bpmn:conditionExpression>
+                               </bpmn:sequenceFlow>
+                               <bpmn:sequenceFlow id="Flow_B" sourceRef="Gateway_1" targetRef="EndEvent_B" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Empty(result.Errors);
+        Assert.Contains(result.Warnings, w => w.Contains("Parallel gateway 'Fork'", StringComparison.Ordinal));
+        Assert.Contains(result.Warnings, w => w.Contains("ignores conditions on parallel-gateway outflows", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_PreservesConditionExpression_OnInclusiveGatewayOutflow()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="inclusive_flow" name="Inclusive Flow" isExecutable="true">
+                               <bpmn:startEvent id="StartEvent_1" />
+                               <bpmn:inclusiveGateway id="Gateway_1" />
+                               <bpmn:endEvent id="EndEvent_1" />
+                               <bpmn:sequenceFlow id="Flow_1" sourceRef="Gateway_1" targetRef="EndEvent_1" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "inclusive_flow",
+            "Inclusive Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "Flow_1",
+                    "bpmn:SequenceFlow",
+                    "High risk",
+                    ConditionExpression: "${riskLevel == 'high'}")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace xsi = "http://www.w3.org/2001/XMLSchema-instance";
+        var flow = document.Descendants(bpmn + "sequenceFlow").Single();
+        var expression = flow.Element(bpmn + "conditionExpression");
+
+        Assert.Equal("High risk", flow.Attribute("name")?.Value);
+        Assert.NotNull(expression);
+        Assert.Equal("bpmn:tFormalExpression", expression!.Attribute(xsi + "type")?.Value);
+        Assert.Equal("${riskLevel == 'high'}", expression.Value);
+    }
 }

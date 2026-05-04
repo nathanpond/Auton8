@@ -1086,6 +1086,27 @@ function describeBusinessObject(businessObject) {
     description.behaviorKey = serviceTask.behaviorKey;
   }
 
+  if (businessObject.$type === "bpmn:ExclusiveGateway" || businessObject.$type === "bpmn:InclusiveGateway") {
+    // Only Exclusive and Inclusive gateways carry a `default` outgoing flow.
+    // Surface it (and the candidate outgoing flows) so the studio panel can
+    // render a default-flow picker.
+    const outgoing = Array.isArray(businessObject.outgoing) ? businessObject.outgoing : [];
+    description.defaultFlowId = typeof businessObject.default?.id === "string" ? businessObject.default.id : null;
+    description.outgoingFlows = outgoing
+      .filter((flow) => flow?.$type === "bpmn:SequenceFlow" && typeof flow.id === "string")
+      .map((flow) => ({
+        id: flow.id,
+        name: typeof flow.name === "string" ? flow.name : null
+      }));
+  }
+
+  if (businessObject.$type === "bpmn:SequenceFlow") {
+    // Surface the source element's $type so the sequence-flow editor can
+    // suppress the condition field for parallel-gateway outflows (Flowable
+    // ignores conditions there at runtime).
+    description.sourceType = typeof businessObject.sourceRef?.$type === "string" ? businessObject.sourceRef.$type : null;
+  }
+
   return description;
 }
 
@@ -1661,6 +1682,44 @@ export function updateSequenceFlowProperties(modelerHandle, flow) {
   modeling.updateProperties(element, {
     name: normalizeOptionalString(flow.name),
     conditionExpression
+  });
+}
+
+export function updateGatewayDefaultFlow(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the gateway.");
+  }
+
+  const gatewayElement = elementRegistry.get(payload.id);
+  if (!gatewayElement?.businessObject) {
+    throw new Error(`Gateway '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const businessType = gatewayElement.businessObject.$type;
+  if (businessType !== "bpmn:ExclusiveGateway" && businessType !== "bpmn:InclusiveGateway") {
+    throw new Error(`Default outgoing flow is only supported on exclusive or inclusive gateways (got ${businessType}).`);
+  }
+
+  const defaultFlowId = normalizeOptionalString(payload.defaultFlowId);
+  let defaultElement;
+  if (defaultFlowId) {
+    const flowElement = elementRegistry.get(defaultFlowId);
+    if (!flowElement?.businessObject || flowElement.businessObject.$type !== "bpmn:SequenceFlow") {
+      throw new Error(`Sequence flow '${defaultFlowId}' is no longer available in the diagram.`);
+    }
+    // bpmn-js expects the SequenceFlow business object (not the element) when
+    // setting `default` so it can serialise as a reference attribute.
+    defaultElement = flowElement.businessObject;
+  } else {
+    // Passing undefined removes the attribute entirely on save.
+    defaultElement = undefined;
+  }
+
+  modeling.updateProperties(gatewayElement, {
+    default: defaultElement
   });
 }
 

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import CodeMirror from "@uiw/react-codemirror";
+import { javascript } from "@codemirror/lang-javascript";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
 import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
 import {
@@ -60,6 +62,20 @@ type SequenceFlowEditor = {
   type: string;
   name: string;
   conditionExpression: string;
+  sourceType: string | null;
+};
+
+type GatewayOutgoingFlow = {
+  id: string;
+  name: string;
+};
+
+type GatewayEditor = {
+  id: string;
+  type: string;
+  name: string;
+  defaultFlowId: string;
+  outgoingFlows: GatewayOutgoingFlow[];
 };
 
 type SignalStartEventEditor = {
@@ -156,6 +172,9 @@ type ElementSelection = {
   timerDate?: string | null;
   serviceTaskKind?: string | null;
   behaviorKey?: string | null;
+  defaultFlowId?: string | null;
+  outgoingFlows?: Array<{ id: string; name: string | null }> | null;
+  sourceType?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -288,6 +307,7 @@ export default function WorkflowStudio() {
   const [timerIntermediateEditor, setTimerIntermediateEditor] =
     useState<TimerIntermediateCatchEventEditor | null>(null);
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
+  const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
 
   // Seed currentModel from the first workflow once the list query resolves. Gating on
@@ -333,6 +353,7 @@ export default function WorkflowStudio() {
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setServiceTaskEditor(null);
+      setGatewayEditor(null);
       setGenericEditor(null);
       return;
     }
@@ -367,6 +388,7 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGatewayEditor(null);
       setGenericEditor(null);
       return;
     }
@@ -393,6 +415,7 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGatewayEditor(null);
       setGenericEditor(null);
       return;
     }
@@ -417,6 +440,7 @@ export default function WorkflowStudio() {
       setSignalStartEditor(null);
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
+      setGatewayEditor(null);
       setGenericEditor(null);
       return;
     }
@@ -435,15 +459,47 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGatewayEditor(null);
       setGenericEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
         type: selection.type,
         name: selection.name ?? "",
-        conditionExpression: selection.conditionExpression ?? ""
+        conditionExpression: selection.conditionExpression ?? "",
+        sourceType: selection.sourceType ?? null
       });
       setScriptTaskEditor(null);
+      setUserTaskEditor(null);
+      setSignalStartEditor(null);
+      setTimerStartEditor(null);
+      setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
+      setGatewayEditor(null);
+      setGenericEditor(null);
+    } else if (
+      selection &&
+      (selection.type === "bpmn:ExclusiveGateway" || selection.type === "bpmn:InclusiveGateway")
+    ) {
+      const outgoingFlows = (selection.outgoingFlows ?? []).map((flow) => ({
+        id: flow.id,
+        name: flow.name ?? ""
+      }));
+      const defaultFlowId = selection.defaultFlowId ?? "";
+      // If the previously stored default flow no longer exists (e.g. the user
+      // deleted it), drop the stale id so the picker renders "(none)".
+      const validDefaultFlowId = outgoingFlows.some((flow) => flow.id === defaultFlowId)
+        ? defaultFlowId
+        : "";
+      setGatewayEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        defaultFlowId: validDefaultFlowId,
+        outgoingFlows
+      });
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setSignalStartEditor(null);
       setTimerStartEditor(null);
@@ -480,6 +536,7 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGatewayEditor(null);
       setGenericEditor(null);
     } else if (selection) {
       setGenericEditor({
@@ -494,6 +551,7 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGatewayEditor(null);
     } else {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
@@ -502,6 +560,7 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGatewayEditor(null);
       setGenericEditor(null);
     }
   }, []);
@@ -539,6 +598,7 @@ export default function WorkflowStudio() {
     setTimerStartEditor(null);
     setTimerIntermediateEditor(null);
     setServiceTaskEditor(null);
+    setGatewayEditor(null);
     setGenericEditor(null);
     // Fire-and-forget audit ping. The studio reuses one workflow list call
     // for the whole session, so without this the audit log would only ever
@@ -780,6 +840,22 @@ export default function WorkflowStudio() {
         name: genericEditor.name
       });
       setGenericEditor(null);
+    });
+
+  const applyGateway = () =>
+    runBusy("applying gateway changes", async () => {
+      if (!handle || !gatewayEditor) {
+        throw new Error("Select a gateway before applying changes.");
+      }
+      await workflow.updateGenericElementName(handle, {
+        id: gatewayEditor.id,
+        name: gatewayEditor.name
+      });
+      await workflow.updateGatewayDefaultFlow(handle, {
+        id: gatewayEditor.id,
+        defaultFlowId: gatewayEditor.defaultFlowId
+      });
+      setGatewayEditor(null);
     });
 
   const applyUserTask = () =>
@@ -1141,6 +1217,19 @@ export default function WorkflowStudio() {
             setServiceTaskEditor(null);
           }}
           onApply={applyServiceTask}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {gatewayEditor && (
+        <GatewayModal
+          editor={gatewayEditor}
+          onChange={setGatewayEditor}
+          onClose={() => {
+            if (busy) return;
+            setGatewayEditor(null);
+          }}
+          onApply={applyGateway}
           disabled={!!busy || !handle}
         />
       )}
@@ -1900,39 +1989,69 @@ function ScriptTaskModal({
           <span className="workflow-script-task-pill">{editor.type}</span>
         </div>
 
-        <label className="workflow-field">
-          <span>Task Name</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-          />
-        </label>
+        <div className="workflow-script-task-row">
+          <label className="workflow-field">
+            <span>Task Name</span>
+            <input
+              className="form-control"
+              value={editor.name}
+              onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            />
+          </label>
 
-        <label className="workflow-field">
-          <span>Script Format</span>
-          <input className="form-control" value="javascript" readOnly />
-        </label>
+          <label className="workflow-field">
+            <span>Script Format</span>
+            <input className="form-control" value="javascript" readOnly />
+          </label>
 
-        <label className="workflow-field">
-          <span>Result Variable</span>
-          <input
-            className="form-control"
-            value={editor.resultVariable}
-            onChange={(e) => onChange({ ...editor, resultVariable: e.target.value })}
-          />
-        </label>
+          <label className="workflow-field">
+            <span>Result Variable</span>
+            <input
+              className="form-control"
+              value={editor.resultVariable}
+              onChange={(e) => onChange({ ...editor, resultVariable: e.target.value })}
+            />
+          </label>
+        </div>
 
-        <label className="workflow-field">
+        <div className="workflow-field">
           <span>Script Body</span>
-          <textarea
-            className="form-control workflow-script-task-editor"
-            rows={12}
-            spellCheck={false}
-            value={editor.script}
-            onChange={(e) => onChange({ ...editor, script: e.target.value })}
-          />
-        </label>
+          <div className="workflow-script-task-editor">
+            <CodeMirror
+              value={editor.script}
+              onChange={(value) => onChange({ ...editor, script: value })}
+              height="100%"
+              style={{ height: "100%" }}
+              extensions={[javascript()]}
+              basicSetup={{
+                lineNumbers: true,
+                highlightActiveLineGutter: true,
+                highlightSpecialChars: true,
+                history: true,
+                foldGutter: true,
+                drawSelection: true,
+                dropCursor: true,
+                allowMultipleSelections: true,
+                indentOnInput: true,
+                syntaxHighlighting: true,
+                bracketMatching: true,
+                closeBrackets: true,
+                autocompletion: true,
+                rectangularSelection: true,
+                crosshairCursor: true,
+                highlightActiveLine: true,
+                highlightSelectionMatches: true,
+                closeBracketsKeymap: true,
+                defaultKeymap: true,
+                searchKeymap: true,
+                historyKeymap: true,
+                foldKeymap: true,
+                completionKeymap: true,
+                lintKeymap: true
+              }}
+            />
+          </div>
+        </div>
 
         <div className="workflow-modal-actions">
           <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
@@ -3032,21 +3151,114 @@ function SequenceFlowModal({
           />
         </label>
 
+        {editor.sourceType === "bpmn:ParallelGateway" ? (
+          <p className="workflow-modal-note">
+            This flow leaves a parallel gateway. Conditions are ignored on parallel-gateway
+            outflows &mdash; every outgoing path always fires, so there&apos;s nothing to gate.
+          </p>
+        ) : (
+          <>
+            <label className="workflow-field">
+              <span>Condition Expression</span>
+              <textarea
+                className="form-control workflow-expression-editor"
+                rows={6}
+                spellCheck={false}
+                value={editor.conditionExpression}
+                onChange={(e) => onChange({ ...editor, conditionExpression: e.target.value })}
+              />
+            </label>
+
+            <p className="workflow-modal-note">
+              Leave the condition blank for an unconditional path. For exclusive and inclusive
+              gateways, put the condition on the outgoing branch itself, not on the gateway node.
+            </p>
+          </>
+        )}
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GatewayModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: GatewayEditor;
+  onChange: (next: GatewayEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const heading = editor.type === "bpmn:InclusiveGateway" ? "Inclusive Gateway" : "Exclusive Gateway";
+  return (
+    <div className="workflow-modal-backdrop">
+      <div className="workflow-modal" role="dialog" aria-modal="true">
+        <div className="workflow-modal-header">
+          <div>
+            <h2>{heading}</h2>
+            <p className="workflow-modal-copy">
+              Conditions live on the outgoing flows themselves &mdash; click an outgoing arrow to
+              edit them. The default flow runs when no other condition matches.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
         <label className="workflow-field">
-          <span>Condition Expression</span>
-          <textarea
-            className="form-control workflow-expression-editor"
-            rows={6}
-            spellCheck={false}
-            value={editor.conditionExpression}
-            onChange={(e) => onChange({ ...editor, conditionExpression: e.target.value })}
+          <span>Name</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
           />
         </label>
 
-        <p className="workflow-modal-note">
-          Leave the condition blank for an unconditional path. For exclusive gateways, put the
-          condition on the outgoing branch itself, not on the gateway node.
-        </p>
+        <label className="workflow-field">
+          <span>Default Outgoing Flow</span>
+          <select
+            className="form-select"
+            value={editor.defaultFlowId}
+            onChange={(e) => onChange({ ...editor, defaultFlowId: e.target.value })}
+            disabled={editor.outgoingFlows.length === 0}
+          >
+            <option value="">(none)</option>
+            {editor.outgoingFlows.map((flow) => (
+              <option key={flow.id} value={flow.id}>
+                {flow.name ? `${flow.name} (${flow.id})` : flow.id}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {editor.outgoingFlows.length === 0 ? (
+          <p className="workflow-modal-note">
+            This gateway has no outgoing flows yet. Draw at least one outgoing arrow before picking
+            a default.
+          </p>
+        ) : (
+          <p className="workflow-modal-note">
+            The default flow fires only when none of the other outgoing flows have a matching
+            condition. Leave it as &quot;(none)&quot; if every path is conditional.
+          </p>
+        )}
 
         <div className="workflow-modal-actions">
           <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
