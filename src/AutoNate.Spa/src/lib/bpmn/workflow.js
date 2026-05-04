@@ -1664,6 +1664,24 @@ export function updateSequenceFlowProperties(modelerHandle, flow) {
   });
 }
 
+export function updateGenericElementName(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the element.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject) {
+    throw new Error(`Element '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name)
+  });
+}
+
 export async function loadXml(modelerHandle, xml) {
   modelerHandle.setSuppressDirtyEvents(true);
   try {

@@ -108,6 +108,12 @@ type ServiceTaskEditor = {
   behaviorKey: string;
 };
 
+type GenericElementEditor = {
+  id: string;
+  type: string;
+  name: string;
+};
+
 const DEFAULT_SIGNAL_TOPIC = "workflow.signals";
 
 type AssignmentMode = "picker" | "expression";
@@ -282,6 +288,7 @@ export default function WorkflowStudio() {
   const [timerIntermediateEditor, setTimerIntermediateEditor] =
     useState<TimerIntermediateCatchEventEditor | null>(null);
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
+  const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
 
   // Seed currentModel from the first workflow once the list query resolves. Gating on
   // workflowsLoaded prevents a false "no workflows yet" flash while the query is in flight.
@@ -326,6 +333,7 @@ export default function WorkflowStudio() {
       setSequenceFlowEditor(null);
       setUserTaskEditor(null);
       setServiceTaskEditor(null);
+      setGenericEditor(null);
       return;
     }
     const isTimerStart =
@@ -359,6 +367,7 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGenericEditor(null);
       return;
     }
     const isSignalStart =
@@ -384,6 +393,7 @@ export default function WorkflowStudio() {
       setUserTaskEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGenericEditor(null);
       return;
     }
     const isServiceTask =
@@ -407,6 +417,7 @@ export default function WorkflowStudio() {
       setSignalStartEditor(null);
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
+      setGenericEditor(null);
       return;
     }
     if (selection && selection.type === "bpmn:ScriptTask") {
@@ -424,6 +435,7 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGenericEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -437,6 +449,7 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGenericEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -467,6 +480,20 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGenericEditor(null);
+    } else if (selection) {
+      setGenericEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? ""
+      });
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setSignalStartEditor(null);
+      setTimerStartEditor(null);
+      setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
     } else {
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
@@ -475,6 +502,7 @@ export default function WorkflowStudio() {
       setTimerStartEditor(null);
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
+      setGenericEditor(null);
     }
   }, []);
 
@@ -511,6 +539,7 @@ export default function WorkflowStudio() {
     setTimerStartEditor(null);
     setTimerIntermediateEditor(null);
     setServiceTaskEditor(null);
+    setGenericEditor(null);
     // Fire-and-forget audit ping. The studio reuses one workflow list call
     // for the whole session, so without this the audit log would only ever
     // see the list-view event; this ensures one ModelViewed event per
@@ -739,6 +768,18 @@ export default function WorkflowStudio() {
         behaviorKey
       });
       setServiceTaskEditor(null);
+    });
+
+  const applyGeneric = () =>
+    runBusy("applying element changes", async () => {
+      if (!handle || !genericEditor) {
+        throw new Error("Select an element before applying changes.");
+      }
+      await workflow.updateGenericElementName(handle, {
+        id: genericEditor.id,
+        name: genericEditor.name
+      });
+      setGenericEditor(null);
     });
 
   const applyUserTask = () =>
@@ -1100,6 +1141,19 @@ export default function WorkflowStudio() {
             setServiceTaskEditor(null);
           }}
           onApply={applyServiceTask}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {genericEditor && (
+        <GenericElementModal
+          editor={genericEditor}
+          onChange={setGenericEditor}
+          onClose={() => {
+            if (busy) return;
+            setGenericEditor(null);
+          }}
+          onApply={applyGeneric}
           disabled={!!busy || !handle}
         />
       )}
@@ -1755,12 +1809,11 @@ function CreateWorkflowModal({
   };
 
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -1825,12 +1878,11 @@ function ScriptTaskModal({
   disabled: boolean;
 }) {
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal workflow-script-task-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -1957,12 +2009,11 @@ function SignalStartEventModal({
   const missingEventType = editor.signalName.trim().length === 0;
 
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -2124,12 +2175,11 @@ function TimerStartEventModal({
     (editor.rawCronOverride && editor.rawCronText.trim().length === 0);
 
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -2531,12 +2581,11 @@ function TimerIntermediateCatchEventModal({
           .length === 0;
 
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -2756,12 +2805,11 @@ function ServiceTaskModal({
   const selected = behaviors.find((b) => b.key === editor.behaviorKey) ?? null;
 
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -2865,6 +2913,73 @@ function ServiceTaskModal({
   );
 }
 
+// Humanize a BPMN moddle type (e.g. "bpmn:ExclusiveGateway") for the modal
+// header. The fallback editor catches every type without a dedicated modal,
+// so this is the only place users see the raw $type rendered as a label.
+function humanizeBpmnType(type: string): string {
+  const local = type.includes(":") ? type.split(":")[1] : type;
+  return local.replace(/([A-Z])/g, " $1").trim();
+}
+
+function GenericElementModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: GenericElementEditor;
+  onChange: (next: GenericElementEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const heading = humanizeBpmnType(editor.type);
+  return (
+    <div className="workflow-modal-backdrop">
+      <div
+        className="workflow-modal"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="workflow-modal-header">
+          <div>
+            <h2>{heading}</h2>
+            <p className="workflow-modal-copy">
+              Edit the display name of this element. Additional configuration for this node type
+              will appear here as it ships.
+            </p>
+          </div>
+          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
+        </div>
+
+        <div className="workflow-script-task-meta">
+          <span className="workflow-script-task-pill">{editor.id}</span>
+          <span className="workflow-script-task-pill">{editor.type}</span>
+        </div>
+
+        <label className="workflow-field">
+          <span>Name</span>
+          <input
+            className="form-control"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+          />
+        </label>
+
+        <div className="workflow-modal-actions">
+          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function pad2(value: string): string {
   const n = parseInt(value, 10);
   if (!Number.isFinite(n)) return "00";
@@ -2885,12 +3000,11 @@ function SequenceFlowModal({
   disabled: boolean;
 }) {
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal workflow-sequence-flow-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -2980,12 +3094,11 @@ function UserTaskModal({
   })();
 
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal workflow-user-task-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
@@ -3370,12 +3483,11 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
   const comingSoonCount = COMING_SOON_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
 
   return (
-    <div className="workflow-modal-backdrop" onClick={onClose}>
+    <div className="workflow-modal-backdrop">
       <div
         className="workflow-modal workflow-bpmn-types-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="workflow-modal-header">
           <div>
