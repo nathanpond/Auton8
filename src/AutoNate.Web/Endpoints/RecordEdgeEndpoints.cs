@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
@@ -155,7 +157,8 @@ public static class RecordEdgeEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.DefineFields);
 
         typeGroup.MapPatch("/{id:guid}", async (
             Guid id,
@@ -191,7 +194,8 @@ public static class RecordEdgeEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.DefineFields);
 
         typeGroup.MapDelete("/{id:guid}", async (
             Guid id, IRecordEdgeTypeStore store,
@@ -210,7 +214,8 @@ public static class RecordEdgeEndpoints
                 return Results.Ok(ToDto(archived));
             }
             catch (RecordEdgeTypeNotFoundException) { return Results.NotFound(); }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.DefineFields);
 
         typeGroup.MapPost("/{id:guid}/restore", async (
             Guid id, IRecordEdgeTypeStore store,
@@ -229,7 +234,8 @@ public static class RecordEdgeEndpoints
                 return Results.Ok(ToDto(restored));
             }
             catch (RecordEdgeTypeNotFoundException) { return Results.NotFound(); }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.DefineFields);
 
         typeGroup.MapGet("/{id:guid}/fields", async (
             Guid id, IRecordEdgeTypeStore store,
@@ -273,7 +279,8 @@ public static class RecordEdgeEndpoints
             }
             catch (RecordEdgeTypeNotFoundException) { return Results.NotFound(); }
             catch (RecordEdgeValidationException ex) { return Results.BadRequest(new { message = ex.Message }); }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.DefineFields);
 
         typeGroup.MapPatch("/{id:guid}/fields/{fieldId:guid}", async (
             Guid id,
@@ -300,7 +307,8 @@ public static class RecordEdgeEndpoints
                 return Results.Ok(ToDto(updated));
             }
             catch (RecordEdgeValidationException ex) { return Results.BadRequest(new { message = ex.Message }); }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.DefineFields);
 
         typeGroup.MapDelete("/{id:guid}/fields/{fieldId:guid}", async (
             Guid id,
@@ -318,7 +326,8 @@ public static class RecordEdgeEndpoints
                 details: null,
                 ct);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.DefineFields);
 
         // ---- Edge instances ----
         var edgeGroup = app.MapGroup("/api/record-edges").RequireAuthorization();

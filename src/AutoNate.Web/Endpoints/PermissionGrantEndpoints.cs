@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Events;
 
@@ -39,7 +41,7 @@ public static class PermissionGrantEndpoints
                 details: new { resultCount = all.Count, scope = "all" },
                 ct);
             return Results.Ok(all);
-        });
+        }).RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
         group.MapPost("/", async (
             CreateGrantRequest request,
@@ -79,7 +81,8 @@ public static class PermissionGrantEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.SiteConfig, Actions.Edit);
 
         group.MapDelete("/{id:guid}", async (
             Guid id, IPermissionGrantStore store,
@@ -95,7 +98,8 @@ public static class PermissionGrantEndpoints
                 details: null,
                 ct);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.SiteConfig, Actions.Edit);
 
         return app;
     }

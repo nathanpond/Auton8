@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
@@ -145,7 +147,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.RecordType, Actions.Create);
 
         group.MapPatch("/{id:guid}", async (
             Guid id,
@@ -179,7 +182,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.RecordType, Actions.Edit);
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
@@ -204,7 +208,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.RecordType, Actions.Delete);
 
         group.MapPost("/{id:guid}/restore", async (
             Guid id,
@@ -229,7 +234,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.RecordType, Actions.Edit);
 
         group.MapGet("/{id:guid}/fields", async (
             Guid id,
@@ -306,7 +312,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.RecordType, Actions.DefineFields);
 
         group.MapPatch("/{id:guid}/fields/{fieldId:guid}", async (
             Guid id,
@@ -350,7 +357,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.RecordType, Actions.DefineFields);
 
         group.MapDelete("/{id:guid}/fields/{fieldId:guid}", async (
             Guid id,
@@ -380,7 +388,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.RecordType, Actions.DefineFields);
 
         group.MapPost("/{id:guid}/fields/{fieldId:guid}/restore", async (
             Guid id,
@@ -410,7 +419,8 @@ public static class RecordTypeEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.RecordType, Actions.DefineFields);
 
         group.MapGet("/{id:guid}/audit", async (
             Guid id,

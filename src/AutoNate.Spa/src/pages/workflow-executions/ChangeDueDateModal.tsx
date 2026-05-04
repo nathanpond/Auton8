@@ -45,10 +45,14 @@ export default function ChangeDueDateModal({
       onConfirm(null);
       return;
     }
-    // The date input gives us "yyyy-MM-dd" with no time. We anchor to local
-    // midnight (so the chosen date is interpreted in the admin's timezone)
-    // and convert to ISO before posting so Flowable stores the same calendar
-    // date the admin picked.
+    // The date input gives us "yyyy-MM-dd" with no time. Anchor to noon UTC
+    // so the chosen calendar date round-trips for every timezone from UTC-12
+    // through UTC+12. Anchoring to local midnight previously shifted the
+    // date one day earlier in UTC for any user east of UTC, since 00:00
+    // local on May 3 is May 2 in UTC and the server interprets the
+    // timestamp in UTC. UTC+13/UTC+14 (Kiritimati, Tonga) still shift by
+    // one day; the only fully timezone-safe fix is sending YYYY-MM-DD as a
+    // date-only string, which would require a server-side contract change.
     const [yearStr, monthStr, dayStr] = value.split("-");
     const year = Number(yearStr);
     const month = Number(monthStr);
@@ -57,12 +61,12 @@ export default function ChangeDueDateModal({
       onConfirm(null);
       return;
     }
-    const local = new Date(year, month - 1, day);
-    if (Number.isNaN(local.getTime())) {
+    const noonUtc = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    if (Number.isNaN(noonUtc.getTime())) {
       onConfirm(null);
       return;
     }
-    onConfirm(local.toISOString());
+    onConfirm(noonUtc.toISOString());
   };
 
   // Portal to document.body so the modal escapes the workflow-execution-modal

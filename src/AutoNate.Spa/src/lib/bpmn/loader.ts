@@ -52,30 +52,38 @@ export function ensureBpmnJsLoaded(): Promise<typeof window.BpmnJS> {
 
   loadPromise = new Promise((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[data-autonate-bpmn="true"]`);
-    const handleLoad = () => {
+    const target: HTMLScriptElement = existing ?? document.createElement("script");
+
+    // Named handlers so the listener pair can actually be removed once the
+    // script settles — anonymous arrow functions can't be detached and were
+    // accumulating across hot-reloads.
+    const cleanup = () => {
+      target.removeEventListener("load", onLoad);
+      target.removeEventListener("error", onError);
+    };
+    const onLoad = () => {
+      cleanup();
       if (typeof window.BpmnJS === "undefined") {
         reject(new Error("bpmn-js bundle loaded but window.BpmnJS is not defined."));
         return;
       }
       resolve(window.BpmnJS);
     };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`Failed to load bpmn-js bundle from ${BPMN_JS_SRC}.`));
+    };
 
-    if (existing) {
-      existing.addEventListener("load", handleLoad);
-      existing.addEventListener("error", () =>
-        reject(new Error(`Failed to load bpmn-js bundle from ${BPMN_JS_SRC}.`)));
-      return;
+    target.addEventListener("load", onLoad);
+    target.addEventListener("error", onError);
+
+    if (!existing) {
+      target.src = BPMN_JS_SRC;
+      target.async = true;
+      target.defer = true;
+      target.dataset.autonateBpmn = "true";
+      document.head.appendChild(target);
     }
-
-    const script = document.createElement("script");
-    script.src = BPMN_JS_SRC;
-    script.async = true;
-    script.defer = true;
-    script.dataset.autonateBpmn = "true";
-    script.addEventListener("load", handleLoad);
-    script.addEventListener("error", () =>
-      reject(new Error(`Failed to load bpmn-js bundle from ${BPMN_JS_SRC}.`)));
-    document.head.appendChild(script);
   });
 
   return loadPromise;

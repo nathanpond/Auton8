@@ -1,3 +1,5 @@
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Events;
 
@@ -23,7 +25,8 @@ public static class RoleAssignmentEndpoints
                 details: null,
                 ct);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.Role, Actions.Assign);
 
         // Look up assignments for a principal — useful for "show all roles for this user"
         group.MapGet("/by-principal", async (
@@ -42,7 +45,7 @@ public static class RoleAssignmentEndpoints
                     details: new { resultCount = assignments.Count },
                     ct);
                 return Results.Ok(assignments);
-            });
+            }).RequireKindPermission(EntityKinds.Role, Actions.View);
 
         return app;
     }

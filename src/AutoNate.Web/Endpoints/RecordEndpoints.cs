@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
@@ -184,11 +185,20 @@ public static class RecordEndpoints
         }).RequirePermission(EntityKinds.Record, Actions.View);
 
         group.MapGet("/by-key/{key}", async (
-            string key, IRecordStore store,
+            string key, HttpContext http, IRecordStore store, IAuthorizer authorizer,
             IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
         {
             var record = await store.GetByKeyAsync(key, cancellationToken);
             if (record is null) return Results.NotFound();
+            // Same gate the /{id:guid} variant gets via .RequirePermission. We
+            // can't use the filter here because the route id is a key, not the
+            // record's guid. 404 on deny so existence isn't probed by key.
+            var decision = await authorizer.AuthorizeAsync(
+                http.User,
+                Actions.View,
+                new EntityRef(EntityKinds.Record, record.Id.ToString()),
+                cancellationToken);
+            if (!decision.IsAllowed) return Results.NotFound();
             await auditPublisher.PublishAsync(
                 DaprRecordEventPublisher.TopicName,
                 RecordEventTypes.Viewed,

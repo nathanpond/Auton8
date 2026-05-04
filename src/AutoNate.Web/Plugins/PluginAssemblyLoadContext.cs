@@ -4,7 +4,7 @@ using System.Runtime.Loader;
 namespace AutoNate.Web.Plugins;
 
 // Per-plugin collectible ALC. Critical detail: assemblies that the host AND
-// plugins both reference (notably AutoNate.Plugins.Abstractions, which carries
+// plugins both reference (notably AutoNate.Plugin.Abstractions, which carries
 // IAutoNatePlugin / IHookRegistrar) MUST resolve to the host's copy, otherwise
 // the cast `(IAutoNatePlugin)pluginInstance` fails — the plugin's IAutoNatePlugin
 // would be a different Type than the one the host knows.

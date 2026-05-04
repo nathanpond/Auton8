@@ -19,12 +19,21 @@ ON CONFLICT (id) DO NOTHING;
 -- The audit log itself. Denormalized for cheap reads in the admin UI; the
 -- full envelope is also stored as JSONB so consumers can reconstruct anything
 -- the host originally published.
+--
+-- resource_id and resource_label promote the most useful fields out of
+-- envelope.resource so the AuditLog page doesn't have to parse JSON in JS.
+-- They live here in 001 because Auditor.cs INSERTs them unconditionally and
+-- splitting them across migrations creates a window where the plugin is
+-- enabled but the columns don't exist yet. Migration 002 keeps the same
+-- ALTER TABLE IF NOT EXISTS so existing deployments are no-ops.
 CREATE TABLE IF NOT EXISTS audit_log (
     id BIGSERIAL PRIMARY KEY,
     event_id UUID NOT NULL,
     event_type TEXT NOT NULL,
     topic_name TEXT NOT NULL,
     resource_kind TEXT NOT NULL,
+    resource_id TEXT NULL,
+    resource_label TEXT NULL,
     actor_id UUID NULL,
     actor_user_name TEXT NULL,
     occurred_at TIMESTAMPTZ NOT NULL,
@@ -44,4 +53,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS ix_audit_log_occurred_at ON audit_log (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS ix_audit_log_event_type ON audit_log (event_type);
 CREATE INDEX IF NOT EXISTS ix_audit_log_actor_id ON audit_log (actor_id);
+CREATE INDEX IF NOT EXISTS ix_audit_log_resource_id
+    ON audit_log (resource_id)
+    WHERE resource_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_audit_log_event_id ON audit_log (event_id);

@@ -1,4 +1,5 @@
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Events;
 
@@ -32,7 +33,7 @@ public static class RegistryEndpoints
                 details: new { kindCount = kinds.Length },
                 ct);
             return Results.Ok(new { kinds });
-        });
+        }).RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
         return app;
     }

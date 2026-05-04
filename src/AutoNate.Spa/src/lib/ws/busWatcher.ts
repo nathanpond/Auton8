@@ -46,23 +46,30 @@ export function createBusConnection(options: BusConnectionOptions = {}): BusConn
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(`${protocol}//${window.location.host}${path}`);
 
-    socket.addEventListener("open", () => status("Connected"));
+    // Every handler guards on `disposed` so a delayed open/message/error
+    // event from an already-cancelled socket can't drive the consumer's
+    // status callback or push data into an unmounted component.
+    socket.addEventListener("open", () => {
+      if (disposed) return;
+      status("Connected");
+    });
 
     socket.addEventListener("message", (event) => {
+      if (disposed) return;
       const data = typeof event.data === "string" ? event.data : String(event.data);
       options.onMessage?.(data);
     });
 
     socket.addEventListener("close", () => {
-      if (disposed) {
-        return;
-      }
-
+      if (disposed) return;
       status("Reconnecting...");
       reconnectTimer = window.setTimeout(connect, 2000);
     });
 
-    socket.addEventListener("error", () => status("Connection error"));
+    socket.addEventListener("error", () => {
+      if (disposed) return;
+      status("Connection error");
+    });
   };
 
   connect();

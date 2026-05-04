@@ -96,16 +96,26 @@ public sealed class PluginRuntime
 
             var folder = Path.Combine(_pluginRoot, row.Id.ToString("D"));
             var entryPath = Path.Combine(folder, row.EntryAssembly);
-            if (!File.Exists(entryPath))
+            // Defense-in-depth: even though plugin uploads come from admins,
+            // refuse an EntryAssembly that resolves outside the plugin folder
+            // (e.g. a manifest with "../../../something.dll" or an absolute
+            // path) so a compromised manifest can't load a host assembly.
+            var folderFull = Path.GetFullPath(folder) + Path.DirectorySeparatorChar;
+            var entryFull = Path.GetFullPath(entryPath);
+            if (!entryFull.StartsWith(folderFull, StringComparison.Ordinal))
             {
-                return new(false, $"Entry assembly not found at '{entryPath}'.");
+                return new(false, $"Entry assembly path '{row.EntryAssembly}' escapes the plugin folder.");
+            }
+            if (!File.Exists(entryFull))
+            {
+                return new(false, $"Entry assembly not found at '{entryFull}'.");
             }
 
-            PluginAssemblyLoadContext alc = new(entryPath);
+            PluginAssemblyLoadContext alc = new(entryFull);
             ScopedHookRegistrar? scoped = null;
             try
             {
-                var assembly = alc.LoadFromAssemblyPath(entryPath);
+                var assembly = alc.LoadFromAssemblyPath(entryFull);
                 Type? pluginType = null;
 
                 if (!string.IsNullOrWhiteSpace(row.EntryType))

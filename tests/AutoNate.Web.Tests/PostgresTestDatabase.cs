@@ -25,6 +25,12 @@ namespace AutoNate.Web.Tests;
 
 internal sealed class PostgresTestDatabase : IAsyncDisposable
 {
+    // Falls back to the docker-compose default so tests work out of the box;
+    // overridable via env var so a developer rotating the local dev secret
+    // doesn't have to grep through the test project to update it.
+    private static readonly string Password =
+        Environment.GetEnvironmentVariable("AUTONATE_POSTGRES_PASSWORD") ?? "Your_password123!";
+
     private readonly string _databaseName;
 
     private PostgresTestDatabase(string databaseName)
@@ -33,7 +39,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     }
 
     public string ConnectionString =>
-        $"Host=localhost;Port=5432;Database={_databaseName};Username=autonate;Password=Your_password123!";
+        $"Host=localhost;Port=5432;Database={_databaseName};Username=autonate;Password={Password}";
 
     public static async Task<PostgresTestDatabase> CreateAsync()
     {
@@ -375,7 +381,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     }
 
     private static string AdminConnectionString(string databaseName) =>
-        $"Host=localhost;Port=5432;Database={databaseName};Username=autonate;Password=Your_password123!";
+        $"Host=localhost;Port=5432;Database={databaseName};Username=autonate;Password={Password}";
 
     private sealed class SimpleDbContextFactory(DbContextOptions<AutoNateDbContext> options)
         : IDbContextFactory<AutoNateDbContext>

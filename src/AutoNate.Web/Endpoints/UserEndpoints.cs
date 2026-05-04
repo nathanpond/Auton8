@@ -33,7 +33,7 @@ public static class UserEndpoints
                 details: new { resultCount = users.Count },
                 cancellationToken);
             return Results.Ok(users);
-        });
+        }).RequireKindPermission(EntityKinds.User, Actions.View);
 
         group.MapPost("/", async (
             CreateUserRequest request,
@@ -56,8 +56,14 @@ public static class UserEndpoints
                 details: null,
                 cancellationToken);
             return Results.Created($"/api/users/{user.Id}", user);
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.User, Actions.Create);
 
+        // Route id is the local users table pkey (long) and the authorization
+        // entity is keyed by the user's Guid, so we gate at the kind level
+        // (matches the existing /unlock convention below). Per-user grants on
+        // these mutations would require translating long → Guid in a custom
+        // filter, which isn't worth the complexity for admin-only routes.
         group.MapPut("/{id:long}", async (
             long id,
             UpdateUserRequest request,
@@ -81,7 +87,8 @@ public static class UserEndpoints
                 details: null,
                 cancellationToken);
             return Results.Ok(updated);
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.User, Actions.Edit);
 
         group.MapPost("/{id:long}/password", async (
             long id,
@@ -100,7 +107,8 @@ public static class UserEndpoints
                 details: null,
                 cancellationToken);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.User, Actions.Edit);
 
         group.MapPost("/{id:long}/unlock", async (
             long id,
@@ -140,7 +148,8 @@ public static class UserEndpoints
                 details: null,
                 cancellationToken);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.User, Actions.Delete);
 
         // Supervisor edges. The hierarchy is modeled as entity_edges with
         // edge_kind='supervisor', from = supervisor user, to = supervisee user.
@@ -176,7 +185,7 @@ public static class UserEndpoints
                 details: new { resultCount = result.Length },
                 ct);
             return Results.Ok(result);
-        });
+        }).RequireKindPermission(EntityKinds.User, Actions.View);
 
         group.MapGet("/{userId:guid}/supervisor", async (
             Guid userId,
@@ -203,7 +212,7 @@ public static class UserEndpoints
                 details: null,
                 ct);
             return Results.Ok(new { userId, supervisorUserId });
-        });
+        }).RequirePermission(EntityKinds.User, Actions.View, "userId");
 
         group.MapPut("/{userId:guid}/supervisor", async (
             Guid userId,
@@ -259,7 +268,8 @@ public static class UserEndpoints
                 details: null,
                 ct);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.User, Actions.Edit, "userId");
 
         return app;
     }

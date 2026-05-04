@@ -20,8 +20,11 @@ FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 infra-prepare:
 	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
 	cp ./infra/dapr/components/*.yaml $(DAPR_DASHBOARD_COMPONENTS)/
-	cp ./infra/dapr/components/pubsub.yaml $(FLOWABLE_DAPR_COMPONENTS)/
-	sed -i.bak 's|nats://localhost:4222|nats://host.docker.internal:4222|' $(FLOWABLE_DAPR_COMPONENTS)/pubsub.yaml && rm -f $(FLOWABLE_DAPR_COMPONENTS)/pubsub.yaml.bak
+	# Rewrite the flowable-dapr pubsub copy to use host.docker.internal.
+	# Idempotent because we always start from the source file and stream
+	# into the destination — sed -i.bak is fragile (silently no-ops on a
+	# second run) and leaves a backup file behind.
+	sed 's|nats://localhost:4222|nats://host.docker.internal:4222|' ./infra/dapr/components/pubsub.yaml > $(FLOWABLE_DAPR_COMPONENTS)/pubsub.yaml
 	./infra/ensure-nats-stream.sh
 
 infra-ensure:
@@ -50,7 +53,13 @@ infra-down:
 
 infra-reset:
 	$(COMPOSE) down
-	rm -rf $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS)
+	# Guard against the variables being empty (which would expand to
+	# `rm -rf` with no operand and either no-op or error depending on the
+	# shell), and quote each path so a whitespace-bearing MOUNT_ROOT
+	# doesn't get word-split into a much wider deletion target.
+	@test -n "$(MOUNT_ROOT)" || { echo "MOUNT_ROOT is empty; refusing to rm -rf"; exit 1; }
+	@test -n "$(POSTGRES_MOUNT)" || { echo "POSTGRES_MOUNT is empty; refusing to rm -rf"; exit 1; }
+	rm -rf "$(POSTGRES_MOUNT)" "$(REDIS_MOUNT)" "$(NATS_MOUNT)" "$(SCHEDULER_MOUNT)" "$(DAPR_DASHBOARD_COMPONENTS)" "$(FLOWABLE_DAPR_COMPONENTS)"
 	$(MAKE) infra-prepare
 
 infra-logs:

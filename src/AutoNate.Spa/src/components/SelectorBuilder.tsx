@@ -43,13 +43,14 @@ export default function SelectorBuilder({ value, onChange, allowedKinds }: Props
   const [state, setState] = useState<SelectorBuilderValue>(() => parseSelector(value));
 
   // Reflect external value changes back into the builder when in visual mode.
+  // Uses the functional setState form so we can compare against the latest
+  // state without capturing it in the effect's closure — that lets the dep
+  // array stay [value, mode] without an eslint suppression and without
+  // looping on our own setState calls.
   useEffect(() => {
     if (mode !== "visual") return;
     const parsed = parseSelector(value);
-    if (!sameState(parsed, state)) {
-      setState(parsed);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setState((prev) => (sameState(parsed, prev) ? prev : parsed));
   }, [value, mode]);
 
   const kinds = useMemo<RegistryKind[]>(() => {
