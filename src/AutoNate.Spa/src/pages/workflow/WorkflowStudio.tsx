@@ -46,6 +46,7 @@ import { useUsers } from "@/hooks/useUsers";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
 import { useForms } from "@/hooks/useForms";
 import { useEventCatalog } from "@/hooks/useEventCatalog";
+import type { EventCatalogResponse } from "@/api/eventCatalog";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { useWorkflowBehaviors } from "@/hooks/useWorkflowBehaviors";
 import "./Workflow.css";
@@ -88,6 +89,28 @@ type SignalStartEventEditor = {
   signalTopic: string;
   recordTypeShortCodes: string[];
 };
+
+// Strict `=== true` semantics — undefined/null defaults to false (conservative).
+// Used by the signal-start modal to decide whether to show the record-type
+// picker, and by `applySignalStart` to decide whether to strip the filter when
+// the user has switched to an event type that doesn't carry a recordTypeId.
+function eventCarriesRecordType(
+  catalog: EventCatalogResponse | undefined,
+  topic: string,
+  eventType: string
+): boolean {
+  if (!catalog) return false;
+  const trimmedTopic = topic.trim();
+  const trimmedEventType = eventType.trim();
+  for (const category of catalog.categories ?? []) {
+    for (const evt of category.events) {
+      if (evt.topic === trimmedTopic && evt.eventType === trimmedEventType) {
+        return evt.carriesRecordType === true;
+      }
+    }
+  }
+  return false;
+}
 
 type TimerStartEventEditor = {
   id: string;
@@ -299,6 +322,10 @@ function buildDueDate(editor: UserTaskEditor): string | null {
 export default function WorkflowStudio() {
   const qc = useQueryClient();
   const { data: workflows = [], isSuccess: workflowsLoaded } = useWorkflows();
+  // Used by `applySignalStart` to strip the record-type filter when the user
+  // has switched to an event type that doesn't carry a recordTypeId. The modal
+  // calls `useEventCatalog` separately for its own picker visibility logic.
+  const { data: signalEventCatalog } = useEventCatalog();
   const [currentModel, setCurrentModel] = useState<WorkflowModel | null>(null);
   const [loadedXml, setLoadedXml] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -776,12 +803,23 @@ export default function WorkflowStudio() {
         throw new Error("Select a signal start event before applying changes.");
       }
 
+      // Mid-edit safety: if the event type no longer carries a recordTypeId,
+      // drop any lingering filter selection so the BPMN attribute is cleared.
+      const carriesRecordType = eventCarriesRecordType(
+        signalEventCatalog,
+        signalStartEditor.signalTopic,
+        signalStartEditor.signalName
+      );
+      const finalShortCodes = carriesRecordType
+        ? signalStartEditor.recordTypeShortCodes
+        : [];
+
       await workflow.updateSignalStartEventProperties(handle, {
         id: signalStartEditor.id,
         name: signalStartEditor.name,
         signalName: signalStartEditor.signalName.trim(),
         signalTopic: signalStartEditor.signalTopic.trim(),
-        recordTypeShortCodes: signalStartEditor.recordTypeShortCodes
+        recordTypeShortCodes: finalShortCodes
       });
       setSignalStartEditor(null);
     });
@@ -2117,20 +2155,10 @@ function SignalStartEventModal({
   const { data: catalog } = useEventCatalog();
   const { data: recordTypes } = useRecordTypes(false);
 
-  // Strict `=== true` semantics — undefined/null defaults to false (conservative).
-  const carriesRecordType = useMemo(() => {
-    if (!catalog) return false;
-    const trimmedTopic = editor.signalTopic.trim();
-    const trimmedEventType = editor.signalName.trim();
-    for (const category of catalog.categories ?? []) {
-      for (const evt of category.events) {
-        if (evt.topic === trimmedTopic && evt.eventType === trimmedEventType) {
-          return evt.carriesRecordType === true;
-        }
-      }
-    }
-    return false;
-  }, [catalog, editor.signalTopic, editor.signalName]);
+  const carriesRecordType = useMemo(
+    () => eventCarriesRecordType(catalog, editor.signalTopic, editor.signalName),
+    [catalog, editor.signalTopic, editor.signalName]
+  );
 
   // Merge static catalog entries (events Flowable / future publishers raise)
   // with dynamic registrations (event types other workflows are listening for)
@@ -2257,6 +2285,13 @@ function SignalStartEventModal({
             messages. Required.
           </p>
         </label>
+
+        {!carriesRecordType && editor.recordTypeShortCodes.length > 0 && (
+          <p className="workflow-modal-warning">
+            This event type doesn&rsquo;t carry a record type — the configured record-type
+            filter will be cleared when you apply.
+          </p>
+        )}
 
         {carriesRecordType && (
           <label className="workflow-field">

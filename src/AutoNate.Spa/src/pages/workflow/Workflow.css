@@ -692,6 +692,16 @@
     font-size: 0.92rem;
 }
 
+.workflow-modal-warning {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #f0c36d;
+    border-radius: 4px;
+    background: #fdf6e3;
+    color: #8a6d3b;
+    font-size: 0.92rem;
+}
+
 .workflow-record-type-multiselect {
     display: flex;
     flex-wrap: wrap;
