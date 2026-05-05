@@ -2,9 +2,11 @@ using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
+using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Workflow;
+using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -135,7 +137,10 @@ public static class WorkflowEndpoints
         // Normalize the BPMN payload coming from the browser's modeler: patch the process key,
         // workflow name, and element-level snapshots, then validate. The UI calls this before
         // save / publish so the authoritative XML massaging (WorkflowBpmnXml.cs) stays server-side.
-        group.MapPost("/prepare", (PrepareWorkflowRequest request) =>
+        group.MapPost("/prepare", async (
+            PrepareWorkflowRequest request,
+            IDbContextFactory<AutoNateDbContext> dbContextFactory,
+            CancellationToken cancellationToken) =>
         {
             var workflowName = WorkflowBpmnXml.NormalizeWorkflowName(request.Model.Name);
             var processKey = string.IsNullOrWhiteSpace(request.Model.ProcessKey)
@@ -160,6 +165,15 @@ public static class WorkflowEndpoints
             }
 
             var validation = WorkflowBpmnXml.ValidateProcess(preparedXml);
+            // Warning-only DB-aware rule: surface signal-filter shortcodes that
+            // don't exist in this environment yet. Publish proceeds either way.
+            var dbWarnings = await WorkflowBpmnXml.BuildRecordTypeShortCodeWarningsAsync(
+                preparedXml, dbContextFactory, cancellationToken);
+
+            var combinedWarnings = dbWarnings.Count == 0
+                ? validation.Warnings
+                : validation.Warnings.Concat(dbWarnings).ToArray();
+
             var prepared = request.Model with
             {
                 Name = workflowName,
@@ -167,7 +181,7 @@ public static class WorkflowEndpoints
                 BpmnXml = preparedXml
             };
 
-            return Results.Ok(new PrepareWorkflowResponse(prepared, validation.Warnings, validation.Errors));
+            return Results.Ok(new PrepareWorkflowResponse(prepared, combinedWarnings, validation.Errors));
         }).DisableAntiforgery();
 
         group.MapPost("/{id:guid}/publish", async (

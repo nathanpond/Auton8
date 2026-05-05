@@ -3,6 +3,8 @@ using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using AutoNate.Web.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Services.Workflow;
 
@@ -189,6 +191,73 @@ public static partial class WorkflowBpmnXml
     public static IReadOnlyList<string> ValidateExecutableProcess(string xml)
     {
         return ValidateProcess(xml).Errors;
+    }
+
+    // Publish-time warning rule: signal start events may carry a
+    // `flowable:recordTypeShortCodes` filter referring to record types that
+    // don't exist in the current DB (e.g. cross-environment exports). Publish
+    // proceeds either way — the dispatcher will simply never match those
+    // codes — but we surface the unresolved tokens so the operator can either
+    // seed the type or fix the filter.
+    public static async Task<IReadOnlyList<string>> BuildRecordTypeShortCodeWarningsAsync(
+        string xml,
+        IDbContextFactory<AutoNateDbContext> dbContextFactory,
+        CancellationToken cancellationToken)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml);
+        }
+        catch
+        {
+            // ValidateProcess will already have surfaced the parse error; no
+            // additional warning to add for unparseable XML.
+            return Array.Empty<string>();
+        }
+
+        var referenced = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var def in document.Descendants(BpmnNamespace + "signalEventDefinition"))
+        {
+            var raw = def.Attribute(FlowableNamespace + "recordTypeShortCodes")?.Value;
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            foreach (var token in raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                referenced.Add(token);
+            }
+        }
+
+        if (referenced.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var existing = (await dbContext.RecordTypes
+                .AsNoTracking()
+                .Where(rt => referenced.Contains(rt.ShortCode))
+                .Select(rt => rt.ShortCode)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var unknown = referenced
+            .Where(code => !existing.Contains(code))
+            .OrderBy(code => code, StringComparer.Ordinal)
+            .ToArray();
+
+        if (unknown.Length == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return new[]
+        {
+            $"Signal start event references record-type shortcode(s) not found in this environment: {string.Join(", ", unknown)}. The filter will never match these until the type is created."
+        };
     }
 
     public static string ExtractProcessKey(string xml)
