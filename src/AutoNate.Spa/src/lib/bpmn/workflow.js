@@ -635,6 +635,9 @@ export async function createReadonlyViewer(container, xml) {
     setHoverTooltip(nextHoverTooltip) {
       hoverTooltip = nextHoverTooltip;
     },
+    getHoverTooltip() {
+      return hoverTooltip;
+    },
     dispose() {
       contextMenu?.dispose?.();
       hoverTooltip?.dispose?.();

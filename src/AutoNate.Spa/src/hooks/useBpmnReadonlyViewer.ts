@@ -104,10 +104,12 @@ export function useBpmnReadonlyViewer(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const viewerRef = useRef<{ dispose?: () => void } | null>(null);
-  // Captured from workflow.js's setHoverTooltip call so we can push
-  // failedActivityIds updates without rebuilding the viewer.
-  const hoverTooltipHandleRef = useRef<{ setFailedActivityIds?: (ids: readonly string[]) => void } | null>(null);
   const currentXmlRef = useRef<string | null>(null);
+  // Kept current on every render so the async mount effect always seeds the
+  // tooltip with the latest value even if the prop changed while BPMN-JS was
+  // still loading.
+  const failedActivityIdsRef = useRef<readonly string[] | undefined>(failedActivityIds);
+  failedActivityIdsRef.current = failedActivityIds;
   const callbacksRef = useRef<UseBpmnReadonlyViewerOptions["callbacks"]>(callbacks);
   callbacksRef.current = callbacks;
 
@@ -158,22 +160,24 @@ export function useBpmnReadonlyViewer(
           }
 
           if (enableHoverTooltip) {
-            // Wrap setHoverTooltip so we can capture the handle that
-            // workflow.js stores internally, enabling subsequent
-            // setFailedActivityIds calls on prop change.
-            const origSetHoverTooltip = (created as { setHoverTooltip?: (h: unknown) => void }).setHoverTooltip?.bind(created);
-            (created as { setHoverTooltip?: (h: unknown) => void }).setHoverTooltip = (h: unknown) => {
-              hoverTooltipHandleRef.current = h as { setFailedActivityIds?: (ids: readonly string[]) => void } | null;
-              origSetHoverTooltip?.(h);
-            };
             workflow.enableUserTaskHoverTooltip(created, {
               getInfo: (
                 activityId: string,
                 activityName: string | null,
                 bpmn: { assignee: string | null; dueDate: string | null }
               ) => hoverTooltipRef.current?.getInfo(activityId, activityName, bpmn) ?? null,
-              failedActivityIds: failedActivityIds ?? []
+              failedActivityIds: failedActivityIdsRef.current ?? []
             });
+            // Flush the freshest value through the handle. Above we passed the
+            // ref-captured failedActivityIds, which may be stale if the parent
+            // re-rendered while createReadonlyViewer was awaiting BPMN-JS load.
+            // The effect below depends on viewerRef.current.getHoverTooltip(); now
+            // that the handle exists, push the latest set explicitly.
+            (created as
+              | { getHoverTooltip?: () => { setFailedActivityIds?: (ids: readonly string[]) => void } | null }
+              | null)
+              ?.getHoverTooltip?.()
+              ?.setFailedActivityIds?.(failedActivityIdsRef.current ?? []);
           }
         }
 
@@ -225,7 +229,10 @@ export function useBpmnReadonlyViewer(
   // Push subsequent updates through the setFailedActivityIds hook installed
   // by workflow.js so a hover after retry/recovery sees the latest set.
   useEffect(() => {
-    hoverTooltipHandleRef.current?.setFailedActivityIds?.(failedActivityIds ?? []);
+    const handle = viewerRef.current as
+      | { getHoverTooltip?: () => { setFailedActivityIds?: (ids: readonly string[]) => void } | null }
+      | null;
+    handle?.getHoverTooltip?.()?.setFailedActivityIds?.(failedActivityIds ?? []);
   }, [failedActivityIds]);
 
   // Dispose on unmount.

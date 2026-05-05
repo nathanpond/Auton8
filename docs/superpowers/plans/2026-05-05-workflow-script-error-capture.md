@@ -1416,53 +1416,21 @@ git commit -m "Generalize hover tooltip to fire on errored nodes, not just UserT
 ## Task 14: `useBpmnReadonlyViewer` threads failed ids into the tooltip
 
 **Files:**
-- Modify: `src/AutoNate.Spa/src/hooks/useBpmnReadonlyViewer.ts:155-165`, plus the highlighting effect at lines 193-210
+- Modify: `src/AutoNate.Spa/src/lib/bpmn/workflow.js` — add `getHoverTooltip()` getter
+- Modify: `src/AutoNate.Spa/src/hooks/useBpmnReadonlyViewer.ts` — drop monkey-patch, use getter, fix race
 
-- [ ] **Step 1: Pass `failedActivityIds` into `enableUserTaskHoverTooltip` and refresh on change**
+**Implemented** (commits `f52d05c4` + follow-up):
 
-In `src/AutoNate.Spa/src/hooks/useBpmnReadonlyViewer.ts`, update the `enableUserTaskHoverTooltip` call (around line 158) to pass the current failed list:
+- `workflow.js` exposes `getHoverTooltip()` alongside `setHoverTooltip()` on the returned viewer object, returning the closure-private handle.
+- The hook no longer monkey-patches `setHoverTooltip` and no longer declares `hoverTooltipHandleRef`.
+- A `failedActivityIdsRef` is declared and updated on every render so the async mount effect always reads the latest value even if the prop changed during BPMN-JS load.
+- `enableUserTaskHoverTooltip` is called with `failedActivityIdsRef.current ?? []`.
+- Immediately after, an explicit flush pushes `failedActivityIdsRef.current` through `getHoverTooltip()?.setFailedActivityIds()` to handle the race where the mount effect's async closure captured an older value.
+- The `useEffect([failedActivityIds])` uses `viewerRef.current.getHoverTooltip()` to push prop changes after mount.
 
-```ts
-if (enableHoverTooltip) {
-  workflow.enableUserTaskHoverTooltip(created, {
-    getInfo: (
-      activityId: string,
-      activityName: string | null,
-      bpmn: { assignee: string | null; dueDate: string | null }
-    ) => hoverTooltipRef.current?.getInfo(activityId, activityName, bpmn) ?? null,
-    failedActivityIds: failedActivityIds ?? []
-  });
-}
-```
-
-Then add a new effect — placed AFTER the existing re-highlight effect (around line 210) — that pushes failed-id changes into the tooltip without rebuilding the viewer:
-
-```ts
-// The hover tooltip captures failedActivityIds at viewer-creation time.
-// Push subsequent updates through the setFailedActivityIds hook installed
-// by workflow.js so a hover after retry/recovery sees the latest set.
-useEffect(() => {
-  const handle = viewerRef.current as { hoverTooltip?: { setFailedActivityIds?: (ids: readonly string[]) => void } } | null;
-  handle?.hoverTooltip?.setFailedActivityIds?.(failedActivityIds ?? []);
-}, [failedActivityIds]);
-```
-
-> If `viewerRef.current` doesn't expose `hoverTooltip` directly, look at `workflow.js`'s `setHoverTooltip(...)` call site (line 2054 area) to confirm where the handle is stored. The viewer handle uses `setHoverTooltip` to attach an object that has `dispose()` and now `setFailedActivityIds(...)`. Mirror however the handle exposes that object — likely via `viewerRef.current?.hoverTooltip` or a getter. If unclear, grep `setHoverTooltip` and `hoverTooltip` inside `workflow.js` to find the storage convention.
-
-- [ ] **Step 2: Type-check**
-
-```bash
-cd src/AutoNate.Spa && npm run type-check
-```
-
-Expected: 0 errors.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/AutoNate.Spa/src/hooks/useBpmnReadonlyViewer.ts
-git commit -m "Forward failedActivityIds into the hover tooltip on each change"
-```
+- [x] **Step 1: Pass `failedActivityIds` into `enableUserTaskHoverTooltip` and refresh on change**
+- [x] **Step 2: Type-check**
+- [x] **Step 3: Commit**
 
 ---
 
