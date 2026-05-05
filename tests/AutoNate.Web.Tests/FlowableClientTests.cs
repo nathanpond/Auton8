@@ -991,6 +991,26 @@ public sealed class FlowableClientTests
         Assert.Contains("broadcast signal 'Nope'", ex.Message);
     }
 
+    // --- SignalExecutionAsync ------------------------------------------------
+
+    [Fact]
+    public async Task SignalExecutionAsync_PutsSignalEventReceivedActionWithVariables()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Put, "service/runtime/executions/exec-1",
+            new { id = "exec-1" });
+
+        await client.SignalExecutionAsync(
+            executionId: "exec-1",
+            variables: new Dictionary<string, object?> { ["eventData"] = "{\"x\":1}" });
+
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Put, sent.Method);
+        Assert.EndsWith("/runtime/executions/exec-1", new Uri(sent.Url).AbsolutePath);
+        Assert.Contains("\"action\":\"signalEventReceived\"", sent.Body);
+        Assert.Contains("\"name\":\"eventData\"", sent.Body);
+    }
+
     // --- DeployProcessAsync --------------------------------------------------
 
     [Fact]

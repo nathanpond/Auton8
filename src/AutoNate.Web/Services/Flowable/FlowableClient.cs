@@ -1066,6 +1066,28 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(response, $"broadcast signal '{signalName}'");
     }
 
+    public async Task SignalExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(executionId))
+            throw new ArgumentException("Execution id is required.", nameof(executionId));
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["action"] = "signalEventReceived",
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"service/runtime/executions/{Uri.EscapeDataString(executionId)}",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"signal execution '{executionId}'");
+    }
+
     public async Task<FlowableTaskSummary?> GetTaskAsync(string taskId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(taskId))

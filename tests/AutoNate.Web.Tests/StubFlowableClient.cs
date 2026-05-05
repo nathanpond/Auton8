@@ -267,6 +267,18 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    public List<(string ExecutionId, IReadOnlyDictionary<string, object?>? Variables)> SignalledExecutions { get; } = new();
+
+    public Task SignalExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"SignalExecution:{executionId}");
+        SignalledExecutions.Add((executionId, variables));
+        return Task.CompletedTask;
+    }
+
     public Task UpdateProcessVariablesAsync(
         string processInstanceId,
         IReadOnlyList<ProcessVariableUpdate> updates,

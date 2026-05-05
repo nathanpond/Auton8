@@ -109,4 +109,12 @@ public interface IFlowableClient
     // event references this name spawns a new instance. Variables become
     // process variables on each spawned instance.
     Task BroadcastSignalAsync(string signalName, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
+
+    // Wakes a single waiting execution (intermediate signal catch). Used by the
+    // dispatcher's per-execution path that replaces broadcast for non-start signal
+    // subscriptions.
+    Task SignalExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default);
 }
