@@ -485,6 +485,84 @@ public sealed class WorkflowBpmnXmlTests
     }
 
     [Fact]
+    public void ApplySignalStartEventSnapshot_WritesAndReadsRecordTypeShortCodes()
+    {
+        const string initial = """
+                               <?xml version="1.0" encoding="UTF-8"?>
+                               <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                                 xmlns:flowable="http://flowable.org/bpmn"
+                                                 id="Definitions_1"
+                                                 targetNamespace="http://autonate.dev/workflows">
+                                 <bpmn:signal id="Signal_Record" name="record.created" flowable:topic="record.events" />
+                                 <bpmn:process id="OrderFlow" name="Order Flow" isExecutable="true">
+                                   <bpmn:startEvent id="SE">
+                                     <bpmn:signalEventDefinition signalRef="Signal_Record" />
+                                   </bpmn:startEvent>
+                                 </bpmn:process>
+                               </bpmn:definitions>
+                               """;
+
+        var snapshot = new WorkflowElementSnapshot(
+            Id: "SE",
+            Type: "bpmn:StartEvent",
+            Name: null,
+            SignalName: "record.created",
+            SignalTopic: "record.events",
+            RecordTypeShortCodes: new[] { "asset", "vehicle" });
+
+        var updated = WorkflowBpmnXml.ApplyProcessMetadata(
+            initial,
+            "OrderFlow",
+            "Order Flow",
+            [snapshot]);
+
+        Assert.Contains("flowable:recordTypeShortCodes=\"asset,vehicle\"", updated);
+
+        var registrations = WorkflowBpmnXml.ExtractSignalRegistrations(updated);
+        var registration = Assert.Single(registrations);
+        Assert.Equal(
+            new HashSet<string>(StringComparer.Ordinal) { "asset", "vehicle" },
+            registration.RecordTypeShortCodes);
+    }
+
+    [Fact]
+    public void ApplySignalStartEventSnapshot_OmitsAttribute_WhenFilterEmpty()
+    {
+        // Initial XML already carries the attribute — applying an empty filter
+        // must clear it so the workflow reverts to "match all records".
+        const string initial = """
+                               <?xml version="1.0" encoding="UTF-8"?>
+                               <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                                 xmlns:flowable="http://flowable.org/bpmn"
+                                                 id="Definitions_1"
+                                                 targetNamespace="http://autonate.dev/workflows">
+                                 <bpmn:signal id="Signal_Record" name="record.created" flowable:topic="record.events" />
+                                 <bpmn:process id="OrderFlow" name="Order Flow" isExecutable="true">
+                                   <bpmn:startEvent id="SE">
+                                     <bpmn:signalEventDefinition signalRef="Signal_Record" flowable:recordTypeShortCodes="asset" />
+                                   </bpmn:startEvent>
+                                 </bpmn:process>
+                               </bpmn:definitions>
+                               """;
+
+        var snapshot = new WorkflowElementSnapshot(
+            Id: "SE",
+            Type: "bpmn:StartEvent",
+            Name: null,
+            SignalName: "record.created",
+            SignalTopic: "record.events",
+            RecordTypeShortCodes: Array.Empty<string>());
+
+        var updated = WorkflowBpmnXml.ApplyProcessMetadata(
+            initial,
+            "OrderFlow",
+            "Order Flow",
+            [snapshot]);
+
+        Assert.DoesNotContain("flowable:recordTypeShortCodes", updated);
+    }
+
+    [Fact]
     public void ExtractSignalRegistrations_ReturnsTuplesForEverySignalStartEvent()
     {
         const string xml = """

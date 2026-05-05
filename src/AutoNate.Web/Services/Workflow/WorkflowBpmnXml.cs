@@ -542,6 +542,24 @@ public static partial class WorkflowBpmnXml
         signal.SetAttributeValue(FlowableNamespace + "topic", trimmedTopic);
 
         signalEventDefinition.SetAttributeValue("signalRef", signal.Attribute("id")!.Value);
+
+        // Per-event record-type filter. Empty/null clears the attribute (preserves
+        // "match all records" behavior). Non-empty writes a comma-joined list.
+        var shortCodes = snapshot.RecordTypeShortCodes;
+        if (shortCodes is null || shortCodes.Count == 0)
+        {
+            signalEventDefinition.SetAttributeValue(
+                FlowableNamespace + "recordTypeShortCodes", null);
+        }
+        else
+        {
+            var normalized = string.Join(",", shortCodes
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim()));
+            signalEventDefinition.SetAttributeValue(
+                FlowableNamespace + "recordTypeShortCodes",
+                string.IsNullOrEmpty(normalized) ? null : normalized);
+        }
     }
 
     private static XElement ResolveOrCreateSignalRoot(XElement definitionsElement, string signalName)

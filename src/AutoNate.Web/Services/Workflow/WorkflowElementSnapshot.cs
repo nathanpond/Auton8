@@ -14,6 +14,7 @@ public sealed record class WorkflowElementSnapshot(
     string? DueDate = null,
     string? SignalName = null,
     string? SignalTopic = null,
+    IReadOnlyList<string>? RecordTypeShortCodes = null,
     string? TimerCycleCron = null,
     string? TimerEndDate = null,
     string? TimerDuration = null,
