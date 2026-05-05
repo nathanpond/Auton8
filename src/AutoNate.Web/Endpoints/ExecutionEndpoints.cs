@@ -160,6 +160,9 @@ public static class ExecutionEndpoints
 
             // Group errors by activityId — multiple retries collapse into a
             // count + latest message stamped onto the matching activity row.
+            // Unlike the diagram handler, history surfaces ErrorStackTrace to the SPA,
+            // so we materialize the full row here. Don't add a Select(...) projection
+            // without first confirming every column accessed below is included.
             var errorRows = await db.WorkflowExecutionErrors.AsNoTracking()
                 .Where(e => e.ProcessInstanceId == processInstanceId)
                 .OrderBy(e => e.OccurredAtUtc)
@@ -169,17 +172,22 @@ public static class ExecutionEndpoints
                 .GroupBy(e => e.ActivityId, StringComparer.Ordinal)
                 .ToDictionary(
                     g => g.Key,
-                    g => new
+                    g =>
                     {
-                        Count = g.Count(),
-                        // Latest non-empty message wins. Stack trace follows the same
-                        // recency rule so the displayed message + trace are consistent.
-                        LatestMessage = g.Reverse()
-                            .Select(e => e.ErrorMessage)
-                            .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m)),
-                        LatestStackTrace = g.Reverse()
-                            .Select(e => e.ErrorStackTrace)
-                            .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
+                        // Pick the latest row that has either a non-empty message or a
+                        // non-empty stack. Surfacing both fields from the SAME row keeps
+                        // the operator's mental model honest — message X belongs to
+                        // stack Y, not "latest message OR latest stack from possibly
+                        // different retries."
+                        var latest = g.Reverse()
+                            .FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.ErrorMessage)
+                                              || !string.IsNullOrWhiteSpace(e.ErrorStackTrace));
+                        return new
+                        {
+                            Count = g.Count(),
+                            LatestMessage = latest?.ErrorMessage,
+                            LatestStackTrace = latest?.ErrorStackTrace
+                        };
                     },
                     StringComparer.Ordinal);
 
@@ -235,12 +243,11 @@ public static class ExecutionEndpoints
                 }
 
                 var first = errorRow.OrderBy(e => e.OccurredAtUtc).First();
-                var latestMessage = errorRow.Reverse()
-                    .Select(e => e.ErrorMessage)
-                    .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
-                var latestStackTrace = errorRow.Reverse()
-                    .Select(e => e.ErrorStackTrace)
-                    .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
+                // Pick the latest row that has either a non-empty message or a non-empty
+                // stack. Same recency-of-pair rule as the errorsByActivity projection.
+                var latest = errorRow.Reverse()
+                    .FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.ErrorMessage)
+                                      || !string.IsNullOrWhiteSpace(e.ErrorStackTrace));
                 var nameFromRow = errorRow
                     .Select(e => e.ActivityName)
                     .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
@@ -258,8 +265,8 @@ public static class ExecutionEndpoints
                     DeleteReason = null,
                     IsErrored = true,
                     ErrorCount = errorRow.Count(),
-                    ErrorMessage = latestMessage,
-                    ErrorStackTrace = latestStackTrace
+                    ErrorMessage = latest?.ErrorMessage,
+                    ErrorStackTrace = latest?.ErrorStackTrace
                 });
             }
 
