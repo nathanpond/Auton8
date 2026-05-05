@@ -85,6 +85,7 @@ type SignalStartEventEditor = {
   name: string;
   signalName: string;
   signalTopic: string;
+  recordTypeShortCodes: string[];
 };
 
 type TimerStartEventEditor = {
@@ -171,6 +172,7 @@ type ElementSelection = {
   dueDate?: string | null;
   signalName?: string | null;
   signalTopic?: string | null;
+  recordTypeShortCodes?: string[] | null;
   timerCycleCron?: string | null;
   timerEndDate?: string | null;
   timerDuration?: string | null;
@@ -419,7 +421,13 @@ export default function WorkflowStudio() {
         type: selection.type,
         name: selection.name ?? "",
         signalName: selection.signalName ?? "",
-        signalTopic: selection.signalTopic ?? ""
+        signalTopic: selection.signalTopic ?? "",
+        // Defensive copy — don't share the array reference with the modeler's
+        // description object, which describeBusinessObject re-emits on each
+        // selection change.
+        recordTypeShortCodes: Array.isArray(selection.recordTypeShortCodes)
+          ? [...selection.recordTypeShortCodes]
+          : []
       });
       setTimerStartEditor(null);
       setScriptTaskEditor(null);
@@ -771,7 +779,8 @@ export default function WorkflowStudio() {
         id: signalStartEditor.id,
         name: signalStartEditor.name,
         signalName: signalStartEditor.signalName.trim(),
-        signalTopic: signalStartEditor.signalTopic.trim()
+        signalTopic: signalStartEditor.signalTopic.trim(),
+        recordTypeShortCodes: signalStartEditor.recordTypeShortCodes
       });
       setSignalStartEditor(null);
     });
