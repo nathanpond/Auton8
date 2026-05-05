@@ -1067,6 +1067,7 @@ function describeBusinessObject(businessObject) {
     // signal's display name (Flowable matches it against incoming eventType).
     description.signalName = signal.signalName;
     description.signalTopic = signal.signalTopic;
+    description.recordTypeShortCodes = signal.recordTypeShortCodes;
   }
 
   if (timer) {
@@ -1238,7 +1239,21 @@ function describeSignalStartEvent(businessObject) {
       ? signalRef.$attrs["flowable:topic"]
       : null;
 
-  return { signalName, signalTopic };
+  // Per-event record-type filter lives on the <signalEventDefinition>, not on
+  // the shared <signal> root, so different events can subscribe to the same
+  // signal name but apply different filters.
+  const rawShortCodes =
+    typeof signalEventDefinition.$attrs?.["flowable:recordTypeShortCodes"] === "string"
+      ? signalEventDefinition.$attrs["flowable:recordTypeShortCodes"]
+      : null;
+  const recordTypeShortCodes = rawShortCodes
+    ? rawShortCodes
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+    : [];
+
+  return { signalName, signalTopic, recordTypeShortCodes };
 }
 
 function readFlowableString(businessObject, name) {
@@ -1463,6 +1478,21 @@ export function updateSignalStartEventProperties(modelerHandle, payload) {
 
   signal.name = signalName;
   writeFlowableAttribute(signal, "topic", topic);
+
+  // Record-type filter is per-event (lives on <signalEventDefinition>), not on
+  // the shared <signal> root. Order is preserved — the studio decides ordering
+  // and the bridge faithfully relays it. Empty list clears the attribute.
+  const shortCodes = Array.isArray(payload.recordTypeShortCodes)
+    ? payload.recordTypeShortCodes
+        .map((s) => (typeof s === "string" ? s.trim() : ""))
+        .filter((s) => s.length > 0)
+    : [];
+
+  writeFlowableAttribute(
+    signalEventDefinition,
+    "recordTypeShortCodes",
+    shortCodes.length === 0 ? null : shortCodes.join(",")
+  );
 
   signalEventDefinition.signalRef = signal;
 
