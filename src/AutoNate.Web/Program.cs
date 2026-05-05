@@ -146,6 +146,8 @@ builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.SystemHealthSer
 builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.ISystemHealthProbe>(
     sp => sp.GetRequiredService<AutoNate.Web.Services.SystemHealth.SystemHealthService>());
 builder.Services.AddSingleton<IWorkflowSignalRegistry, EfCoreWorkflowSignalRegistry>();
+builder.Services.AddSingleton<RecordTypeShortCodeCache>();
+builder.Services.AddHostedService<RecordTypeShortCodeCacheInitializer>();
 builder.Services.AddSingleton<WorkflowSignalDispatcher>();
 builder.Services.AddDaprPubSubClient((sp, b) =>
 {
