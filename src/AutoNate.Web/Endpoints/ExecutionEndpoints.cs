@@ -81,10 +81,9 @@ public static class ExecutionEndpoints
             var detail = await flowable.GetWorkflowExecutionDiagramDetailAsync(processInstanceId, cancellationToken);
 
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-            var failedActivityIds = await db.WorkflowExecutionErrors.AsNoTracking()
+            var errorRows = await db.WorkflowExecutionErrors.AsNoTracking()
                 .Where(e => e.ProcessInstanceId == processInstanceId)
-                .Select(e => e.ActivityId)
-                .Distinct()
+                .OrderBy(e => e.OccurredAtUtc)
                 .ToListAsync(cancellationToken);
 
             await auditPublisher.PublishAsync(
@@ -92,15 +91,39 @@ public static class ExecutionEndpoints
                 WorkflowAdminEventTypes.ExecutionDiagramViewed,
                 WorkflowResourceKinds.Execution,
                 resource: new { processInstanceId },
-                details: new { failedActivityCount = failedActivityIds.Count },
+                details: new { failedActivityCount = errorRows.Select(e => e.ActivityId).Distinct().Count() },
                 cancellationToken);
 
-            if (failedActivityIds.Count == 0)
+            if (errorRows.Count == 0)
             {
                 return Results.Ok(detail);
             }
 
-            return Results.Ok(detail with { FailedActivityIds = failedActivityIds });
+            var failedActivityIds = errorRows
+                .Select(e => e.ActivityId)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            // Latest non-empty message per activity. We take the freshest error
+            // because retries can produce successively different messages and the
+            // most recent one is what the operator wants to see in the tooltip.
+            var errorMessagesByActivityId = errorRows
+                .GroupBy(e => e.ActivityId, StringComparer.Ordinal)
+                .Select(g => new
+                {
+                    ActivityId = g.Key,
+                    Message = g.OrderByDescending(e => e.OccurredAtUtc)
+                               .Select(e => e.ErrorMessage)
+                               .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
+                })
+                .Where(x => x.Message != null)
+                .ToDictionary(x => x.ActivityId, x => x.Message!, StringComparer.Ordinal);
+
+            return Results.Ok(detail with
+            {
+                FailedActivityIds = failedActivityIds,
+                ErrorMessagesByActivityId = errorMessagesByActivityId
+            });
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
         executions.MapGet("/{processInstanceId}/history", async (

@@ -112,6 +112,13 @@ public sealed record class WorkflowExecutionDiagramDetail
     // instance. Populated from the workflow_execution_errors table.
     public IReadOnlyList<string> FailedActivityIds { get; init; } = [];
 
+    // Latest non-empty error message per failed activity. Sourced from the
+    // workflow_execution_errors table. Only populated for activity ids that
+    // also appear in FailedActivityIds AND have at least one captured message
+    // (rows from before the capture feature shipped won't surface here).
+    public IReadOnlyDictionary<string, string> ErrorMessagesByActivityId { get; init; }
+        = new Dictionary<string, string>(StringComparer.Ordinal);
+
     public IReadOnlyList<FlowableProcessVariable> Variables { get; init; } = [];
 }
 
