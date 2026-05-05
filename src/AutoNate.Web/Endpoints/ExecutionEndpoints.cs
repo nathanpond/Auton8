@@ -1,12 +1,16 @@
 using System.Security.Claims;
+using System.Text.Json;
+using System.Xml.Linq;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
+using AutoNate.Web.Models.Forms;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Forms;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
 
@@ -610,6 +614,62 @@ public static class ExecutionEndpoints
             return Results.Ok(list);
         });
 
+        // Drives the SPA's task-action UI: pulls together everything needed to
+        // render a task — the BPMN-encoded userForm config (mode + optional
+        // form short code), the form snapshot itself, and the current process
+        // variables. Lookup chain: task → processDefinitionId →
+        // workflow_model_versions row (BPMN xml) → matching <userTask>
+        // element → flowable:userForm{Mode,ShortCode} attributes.
+        tasks.MapGet("/{taskId}/form-config", async (
+            string taskId,
+            IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IFormStore formStore,
+            CancellationToken cancellationToken) =>
+        {
+            var task = await flowable.GetTaskAsync(taskId, cancellationToken);
+            if (task is null)
+            {
+                return Results.NotFound();
+            }
+
+            var bpmnXml = await ResolveBpmnXmlForProcessDefinitionAsync(
+                dbFactory, task.ProcessDefinitionId, cancellationToken);
+
+            var (mode, formShortCode) = ParseUserFormConfig(bpmnXml, task.TaskDefinitionKey);
+
+            FormWorkflowSnapshot? formSnapshot = null;
+            if ((mode == TaskFormModes.Modal || mode == TaskFormModes.Page)
+                && !string.IsNullOrWhiteSpace(formShortCode))
+            {
+                formSnapshot = await formStore
+                    .GetWorkflowSnapshotByShortCodeAsync(formShortCode, cancellationToken);
+            }
+
+            // Variables only matter when a form is rendered — the simple-
+            // complete modal doesn't reference them. Skip the round-trip
+            // when we know we don't need them.
+            IReadOnlyDictionary<string, JsonElement> variables =
+                new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            if (formSnapshot is not null && !string.IsNullOrWhiteSpace(task.ProcessInstanceId))
+            {
+                variables = await flowable.GetProcessInstanceVariablesAsync(
+                    task.ProcessInstanceId!, cancellationToken);
+            }
+
+            return Results.Ok(new TaskFormConfigDto(
+                TaskId: task.Id,
+                TaskName: task.Name,
+                TaskDefinitionKey: task.TaskDefinitionKey,
+                ProcessInstanceId: task.ProcessInstanceId,
+                ProcessInstanceName: task.ProcessInstanceName,
+                ProcessDefinitionName: task.ProcessDefinitionName,
+                Mode: mode,
+                FormShortCode: formShortCode,
+                Form: formSnapshot,
+                Variables: variables));
+        }).RequirePermission(EntityKinds.WorkflowTask, Actions.View, "taskId");
+
         tasks.MapPost("/{taskId}/complete", async (
             string taskId,
             CompleteTaskRequest? request,
@@ -649,4 +709,93 @@ public static class ExecutionEndpoints
     public sealed record UpdateTaskDueDateRequest(DateTimeOffset? DueDate);
 
     public sealed record MoveExecutionStateRequest(string TargetActivityId);
+
+    public static class TaskFormModes
+    {
+        public const string Simple = "simple";
+        public const string Modal = "modal";
+        public const string Page = "page";
+    }
+
+    public sealed record TaskFormConfigDto(
+        string TaskId,
+        string TaskName,
+        string? TaskDefinitionKey,
+        string? ProcessInstanceId,
+        string? ProcessInstanceName,
+        string? ProcessDefinitionName,
+        string Mode,
+        string? FormShortCode,
+        FormWorkflowSnapshot? Form,
+        IReadOnlyDictionary<string, JsonElement> Variables);
+
+    private static async Task<string?> ResolveBpmnXmlForProcessDefinitionAsync(
+        IDbContextFactory<AutoNateDbContext> dbFactory,
+        string? processDefinitionId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(processDefinitionId))
+        {
+            return null;
+        }
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        return await db.WorkflowModelVersions
+            .AsNoTracking()
+            .Where(v => v.ProcessDefinitionId == processDefinitionId)
+            .OrderByDescending(v => v.PublishedAtUtc)
+            .Select(v => v.BpmnXml)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private const string FlowableNamespace = "http://flowable.org/bpmn";
+
+    private static (string Mode, string? FormShortCode) ParseUserFormConfig(
+        string? bpmnXml,
+        string? taskDefinitionKey)
+    {
+        if (string.IsNullOrWhiteSpace(bpmnXml) || string.IsNullOrWhiteSpace(taskDefinitionKey))
+        {
+            return (TaskFormModes.Simple, null);
+        }
+
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Parse(bpmnXml);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return (TaskFormModes.Simple, null);
+        }
+
+        // The BPMN spec lets several namespace prefixes coexist, so match the
+        // userTask element by local name + id rather than a fully-qualified
+        // XName. The flowable: attributes are in their own namespace; look up
+        // both the namespaced form (what bpmn-js writes) and the legacy
+        // attribute-only form just in case.
+        var task = doc.Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == "userTask"
+                                 && (string?)e.Attribute("id") == taskDefinitionKey);
+        if (task is null)
+        {
+            return (TaskFormModes.Simple, null);
+        }
+
+        var ns = XNamespace.Get(FlowableNamespace);
+        var rawMode = (string?)task.Attribute(ns + "userFormMode")
+                      ?? (string?)task.Attribute("flowable:userFormMode");
+        var rawShortCode = (string?)task.Attribute(ns + "userFormShortCode")
+                           ?? (string?)task.Attribute("flowable:userFormShortCode");
+
+        var mode = (rawMode ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            TaskFormModes.Modal => TaskFormModes.Modal,
+            TaskFormModes.Page => TaskFormModes.Page,
+            _ => TaskFormModes.Simple
+        };
+
+        var shortCode = string.IsNullOrWhiteSpace(rawShortCode) ? null : rawShortCode!.Trim();
+        return (mode, shortCode);
+    }
 }

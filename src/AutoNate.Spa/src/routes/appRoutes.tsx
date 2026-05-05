@@ -17,6 +17,7 @@ import { ConfigIndex } from "@/pages/admin/config/sections";
 import FormEditor from "@/pages/admin/config/forms/FormEditor";
 import FormDevView from "@/pages/forms/FormDevView";
 import FormPublicView from "@/pages/forms/FormPublicView";
+import TaskFormPage from "@/pages/workflow-tasks/TaskFormPage";
 import Notifications from "@/pages/notifications/Notifications";
 import DynamicPageRoute from "@/pages/dynamic-page/DynamicPageRoute";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
@@ -68,6 +69,11 @@ export const APP_ROUTES: AppRoute[] = [
   // server-side by `site_available`.
   { path: "formdev/:shortCode", element: protect(<FormDevView />) },
   { path: "form/:shortCode", element: protect(<FormPublicView />) },
+
+  // Full-page workflow user-task form (mode="page" on the user task).
+  // Modal-mode tasks render in place via TaskFormModal; this route is the
+  // navigation target for tasks where the author chose Form Page.
+  { path: "workflow-tasks/:taskId/form", element: protect(<TaskFormPage />) },
 
   // Site Configuration shell — children are page templates rendered inside the
   // layout's <Outlet />. Mounted at the templates' default_path so the URL

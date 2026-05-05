@@ -84,6 +84,47 @@ export async function completeTask(
   });
 }
 
+export type TaskFormMode = "simple" | "modal" | "page";
+
+export type TaskFormWorkflowSnapshot = {
+  formId: string;
+  name: string;
+  shortCode: string;
+  formCode: string;
+  publishedVersionNumber: number | null;
+  isDraftFallback: boolean;
+};
+
+export type TaskFormConfig = {
+  taskId: string;
+  taskName: string;
+  taskDefinitionKey: string | null;
+  processInstanceId: string | null;
+  processInstanceName: string | null;
+  processDefinitionName: string | null;
+  mode: TaskFormMode;
+  formShortCode: string | null;
+  form: TaskFormWorkflowSnapshot | null;
+  variables: Record<string, unknown>;
+};
+
+export async function getTaskFormConfig(
+  taskId: string,
+  signal?: AbortSignal
+): Promise<TaskFormConfig | null> {
+  try {
+    const { data } = await api.get<TaskFormConfig>(
+      `/api/tasks/${encodeURIComponent(taskId)}/form-config`,
+      { signal }
+    );
+    return data;
+  } catch (error) {
+    const status = (error as { response?: { status?: number } }).response?.status;
+    if (status === 404) return null;
+    throw error;
+  }
+}
+
 export async function listMyAssignedTasks(signal?: AbortSignal): Promise<FlowableTaskSummary[]> {
   const { data } = await api.get<FlowableTaskSummary[]>("/api/tasks/assigned-to-me", { signal });
   return data;

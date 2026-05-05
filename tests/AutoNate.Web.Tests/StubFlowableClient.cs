@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
 
@@ -327,6 +328,27 @@ internal sealed class StubFlowableClient : IFlowableClient
         Calls.Add($"CompletedAssignees:{processInstanceId}:{activityId}");
         CompletedAssigneesByActivity.TryGetValue((processInstanceId, activityId), out var list);
         IReadOnlyList<string> result = list?.AsReadOnly() ?? (IReadOnlyList<string>)Array.Empty<string>();
+        return Task.FromResult(result);
+    }
+
+    public Dictionary<string, FlowableTaskSummary> TasksById { get; } = new();
+    public Dictionary<string, Dictionary<string, JsonElement>> VariablesByProcessInstanceId { get; } = new();
+
+    public Task<FlowableTaskSummary?> GetTaskAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"GetTask:{taskId}");
+        TasksById.TryGetValue(taskId, out var task);
+        return Task.FromResult<FlowableTaskSummary?>(task);
+    }
+
+    public Task<IReadOnlyDictionary<string, JsonElement>> GetProcessInstanceVariablesAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"GetVariables:{processInstanceId}");
+        VariablesByProcessInstanceId.TryGetValue(processInstanceId, out var variables);
+        IReadOnlyDictionary<string, JsonElement> result =
+            variables ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         return Task.FromResult(result);
     }
 }

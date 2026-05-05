@@ -66,6 +66,20 @@ public interface IFlowableClient
 
     Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default);
 
+    // Returns a single runtime task or null if not found / already completed.
+    // Used by the task form-config endpoint to look up the task's
+    // taskDefinitionKey + processInstanceId + processDefinitionId without
+    // pulling a paged list.
+    Task<FlowableTaskSummary?> GetTaskAsync(string taskId, CancellationToken cancellationToken = default);
+
+    // Snapshot of every variable on a running process instance, deserialized
+    // to JsonElement so the SPA can pass them straight into a form's `data`
+    // prop. Returns an empty dictionary if the instance has finished or has
+    // no variables yet.
+    Task<IReadOnlyDictionary<string, System.Text.Json.JsonElement>> GetProcessInstanceVariablesAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default);
+
     // Reassigns a runtime user task. Pass null to clear the assignee. Used by
     // the executions admin override surface alongside force-complete.
     Task UpdateTaskAssigneeAsync(string taskId, string? assignee, CancellationToken cancellationToken = default);

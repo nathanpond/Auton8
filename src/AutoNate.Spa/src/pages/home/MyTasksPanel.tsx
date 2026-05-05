@@ -1,14 +1,16 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMyAssignedRecords } from "@/hooks/useRecords";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import {
   ASSIGNED_TASKS_QUERY_KEY,
   TEAM_TASKS_QUERY_KEY,
+  taskFormConfigQueryKey,
   useCompleteTask,
   useMyAssignedTasks
 } from "@/hooks/useExecutions";
+import { getTaskFormConfig, TaskFormConfig } from "@/api/executions";
 import { useBusConnection } from "@/hooks/useBusConnection";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { RecordModel, RecordType } from "@/types/records";
@@ -16,6 +18,8 @@ import { FlowableTaskSummary } from "@/types/flowable";
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { findIcon, preferredStyle, stripFaPrefix } from "@/lib/faIcons";
 import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
+import SimpleCompleteTaskModal from "@/components/workflow/SimpleCompleteTaskModal";
+import TaskFormModal from "@/components/workflow/TaskFormModal";
 
 const PAGE_SIZE = 10;
 
@@ -50,7 +54,10 @@ export default function MyTasksPanel() {
     isError: tasksError
   } = useMyAssignedTasks();
   const completeTask = useCompleteTask();
-  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [openingTaskId, setOpeningTaskId] = useState<string | null>(null);
+  const [activeTaskConfig, setActiveTaskConfig] = useState<TaskFormConfig | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   // Refetch on any record or workflow-execution bus event. The server-side
   // /assigned-to-me endpoints already filter by the current user, so we don't
@@ -71,14 +78,41 @@ export default function MyTasksPanel() {
   );
   useBusConnection({ onMessage: onBusMessage });
 
-  const onCompleteTask = async (taskId: string) => {
-    setCompletingTaskId(taskId);
+  // Clicking Open dispatches on the task's userForm config (set in
+  // Workflow Studio). Simple → confirm modal in place, Modal → form modal
+  // in place, Page → navigate to the dedicated task-form route.
+  const onOpenTask = async (taskId: string) => {
+    setOpeningTaskId(taskId);
+    setOpenError(null);
     try {
-      await completeTask.mutateAsync({ taskId });
+      const config = await qc.fetchQuery({
+        queryKey: taskFormConfigQueryKey(taskId),
+        queryFn: ({ signal }) => getTaskFormConfig(taskId, signal)
+      });
+      if (!config) {
+        setOpenError("Task not found or already completed.");
+        return;
+      }
+      if (config.mode === "page") {
+        navigate(`/workflow-tasks/${encodeURIComponent(taskId)}/form`);
+        return;
+      }
+      setActiveTaskConfig(config);
+    } catch (err) {
+      setOpenError(describeError(err));
     } finally {
-      setCompletingTaskId(null);
+      setOpeningTaskId(null);
     }
   };
+
+  const closeActiveTask = () => setActiveTaskConfig(null);
+
+  const completeFromModal = useCallback(
+    async (taskId: string, variables?: Record<string, unknown>) => {
+      await completeTask.mutateAsync({ taskId, variables });
+    },
+    [completeTask]
+  );
 
   const typesById = useMemo(() => {
     const map = new Map<string, RecordType>();
@@ -165,8 +199,8 @@ export default function MyTasksPanel() {
                   <WorkflowRow
                     key={row.id}
                     task={row.task}
-                    onComplete={onCompleteTask}
-                    isCompleting={completingTaskId === row.task.id}
+                    onOpen={onOpenTask}
+                    isOpening={openingTaskId === row.task.id}
                     statusAppearance={statusAppearance}
                   />
                 )
@@ -179,7 +213,27 @@ export default function MyTasksPanel() {
             Showing {recordItems.length} of {totalRecordCount} assigned records.
           </div>
         )}
+        {openError && (
+          <div className="alert alert-danger mt-3" role="alert">
+            {openError}
+          </div>
+        )}
       </div>
+
+      {activeTaskConfig?.mode === "simple" && (
+        <SimpleCompleteTaskModal
+          config={activeTaskConfig}
+          onClose={closeActiveTask}
+          onComplete={(taskId) => completeFromModal(taskId)}
+        />
+      )}
+      {activeTaskConfig?.mode === "modal" && (
+        <TaskFormModal
+          config={activeTaskConfig}
+          onClose={closeActiveTask}
+          onComplete={(taskId, variables) => completeFromModal(taskId, variables)}
+        />
+      )}
     </div>
   );
 }
@@ -263,13 +317,13 @@ function statusBadgeStyle(
 
 function WorkflowRow({
   task,
-  onComplete,
-  isCompleting,
+  onOpen,
+  isOpening,
   statusAppearance
 }: {
   task: FlowableTaskSummary;
-  onComplete: (taskId: string) => void;
-  isCompleting: boolean;
+  onOpen: (taskId: string) => void;
+  isOpening: boolean;
   statusAppearance: StatusAppearanceEntry[];
 }) {
   // Prefer the per-execution display name (set at start time) over the
@@ -323,15 +377,30 @@ function WorkflowRow({
       <td>
         <button
           type="button"
-          className="btn btn-sm btn-success"
-          onClick={() => onComplete(task.id)}
-          disabled={isCompleting}
+          className="btn btn-sm btn-primary"
+          onClick={() => onOpen(task.id)}
+          disabled={isOpening}
         >
-          Complete
+          {isOpening ? (
+            <>
+              <i className="fa fa-spinner fa-spin me-1" />
+              Opening…
+            </>
+          ) : (
+            "Open"
+          )}
         </button>
       </td>
     </tr>
   );
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    const response = (error as { response?: { data?: { reason?: string } } }).response;
+    return response?.data?.reason ?? error.message;
+  }
+  return String(error);
 }
 
 function resolveIconClass(icon: string): string {

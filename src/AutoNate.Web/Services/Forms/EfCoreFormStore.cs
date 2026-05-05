@@ -320,6 +320,50 @@ public sealed class EfCoreFormStore(IDbContextFactory<AutoNateDbContext> dbConte
             PublishedAtUtc: ToDateTimeOffset(version.CreatedAtUtc));
     }
 
+    public async Task<FormWorkflowSnapshot?> GetWorkflowSnapshotByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeShortCode(shortCode);
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var form = await db.Forms
+            .AsNoTracking()
+            .SingleOrDefaultAsync(f => f.ShortCode == normalized, cancellationToken);
+        if (form is null) return null;
+
+        // Workflow tasks render the published version when one exists, so an
+        // admin's draft tweaks don't immediately leak into running tasks.
+        // Fall back to the draft when nothing's been published — useful
+        // while authoring, surfaced via IsDraftFallback so the SPA can flag
+        // it. site_available is intentionally ignored here; that flag is a
+        // public-surface gate, not an internal one.
+        if (form.PublishedVersionNumber is int publishedNumber)
+        {
+            var version = await db.FormVersions
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    v => v.FormId == form.Id && v.VersionNumber == publishedNumber,
+                    cancellationToken);
+            if (version is not null)
+            {
+                return new FormWorkflowSnapshot(
+                    FormId: form.Id,
+                    Name: version.Name,
+                    ShortCode: version.ShortCode,
+                    FormCode: version.FormCode,
+                    PublishedVersionNumber: version.VersionNumber,
+                    IsDraftFallback: false);
+            }
+        }
+
+        return new FormWorkflowSnapshot(
+            FormId: form.Id,
+            Name: form.Name,
+            ShortCode: form.ShortCode,
+            FormCode: form.FormCode,
+            PublishedVersionNumber: null,
+            IsDraftFallback: true);
+    }
+
     private static FormSummary ToSummary(FormEntity entity) => new(
         Id: entity.Id,
         Name: entity.Name,

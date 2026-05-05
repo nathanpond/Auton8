@@ -1066,6 +1066,91 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(response, $"broadcast signal '{signalName}'");
     }
 
+    public async Task<FlowableTaskSummary?> GetTaskAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(taskId))
+        {
+            return null;
+        }
+
+        using var response = await _httpClient.GetAsync(
+            $"service/runtime/tasks/{Uri.EscapeDataString(taskId)}",
+            cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        await EnsureSuccessAsync(response, "fetch runtime task");
+
+        var task = await DeserializeAsync<FlowableTaskResponse>(response, cancellationToken);
+        if (task is null || string.IsNullOrWhiteSpace(task.Id))
+        {
+            return null;
+        }
+
+        // Backfill the per-instance display name if Flowable's task DTO
+        // didn't include it (older versions return null on the task and
+        // expose it only on the process-instance resource).
+        var processInstanceName = task.ProcessInstanceName;
+        if (string.IsNullOrWhiteSpace(processInstanceName) && !string.IsNullOrWhiteSpace(task.ProcessInstanceId))
+        {
+            var instance = await GetProcessInstanceAsync(task.ProcessInstanceId, cancellationToken);
+            processInstanceName = instance?.Name;
+        }
+
+        return new FlowableTaskSummary
+        {
+            Id = task.Id,
+            Name = task.Name ?? string.Empty,
+            TaskDefinitionKey = task.TaskDefinitionKey,
+            Assignee = task.Assignee,
+            ProcessInstanceId = task.ProcessInstanceId,
+            ProcessInstanceName = processInstanceName,
+            ProcessDefinitionId = task.ProcessDefinitionId,
+            CreatedAtUtc = task.CreateTime,
+            DueDate = task.DueDate
+        };
+    }
+
+    public async Task<IReadOnlyDictionary<string, JsonElement>> GetProcessInstanceVariablesAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(processInstanceId))
+        {
+            return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        }
+
+        using var response = await _httpClient.GetAsync(
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/variables",
+            cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        }
+
+        await EnsureSuccessAsync(response, "fetch process instance variables");
+
+        // Flowable returns this endpoint as a bare JSON array (not the
+        // standard {data, total} wrapper) so we deserialize it directly.
+        var variables = await response.Content.ReadFromJsonAsync<FlowableRuntimeVariableResponse[]>(cancellationToken: cancellationToken)
+            ?? Array.Empty<FlowableRuntimeVariableResponse>();
+
+        var result = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var variable in variables)
+        {
+            if (string.IsNullOrWhiteSpace(variable.Name) || variable.Value is null)
+            {
+                continue;
+            }
+            result[variable.Name] = variable.Value.Value;
+        }
+        return result;
+    }
+
     public async Task<IReadOnlyList<string>> GetCompletedAssigneesForActivityAsync(
         string processInstanceId,
         string activityId,
@@ -1349,6 +1434,18 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
     }
 
     private sealed class FlowableHistoricVariableResponse
+    {
+        public string? Name { get; init; }
+
+        public string? Type { get; init; }
+
+        public JsonElement? Value { get; init; }
+    }
+
+    // Shape returned by GET /runtime/process-instances/{id}/variables — a
+    // flat array of these (no `data` wrapper). Mirrors the historic variant
+    // above but without the wrapper indirection.
+    private sealed class FlowableRuntimeVariableResponse
     {
         public string? Name { get; init; }
 

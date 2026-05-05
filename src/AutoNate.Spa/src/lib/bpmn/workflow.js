@@ -1052,7 +1052,13 @@ function describeBusinessObject(businessObject) {
     assignee: readFlowableString(businessObject, "assignee"),
     candidateUsers: readFlowableList(businessObject, "candidateUsers"),
     candidateGroups: readFlowableList(businessObject, "candidateGroups"),
-    dueDate: readFlowableString(businessObject, "dueDate")
+    dueDate: readFlowableString(businessObject, "dueDate"),
+    // userForm controls how the SPA renders this user task to assignees:
+    // "simple" → confirm-and-complete modal (default when omitted),
+    // "modal" → JsxFormHost in a modal, "page" → full-page route.
+    // userFormShortCode references the Form to render for "modal"/"page".
+    userFormMode: readFlowableString(businessObject, "userFormMode"),
+    userFormShortCode: readFlowableString(businessObject, "userFormShortCode")
   };
 
   if (signal) {
@@ -1362,6 +1368,23 @@ export function updateUserTaskProperties(modelerHandle, task) {
   writeFlowableAttribute(businessObject, "candidateUsers", candidateUsers);
   writeFlowableAttribute(businessObject, "candidateGroups", candidateGroups);
   writeFlowableAttribute(businessObject, "dueDate", dueDate);
+
+  // userFormMode is the source of truth for rendering. We only persist it
+  // when it's "modal" or "page"; "simple" (or null) means the default
+  // simple-complete UI, which doesn't need a stored value. Same idea for
+  // userFormShortCode: only relevant when a form is referenced.
+  const userFormMode = normalizeOptionalString(task.userFormMode);
+  const userFormShortCode = normalizeOptionalString(task.userFormShortCode);
+  writeFlowableAttribute(
+    businessObject,
+    "userFormMode",
+    userFormMode === "simple" ? null : userFormMode
+  );
+  writeFlowableAttribute(
+    businessObject,
+    "userFormShortCode",
+    userFormMode === "modal" || userFormMode === "page" ? userFormShortCode : null
+  );
 
   modeling.updateProperties(element, {
     name: normalizeOptionalString(task.name)

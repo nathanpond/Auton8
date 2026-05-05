@@ -44,6 +44,7 @@ import {
 import AssigneePicker from "@/components/AssigneePicker";
 import { useUsers } from "@/hooks/useUsers";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
+import { useForms } from "@/hooks/useForms";
 import { useEventCatalog } from "@/hooks/useEventCatalog";
 import { useWorkflowBehaviors } from "@/hooks/useWorkflowBehaviors";
 import "./Workflow.css";
@@ -136,6 +137,8 @@ type AssignmentMode = "picker" | "expression";
 
 type DueDateMode = "none" | "afterActivation" | "afterProcessStart" | "expression";
 
+type UserFormMode = "simple" | "modal" | "page";
+
 type UserTaskEditor = {
   id: string;
   type: string;
@@ -150,6 +153,8 @@ type UserTaskEditor = {
   dueDateMode: DueDateMode;
   dueDateDays: string;
   dueDateExpression: string;
+  userFormMode: UserFormMode;
+  userFormShortCode: string;
 };
 
 type ElementSelection = {
@@ -175,6 +180,8 @@ type ElementSelection = {
   defaultFlowId?: string | null;
   outgoingFlows?: Array<{ id: string; name: string | null }> | null;
   sourceType?: string | null;
+  userFormMode?: string | null;
+  userFormShortCode?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -520,6 +527,9 @@ export default function WorkflowStudio() {
       const candidateUsersIsExpression =
         candidateUsers.length === 1 && looksLikeExpression(candidateUsersFirst);
       const dueDate = parseDueDate(selection.dueDate);
+      const rawUserFormMode = (selection.userFormMode ?? "").trim().toLowerCase();
+      const userFormMode: UserFormMode =
+        rawUserFormMode === "modal" || rawUserFormMode === "page" ? rawUserFormMode : "simple";
       setUserTaskEditor({
         id: selection.id,
         type: selection.type,
@@ -533,7 +543,9 @@ export default function WorkflowStudio() {
         candidateGroupsRaw: candidateGroups.join(", "),
         dueDateMode: dueDate.mode,
         dueDateDays: dueDate.days,
-        dueDateExpression: dueDate.expression
+        dueDateExpression: dueDate.expression,
+        userFormMode,
+        userFormShortCode: (selection.userFormShortCode ?? "").trim()
       });
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
@@ -889,13 +901,21 @@ export default function WorkflowStudio() {
 
       const dueDate = buildDueDate(userTaskEditor);
 
+      const userFormMode = userTaskEditor.userFormMode;
+      const userFormShortCode =
+        userFormMode === "modal" || userFormMode === "page"
+          ? userTaskEditor.userFormShortCode.trim()
+          : "";
+
       await workflow.updateUserTaskProperties(handle, {
         id: userTaskEditor.id,
         name: userTaskEditor.name,
         assignee,
         candidateUsers,
         candidateGroups,
-        dueDate
+        dueDate,
+        userFormMode,
+        userFormShortCode: userFormShortCode || null
       });
       setUserTaskEditor(null);
     });
@@ -3293,6 +3313,17 @@ function UserTaskModal({
 }) {
   const { data: users = [] } = useUsers();
   const directory = useUserDirectory();
+  const { data: forms = [] } = useForms();
+  const sortedForms = useMemo(
+    () => [...forms].sort((a, b) => a.name.localeCompare(b.name)),
+    [forms]
+  );
+  const formNeedsPick =
+    editor.userFormMode === "modal" || editor.userFormMode === "page";
+  const userFormError =
+    formNeedsPick && !editor.userFormShortCode
+      ? "Select a form, or change the User Form mode to Simple Complete."
+      : null;
 
   const sortedUsers = useMemo(
     () =>
@@ -3560,11 +3591,63 @@ function UserTaskModal({
           )}
         </fieldset>
 
+        <fieldset className="workflow-field">
+          <legend>User Form</legend>
+          <p className="workflow-modal-note mb-2">
+            Choose how the assignee will see this task. Simple Complete shows a confirm-and-complete
+            modal; Form Modal renders the chosen form in a modal; Form Page navigates to a full-page
+            route at <code>/workflow-tasks/&lt;taskId&gt;/form</code>.
+          </p>
+          <select
+            className="form-select"
+            value={editor.userFormMode}
+            onChange={(e) =>
+              onChange({ ...editor, userFormMode: e.target.value as UserFormMode })
+            }
+          >
+            <option value="simple">Simple Complete</option>
+            <option value="modal">Form Modal</option>
+            <option value="page">Form Page</option>
+          </select>
+
+          {formNeedsPick && (
+            <div className="mt-2">
+              <label className="form-label">Form</label>
+              <select
+                className={`form-select${userFormError ? " is-invalid" : ""}`}
+                value={editor.userFormShortCode}
+                onChange={(e) =>
+                  onChange({ ...editor, userFormShortCode: e.target.value })
+                }
+              >
+                <option value="">Select form…</option>
+                {sortedForms.map((f) => (
+                  <option key={f.id} value={f.shortCode}>
+                    {f.name} ({f.shortCode})
+                    {f.publishedVersionNumber === null ? " — unpublished" : ""}
+                  </option>
+                ))}
+              </select>
+              {userFormError && <div className="invalid-feedback">{userFormError}</div>}
+              <p className="workflow-modal-note mt-1">
+                The form's process variables are passed in as <code>data</code>; submitting calls{" "}
+                <code>POST /api/tasks/&lt;taskId&gt;/complete</code> with the payload as Flowable
+                variables.
+              </p>
+            </div>
+          )}
+        </fieldset>
+
         <div className="workflow-modal-actions">
           <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
             Close
           </button>
-          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onApply}
+            disabled={disabled || Boolean(userFormError)}
+          >
             Apply
           </button>
         </div>

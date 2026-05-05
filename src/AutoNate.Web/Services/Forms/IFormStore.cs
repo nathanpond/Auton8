@@ -27,4 +27,10 @@ public interface IFormStore
     Task<FormDraftSnapshot?> GetDraftSnapshotByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default);
 
     Task<FormPublishedSnapshot?> GetPublishedSnapshotByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default);
+
+    // Returns the form_code an internal consumer (e.g. a workflow user task)
+    // should render: the currently-published version if one exists,
+    // otherwise the current draft. site_available is intentionally ignored
+    // here — that flag gates only the public /form/{shortCode} surface.
+    Task<FormWorkflowSnapshot?> GetWorkflowSnapshotByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default);
 }

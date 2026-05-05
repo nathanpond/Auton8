@@ -98,3 +98,11 @@ public sealed record class FormPublishedSnapshot(
     string FormCode,
     int VersionNumber,
     DateTimeOffset PublishedAtUtc);
+
+public sealed record class FormWorkflowSnapshot(
+    Guid FormId,
+    string Name,
+    string ShortCode,
+    string FormCode,
+    int? PublishedVersionNumber,
+    bool IsDraftFallback);

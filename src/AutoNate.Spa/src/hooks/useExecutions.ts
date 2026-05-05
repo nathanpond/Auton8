@@ -11,11 +11,13 @@ import {
   getExecutionHistory,
   getExecutionLog,
   getExecutionTasks,
+  getTaskFormConfig,
   listExecutions,
   listMyAssignedTasks,
   listTeamAssignedTasks,
   moveExecutionState,
   reassignTaskAtNode,
+  TaskFormConfig,
   updateExecutionVariables,
   updateTaskDueDateAtNode
 } from "@/api/executions";
@@ -118,6 +120,21 @@ export function useCompleteTask() {
       qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
       qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
     }
+  });
+}
+
+export const taskFormConfigQueryKey = (taskId: string) =>
+  ["tasks", "form-config", taskId] as const;
+
+// Lazy lookup of a task's user-form configuration. Driven by a query so the
+// SPA can call ensureQueryData on click (cache-first) without keeping it
+// mounted, and also subscribe normally on the dedicated form page.
+export function useTaskFormConfig(taskId: string | null) {
+  return useQuery<TaskFormConfig | null>({
+    queryKey: taskFormConfigQueryKey(taskId ?? "unset"),
+    queryFn: ({ signal }) =>
+      taskId ? getTaskFormConfig(taskId, signal) : Promise.resolve(null),
+    enabled: Boolean(taskId)
   });
 }
 
