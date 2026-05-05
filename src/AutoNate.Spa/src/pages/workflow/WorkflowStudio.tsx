@@ -46,6 +46,7 @@ import { useUsers } from "@/hooks/useUsers";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
 import { useForms } from "@/hooks/useForms";
 import { useEventCatalog } from "@/hooks/useEventCatalog";
+import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { useWorkflowBehaviors } from "@/hooks/useWorkflowBehaviors";
 import "./Workflow.css";
 
@@ -2114,6 +2115,22 @@ function SignalStartEventModal({
   disabled: boolean;
 }) {
   const { data: catalog } = useEventCatalog();
+  const { data: recordTypes } = useRecordTypes(false);
+
+  // Strict `=== true` semantics — undefined/null defaults to false (conservative).
+  const carriesRecordType = useMemo(() => {
+    if (!catalog) return false;
+    const trimmedTopic = editor.signalTopic.trim();
+    const trimmedEventType = editor.signalName.trim();
+    for (const category of catalog.categories ?? []) {
+      for (const evt of category.events) {
+        if (evt.topic === trimmedTopic && evt.eventType === trimmedEventType) {
+          return evt.carriesRecordType === true;
+        }
+      }
+    }
+    return false;
+  }, [catalog, editor.signalTopic, editor.signalName]);
 
   // Merge static catalog entries (events Flowable / future publishers raise)
   // with dynamic registrations (event types other workflows are listening for)
@@ -2241,6 +2258,21 @@ function SignalStartEventModal({
           </p>
         </label>
 
+        {carriesRecordType && (
+          <label className="workflow-field">
+            <span>Record types (optional)</span>
+            <RecordTypeMultiSelect
+              selected={editor.recordTypeShortCodes}
+              options={recordTypes ?? []}
+              onChange={(next) => onChange({ ...editor, recordTypeShortCodes: next })}
+            />
+            <p className="workflow-modal-note">
+              Empty = all record types match. When set, only payloads whose{" "}
+              <code>recordTypeId</code> matches one of these will start this workflow.
+            </p>
+          </label>
+        )}
+
         <div className="workflow-modal-actions">
           <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
             Close
@@ -2255,6 +2287,50 @@ function SignalStartEventModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RecordTypeMultiSelect({
+  selected,
+  options,
+  onChange
+}: {
+  selected: string[];
+  options: { shortCode: string; name: string; isArchived?: boolean }[];
+  onChange: (next: string[]) => void;
+}) {
+  const toggle = (shortCode: string) => {
+    if (selected.includes(shortCode)) {
+      onChange(selected.filter((s) => s !== shortCode));
+    } else {
+      onChange([...selected, shortCode]);
+    }
+  };
+
+  if (options.length === 0) {
+    return (
+      <p className="workflow-modal-note">
+        No record types defined yet. Empty selection means &ldquo;match all record types.&rdquo;
+      </p>
+    );
+  }
+
+  return (
+    <div className="workflow-record-type-multiselect">
+      {options.map((opt) => (
+        <label key={opt.shortCode} className="workflow-chip">
+          <input
+            type="checkbox"
+            checked={selected.includes(opt.shortCode)}
+            onChange={() => toggle(opt.shortCode)}
+          />
+          <span>
+            {opt.name}
+            {opt.isArchived ? " (archived)" : ""}
+          </span>
+        </label>
+      ))}
     </div>
   );
 }

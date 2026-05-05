@@ -692,6 +692,37 @@
     font-size: 0.92rem;
 }
 
+.workflow-record-type-multiselect {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.workflow-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid #d8e2e8;
+    border-radius: 999px;
+    background: #fff;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #334e68;
+}
+
+.workflow-chip input[type="checkbox"] {
+    margin: 0;
+}
+
+.workflow-chip:has(input:checked) {
+    background: #e0ecff;
+    border-color: #486581;
+    color: #102a43;
+}
+
 .workflow-meta {
     display: grid;
     gap: 0.75rem;
