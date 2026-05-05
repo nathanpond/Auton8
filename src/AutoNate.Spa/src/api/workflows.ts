@@ -65,6 +65,7 @@ export type WorkflowElementSnapshot = {
   dueDate?: string | null;
   signalName?: string | null;
   signalTopic?: string | null;
+  recordTypeShortCodes?: string[] | null;
   timerCycleCron?: string | null;
   timerEndDate?: string | null;
   timerDuration?: string | null;
