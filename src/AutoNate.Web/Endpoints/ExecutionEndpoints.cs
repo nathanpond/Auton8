@@ -81,28 +81,30 @@ public static class ExecutionEndpoints
             var detail = await flowable.GetWorkflowExecutionDiagramDetailAsync(processInstanceId, cancellationToken);
 
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            // Project only the three columns the handler actually reads — ErrorStackTrace
+            // can be tens of KB and is surfaced on the history endpoint, not here.
             var errorRows = await db.WorkflowExecutionErrors.AsNoTracking()
                 .Where(e => e.ProcessInstanceId == processInstanceId)
-                .OrderBy(e => e.OccurredAtUtc)
+                .Select(e => new { e.ActivityId, e.ErrorMessage, e.OccurredAtUtc })
                 .ToListAsync(cancellationToken);
+
+            var failedActivityIds = errorRows
+                .Select(e => e.ActivityId)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionDiagramViewed,
                 WorkflowResourceKinds.Execution,
                 resource: new { processInstanceId },
-                details: new { failedActivityCount = errorRows.Select(e => e.ActivityId).Distinct().Count() },
+                details: new { failedActivityCount = failedActivityIds.Count },
                 cancellationToken);
 
             if (errorRows.Count == 0)
             {
                 return Results.Ok(detail);
             }
-
-            var failedActivityIds = errorRows
-                .Select(e => e.ActivityId)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
 
             // Latest non-empty message per activity. We take the freshest error
             // because retries can produce successively different messages and the
