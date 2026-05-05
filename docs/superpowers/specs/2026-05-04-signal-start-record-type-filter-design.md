@@ -1,8 +1,21 @@
 # Signal Start Event — Record Type Filter
 
-**Status:** Approved (design)
+**Status:** Implemented
 **Date:** 2026-05-04
 **Owner:** npond
+
+## Implementation Notes
+
+Implemented across phases between 2026-05-04 and 2026-05-05. Notable nuances surfaced during execution:
+
+- **Public validation API.** `WorkflowBpmnXml.Validate(...)` referenced in the spec is actually `WorkflowBpmnXml.ValidateProcess(...)` returning `WorkflowBpmnValidationResult` with `.Errors` and `.Warnings`. The publish-time DB-aware warning lives one level up in the `/api/workflows/prepare` endpoint handler.
+- **EventCatalog topic vs. category.** Read-side audit events (`record.viewed`, `record.list.viewed`, `record.searched`, `record.history.viewed`) share the `record.events` topic but use a different envelope (audit context, not `RecordEventEnvelope`). They intentionally stay unflagged. The `CarriesRecordType` flag is set per-entry on the six lifecycle events in the "Record" category, not by topic.
+- **Idempotency `businessKey`.** The dispatcher does NOT yet set a deterministic business key from `BusWatcherMessage.Headers`. At-least-once delivery may produce duplicate starts on Dapr redelivery. Acceptable for v1; deferred until a concrete duplication is observed.
+- **Audit-event invalidation of `RecordTypeShortCodeCache`.** Deferred: the cache refreshes only on app start. `IActionHub.AuditEventPublished` is a viable in-process hook for `record-type.created/updated/archived/restored` events when needed; documented as TODO inside the cache class.
+- **Resolver guard in dispatcher.** `IRecordTypeShortCodeResolver.TryGetShortCode` is called inside a `try`/`catch` so a future resolver implementation that throws cannot tear down dispatch.
+- **`BroadcastSignalAsync`.** Removed from the dispatch path entirely. Still exists on `IFlowableClient` for completeness; can be deleted in a follow-up sweep.
+- **Filter set comparison is `StringComparer.Ordinal`.** Match the rest of the AutoNate codebase. Filter set on each registration is a `FrozenSet<string>` to make the immutability explicit.
+- **Tests:** 738 passing post-implementation (was ~720 pre). Includes one end-to-end integration test (`SignalStartRecordTypeFilterIntegrationTests`) exercising publish → registry refresh → dispatcher → start.
 
 ## Summary
 
