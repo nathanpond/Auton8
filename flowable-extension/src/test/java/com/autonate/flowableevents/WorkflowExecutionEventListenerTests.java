@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import org.flowable.common.engine.api.delegate.event.FlowableExceptionEvent;
 import org.flowable.common.engine.impl.cfg.TransactionState;
 import org.junit.jupiter.api.Test;
 
@@ -71,5 +72,72 @@ class WorkflowExecutionEventListenerTests {
             ZoneId.of("UTC"));
 
         assertEquals("Workflow - 2026-12-31 23:59 UTC", name);
+    }
+
+    @Test
+    void failureListenerExtractsCauseFromExceptionEvent() {
+        // The failure listener must cast the event to FlowableExceptionEvent and
+        // pass the cause Throwable into the mapper, so the payload carries the
+        // root-cause message and stack trace into workflow_execution_errors.
+        // This test pins the contract: event.getCause() result MUST end up as the
+        // mapper's `cause` argument.
+        var capturedCause = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var fakeMapper = new WorkflowExecutionEventMapper(
+            new FlowableExecutionEventProperties(), new WorkflowDefinitionMetadataResolver()) {
+            // Override the 5-arg overload to capture the cause without needing
+            // a real Flowable event. We return null so the listener short-
+            // circuits before calling publisher.publish (which is also null).
+            @Override
+            WorkflowExecutionEventEnvelope map(
+                String eventType,
+                org.flowable.common.engine.api.delegate.event.FlowableEngineEvent flowableEvent,
+                org.flowable.engine.delegate.DelegateExecution execution,
+                org.flowable.engine.RepositoryService repositoryService,
+                Throwable cause) {
+                capturedCause.set(cause);
+                return null;
+            }
+        };
+        // Compiles because Task 3 dropped `final` from
+        // WorkflowExecutionEventMapper and the class is package-private (test
+        // class is in the same package).
+
+        var rootCause = new IllegalStateException("script line 7: x is undefined");
+        var listener = new WorkflowFailureEventListener(fakeMapper, /*publisher*/ null, /*repoProvider*/ null);
+
+        // Drive the protected hook directly so we don't need a live Flowable engine.
+        var event = new TestExceptionEntityEvent(rootCause);
+        listener.invokeJobExecutionFailureForTest(event);
+
+        org.junit.jupiter.api.Assertions.assertSame(rootCause, capturedCause.get(),
+            "WorkflowFailureEventListener must thread event.getCause() into the mapper");
+    }
+
+    // Minimal stand-in for FlowableEngineEntityEvent + FlowableExceptionEvent.
+    // Production code calls only getCause(); the rest of the interface methods
+    // throw — they would fail the test loudly if the listener started touching
+    // them, which is what we want.
+    private static final class TestExceptionEntityEvent
+        implements org.flowable.common.engine.api.delegate.event.FlowableEngineEntityEvent,
+                   org.flowable.common.engine.api.delegate.event.FlowableExceptionEvent {
+
+        private final Throwable cause;
+
+        TestExceptionEntityEvent(Throwable cause) {
+            this.cause = cause;
+        }
+
+        @Override public Throwable getCause() { return cause; }
+        @Override public Object getEntity() { return null; }
+        @Override public org.flowable.common.engine.api.delegate.event.FlowableEngineEventType getType() {
+            return org.flowable.common.engine.api.delegate.event.FlowableEngineEventType.JOB_EXECUTION_FAILURE;
+        }
+        @Override public String getProcessDefinitionId() { return null; }
+        @Override public String getProcessInstanceId() { return null; }
+        @Override public String getExecutionId() { return null; }
+        @Override public String getScopeId() { return null; }
+        @Override public String getScopeType() { return null; }
+        @Override public String getScopeDefinitionId() { return null; }
+        @Override public String getSubScopeId() { return null; }
     }
 }

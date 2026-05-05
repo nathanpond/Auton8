@@ -4,6 +4,7 @@ import java.util.Set;
 import org.flowable.common.engine.api.delegate.event.FlowableEngineEntityEvent;
 import org.flowable.common.engine.api.delegate.event.FlowableEngineEvent;
 import org.flowable.common.engine.api.delegate.event.FlowableEngineEventType;
+import org.flowable.common.engine.api.delegate.event.FlowableExceptionEvent;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.delegate.DelegateExecution;
 import org.flowable.engine.delegate.event.AbstractFlowableEngineEventListener;
@@ -41,15 +42,32 @@ final class WorkflowFailureEventListener extends AbstractFlowableEngineEventList
 
     @Override
     protected void jobExecutionFailure(FlowableEngineEntityEvent event) {
-        publish("job.execution.failed", event, getExecution(event));
+        publish("job.execution.failed", event, getExecution(event), causeFrom(event));
     }
 
-    private void publish(String eventType, FlowableEngineEvent event, DelegateExecution execution) {
+    // Test-only entry point: invokes the same path the engine would on
+    // JOB_EXECUTION_FAILURE so we can drive the listener without a live engine.
+    void invokeJobExecutionFailureForTest(FlowableEngineEntityEvent event) {
+        jobExecutionFailure(event);
+    }
+
+    private void publish(String eventType, FlowableEngineEvent event, DelegateExecution execution, Throwable cause) {
         try {
-            var envelope = eventMapper.map(eventType, event, execution, repositoryServiceProvider.getIfAvailable());
-            publisher.publish(envelope);
+            var envelope = eventMapper.map(eventType, event, execution, repositoryServiceProvider != null
+                ? repositoryServiceProvider.getIfAvailable()
+                : null, cause);
+            if (envelope != null && publisher != null) {
+                publisher.publish(envelope);
+            }
         } catch (RuntimeException exception) {
             Logger.warn("Failed to publish Flowable workflow event '{}'.", eventType, exception);
         }
+    }
+
+    private static Throwable causeFrom(FlowableEngineEvent event) {
+        if (event instanceof FlowableExceptionEvent exceptionEvent) {
+            return exceptionEvent.getCause();
+        }
+        return null;
     }
 }
