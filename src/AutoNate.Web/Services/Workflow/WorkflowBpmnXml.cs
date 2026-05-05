@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -697,11 +698,13 @@ public static partial class WorkflowBpmnXml
             set.Add(token);
         }
 
-        return set;
+        // Freeze before returning so registrations can't be mutated by downstream
+        // consumers that might cache the set across async boundaries.
+        return set.ToFrozenSet(StringComparer.Ordinal);
     }
 
     private static readonly IReadOnlySet<string> EmptyShortCodeSet =
-        new HashSet<string>(StringComparer.Ordinal);
+        FrozenSet<string>.Empty;
 
     private static void ApplyScriptTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
     {
