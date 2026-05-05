@@ -247,15 +247,21 @@ new file or extension)**
   activity, with the latest non-empty message.
 - `/api/executions/{id}/history` returns `errorStackTrace` on errored rows.
 
-**SPA (`src/AutoNate.Spa/src/pages/workflow-executions/__tests__` or near
-`buildUserTaskHoverInfo` in the existing test file)**
-- `buildActivityHoverInfo` returns the errored branch when
-  `errorsByActivityId[activityId]` is present, even on a userTask.
-- `(no message captured)` placeholder rendered when message is null.
-- `ErrorDetails` toggles between collapsed and expanded states.
+**SPA**
+The SPA has no Vitest/Jest setup (no test runner in `package.json`), so SPA
+changes are verified by:
+- `npm run type-check` to confirm the type-mirror updates compile against
+  the rest of the SPA.
+- Manual smoke: trigger a script-task failure in dev (the existing
+  `__tests__`-style harness doesn't apply here), hover the errored node,
+  confirm the tooltip renders with the root-cause message; open the History
+  tab and confirm the "Show stack trace" toggle reveals the trace.
+- The existing Playwright suite in `tests/AutoNate.E2E.Tests/` is
+  unchanged — those tests assert the executions page renders, not specific
+  tooltip content.
 
-No Playwright/E2E pass — the surgical scope is well-covered by unit + endpoint
-tests, and the existing failed-node-rendering E2E is unchanged.
+If we later introduce a SPA unit-test runner, `buildActivityHoverInfo` and
+`ErrorDetails` are good first targets.
 
 ## Implementation order
 
