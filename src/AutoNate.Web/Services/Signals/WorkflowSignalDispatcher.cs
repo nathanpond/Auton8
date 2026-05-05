@@ -20,8 +20,8 @@ public sealed class WorkflowSignalDispatcher(
 
     public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
     {
-        var signalsForTopic = _registry.GetSignalNamesForTopic(message.Topic);
-        if (signalsForTopic.Count == 0)
+        var registrations = _registry.GetRegistrationsForTopic(message.Topic);
+        if (registrations.Count == 0)
         {
             return;
         }
@@ -35,31 +35,70 @@ public sealed class WorkflowSignalDispatcher(
             return;
         }
 
-        if (!signalsForTopic.Contains(eventType))
+        var matching = registrations
+            .Where(r => string.Equals(r.SignalName, eventType, StringComparison.Ordinal))
+            .ToArray();
+        if (matching.Length == 0)
         {
             return;
         }
 
+        // Start one process per matching registration. Each call gets its own
+        // try/catch so a single Flowable failure can't abort siblings.
+        foreach (var registration in matching)
+        {
+            try
+            {
+                // Forward the raw JSON string as eventData. Flowable stores it as
+                // a string variable; downstream script tasks `JSON.parse(eventData)`.
+                await _flowableClient.StartProcessInstanceAsync(
+                    registration.ProcessDefinitionKey,
+                    variables: new Dictionary<string, object?> { ["eventData"] = message.Payload });
+
+                _logger.LogInformation(
+                    "Started workflow {ProcessDefinitionKey} from signal '{SignalName}' on topic {Topic}.",
+                    registration.ProcessDefinitionKey, eventType, message.Topic);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Failed to start workflow {ProcessDefinitionKey} from signal '{SignalName}' on topic {Topic}.",
+                    registration.ProcessDefinitionKey, eventType, message.Topic);
+            }
+        }
+
+        // Wake any waiting intermediate-catch executions on this signal.
+        IReadOnlyList<string> waitingExecutionIds;
         try
         {
-            // Forward the raw JSON string as eventData. Flowable stores it as
-            // a string variable; downstream script tasks `JSON.parse(eventData)`.
-            await _flowableClient.BroadcastSignalAsync(
-                eventType,
-                new Dictionary<string, object?> { ["eventData"] = message.Payload });
-
-            _logger.LogInformation(
-                "Broadcasted signal '{SignalName}' from topic {Topic}.",
-                eventType,
-                message.Topic);
+            waitingExecutionIds = await _flowableClient
+                .ListExecutionsBySignalSubscriptionAsync(eventType);
         }
         catch (Exception exception)
         {
             _logger.LogError(
                 exception,
-                "Failed to broadcast signal '{SignalName}' from topic {Topic}.",
-                eventType,
-                message.Topic);
+                "Failed to list executions waiting on signal '{SignalName}'. Skipping intermediate-catch dispatch.",
+                eventType);
+            return;
+        }
+
+        foreach (var executionId in waitingExecutionIds)
+        {
+            try
+            {
+                await _flowableClient.SignalExecutionAsync(
+                    executionId,
+                    new Dictionary<string, object?> { ["eventData"] = message.Payload });
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Failed to signal execution {ExecutionId} for signal '{SignalName}'.",
+                    executionId, eventType);
+            }
         }
     }
 

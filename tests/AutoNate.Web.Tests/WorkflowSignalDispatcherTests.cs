@@ -9,115 +9,153 @@ namespace AutoNate.Web.Tests;
 public sealed class WorkflowSignalDispatcherTests
 {
     [Fact]
-    public async Task HandleAsync_BroadcastsSignal_WhenEventTypeMatches()
+    public async Task HandleAsync_StartsMatchingProcess_WhenEventTypeMatches()
     {
-        var (dispatcher, stub) = CreateDispatcher(("orders.events", new[] { "OrderPlaced" }));
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
             topic: "orders.events",
             payload: """{ "eventType": "OrderPlaced", "orderId": 42 }"""));
 
-        var broadcast = Assert.Single(stub.BroadcastedSignals);
-        Assert.Equal("OrderPlaced", broadcast.SignalName);
-        Assert.NotNull(broadcast.Variables);
-        Assert.Equal("eventData", Assert.Single(broadcast.Variables!.Keys));
-        var raw = Assert.IsType<string>(broadcast.Variables["eventData"]!);
+        var start = Assert.Single(stub.StartedProcesses);
+        Assert.Equal("OrderFlow", start.ProcessDefinitionKey);
+        Assert.NotNull(start.Variables);
+        Assert.Equal("eventData", Assert.Single(start.Variables!.Keys));
+        var raw = Assert.IsType<string>(start.Variables["eventData"]!);
         Assert.Contains("\"orderId\"", raw);
+        Assert.Empty(stub.BroadcastedSignals);
     }
 
     [Fact]
     public async Task HandleAsync_NoOps_WhenEventTypeIsNotConfiguredForTopic()
     {
-        var (dispatcher, stub) = CreateDispatcher(("orders.events", new[] { "OrderPlaced" }));
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
             topic: "orders.events",
             payload: """{ "eventType": "ShipmentDelivered" }"""));
 
-        Assert.Empty(stub.BroadcastedSignals);
+        Assert.Empty(stub.StartedProcesses);
+        Assert.Empty(stub.SignalledExecutions);
     }
 
     [Fact]
     public async Task HandleAsync_NoOps_WhenTopicHasNoConfiguredSignals()
     {
-        var (dispatcher, stub) = CreateDispatcher(("orders.events", new[] { "OrderPlaced" }));
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
             topic: "unrelated.topic",
             payload: """{ "eventType": "OrderPlaced" }"""));
 
-        Assert.Empty(stub.BroadcastedSignals);
+        Assert.Empty(stub.StartedProcesses);
+        Assert.Empty(stub.SignalledExecutions);
     }
 
     [Fact]
     public async Task HandleAsync_NoOps_WhenPayloadIsMalformed()
     {
-        var (dispatcher, stub) = CreateDispatcher(("orders.events", new[] { "OrderPlaced" }));
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
             topic: "orders.events",
             payload: "not json"));
 
-        Assert.Empty(stub.BroadcastedSignals);
+        Assert.Empty(stub.StartedProcesses);
+        Assert.Empty(stub.SignalledExecutions);
     }
 
     [Fact]
     public async Task HandleAsync_NoOps_WhenEventTypeFieldIsMissing()
     {
-        var (dispatcher, stub) = CreateDispatcher(("orders.events", new[] { "OrderPlaced" }));
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
             topic: "orders.events",
             payload: """{ "orderId": 42 }"""));
 
-        Assert.Empty(stub.BroadcastedSignals);
+        Assert.Empty(stub.StartedProcesses);
+        Assert.Empty(stub.SignalledExecutions);
     }
 
     [Fact]
-    public async Task HandleAsync_BroadcastsSeparately_ForMultipleSignalsOnSameTopic()
+    public async Task HandleAsync_StartsOnlyMatchingRegistration_ForMultipleSignalsOnSameTopic()
     {
-        // Two signal start events listen on the same topic, but only the matching
-        // eventType should be broadcasted — not all configured names.
-        var (dispatcher, stub) = CreateDispatcher(("orders.events", new[] { "OrderPlaced", "OrderCancelled" }));
+        // Two signal start events listen on the same topic — only the matching
+        // eventType's registration should be started.
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderPlacedFlow"),
+            Reg("orders.events", "OrderCancelled", "OrderCancelledFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
             topic: "orders.events",
             payload: """{ "eventType": "OrderCancelled" }"""));
 
-        var broadcast = Assert.Single(stub.BroadcastedSignals);
-        Assert.Equal("OrderCancelled", broadcast.SignalName);
+        var start = Assert.Single(stub.StartedProcesses);
+        Assert.Equal("OrderCancelledFlow", start.ProcessDefinitionKey);
     }
 
     [Fact]
-    public async Task HandleAsync_SwallowsFlowableException()
+    public async Task HandleAsync_SwallowsFlowableException_OnStartProcess()
     {
-        var (dispatcher, stub) = CreateDispatcher(("orders.events", new[] { "OrderPlaced" }));
-        stub.BroadcastSignalThrows = new InvalidOperationException("flowable down");
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
+        stub.StartProcessInstanceThrows = new InvalidOperationException("flowable down");
 
         // Should not propagate — dispatcher logs and continues so a single bad
-        // publish can't tear down the bus subscriber loop.
+        // start can't tear down the bus subscriber loop.
         await dispatcher.HandleAsync(BuildMessage(
             topic: "orders.events",
             payload: """{ "eventType": "OrderPlaced" }"""));
 
-        Assert.Single(stub.BroadcastedSignals);
+        // The stub records the call before throwing so we know the dispatcher
+        // attempted the start and swallowed the exception.
+        Assert.Single(stub.StartedProcesses);
+    }
+
+    [Fact]
+    public async Task HandleAsync_StartsAllMatchingRegistrations_EvenWhenOneFails()
+    {
+        // Two start-event workflows listen on the same signal name. If the
+        // first one throws the dispatcher must still attempt the second.
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "FlowA"),
+            Reg("orders.events", "OrderPlaced", "FlowB"));
+        stub.StartProcessInstanceThrows = new InvalidOperationException("flowable down");
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "orders.events",
+            payload: """{ "eventType": "OrderPlaced" }"""));
+
+        Assert.Equal(
+            new[] { "FlowA", "FlowB" },
+            stub.StartedProcesses.Select(s => s.ProcessDefinitionKey).OrderBy(k => k));
+    }
+
+    [Fact]
+    public async Task HandleAsync_SignalsWaitingExecutions_WhenEventTypeMatches()
+    {
+        var (dispatcher, stub) = CreateDispatcher(
+            Reg("orders.events", "OrderPlaced", "OrderFlow"));
+        stub.WaitingExecutionsBySignal["OrderPlaced"] = new[] { "exec-1", "exec-2" };
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "orders.events",
+            payload: """{ "eventType": "OrderPlaced" }"""));
+
+        Assert.Equal(
+            new[] { "exec-1", "exec-2" },
+            stub.SignalledExecutions.Select(s => s.ExecutionId).OrderBy(s => s));
     }
 
     private static (WorkflowSignalDispatcher Dispatcher, StubFlowableClient Stub) CreateDispatcher(
-        params (string Topic, string[] SignalNames)[] entries)
+        params WorkflowSignalRegistration[] registrations)
     {
-        // Existing dispatcher tests don't yet care about process keys or
-        // record-type filtering — synthesize a single placeholder process key
-        // per signal so each (topic, signalName) pair becomes one registration.
-        var registrations = entries
-            .SelectMany(entry => entry.SignalNames.Select(signalName =>
-                new WorkflowSignalRegistration(
-                    SignalName: signalName,
-                    Topic: entry.Topic,
-                    ProcessDefinitionKey: $"Flow_{signalName}",
-                    RecordTypeShortCodes: new HashSet<string>(StringComparer.Ordinal))))
-            .ToArray();
-
         var registry = new InMemorySignalRegistry();
         registry.Set(registrations);
         var stub = new StubFlowableClient();
@@ -127,6 +165,12 @@ public sealed class WorkflowSignalDispatcherTests
             NullLogger<WorkflowSignalDispatcher>.Instance);
         return (dispatcher, stub);
     }
+
+    private static WorkflowSignalRegistration Reg(
+        string topic, string signalName, string processKey,
+        params string[] shortCodes) =>
+        new(signalName, topic, processKey,
+            new HashSet<string>(shortCodes, StringComparer.Ordinal));
 
     private static BusWatcherStreamService.BusWatcherMessage BuildMessage(string topic, string payload)
     {

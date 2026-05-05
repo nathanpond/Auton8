@@ -72,6 +72,14 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    public List<(string ProcessDefinitionKey, string? Name, IReadOnlyDictionary<string, object?>? Variables)>
+        StartedProcesses { get; } = new();
+
+    // Set to make StartProcessInstanceAsync throw — dispatcher tests for the
+    // per-process error-isolation path use this without needing a separate
+    // IFlowableClient implementation.
+    public Exception? StartProcessInstanceThrows { get; set; }
+
     public Task<FlowableProcessInstanceSummary> StartProcessInstanceAsync(
         string processDefinitionKey,
         string? name = null,
@@ -79,6 +87,11 @@ internal sealed class StubFlowableClient : IFlowableClient
         CancellationToken cancellationToken = default)
     {
         Calls.Add($"Start:{processDefinitionKey}:{name ?? "(unnamed)"}");
+        StartedProcesses.Add((processDefinitionKey, name, variables));
+        if (StartProcessInstanceThrows is not null)
+        {
+            throw StartProcessInstanceThrows;
+        }
         return Task.FromResult(new FlowableProcessInstanceSummary { Name = name });
     }
 
