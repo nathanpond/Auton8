@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Workflow;
 
 namespace AutoNate.Web.Services.Signals;
@@ -12,10 +13,12 @@ namespace AutoNate.Web.Services.Signals;
 public sealed class WorkflowSignalDispatcher(
     IWorkflowSignalRegistry registry,
     IFlowableClient flowableClient,
+    IRecordTypeShortCodeResolver recordTypeResolver,
     ILogger<WorkflowSignalDispatcher> logger)
 {
     private readonly IWorkflowSignalRegistry _registry = registry;
     private readonly IFlowableClient _flowableClient = flowableClient;
+    private readonly IRecordTypeShortCodeResolver _recordTypeResolver = recordTypeResolver;
     private readonly ILogger<WorkflowSignalDispatcher> _logger = logger;
 
     public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
@@ -43,10 +46,35 @@ public sealed class WorkflowSignalDispatcher(
             return;
         }
 
+        // Resolve the payload's recordTypeId (if any) once up front: every
+        // filtered registration tests against the same shortcode.
+        var payloadRecordTypeId = TryReadGuid(message.Payload, "recordTypeId");
+        string? resolvedShortCode = null;
+        if (payloadRecordTypeId is Guid id
+            && _recordTypeResolver.TryGetShortCode(id, out var sc))
+        {
+            resolvedShortCode = sc;
+        }
+
         // Start one process per matching registration. Each call gets its own
         // try/catch so a single Flowable failure can't abort siblings.
         foreach (var registration in matching)
         {
+            // Per-registration record-type filter. An empty filter set means
+            // "no filter" and always passes; a non-empty set requires the
+            // payload's recordTypeId to resolve to a shortcode in the set.
+            if (registration.RecordTypeShortCodes.Count > 0)
+            {
+                if (resolvedShortCode is null
+                    || !registration.RecordTypeShortCodes.Contains(resolvedShortCode))
+                {
+                    _logger.LogInformation(
+                        "Skipping {ProcessDefinitionKey} for signal '{SignalName}': record-type filter excluded payload (recordTypeId={RecordTypeId}, shortCode={ShortCode}).",
+                        registration.ProcessDefinitionKey, eventType, payloadRecordTypeId, resolvedShortCode);
+                    continue;
+                }
+            }
+
             try
             {
                 // Forward the raw JSON string as eventData. Flowable stores it as
@@ -129,6 +157,39 @@ public sealed class WorkflowSignalDispatcher(
 
             var value = eventTypeElement.GetString();
             return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static Guid? TryReadGuid(string payload, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            if (!document.RootElement.TryGetProperty(fieldName, out var element))
+            {
+                return null;
+            }
+
+            if (element.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            return Guid.TryParse(element.GetString(), out var value) ? value : null;
         }
         catch (JsonException)
         {

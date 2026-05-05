@@ -15,14 +15,18 @@ namespace AutoNate.Web.Services.Records;
 //   - Initial load: RecordTypeShortCodeCacheInitializer (IHostedService)
 //     calls RefreshAsync at app start, before any signals are dispatched.
 //   - Mutations: TODO — wire RefreshAsync to the
-//     record-type.created/updated/archived/restored audit events. Today the
-//     cache is read-mostly and stale entries only matter for newly-created
-//     record types being signalled before the next process restart, which is
-//     unlikely in practice. Will be added when P2.4 surfaces a real
-//     staleness concern.
+//     record-type.created/updated/archived/restored audit events. The most
+//     likely seam is an IActionHandler subscribed to
+//     HookPoints.AuditEventPublished (see AuditEventPublisher.cs:98-104) that
+//     filters on those EventTypes and calls RefreshAsync. Today the cache is
+//     read-mostly and stale entries only matter for newly-created record
+//     types being signalled before the next process restart, which is
+//     unlikely in practice. Will be added when a real staleness concern
+//     surfaces.
 public sealed class RecordTypeShortCodeCache(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
     ILogger<RecordTypeShortCodeCache> logger)
+    : IRecordTypeShortCodeResolver
 {
     private readonly IDbContextFactory<AutoNateDbContext> _dbContextFactory = dbContextFactory;
     private readonly ILogger<RecordTypeShortCodeCache> _logger = logger;

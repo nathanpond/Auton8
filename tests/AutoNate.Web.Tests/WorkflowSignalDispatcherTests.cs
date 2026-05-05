@@ -1,4 +1,5 @@
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Signals;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,7 +12,7 @@ public sealed class WorkflowSignalDispatcherTests
     [Fact]
     public async Task HandleAsync_StartsMatchingProcess_WhenEventTypeMatches()
     {
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
@@ -30,7 +31,7 @@ public sealed class WorkflowSignalDispatcherTests
     [Fact]
     public async Task HandleAsync_NoOps_WhenEventTypeIsNotConfiguredForTopic()
     {
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
@@ -44,7 +45,7 @@ public sealed class WorkflowSignalDispatcherTests
     [Fact]
     public async Task HandleAsync_NoOps_WhenTopicHasNoConfiguredSignals()
     {
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
@@ -58,7 +59,7 @@ public sealed class WorkflowSignalDispatcherTests
     [Fact]
     public async Task HandleAsync_NoOps_WhenPayloadIsMalformed()
     {
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
@@ -72,7 +73,7 @@ public sealed class WorkflowSignalDispatcherTests
     [Fact]
     public async Task HandleAsync_NoOps_WhenEventTypeFieldIsMissing()
     {
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderFlow"));
 
         await dispatcher.HandleAsync(BuildMessage(
@@ -88,7 +89,7 @@ public sealed class WorkflowSignalDispatcherTests
     {
         // Two signal start events listen on the same topic — only the matching
         // eventType's registration should be started.
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderPlacedFlow"),
             Reg("orders.events", "OrderCancelled", "OrderCancelledFlow"));
 
@@ -103,7 +104,7 @@ public sealed class WorkflowSignalDispatcherTests
     [Fact]
     public async Task HandleAsync_SwallowsFlowableException_OnStartProcess()
     {
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderFlow"));
         stub.StartProcessInstanceThrows = new InvalidOperationException("flowable down");
 
@@ -123,7 +124,7 @@ public sealed class WorkflowSignalDispatcherTests
     {
         // Two start-event workflows listen on the same signal name. If the
         // first one throws the dispatcher must still attempt the second.
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "FlowA"),
             Reg("orders.events", "OrderPlaced", "FlowB"));
         stub.StartProcessInstanceThrows = new InvalidOperationException("flowable down");
@@ -140,7 +141,7 @@ public sealed class WorkflowSignalDispatcherTests
     [Fact]
     public async Task HandleAsync_SignalsWaitingExecutions_WhenEventTypeMatches()
     {
-        var (dispatcher, stub) = CreateDispatcher(
+        var (dispatcher, stub, _) = CreateDispatcher(
             Reg("orders.events", "OrderPlaced", "OrderFlow"));
         stub.WaitingExecutionsBySignal["OrderPlaced"] = new[] { "exec-1", "exec-2" };
 
@@ -153,17 +154,81 @@ public sealed class WorkflowSignalDispatcherTests
             stub.SignalledExecutions.Select(s => s.ExecutionId).OrderBy(s => s));
     }
 
-    private static (WorkflowSignalDispatcher Dispatcher, StubFlowableClient Stub) CreateDispatcher(
+    [Fact]
+    public async Task HandleAsync_StartsWorkflow_WhenFilterMatchesPayloadShortCode()
+    {
+        var recordTypeId = Guid.NewGuid();
+        var (dispatcher, stub, resolver) = CreateDispatcher(
+            Reg("records.events", "RecordCreated", "AssetFlow", "asset"));
+        resolver.ShortCodesById[recordTypeId] = "asset";
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "records.events",
+            payload: $$"""{ "eventType": "RecordCreated", "recordTypeId": "{{recordTypeId}}" }"""));
+
+        var start = Assert.Single(stub.StartedProcesses);
+        Assert.Equal("AssetFlow", start.ProcessDefinitionKey);
+    }
+
+    [Fact]
+    public async Task HandleAsync_SkipsWorkflow_WhenFilterDoesNotMatchPayloadShortCode()
+    {
+        var recordTypeId = Guid.NewGuid();
+        var (dispatcher, stub, resolver) = CreateDispatcher(
+            Reg("records.events", "RecordCreated", "AssetFlow", "asset"));
+        resolver.ShortCodesById[recordTypeId] = "vehicle";
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "records.events",
+            payload: $$"""{ "eventType": "RecordCreated", "recordTypeId": "{{recordTypeId}}" }"""));
+
+        Assert.Empty(stub.StartedProcesses);
+    }
+
+    [Fact]
+    public async Task HandleAsync_SkipsWorkflow_WhenFilterSetButPayloadHasNoRecordTypeId()
+    {
+        var (dispatcher, stub, _) = CreateDispatcher(
+            Reg("records.events", "RecordCreated", "AssetFlow", "asset"));
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "records.events",
+            payload: """{ "eventType": "RecordCreated" }"""));
+
+        Assert.Empty(stub.StartedProcesses);
+    }
+
+    [Fact]
+    public async Task HandleAsync_StartsBothFilteredAndUnfilteredWorkflows_OnMatchingPayload()
+    {
+        var recordTypeId = Guid.NewGuid();
+        var (dispatcher, stub, resolver) = CreateDispatcher(
+            Reg("records.events", "RecordCreated", "AssetFlow", "asset"),
+            Reg("records.events", "RecordCreated", "GenericFlow"));
+        resolver.ShortCodesById[recordTypeId] = "asset";
+
+        await dispatcher.HandleAsync(BuildMessage(
+            topic: "records.events",
+            payload: $$"""{ "eventType": "RecordCreated", "recordTypeId": "{{recordTypeId}}" }"""));
+
+        Assert.Equal(
+            new[] { "AssetFlow", "GenericFlow" },
+            stub.StartedProcesses.Select(s => s.ProcessDefinitionKey).OrderBy(k => k));
+    }
+
+    private static (WorkflowSignalDispatcher Dispatcher, StubFlowableClient Stub, FakeRecordTypeResolver Resolver) CreateDispatcher(
         params WorkflowSignalRegistration[] registrations)
     {
         var registry = new InMemorySignalRegistry();
         registry.Set(registrations);
         var stub = new StubFlowableClient();
+        var resolver = new FakeRecordTypeResolver();
         var dispatcher = new WorkflowSignalDispatcher(
             registry,
             stub,
+            resolver,
             NullLogger<WorkflowSignalDispatcher>.Instance);
-        return (dispatcher, stub);
+        return (dispatcher, stub, resolver);
     }
 
     private static WorkflowSignalRegistration Reg(
@@ -180,6 +245,22 @@ public sealed class WorkflowSignalDispatcherTests
             "application/json",
             new Dictionary<string, string>(),
             payload);
+    }
+
+    private sealed class FakeRecordTypeResolver : IRecordTypeShortCodeResolver
+    {
+        public Dictionary<Guid, string> ShortCodesById { get; } = new();
+
+        public bool TryGetShortCode(Guid recordTypeId, out string shortCode)
+        {
+            if (ShortCodesById.TryGetValue(recordTypeId, out var v))
+            {
+                shortCode = v;
+                return true;
+            }
+            shortCode = string.Empty;
+            return false;
+        }
     }
 
     private sealed class InMemorySignalRegistry : IWorkflowSignalRegistry
