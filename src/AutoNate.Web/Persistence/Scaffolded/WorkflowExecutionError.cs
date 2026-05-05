@@ -14,6 +14,8 @@ public partial class WorkflowExecutionError
 
     public string? ErrorMessage { get; set; }
 
+    public string? ErrorStackTrace { get; set; }
+
     public string? RawFlowableEventType { get; set; }
 
     public DateTime OccurredAtUtc { get; set; }

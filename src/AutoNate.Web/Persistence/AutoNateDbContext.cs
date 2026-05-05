@@ -187,6 +187,7 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.ActivityId).HasColumnName("activity_id");
             entity.Property(e => e.ActivityName).HasColumnName("activity_name");
             entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
+            entity.Property(e => e.ErrorStackTrace).HasColumnName("error_stack_trace");
             entity.Property(e => e.RawFlowableEventType).HasColumnName("raw_flowable_event_type");
             entity.Property(e => e.OccurredAtUtc).HasColumnName("occurred_at_utc");
         });
