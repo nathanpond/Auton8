@@ -37,7 +37,7 @@ public sealed class WorkflowExecutionErrorRecorder(
         return Task.CompletedTask;
     }
 
-    private async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
+    public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
     {
         if (!string.Equals(message.Topic, BusWatcherStreamService.TopicName, StringComparison.Ordinal))
         {

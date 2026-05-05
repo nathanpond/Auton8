@@ -1,4 +1,3 @@
-using System.Reflection;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.EntityFrameworkCore;
@@ -80,10 +79,6 @@ public sealed class WorkflowExecutionErrorRecorderTests
             db.CreateDbContextFactory(),
             NullLogger<WorkflowExecutionErrorRecorder>.Instance);
 
-        var method = typeof(WorkflowExecutionErrorRecorder)
-            .GetMethod("HandleAsync", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new MissingMethodException(nameof(WorkflowExecutionErrorRecorder), "HandleAsync");
-
         var message = new BusWatcherStreamService.BusWatcherMessage(
             DateTimeOffset.UtcNow,
             BusWatcherStreamService.TopicName,
@@ -91,7 +86,6 @@ public sealed class WorkflowExecutionErrorRecorderTests
             new Dictionary<string, string>(),
             payload);
 
-        var task = (Task)method.Invoke(recorder, new object[] { message })!;
-        await task;
+        await recorder.HandleAsync(message);
     }
 }
