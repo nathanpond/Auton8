@@ -62,10 +62,41 @@ public sealed class ExecutionEndpointsErrorTests
         Assert.Contains("ReferenceError", row.ErrorStackTrace ?? "");
     }
 
+    [Fact]
+    public async Task HistoryEndpoint_PairsErrorMessageAndStackFromSameRetry()
+    {
+        // Pin the consistency invariant from commit c085fc1f: when an activity
+        // has multiple retries with mixed presence/absence of message and stack,
+        // the surfaced (ErrorMessage, ErrorStackTrace) MUST come from the same
+        // retry row — not from independently-picked "latest non-empty" rows in
+        // each column. The synthesized-row branch and the errorsByActivity
+        // dictionary both share this rule.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+
+        var processId = $"proc-{Guid.NewGuid():N}";
+        await SeedErrorsAsync(factory, processId,
+            ("scriptTask_1", "msg-A", null,        "2026-05-05T10:00:00Z"),
+            ("scriptTask_1", null,    "trace-B",   "2026-05-05T10:30:00Z"),
+            ("scriptTask_1", "msg-C", "trace-C",   "2026-05-05T11:00:00Z"));
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var rows = await client.GetFromJsonAsync<WorkflowExecutionHistoryEvent[]>(
+            $"/api/executions/{processId}/history");
+
+        Assert.NotNull(rows);
+        var row = Assert.Single(rows!, r => r.ActivityId == "scriptTask_1");
+        Assert.True(row.IsErrored);
+        Assert.Equal("msg-C", row.ErrorMessage);
+        Assert.Contains("trace-C", row.ErrorStackTrace ?? "");
+        Assert.Equal(3, row.ErrorCount);
+    }
+
     private static async Task SeedErrorsAsync(
         AutoNateWebApplicationFactory factory,
         string processId,
-        params (string ActivityId, string Message, string Trace, string OccurredAtUtc)[] rows)
+        params (string ActivityId, string? Message, string? Trace, string OccurredAtUtc)[] rows)
     {
         var dbFactory = factory.Services.GetRequiredService<
             IDbContextFactory<AutoNate.Web.Persistence.AutoNateDbContext>>();
