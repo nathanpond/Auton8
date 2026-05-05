@@ -109,7 +109,8 @@ public sealed class WorkflowExecutionErrorRecorder(
             ProcessInstanceId = processInstanceId,
             ActivityId = activityId,
             ActivityName = ReadString(root, "activityName"),
-            ErrorMessage = null,
+            ErrorMessage = ReadString(root, "errorMessage"),
+            ErrorStackTrace = ReadString(root, "errorStackTrace"),
             RawFlowableEventType = ReadString(root, "rawFlowableEventType"),
             OccurredAtUtc = ReadDateTime(root, "occurredAtUtc") ?? DateTime.UtcNow
         };
