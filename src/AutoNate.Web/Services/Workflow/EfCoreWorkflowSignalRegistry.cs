@@ -11,12 +11,18 @@ public sealed class EfCoreWorkflowSignalRegistry(
     private static readonly IReadOnlySet<string> EmptySet =
         new HashSet<string>(StringComparer.Ordinal);
 
+    private static readonly IReadOnlyList<WorkflowSignalRegistration> EmptyRegistrations =
+        Array.Empty<WorkflowSignalRegistration>();
+
     private readonly IDbContextFactory<AutoNateDbContext> _dbContextFactory = dbContextFactory;
     private readonly ILogger<EfCoreWorkflowSignalRegistry> _logger = logger;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     private IReadOnlyDictionary<string, IReadOnlySet<string>> _byTopic =
         new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+
+    private IReadOnlyDictionary<string, IReadOnlyList<WorkflowSignalRegistration>> _registrationsByTopic =
+        new Dictionary<string, IReadOnlyList<WorkflowSignalRegistration>>(StringComparer.Ordinal);
 
     public IReadOnlyCollection<string> GetSubscribedTopics()
     {
@@ -26,6 +32,13 @@ public sealed class EfCoreWorkflowSignalRegistry(
     public IReadOnlySet<string> GetSignalNamesForTopic(string topic)
     {
         return _byTopic.TryGetValue(topic, out var names) ? names : EmptySet;
+    }
+
+    public IReadOnlyList<WorkflowSignalRegistration> GetRegistrationsForTopic(string topic)
+    {
+        return _registrationsByTopic.TryGetValue(topic, out var registrations)
+            ? registrations
+            : EmptyRegistrations;
     }
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
@@ -42,24 +55,41 @@ public sealed class EfCoreWorkflowSignalRegistry(
                 .Select(model => model.BpmnXml)
                 .ToListAsync(cancellationToken);
 
-            var byTopic = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            // Build both the names-by-topic and registrations-by-topic indexes
+            // in a single pass over each published workflow's signal registrations.
+            var byTopicNames = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var byTopicRegs = new Dictionary<string, List<WorkflowSignalRegistration>>(StringComparer.Ordinal);
+
             foreach (var xml in publishedXmls)
             {
                 foreach (var registration in WorkflowBpmnXml.ExtractSignalRegistrations(xml))
                 {
-                    if (!byTopic.TryGetValue(registration.Topic, out var names))
+                    if (!byTopicNames.TryGetValue(registration.Topic, out var names))
                     {
                         names = new HashSet<string>(StringComparer.Ordinal);
-                        byTopic[registration.Topic] = names;
+                        byTopicNames[registration.Topic] = names;
                     }
 
                     names.Add(registration.SignalName);
+
+                    if (!byTopicRegs.TryGetValue(registration.Topic, out var registrations))
+                    {
+                        registrations = new List<WorkflowSignalRegistration>();
+                        byTopicRegs[registration.Topic] = registrations;
+                    }
+
+                    registrations.Add(registration);
                 }
             }
 
-            _byTopic = byTopic.ToDictionary(
+            _byTopic = byTopicNames.ToDictionary(
                 pair => pair.Key,
                 pair => (IReadOnlySet<string>)pair.Value,
+                StringComparer.Ordinal);
+
+            _registrationsByTopic = byTopicRegs.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyList<WorkflowSignalRegistration>)pair.Value.AsReadOnly(),
                 StringComparer.Ordinal);
 
             _logger.LogInformation(

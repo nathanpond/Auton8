@@ -9,5 +9,7 @@ public interface IWorkflowSignalRegistry
 
     IReadOnlySet<string> GetSignalNamesForTopic(string topic);
 
+    IReadOnlyList<WorkflowSignalRegistration> GetRegistrationsForTopic(string topic);
+
     Task RefreshAsync(CancellationToken cancellationToken = default);
 }

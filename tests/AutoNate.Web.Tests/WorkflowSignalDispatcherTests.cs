@@ -106,8 +106,20 @@ public sealed class WorkflowSignalDispatcherTests
     private static (WorkflowSignalDispatcher Dispatcher, StubFlowableClient Stub) CreateDispatcher(
         params (string Topic, string[] SignalNames)[] entries)
     {
+        // Existing dispatcher tests don't yet care about process keys or
+        // record-type filtering — synthesize a single placeholder process key
+        // per signal so each (topic, signalName) pair becomes one registration.
+        var registrations = entries
+            .SelectMany(entry => entry.SignalNames.Select(signalName =>
+                new WorkflowSignalRegistration(
+                    SignalName: signalName,
+                    Topic: entry.Topic,
+                    ProcessDefinitionKey: $"Flow_{signalName}",
+                    RecordTypeShortCodes: new HashSet<string>(StringComparer.Ordinal))))
+            .ToArray();
+
         var registry = new InMemorySignalRegistry();
-        registry.Set(entries);
+        registry.Set(registrations);
         var stub = new StubFlowableClient();
         var dispatcher = new WorkflowSignalDispatcher(
             registry,
@@ -128,24 +140,40 @@ public sealed class WorkflowSignalDispatcherTests
 
     private sealed class InMemorySignalRegistry : IWorkflowSignalRegistry
     {
-        private static readonly IReadOnlySet<string> EmptySet =
+        private static readonly IReadOnlySet<string> EmptyNames =
             new HashSet<string>(StringComparer.Ordinal);
 
-        private Dictionary<string, IReadOnlySet<string>> _byTopic =
-            new(StringComparer.Ordinal);
+        private static readonly IReadOnlyList<WorkflowSignalRegistration> EmptyRegs =
+            Array.Empty<WorkflowSignalRegistration>();
 
-        public void Set(params (string Topic, string[] SignalNames)[] entries)
+        private Dictionary<string, IReadOnlySet<string>> _names = new(StringComparer.Ordinal);
+        private Dictionary<string, IReadOnlyList<WorkflowSignalRegistration>> _regs = new(StringComparer.Ordinal);
+
+        public void Set(params WorkflowSignalRegistration[] registrations)
         {
-            _byTopic = entries.ToDictionary(
-                entry => entry.Topic,
-                entry => (IReadOnlySet<string>)new HashSet<string>(entry.SignalNames, StringComparer.Ordinal),
-                StringComparer.Ordinal);
+            _names = registrations
+                .GroupBy(r => r.Topic, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => (IReadOnlySet<string>)new HashSet<string>(
+                        group.Select(r => r.SignalName), StringComparer.Ordinal),
+                    StringComparer.Ordinal);
+
+            _regs = registrations
+                .GroupBy(r => r.Topic, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => (IReadOnlyList<WorkflowSignalRegistration>)group.ToList().AsReadOnly(),
+                    StringComparer.Ordinal);
         }
 
-        public IReadOnlyCollection<string> GetSubscribedTopics() => _byTopic.Keys.ToArray();
+        public IReadOnlyCollection<string> GetSubscribedTopics() => _names.Keys.ToArray();
 
         public IReadOnlySet<string> GetSignalNamesForTopic(string topic) =>
-            _byTopic.TryGetValue(topic, out var names) ? names : EmptySet;
+            _names.TryGetValue(topic, out var names) ? names : EmptyNames;
+
+        public IReadOnlyList<WorkflowSignalRegistration> GetRegistrationsForTopic(string topic) =>
+            _regs.TryGetValue(topic, out var registrations) ? registrations : EmptyRegs;
 
         public Task RefreshAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }

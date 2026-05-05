@@ -65,11 +65,17 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         private static readonly IReadOnlySet<string> Empty =
             new HashSet<string>(StringComparer.Ordinal);
 
+        private static readonly IReadOnlyList<WorkflowSignalRegistration> EmptyRegistrations =
+            Array.Empty<WorkflowSignalRegistration>();
+
         public int RefreshCount { get; private set; }
 
         public IReadOnlyCollection<string> GetSubscribedTopics() => Array.Empty<string>();
 
         public IReadOnlySet<string> GetSignalNamesForTopic(string topic) => Empty;
+
+        public IReadOnlyList<WorkflowSignalRegistration> GetRegistrationsForTopic(string topic) =>
+            EmptyRegistrations;
 
         public Task RefreshAsync(CancellationToken cancellationToken = default)
         {

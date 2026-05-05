@@ -57,6 +57,9 @@ ALTER TABLE workflow_models
 ALTER TABLE workflow_models
     ADD COLUMN IF NOT EXISTS published_version_number INTEGER NULL;
 
+ALTER TABLE workflow_models
+    ADD COLUMN IF NOT EXISTS default_variables JSONB NULL;
+
 CREATE TABLE IF NOT EXISTS workflow_model_versions (
     id UUID PRIMARY KEY,
     workflow_model_id UUID NOT NULL REFERENCES workflow_models (id) ON DELETE CASCADE,
