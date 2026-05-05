@@ -3,6 +3,7 @@ using RoleModel = AutoNate.Web.Models.Authorization.Role;
 using RecordTypeModel = AutoNate.Web.Models.Records.RecordType;
 using RecordModel = AutoNate.Web.Models.Records.Record;
 using WorkflowModelModel = AutoNate.Web.Models.WorkflowModel;
+using FormModel = AutoNate.Web.Models.Forms.Form;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
@@ -17,7 +18,8 @@ public static class CoreEntityTypes
         new IEntityType[]
         {
             User!, Group!, Role!, RecordType!, Record!,
-            WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!
+            WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
+            Form!
         });
 
     public static EntityTypeDefinition User { get; } = new(
@@ -112,4 +114,18 @@ public static class CoreEntityTypes
         idClrType: typeof(Guid),
         actions: new[] { Actions.Manage },
         tags: new[] { "name", "version", "status" });
+
+    // Admin-authored JSX forms. Drafts live in `forms`, every save snapshots
+    // into `form_versions`. Publish flips `is_draft=false` and points
+    // `published_version_number` at the active version.
+    public static EntityTypeDefinition Form { get; } = new(
+        kind: EntityKinds.Form,
+        clrType: typeof(FormModel),
+        idClrType: typeof(Guid),
+        actions: new[]
+        {
+            Actions.View, Actions.Create, Actions.Edit,
+            Actions.Delete, Actions.Publish
+        },
+        tags: new[] { "shortcode", "siteAvailable", "draft", "published" });
 }

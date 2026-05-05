@@ -19,4 +19,6 @@ public static class EntityKinds
     // ever needed (e.g. plugin-scoped issues), add an instance authorizer
     // alongside this kind.
     public const string SystemIssue = "systemissue";
+
+    public const string Form = "form";
 }

@@ -55,10 +55,19 @@ class RuntimeBoundary extends Component<
 }
 
 type Compiled =
-  | { kind: "ok"; Page: React.ComponentType }
+  | { kind: "ok"; Page: React.ComponentType<Record<string, unknown>> }
   | { kind: "error"; message: string };
 
-export function JsxPage({ source }: { source: string }) {
+export type JsxPageProps = {
+  source: string;
+  // Optional bag of values forwarded to the authored `Page({ ... })`
+  // component. Existing menu-page consumers don't pass anything; the Forms
+  // runtime uses this to thread `data`, `onChange`, `onSubmit`, `mode`,
+  // and `context` through. Unknown keys are passed verbatim.
+  props?: Record<string, unknown>;
+};
+
+export function JsxPage({ source, props }: JsxPageProps) {
   const [sucrase, setSucrase] = useState<Sucrase | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -120,7 +129,10 @@ export function JsxPage({ source }: { source: string }) {
           message: "Define a `function Page() { … }` that returns JSX."
         };
       }
-      return { kind: "ok", Page: Page as React.ComponentType };
+      return {
+        kind: "ok",
+        Page: Page as React.ComponentType<Record<string, unknown>>
+      };
     } catch (err) {
       return {
         kind: "error",
@@ -158,7 +170,7 @@ export function JsxPage({ source }: { source: string }) {
   const Page = compiled.Page;
   return (
     <RuntimeBoundary key={source}>
-      <Page />
+      <Page {...(props ?? {})} />
     </RuntimeBoundary>
   );
 }

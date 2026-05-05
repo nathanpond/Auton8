@@ -138,3 +138,30 @@ public sealed class WorkflowModelInstanceAuthorizer : IInstanceAuthorizer
         return await visible.AnyAsync(cancellationToken);
     }
 }
+
+public sealed class FormInstanceAuthorizer : IInstanceAuthorizer
+{
+    private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
+
+    public FormInstanceAuthorizer(IDbContextFactory<AutoNateDbContext> dbFactory)
+    {
+        _dbFactory = dbFactory;
+    }
+
+    public string Kind => EntityKinds.Form;
+
+    public async Task<bool> ExistsAndAuthorizedAsync(
+        IAuthorizer authorizer,
+        ClaimsPrincipal actor,
+        string action,
+        string targetId,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(targetId, out var id)) return false;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.Forms.AsNoTracking().Where(f => f.Id == id);
+        var visible = await authorizer.FilterQueryAsync(db, actor, Kind, action, query, cancellationToken);
+        return await visible.AnyAsync(cancellationToken);
+    }
+}

@@ -76,6 +76,10 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<SystemIssue> SystemIssues { get; set; }
 
+    public virtual DbSet<Form> Forms { get; set; }
+
+    public virtual DbSet<FormVersion> FormVersions { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -871,6 +875,67 @@ public partial class AutoNateDbContext : DbContext
             entity.HasIndex(e => e.Fingerprint, "ux_system_issues_open_fingerprint")
                 .IsUnique()
                 .HasFilter("state IN ('open', 'acknowledged')");
+        });
+
+        modelBuilder.Entity<Form>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("forms_pkey");
+
+            entity.ToTable("forms");
+
+            entity.HasIndex(e => e.ShortCode, "forms_short_code_key").IsUnique();
+
+            entity.HasIndex(e => e.UpdatedAtUtc, "ix_forms_updated_at_utc").IsDescending();
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.ShortCode).HasColumnName("short_code");
+            entity.Property(e => e.FormCode).HasColumnName("form_code");
+            entity.Property(e => e.SiteAvailable).HasColumnName("site_available");
+            entity.Property(e => e.IsDraft).HasColumnName("is_draft");
+            entity.Property(e => e.DraftVersionNumber).HasColumnName("draft_version_number");
+            entity.Property(e => e.PublishedVersionNumber).HasColumnName("published_version_number");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<FormVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("form_versions_pkey");
+
+            entity.ToTable("form_versions");
+
+            entity.HasIndex(e => new { e.FormId, e.VersionNumber },
+                "form_versions_form_id_version_number_key").IsUnique();
+
+            entity.HasIndex(e => e.FormId, "ix_form_versions_form_id");
+
+            // Declared so EF orders the parent insert before the version
+            // insert when both are added in the same SaveChanges (Create
+            // path). The schema initializer creates the FK with ON DELETE
+            // CASCADE — match it here so EF's delete tracking agrees.
+            entity.HasOne<Form>()
+                .WithMany()
+                .HasForeignKey(e => e.FormId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.FormId).HasColumnName("form_id");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.ShortCode).HasColumnName("short_code");
+            entity.Property(e => e.FormCode).HasColumnName("form_code");
+            entity.Property(e => e.SiteAvailable).HasColumnName("site_available");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
         });
 
         OnModelCreatingPartial(modelBuilder);

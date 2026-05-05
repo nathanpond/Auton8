@@ -18,6 +18,7 @@ using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Flowable;
+using AutoNate.Web.Services.Forms;
 using AutoNate.Web.Services.Menus;
 using AutoNate.Web.Services.Nats;
 using AutoNate.Web.Services.Notifications;
@@ -198,6 +199,7 @@ builder.Services.AddScoped<IInstanceAuthorizer, RecordTypeInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowModelInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowTaskInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowExecutionInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, FormInstanceAuthorizer>();
 
 builder.Services.AddScoped<IAuthorizer, Authorizer>();
 builder.Services.AddScoped<AuthCacheBumper>();
@@ -210,6 +212,7 @@ builder.Services.AddScoped<IMenuStore, EfCoreMenuStore>();
 builder.Services.AddScoped<IPageTemplateStore, EfCorePageTemplateStore>();
 builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();
 builder.Services.AddScoped<IWorkflowModelStore, EfCoreWorkflowModelStore>();
+builder.Services.AddScoped<IFormStore, EfCoreFormStore>();
 builder.Services.AddSingleton<IFieldType, TextFieldType>();
 builder.Services.AddSingleton<IFieldType, NumberFieldType>();
 builder.Services.AddSingleton<IFieldType, DateFieldType>();
@@ -657,6 +660,7 @@ app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();
 app.MapAdminPluginsEndpoints();
+app.MapFormEndpoints();
 
 // Runtime-mutable public assets live under /data/wwwroot and are served at the
 // configured prefix (default /files). MapStaticAssets only handles compile-time

@@ -14,6 +14,9 @@ import EdgeTypeList from "@/pages/edge-types/EdgeTypeList";
 import EdgeTypeEditor from "@/pages/edge-types/EdgeTypeEditor";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import { ConfigIndex } from "@/pages/admin/config/sections";
+import FormEditor from "@/pages/admin/config/forms/FormEditor";
+import FormDevView from "@/pages/forms/FormDevView";
+import FormPublicView from "@/pages/forms/FormPublicView";
 import Notifications from "@/pages/notifications/Notifications";
 import DynamicPageRoute from "@/pages/dynamic-page/DynamicPageRoute";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
@@ -60,6 +63,12 @@ export const APP_ROUTES: AppRoute[] = [
   // Notifications inbox (per-user; not a configurable page template)
   { path: "notifications", element: protect(<Notifications />) },
 
+  // Forms feature: dev preview (draft) and public render (published).
+  // Both require an authenticated user; the public render is also gated
+  // server-side by `site_available`.
+  { path: "formdev/:shortCode", element: protect(<FormDevView />) },
+  { path: "form/:shortCode", element: protect(<FormPublicView />) },
+
   // Site Configuration shell — children are page templates rendered inside the
   // layout's <Outlet />. Mounted at the templates' default_path so the URL
   // works whether reached through the site-config menu or directly.
@@ -84,6 +93,9 @@ export const APP_ROUTES: AppRoute[] = [
       { path: "permission-checker", element: template("configSecurityPermissionChecker") },
       { path: "plugins", element: template("configPlugins") },
       { path: "plugins/documentation", element: template("configPluginDocumentation") },
+      { path: "forms", element: template("configForms") },
+      { path: "forms/:id", element: protect(<FormEditor />) },
+      { path: "form-mappings", element: template("configFormMappings") },
       // Catch-all so menu items added by plugins under /admin/config/* render
       // inside ConfigLayout's sidebar shell. The dynamic page component reads
       // the menu_item config (path/content/contentType) and renders it.

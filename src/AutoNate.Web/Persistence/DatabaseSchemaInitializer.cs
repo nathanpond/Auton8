@@ -1309,7 +1309,9 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configSecurityPermissions', 'Set Permissions (Site Config)', 'Set permissions mounted inside Site Config.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityPermissionChecker', 'Permission Checker (Site Config)', 'Effective-permission checker.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configPlugins', 'Manage Plugins (Site Config)', 'Plugin management mounted inside Site Config.', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How AutoNate plugins work and the patterns for working within them.', TRUE, NOW(), NOW())
+              (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How AutoNate plugins work and the patterns for working within them.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configForms', 'Forms (Site Config)', 'Define and manage form definitions.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configFormMappings', 'Form Mappings (Site Config)', 'Map forms to record types and fields.', TRUE, NOW(), NOW())
             ON CONFLICT (key) DO NOTHING;
 
             INSERT INTO menus (id, key, name, description, is_system,
@@ -1351,7 +1353,9 @@ internal static class DatabaseSchemaInitializer
               ('/admin/config/groups', 'configSecurityGroups'),
               ('/admin/config/roles', 'configSecurityRoles'),
               ('/admin/config/permissions', 'configSecurityPermissions'),
-              ('/admin/config/permission-checker', 'configSecurityPermissionChecker')
+              ('/admin/config/permission-checker', 'configSecurityPermissionChecker'),
+              ('/admin/config/forms', 'configForms'),
+              ('/admin/config/form-mappings', 'configFormMappings')
             ) AS mapping(path, template_key)
             WHERE mi.item_type = 'route'
               AND mi.config->>'path' = mapping.path;
@@ -1864,6 +1868,145 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // Adds a "Forms" group to the site-config left-nav with two child template
+    // items: "Forms" and "Form Mappings". The group is appended at the end of
+    // the existing top-level groups (sort_order = max+1) so it slots in below
+    // Security without disturbing other groups. Idempotent via auth_seed_state
+    // and content guards: re-running won't duplicate the group or its items.
+    private const string SiteConfigFormsSql =
+        """
+        DO $$
+        DECLARE
+            site_id UUID := '00000000-0000-0000-0001-000000000004';
+            forms_group_id UUID;
+            next_sort INT;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'site_config_forms_v1') THEN
+                IF EXISTS (SELECT 1 FROM menus WHERE id = site_id) THEN
+                    SELECT id INTO forms_group_id
+                    FROM menu_items
+                    WHERE menu_id = site_id
+                      AND parent_id IS NULL
+                      AND display_name = 'Forms'
+                      AND item_type = 'group'
+                    LIMIT 1;
+
+                    IF forms_group_id IS NULL THEN
+                        SELECT COALESCE(MAX(sort_order), -1) + 1 INTO next_sort
+                        FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id IS NULL;
+
+                        forms_group_id := gen_random_uuid();
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            forms_group_id, site_id, NULL, next_sort,
+                            'Forms', 'fa fa-list-check',
+                            'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id = forms_group_id
+                          AND config->>'templateKey' = 'configForms'
+                    ) THEN
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            gen_random_uuid(), site_id, forms_group_id, 0,
+                            'Forms', 'fa fa-file-lines',
+                            'template',
+                            '{{"templateKey":"configForms","path":"/admin/config/forms"}}'::jsonb,
+                            TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id = forms_group_id
+                          AND config->>'templateKey' = 'configFormMappings'
+                    ) THEN
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            gen_random_uuid(), site_id, forms_group_id, 1,
+                            'Form Mappings', 'fa fa-arrow-right-arrow-left',
+                            'template',
+                            '{{"templateKey":"configFormMappings","path":"/admin/config/form-mappings"}}'::jsonb,
+                            TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('site_config_forms_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
+    // Forms feature: admin-authored JSX bound to backend data. `forms` holds
+    // the editable draft (latest FormCode + metadata); `form_versions` is an
+    // append-only history written every save / publish / restore. The SPA
+    // renders the published snapshot at /form/{shortCode} (when site_available)
+    // and the draft at /formdev/{shortCode}.
+    private const string FormsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS forms (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            short_code TEXT NOT NULL,
+            form_code TEXT NOT NULL DEFAULT '',
+            site_available BOOLEAN NOT NULL DEFAULT FALSE,
+            is_draft BOOLEAN NOT NULL DEFAULT TRUE,
+            draft_version_number INTEGER NOT NULL DEFAULT 1,
+            published_version_number INTEGER NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS forms_short_code_key
+            ON forms (short_code);
+
+        CREATE INDEX IF NOT EXISTS ix_forms_updated_at_utc
+            ON forms (updated_at_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS form_versions (
+            id UUID PRIMARY KEY,
+            form_id UUID NOT NULL REFERENCES forms (id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            short_code TEXT NOT NULL,
+            form_code TEXT NOT NULL,
+            site_available BOOLEAN NOT NULL,
+            kind TEXT NOT NULL,
+            note TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS form_versions_form_id_version_number_key
+            ON form_versions (form_id, version_number);
+
+        CREATE INDEX IF NOT EXISTS ix_form_versions_form_id
+            ON form_versions (form_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -1897,6 +2040,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSiteConfigMenuSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemIssuesSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigFormsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(FormsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxSchemaSql, cancellationToken);

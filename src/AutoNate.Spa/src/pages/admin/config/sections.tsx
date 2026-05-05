@@ -125,3 +125,12 @@ export function SecurityPermissionChecker() {
     />
   );
 }
+
+export function FormsFormMappings() {
+  return (
+    <Stub
+      title="Form Mappings"
+      blurb="Map forms to record types and fields."
+    />
+  );
+}

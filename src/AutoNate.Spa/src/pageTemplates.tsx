@@ -17,7 +17,9 @@ import Events from "@/pages/admin/config/Events";
 import SystemHealth from "@/pages/admin/config/SystemHealth";
 import SystemIssues from "@/pages/admin/config/SystemIssues";
 import PluginDocumentation from "@/pages/admin/config/PluginDocumentation";
+import FormsList from "@/pages/admin/config/forms/FormsList";
 import {
+  FormsFormMappings,
   SecurityManageGroups,
   SecurityManageRoles,
   SecurityManageUsers,
@@ -60,5 +62,7 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configSecurityPermissions: <SecuritySetPermissions />,
   configSecurityPermissionChecker: <SecurityPermissionChecker />,
   configPlugins: <AdminPlugins />,
-  configPluginDocumentation: <PluginDocumentation />
+  configPluginDocumentation: <PluginDocumentation />,
+  configForms: <FormsList />,
+  configFormMappings: <FormsFormMappings />
 };

@@ -1,0 +1,151 @@
+/*
+ * Form editor layout. Adapts the right-side-bar (rsb) visual pattern from
+ * the Workflow Studio (.workflow-rsb-*) so the dev-props panel slides in
+ * from the right, with a single-button rail for the toggle when collapsed.
+ */
+
+.form-editor-layout {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-height: 32rem;
+}
+
+.form-editor-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.form-editor-canvas {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 30rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.form-editor-code {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+}
+
+.form-editor-rail {
+    position: absolute;
+    top: 0.75rem;
+    right: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid #d8e2e8;
+    border-right: 0;
+    border-top-left-radius: 0.6rem;
+    border-bottom-left-radius: 0.6rem;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(6px);
+}
+
+.form-editor-layout--sidebar-open .form-editor-rail {
+    display: none;
+}
+
+.form-editor-rail-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 0;
+    background: transparent;
+    color: #52606d;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.form-editor-rail-btn:hover,
+.form-editor-rail-btn:focus-visible {
+    color: #102a43;
+    background: #eef5fb;
+    outline: none;
+}
+
+.form-editor-rail-btn.is-active {
+    color: #2680c2;
+}
+
+.form-editor-sidebar {
+    width: 360px;
+    flex: 0 0 360px;
+    align-self: stretch;
+    background: #fff;
+    border: 1px solid #d8e2e8;
+    border-left: 0;
+    border-top-right-radius: 0.75rem;
+    border-bottom-right-radius: 0.75rem;
+    padding: 0.85rem 0.95rem 1rem;
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.form-editor-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #eef1f5;
+}
+
+.form-editor-sidebar-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0;
+    font-size: 1rem;
+    color: #102a43;
+}
+
+.form-editor-sidebar-title i {
+    font-size: 1.1rem;
+    color: #2680c2;
+}
+
+.form-editor-collapse-btn {
+    background: transparent;
+    border: 0;
+    color: #52606d;
+    padding: 0.25rem 0.45rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.form-editor-collapse-btn:hover,
+.form-editor-collapse-btn:focus-visible {
+    color: #102a43;
+    background: #eef5fb;
+    outline: none;
+}
+
+.form-editor-sidebar-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.form-editor-sidebar-editor {
+    flex: 1 1 auto;
+    min-height: 16rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    overflow: hidden;
+}
