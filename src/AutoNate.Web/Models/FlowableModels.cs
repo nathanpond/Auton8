@@ -176,6 +176,11 @@ public sealed record class WorkflowExecutionHistoryEvent
     // capture exception messages — see followup task).
     public string? ErrorMessage { get; init; }
 
+    // Latest captured full stack trace from workflow_execution_errors for this
+    // activityId. Often null on legacy rows; the SPA hides the "Show stack
+    // trace" toggle when this is null.
+    public string? ErrorStackTrace { get; init; }
+
     // Number of recorded failures for this activity in this process.
     // Useful when an activity errored, retried, then succeeded — the row
     // looks "completed" but the retry count tells the real story.

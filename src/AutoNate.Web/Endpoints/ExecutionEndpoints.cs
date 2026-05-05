@@ -172,10 +172,13 @@ public static class ExecutionEndpoints
                     g => new
                     {
                         Count = g.Count(),
-                        // Latest non-empty message wins. Today these are
-                        // mostly null until the Java-side capture lands.
+                        // Latest non-empty message wins. Stack trace follows the same
+                        // recency rule so the displayed message + trace are consistent.
                         LatestMessage = g.Reverse()
                             .Select(e => e.ErrorMessage)
+                            .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m)),
+                        LatestStackTrace = g.Reverse()
+                            .Select(e => e.ErrorStackTrace)
                             .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
                     },
                     StringComparer.Ordinal);
@@ -206,7 +209,8 @@ public static class ExecutionEndpoints
                         {
                             IsErrored = true,
                             ErrorCount = errorAgg.Count,
-                            ErrorMessage = errorAgg.LatestMessage
+                            ErrorMessage = errorAgg.LatestMessage,
+                            ErrorStackTrace = errorAgg.LatestStackTrace
                         };
                     }
 
@@ -234,6 +238,9 @@ public static class ExecutionEndpoints
                 var latestMessage = errorRow.Reverse()
                     .Select(e => e.ErrorMessage)
                     .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
+                var latestStackTrace = errorRow.Reverse()
+                    .Select(e => e.ErrorStackTrace)
+                    .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m));
                 var nameFromRow = errorRow
                     .Select(e => e.ActivityName)
                     .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
@@ -251,7 +258,8 @@ public static class ExecutionEndpoints
                     DeleteReason = null,
                     IsErrored = true,
                     ErrorCount = errorRow.Count(),
-                    ErrorMessage = latestMessage
+                    ErrorMessage = latestMessage,
+                    ErrorStackTrace = latestStackTrace
                 });
             }
 
