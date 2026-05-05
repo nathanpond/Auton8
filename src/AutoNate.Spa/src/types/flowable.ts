@@ -43,6 +43,10 @@ export type WorkflowExecutionDiagramDetail = {
   cancelledActivityIds: string[];
   // Activities that produced a job.execution.failed event for this run.
   failedActivityIds: string[];
+  // Latest non-empty error message per failed activity. Keyed by the BPMN
+  // activity id. Empty when no captured messages exist (legacy rows or
+  // pre-feature failures).
+  errorMessagesByActivityId: Record<string, string>;
   variables: FlowableProcessVariable[];
 };
 
@@ -71,6 +75,9 @@ export type WorkflowExecutionHistoryEvent = {
   // Latest captured error message (may be null while the Java extension
   // doesn't capture exception messages).
   errorMessage: string | null;
+  // Latest captured full stack trace for this activity in this process.
+  // Null on legacy rows or when capture wasn't available.
+  errorStackTrace: string | null;
   // Number of recorded failures for this activity in this process.
   errorCount: number | null;
 };
