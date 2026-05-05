@@ -47,13 +47,30 @@ public sealed class WorkflowSignalDispatcher(
         }
 
         // Resolve the payload's recordTypeId (if any) once up front: every
-        // filtered registration tests against the same shortcode.
+        // filtered registration tests against the same shortcode. The resolver
+        // call is wrapped because IRecordTypeShortCodeResolver makes no
+        // exception-freedom guarantee — a future implementation (DB fallback,
+        // decorator) must not be able to take down message handling. On error
+        // the lookup is treated as unresolved, which means filtered
+        // registrations skip and unfiltered ones still start.
         var payloadRecordTypeId = TryReadGuid(message.Payload, "recordTypeId");
         string? resolvedShortCode = null;
-        if (payloadRecordTypeId is Guid id
-            && _recordTypeResolver.TryGetShortCode(id, out var sc))
+        if (payloadRecordTypeId is Guid id)
         {
-            resolvedShortCode = sc;
+            try
+            {
+                if (_recordTypeResolver.TryGetShortCode(id, out var sc))
+                {
+                    resolvedShortCode = sc;
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Record-type short-code lookup failed for {RecordTypeId} on signal '{SignalName}'. Filtered registrations will be skipped.",
+                    id, eventType);
+            }
         }
 
         // Start one process per matching registration. Each call gets its own
