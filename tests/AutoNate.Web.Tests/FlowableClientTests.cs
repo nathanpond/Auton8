@@ -1011,6 +1011,54 @@ public sealed class FlowableClientTests
         Assert.Contains("\"name\":\"eventData\"", sent.Body);
     }
 
+    // --- ListExecutionsBySignalSubscriptionAsync -----------------------------
+
+    [Fact]
+    public async Task ListExecutionsBySignalSubscriptionAsync_ParsesIdsFromResponse()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/runtime/executions",
+            new
+            {
+                data = new[]
+                {
+                    new { id = "exec-1" },
+                    new { id = "exec-2" }
+                },
+                total = 2
+            });
+
+        var ids = await client.ListExecutionsBySignalSubscriptionAsync("record.created");
+
+        Assert.Equal(new[] { "exec-1", "exec-2" }, ids);
+        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(HttpMethod.Get, sent.Method);
+        Assert.Contains("signalEventSubscriptionName=record.created", sent.Url);
+    }
+
+    [Fact]
+    public async Task ListExecutionsBySignalSubscriptionAsync_ReturnsEmpty_WhenSignalNameBlank()
+    {
+        var (client, stub) = CreateClient();
+
+        var ids = await client.ListExecutionsBySignalSubscriptionAsync("   ");
+
+        Assert.Empty(ids);
+        Assert.Empty(stub.Requests);
+    }
+
+    [Fact]
+    public async Task ListExecutionsBySignalSubscriptionAsync_ThrowsOnNon2xx()
+    {
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Get, "service/runtime/executions",
+            HttpStatusCode.InternalServerError, "boom");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.ListExecutionsBySignalSubscriptionAsync("record.created"));
+        Assert.Contains("list executions waiting on 'record.created'", ex.Message);
+    }
+
     // --- DeployProcessAsync --------------------------------------------------
 
     [Fact]

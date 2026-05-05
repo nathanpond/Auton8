@@ -117,4 +117,12 @@ public interface IFlowableClient
         string executionId,
         IReadOnlyDictionary<string, object?>? variables = null,
         CancellationToken cancellationToken = default);
+
+    // Returns the ids of every runtime execution currently subscribed to the
+    // named signal (i.e. paused on an intermediate signal catch). Used by the
+    // dispatcher to fan out per-execution signals via SignalExecutionAsync
+    // instead of relying on Flowable's broadcast.
+    Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
+        string signalName,
+        CancellationToken cancellationToken = default);
 }

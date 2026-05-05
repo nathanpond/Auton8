@@ -279,6 +279,22 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.CompletedTask;
     }
 
+    // Tests can seed this to control which execution ids the dispatcher sees
+    // when it asks Flowable who is parked on a given intermediate signal
+    // catch. Keys are matched ordinally; missing keys yield an empty list.
+    public Dictionary<string, IReadOnlyList<string>> WaitingExecutionsBySignal { get; } =
+        new(StringComparer.Ordinal);
+
+    public Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
+        string signalName,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ListExecutionsBySignalSubscription:{signalName}");
+        return Task.FromResult(WaitingExecutionsBySignal.TryGetValue(signalName, out var ids)
+            ? ids
+            : (IReadOnlyList<string>)Array.Empty<string>());
+    }
+
     public Task UpdateProcessVariablesAsync(
         string processInstanceId,
         IReadOnlyList<ProcessVariableUpdate> updates,

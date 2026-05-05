@@ -1088,6 +1088,33 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         await EnsureSuccessAsync(response, $"signal execution '{executionId}'");
     }
 
+    public async Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
+        string signalName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(signalName))
+        {
+            return Array.Empty<string>();
+        }
+
+        using var response = await _httpClient.GetAsync(
+            $"service/runtime/executions?signalEventSubscriptionName={Uri.EscapeDataString(signalName)}",
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"list executions waiting on '{signalName}'");
+
+        var page = await DeserializeAsync<FlowableListResponse<FlowableExecutionResponse>>(response, cancellationToken);
+        if (page.Data is null || page.Data.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return page.Data
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => item.Id!)
+            .ToArray();
+    }
+
     public async Task<FlowableTaskSummary?> GetTaskAsync(string taskId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(taskId))
@@ -1397,6 +1424,15 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         public bool Suspended { get; init; }
 
         public string? StartUserId { get; init; }
+    }
+
+    // Trimmed-down execution row for the runtime executions listing — only
+    // the id is consumed by ListExecutionsBySignalSubscriptionAsync. Flowable
+    // returns the same shape for any /runtime/executions query, so additional
+    // fields can be added here without touching the request path.
+    private sealed class FlowableExecutionResponse
+    {
+        public string? Id { get; init; }
     }
 
     private sealed class FlowableHistoricProcessInstanceResponse
