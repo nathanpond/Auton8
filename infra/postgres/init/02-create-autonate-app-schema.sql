@@ -969,6 +969,11 @@ CREATE TABLE IF NOT EXISTS workflow_execution_errors (
 CREATE INDEX IF NOT EXISTS ix_workflow_execution_errors_process_instance_id
     ON workflow_execution_errors (process_instance_id);
 
+-- error_stack_trace was added after the initial table; idempotent so it's
+-- safe on both fresh installs (column was just created above) and upgrades.
+ALTER TABLE workflow_execution_errors
+    ADD COLUMN IF NOT EXISTS error_stack_trace TEXT NULL;
+
 -- Plugins table. Mirrored in DatabaseSchemaInitializer (PluginsSchemaSql) —
 -- needed at bootstrap time so OrphanReferenceDetector can scan
 -- menu_items.created_by_plugin_id orphans even before any plugin work runs.

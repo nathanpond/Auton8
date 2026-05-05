@@ -1599,6 +1599,11 @@ internal static class DatabaseSchemaInitializer
 
         CREATE INDEX IF NOT EXISTS ix_workflow_execution_errors_process_instance_id
             ON workflow_execution_errors (process_instance_id);
+
+        -- Added after initial table; ALTER ADD COLUMN IF NOT EXISTS is idempotent
+        -- on fresh installs and additive on upgrades.
+        ALTER TABLE workflow_execution_errors
+            ADD COLUMN IF NOT EXISTS error_stack_trace TEXT NULL;
         """;
 
     // Tracks who actually triggered task completion. Flowable's historic
