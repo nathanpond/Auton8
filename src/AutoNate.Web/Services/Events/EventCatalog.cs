@@ -287,7 +287,8 @@ public static class EventCatalog
                     [
                         "changedFields is empty (the record is new — every field is its initial value).",
                         "previousStatus is always null."
-                    ]),
+                    ],
+                    CarriesRecordType: true),
                 new EventCatalogEntry(
                     DaprRecordEventPublisher.TopicName,
                     RecordEventTypes.Updated,
@@ -296,7 +297,8 @@ public static class EventCatalog
                     [
                         "changedFields lists every field touched (e.g. 'name', 'status', 'values.priority').",
                         "When status changed, a separate `record.status.changed` event is also published."
-                    ]),
+                    ],
+                    CarriesRecordType: true),
                 new EventCatalogEntry(
                     DaprRecordEventPublisher.TopicName,
                     RecordEventTypes.Deleted,
@@ -305,7 +307,8 @@ public static class EventCatalog
                     [
                         "isArchived is always true.",
                         "changedFields is ['isArchived']."
-                    ]),
+                    ],
+                    CarriesRecordType: true),
                 new EventCatalogEntry(
                     DaprRecordEventPublisher.TopicName,
                     RecordEventTypes.StatusChanged,
@@ -314,7 +317,8 @@ public static class EventCatalog
                     [
                         "previousStatus carries the value before the change (may be null).",
                         "status carries the new value (may be null when status was cleared)."
-                    ]),
+                    ],
+                    CarriesRecordType: true),
                 new EventCatalogEntry(
                     DaprRecordEventPublisher.TopicName,
                     RecordEventTypes.Restored,
@@ -323,7 +327,8 @@ public static class EventCatalog
                     [
                         "isArchived is always false.",
                         "changedFields is ['isArchived']."
-                    ]),
+                    ],
+                    CarriesRecordType: true),
                 new EventCatalogEntry(
                     DaprRecordEventPublisher.TopicName,
                     RecordEventTypes.AssigneesChanged,
@@ -332,7 +337,8 @@ public static class EventCatalog
                     [
                         "assigneeIds carries the new (current) assignee list.",
                         "changedFields is ['assigneeIds']."
-                    ])
+                    ],
+                    CarriesRecordType: true)
             ]),
         new(
             "Plugin",
@@ -1110,4 +1116,5 @@ public sealed record EventCatalogEntry(
     string EventType,
     string Summary,
     string FiresWhen,
-    IReadOnlyList<string> PayloadHighlights);
+    IReadOnlyList<string> PayloadHighlights,
+    bool CarriesRecordType = false);

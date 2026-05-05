@@ -3,6 +3,7 @@ using System.Text.Json;
 using AutoNate.Web.Endpoints;
 using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.SiteSettings;
@@ -261,6 +262,40 @@ public sealed class ViewEventPublishingTests
 
         Assert.Contains(factory.RecordedAuditEvents.Events,
             e => e.EventType == IamEventTypes.RegistryViewed);
+    }
+
+    [Fact]
+    public void EventCatalog_RecordEvents_CarryRecordType()
+    {
+        var expectedEventTypes = new[]
+        {
+            RecordEventTypes.Created,
+            RecordEventTypes.Updated,
+            RecordEventTypes.Deleted,
+            RecordEventTypes.StatusChanged,
+            RecordEventTypes.Restored,
+            RecordEventTypes.AssigneesChanged
+        };
+
+        var recordCategory = EventCatalog.Categories.Single(c => c.Title == "Record");
+        var flagged = recordCategory.Events
+            .Where(e => e.CarriesRecordType)
+            .Select(e => e.EventType)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            expectedEventTypes.OrderBy(s => s, StringComparer.Ordinal).ToArray(),
+            flagged);
+
+        Assert.All(recordCategory.Events, e => Assert.True(e.CarriesRecordType,
+            $"Expected {e.EventType} to set CarriesRecordType=true."));
+
+        // View events on the same record.events topic must NOT carry the flag —
+        // their envelope is the audit envelope (different shape from RecordEventEnvelope).
+        var viewCategory = EventCatalog.Categories.Single(c => c.Title.StartsWith("View events"));
+        Assert.All(viewCategory.Events, e => Assert.False(e.CarriesRecordType,
+            $"View event {e.EventType} should not set CarriesRecordType."));
     }
 
     [Fact]

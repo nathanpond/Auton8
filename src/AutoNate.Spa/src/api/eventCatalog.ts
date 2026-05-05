@@ -18,6 +18,7 @@ export type EventCatalogEntry = {
   summary: string;
   firesWhen: string;
   payloadHighlights: string[];
+  carriesRecordType?: boolean;
 };
 
 export type EventCatalogCategory = {
