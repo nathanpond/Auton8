@@ -1884,4 +1884,66 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Equal("bpmn:tFormalExpression", expression!.Attribute(xsi + "type")?.Value);
         Assert.Equal("${riskLevel == 'high'}", expression.Value);
     }
+
+    [Fact]
+    public void ValidateProcess_ReturnsError_WhenRecordTypeFilterAppearsOnIntermediateCatch()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="S" name="record.created" flowable:topic="record.events" />
+                             <bpmn:process id="OrderFlow" name="Order Flow" isExecutable="true">
+                               <bpmn:startEvent id="Start" />
+                               <bpmn:intermediateCatchEvent id="Catch">
+                                 <bpmn:signalEventDefinition signalRef="S" flowable:recordTypeShortCodes="asset" />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Errors,
+            e => e.Contains("recordTypeShortCodes", StringComparison.OrdinalIgnoreCase)
+              && e.Contains("startEvent", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ApplySignalStartEventSnapshot_ClearsRecordTypeShortCodes_WhenSignalNameCleared()
+    {
+        const string initial = """
+                               <?xml version="1.0" encoding="UTF-8"?>
+                               <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                                 xmlns:flowable="http://flowable.org/bpmn"
+                                                 id="Definitions_1"
+                                                 targetNamespace="http://autonate.dev/workflows">
+                                 <bpmn:signal id="S" name="record.created" flowable:topic="record.events" />
+                                 <bpmn:process id="OrderFlow" name="Order Flow" isExecutable="true">
+                                   <bpmn:startEvent id="SE">
+                                     <bpmn:signalEventDefinition signalRef="S" flowable:recordTypeShortCodes="asset" />
+                                   </bpmn:startEvent>
+                                 </bpmn:process>
+                               </bpmn:definitions>
+                               """;
+
+        var snapshot = new WorkflowElementSnapshot(
+            Id: "SE",
+            Type: "bpmn:StartEvent",
+            Name: null,
+            SignalName: null,                              // user cleared the signal name
+            SignalTopic: "record.events",
+            RecordTypeShortCodes: new[] { "asset" });      // stale; should be cleared with the name
+
+        var updated = WorkflowBpmnXml.ApplyProcessMetadata(
+            initial,
+            "OrderFlow",
+            "Order Flow",
+            [snapshot]);
+
+        Assert.DoesNotContain("flowable:recordTypeShortCodes", updated);
+        Assert.DoesNotContain("signalRef", updated); // pre-existing behavior — sanity check
+    }
 }

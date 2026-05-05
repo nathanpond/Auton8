@@ -172,6 +172,7 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildTimerStartEventValidationErrors(document));
             errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));
             errors.AddRange(BuildServiceTaskValidationErrors(document));
+            errors.AddRange(BuildRecordTypeFilterMisplacementErrors(document));
 
             var warnings = new List<string>();
             warnings.AddRange(BuildUnsupportedRuntimeWarnings(document));
@@ -528,7 +529,11 @@ public static partial class WorkflowBpmnXml
             // bpmn-js leaves the event with an unresolved signalRef when the
             // user hasn't picked a name. Strip the signalRef so the XML at
             // least parses cleanly; validation will surface the missing name.
+            // Also clear any record-type filter so a stale value doesn't
+            // linger on the now-broken event (it's bound to a signal that no
+            // longer exists).
             signalEventDefinition.SetAttributeValue("signalRef", null);
+            signalEventDefinition.SetAttributeValue(FlowableNamespace + "recordTypeShortCodes", null);
             return;
         }
 
@@ -913,6 +918,32 @@ public static partial class WorkflowBpmnXml
             }
         }
 
+        return errors;
+    }
+
+    private static IReadOnlyList<string> BuildRecordTypeFilterMisplacementErrors(XDocument document)
+    {
+        var errors = new List<string>();
+        foreach (var signalEventDef in document.Descendants(BpmnNamespace + "signalEventDefinition"))
+        {
+            if (signalEventDef.Attribute(FlowableNamespace + "recordTypeShortCodes") is null)
+            {
+                continue;
+            }
+
+            var parent = signalEventDef.Parent;
+            if (parent is null)
+            {
+                continue;
+            }
+
+            if (parent.Name != BpmnNamespace + "startEvent")
+            {
+                var elementId = parent.Attribute("id")?.Value ?? "(unknown)";
+                errors.Add(
+                    $"Element '{elementId}': flowable:recordTypeShortCodes is only supported on signal startEvent (found on {parent.Name.LocalName}).");
+            }
+        }
         return errors;
     }
 
