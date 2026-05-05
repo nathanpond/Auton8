@@ -11,7 +11,14 @@ import org.flowable.engine.delegate.event.FlowableActivityEvent;
 import org.flowable.engine.runtime.ProcessInstance;
 import org.flowable.task.api.TaskInfo;
 
-final class WorkflowExecutionEventMapper {
+class WorkflowExecutionEventMapper {
+
+    // Caps applied at the boundary so a runaway throwable can't blow up the
+    // event payload or the workflow_execution_errors row. Truncated values get
+    // a trailing marker so it's obvious in the UI.
+    private static final int ERROR_MESSAGE_CAP = 4 * 1024;
+    private static final int ERROR_STACK_TRACE_CAP = 64 * 1024;
+    private static final String TRUNCATION_MARKER = "\n… [truncated]";
 
     private final FlowableExecutionEventProperties properties;
     private final WorkflowDefinitionMetadataResolver definitionMetadataResolver;
@@ -29,6 +36,16 @@ final class WorkflowExecutionEventMapper {
         FlowableEngineEvent flowableEvent,
         DelegateExecution execution,
         RepositoryService repositoryService
+    ) {
+        return map(eventType, flowableEvent, execution, repositoryService, /*cause*/ null);
+    }
+
+    WorkflowExecutionEventEnvelope map(
+        String eventType,
+        FlowableEngineEvent flowableEvent,
+        DelegateExecution execution,
+        RepositoryService repositoryService,
+        Throwable cause
     ) {
         var processDefinitionId = firstNonBlank(flowableEvent.getProcessDefinitionId(), execution != null ? execution.getProcessDefinitionId() : null);
         var definition = definitionMetadataResolver.resolve(repositoryService, processDefinitionId);
@@ -53,7 +70,9 @@ final class WorkflowExecutionEventMapper {
             task.assignee(),
             tenantId,
             flowableEvent.getType().name(),
-            properties.getSourceAppId()
+            properties.getSourceAppId(),
+            truncate(ExceptionDetails.rootCauseMessage(cause), ERROR_MESSAGE_CAP),
+            truncate(ExceptionDetails.fullStackTrace(cause), ERROR_STACK_TRACE_CAP)
         );
 
         return new WorkflowExecutionEventEnvelope(topicFor(payload), payload);
@@ -84,7 +103,9 @@ final class WorkflowExecutionEventMapper {
             null,
             processInstance.getTenantId(),
             flowableEvent.getType().name(),
-            properties.getSourceAppId()
+            properties.getSourceAppId(),
+            null,   // errorMessage (process-started never has a cause)
+            null    // errorStackTrace
         );
 
         return new WorkflowExecutionEventEnvelope(topicFor(payload), payload);
@@ -123,6 +144,13 @@ final class WorkflowExecutionEventMapper {
 
     private static String firstNonBlank(String primary, String secondary) {
         return primary != null && !primary.isBlank() ? primary : secondary;
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null || value.length() <= max) {
+            return value;
+        }
+        return value.substring(0, max - TRUNCATION_MARKER.length()) + TRUNCATION_MARKER;
     }
 
     private record ActivityDetails(String activityId, String activityName) {

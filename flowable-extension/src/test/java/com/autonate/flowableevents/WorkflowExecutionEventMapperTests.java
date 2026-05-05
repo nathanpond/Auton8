@@ -35,7 +35,9 @@ class WorkflowExecutionEventMapperTests {
             null,
             null,
             "TASK_COMPLETED",
-            "flowable"
+            "flowable",
+            null,   // errorMessage
+            null    // errorStackTrace
         );
 
         assertEquals("event-1", payload.eventId());
@@ -62,7 +64,9 @@ class WorkflowExecutionEventMapperTests {
             null,
             null,
             "PROCESS_STARTED",
-            "flowable"
+            "flowable",
+            null,   // errorMessage
+            null    // errorStackTrace
         );
 
         var envelope = new WorkflowExecutionEventEnvelope("workflow.execution.events", payload);
