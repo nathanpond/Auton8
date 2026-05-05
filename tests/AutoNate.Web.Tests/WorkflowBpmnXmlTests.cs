@@ -545,6 +545,30 @@ public sealed class WorkflowBpmnXmlTests
     }
 
     [Fact]
+    public void ExtractSignalRegistrations_PopulatesProcessDefinitionKey()
+    {
+        var xml = """
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:flowable="http://flowable.org/bpmn">
+              <signal id="Signal_1" name="record.created" flowable:topic="record.events"/>
+              <process id="OrderFlow">
+                <startEvent id="StartEvent_1">
+                  <signalEventDefinition signalRef="Signal_1"/>
+                </startEvent>
+              </process>
+            </definitions>
+            """;
+
+        var registrations = WorkflowBpmnXml.ExtractSignalRegistrations(xml);
+
+        var registration = Assert.Single(registrations);
+        Assert.Equal("record.created", registration.SignalName);
+        Assert.Equal("record.events", registration.Topic);
+        Assert.Equal("OrderFlow", registration.ProcessDefinitionKey);
+        Assert.Empty(registration.RecordTypeShortCodes);
+    }
+
+    [Fact]
     public void ValidateProcess_DoesNotWarnAboutSignalEventDefinition_OnStartEvents()
     {
         const string xml = """

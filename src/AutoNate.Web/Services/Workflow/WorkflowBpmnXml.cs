@@ -607,9 +607,10 @@ public static partial class WorkflowBpmnXml
         }
     }
 
-    // Reads (signalName, topic) tuples for every signal start event in the
-    // document. Used by the runtime registry to know which Dapr topics to
-    // subscribe on and which signal names to dispatch when a message arrives.
+    // Reads (signalName, topic, processDefinitionKey, recordTypeShortCodes)
+    // tuples for every signal start event in the document. Used by the
+    // runtime registry to know which Dapr topics to subscribe on, which
+    // signal names to dispatch, and which workflow each one starts.
     public static IReadOnlyList<WorkflowSignalRegistration> ExtractSignalRegistrations(string xml)
     {
         if (string.IsNullOrWhiteSpace(xml))
@@ -636,7 +637,7 @@ public static partial class WorkflowBpmnXml
                 StringComparer.Ordinal)
             ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
 
-        var registrations = new Dictionary<(string Name, string Topic), WorkflowSignalRegistration>();
+        var registrations = new Dictionary<(string Name, string Topic, string ProcessKey), WorkflowSignalRegistration>();
 
         foreach (var startEvent in document.Descendants(BpmnNamespace + "startEvent"))
         {
@@ -664,12 +665,43 @@ public static partial class WorkflowBpmnXml
                 topic = DefaultSignalTopic;
             }
 
-            var key = (name, topic);
-            registrations.TryAdd(key, new WorkflowSignalRegistration(name, topic));
+            // Walk up to the enclosing <process id="..."> — that is the
+            // processDefinitionKey Flowable will use when starting an instance.
+            var processElement = startEvent.Ancestors(BpmnNamespace + "process").FirstOrDefault();
+            var processKey = processElement?.Attribute("id")?.Value?.Trim();
+            if (string.IsNullOrEmpty(processKey))
+            {
+                continue;
+            }
+
+            var shortCodesAttr = signalEventDefinition.Attribute(FlowableNamespace + "recordTypeShortCodes")?.Value;
+            var shortCodes = ParseShortCodeList(shortCodesAttr);
+
+            var key = (name, topic, processKey);
+            registrations.TryAdd(key, new WorkflowSignalRegistration(name, topic, processKey, shortCodes));
         }
 
         return registrations.Values.ToArray();
     }
+
+    private static IReadOnlySet<string> ParseShortCodeList(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return EmptyShortCodeSet;
+        }
+
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var token in raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            set.Add(token);
+        }
+
+        return set;
+    }
+
+    private static readonly IReadOnlySet<string> EmptyShortCodeSet =
+        new HashSet<string>(StringComparer.Ordinal);
 
     private static void ApplyScriptTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
     {

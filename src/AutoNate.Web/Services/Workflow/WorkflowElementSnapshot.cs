@@ -23,5 +23,12 @@ public sealed record class WorkflowElementSnapshot(
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr
-// pub/sub topic the bus subscriber should listen on for that signal.
-public sealed record class WorkflowSignalRegistration(string SignalName, string Topic);
+// pub/sub topic the bus subscriber should listen on for that signal. The
+// process definition key identifies the workflow to start; the
+// RecordTypeShortCodes set is empty for unfiltered registrations and contains
+// shortcodes the payload's `recordTypeId` must resolve to for filtered ones.
+public sealed record class WorkflowSignalRegistration(
+    string SignalName,
+    string Topic,
+    string ProcessDefinitionKey,
+    IReadOnlySet<string> RecordTypeShortCodes);
