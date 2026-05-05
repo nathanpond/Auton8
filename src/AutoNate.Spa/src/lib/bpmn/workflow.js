@@ -1980,17 +1980,15 @@ export function enableCurrentStepContextMenu(viewerHandle, dotNetRef, options) {
   });
 }
 
-// Enables a small floating tooltip that appears when the cursor hovers any
-// bpmn:UserTask element in a read-only execution viewer. The React layer
-// supplies the tooltip body via a getInfo thunk; this layer only knows about
-// hover events, BPMN type filtering, and DOM positioning. Returns nothing —
-// disposal is wired through viewerHandle.setHoverTooltip so the viewer's own
-// dispose() call cleans us up.
-//
 // options.getInfo(activityId, activityName, bpmn) → { title, rows } | null
-//   Where bpmn is { assignee, dueDate } pulled from flowable:* attributes.
-//   Returning null suppresses the tooltip for that element (useful when the
-//   React side has no data yet, e.g. tasks query still loading).
+//   Where bpmn is { assignee, dueDate } pulled from flowable:* attributes
+//   (always present for shape sake; null on non-userTask elements). Returning
+//   null suppresses the tooltip for that element.
+//
+// options.failedActivityIds: readonly string[] — the set of activities the
+//   diagram has marked failed. Hover fires on any element whose id is in
+//   this set, in addition to all bpmn:UserTask elements. The React side
+//   decides what to render via getInfo.
 export function enableUserTaskHoverTooltip(viewerHandle, options) {
   if (!viewerHandle?.viewer) {
     return;
@@ -2002,19 +2000,28 @@ export function enableUserTaskHoverTooltip(viewerHandle, options) {
     return;
   }
 
+  // Held in a closure-mutable ref so the React side can update the failed set
+  // without rebuilding the viewer. workflow.js exposes setFailedActivityIds
+  // below for the hook to call on prop change.
+  let failedActivityIds = new Set(Array.isArray(opts.failedActivityIds) ? opts.failedActivityIds : []);
+
   const eventBus = viewerHandle.viewer.get("eventBus");
   const tooltip = createUserTaskHoverTooltip(viewerHandle.cssScopeAttribute);
 
+  const shouldShowFor = (element) => {
+    if (!element || element.waypoints) return false;
+    const businessObject = element.businessObject;
+    if (!businessObject) return false;
+    if (businessObject.$type === "bpmn:UserTask") return true;
+    return failedActivityIds.has(element.id);
+  };
+
   const onHover = (event) => {
     const element = event?.element;
-    if (!element || element.waypoints) {
+    if (!shouldShowFor(element)) {
       return;
     }
     const businessObject = element.businessObject;
-    if (!businessObject || businessObject.$type !== "bpmn:UserTask") {
-      return;
-    }
-
     const activityName = typeof businessObject.name === "string" ? businessObject.name : null;
     const bpmn = {
       assignee: readFlowableString(businessObject, "assignee"),
@@ -2037,7 +2044,7 @@ export function enableUserTaskHoverTooltip(viewerHandle, options) {
 
   const onOut = (event) => {
     const element = event?.element;
-    if (!element || element.businessObject?.$type !== "bpmn:UserTask") {
+    if (!shouldShowFor(element)) {
       return;
     }
     tooltip.hide();
@@ -2052,6 +2059,9 @@ export function enableUserTaskHoverTooltip(viewerHandle, options) {
   eventBus.on("canvas.viewbox.changed", onViewboxChanged);
 
   viewerHandle.setHoverTooltip({
+    setFailedActivityIds(ids) {
+      failedActivityIds = new Set(Array.isArray(ids) ? ids : []);
+    },
     dispose() {
       tooltip.dispose();
       eventBus.off("element.hover", onHover);
