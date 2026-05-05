@@ -104,6 +104,9 @@ export function useBpmnReadonlyViewer(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const viewerRef = useRef<{ dispose?: () => void } | null>(null);
+  // Captured from workflow.js's setHoverTooltip call so we can push
+  // failedActivityIds updates without rebuilding the viewer.
+  const hoverTooltipHandleRef = useRef<{ setFailedActivityIds?: (ids: readonly string[]) => void } | null>(null);
   const currentXmlRef = useRef<string | null>(null);
   const callbacksRef = useRef<UseBpmnReadonlyViewerOptions["callbacks"]>(callbacks);
   callbacksRef.current = callbacks;
@@ -155,12 +158,21 @@ export function useBpmnReadonlyViewer(
           }
 
           if (enableHoverTooltip) {
+            // Wrap setHoverTooltip so we can capture the handle that
+            // workflow.js stores internally, enabling subsequent
+            // setFailedActivityIds calls on prop change.
+            const origSetHoverTooltip = (created as { setHoverTooltip?: (h: unknown) => void }).setHoverTooltip?.bind(created);
+            (created as { setHoverTooltip?: (h: unknown) => void }).setHoverTooltip = (h: unknown) => {
+              hoverTooltipHandleRef.current = h as { setFailedActivityIds?: (ids: readonly string[]) => void } | null;
+              origSetHoverTooltip?.(h);
+            };
             workflow.enableUserTaskHoverTooltip(created, {
               getInfo: (
                 activityId: string,
                 activityName: string | null,
                 bpmn: { assignee: string | null; dueDate: string | null }
-              ) => hoverTooltipRef.current?.getInfo(activityId, activityName, bpmn) ?? null
+              ) => hoverTooltipRef.current?.getInfo(activityId, activityName, bpmn) ?? null,
+              failedActivityIds: failedActivityIds ?? []
             });
           }
         }
@@ -208,6 +220,13 @@ export function useBpmnReadonlyViewer(
       // Re-highlight can fail if called after dispose; not fatal.
     }
   }, [completedActivityIds, currentActivityIds, cancelledActivityIds, failedActivityIds]);
+
+  // The hover tooltip captures failedActivityIds at viewer-creation time.
+  // Push subsequent updates through the setFailedActivityIds hook installed
+  // by workflow.js so a hover after retry/recovery sees the latest set.
+  useEffect(() => {
+    hoverTooltipHandleRef.current?.setFailedActivityIds?.(failedActivityIds ?? []);
+  }, [failedActivityIds]);
 
   // Dispose on unmount.
   useEffect(() => {
