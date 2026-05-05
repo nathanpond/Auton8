@@ -45,12 +45,6 @@ final class WorkflowFailureEventListener extends AbstractFlowableEngineEventList
         publish("job.execution.failed", event, getExecution(event), causeFrom(event));
     }
 
-    // Test-only entry point: invokes the same path the engine would on
-    // JOB_EXECUTION_FAILURE so we can drive the listener without a live engine.
-    void invokeJobExecutionFailureForTest(FlowableEngineEntityEvent event) {
-        jobExecutionFailure(event);
-    }
-
     private void publish(String eventType, FlowableEngineEvent event, DelegateExecution execution, Throwable cause) {
         try {
             var envelope = eventMapper.map(eventType, event, execution, repositoryServiceProvider != null

@@ -107,7 +107,7 @@ class WorkflowExecutionEventListenerTests {
 
         // Drive the protected hook directly so we don't need a live Flowable engine.
         var event = new TestExceptionEntityEvent(rootCause);
-        listener.invokeJobExecutionFailureForTest(event);
+        listener.jobExecutionFailure(event);
 
         org.junit.jupiter.api.Assertions.assertSame(rootCause, capturedCause.get(),
             "WorkflowFailureEventListener must thread event.getCause() into the mapper");

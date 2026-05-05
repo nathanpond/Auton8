@@ -420,7 +420,7 @@ void failureListenerExtractsCauseFromExceptionEvent() {
 
     // Drive the protected hook directly so we don't need a live Flowable engine.
     var event = new TestExceptionEntityEvent(rootCause);
-    listener.invokeJobExecutionFailureForTest(event);
+    listener.jobExecutionFailure(event);
 
     org.junit.jupiter.api.Assertions.assertSame(rootCause, capturedCause.get(),
         "WorkflowFailureEventListener must thread event.getCause() into the mapper");
@@ -428,8 +428,10 @@ void failureListenerExtractsCauseFromExceptionEvent() {
 
 // Minimal stand-in for FlowableEngineEntityEvent + FlowableExceptionEvent.
 // Production code calls only getCause(); the rest of the interface methods
-// throw — they would fail the test loudly if the listener started touching
-// them, which is what we want.
+// return null — they would fail the test loudly if the listener started
+// touching them, which is what we want.
+// If Flowable adds methods to FlowableEngineEntityEvent, add no-op overrides here —
+// production code only calls getCause()/getType().
 private static final class TestExceptionEntityEvent
     implements org.flowable.common.engine.api.delegate.event.FlowableEngineEntityEvent,
                org.flowable.common.engine.api.delegate.event.FlowableExceptionEvent {
@@ -448,7 +450,10 @@ private static final class TestExceptionEntityEvent
     @Override public String getProcessDefinitionId() { return null; }
     @Override public String getProcessInstanceId() { return null; }
     @Override public String getExecutionId() { return null; }
+    @Override public String getScopeId() { return null; }
     @Override public String getScopeType() { return null; }
+    @Override public String getScopeDefinitionId() { return null; }
+    @Override public String getSubScopeId() { return null; }
 }
 ```
 
@@ -510,12 +515,6 @@ final class WorkflowFailureEventListener extends AbstractFlowableEngineEventList
     @Override
     protected void jobExecutionFailure(FlowableEngineEntityEvent event) {
         publish("job.execution.failed", event, getExecution(event), causeFrom(event));
-    }
-
-    // Test-only entry point: invokes the same path the engine would on
-    // JOB_EXECUTION_FAILURE so we can drive the listener without a live engine.
-    void invokeJobExecutionFailureForTest(FlowableEngineEntityEvent event) {
-        jobExecutionFailure(event);
     }
 
     private void publish(String eventType, FlowableEngineEvent event, DelegateExecution execution, Throwable cause) {
