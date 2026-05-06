@@ -601,16 +601,17 @@ export function ExecutionContent({
         activityName: string | null,
         bpmn: { assignee: string | null; dueDate: string | null }
       ): UserTaskHoverInfo | null =>
-        buildUserTaskHoverInfo({
+        buildActivityHoverInfo({
           activityId,
           activityName,
           bpmn,
           tasks,
           history,
+          errorMessagesByActivityId: detail?.errorMessagesByActivityId ?? {},
           resolveAssigneeLabel
         })
     }),
-    [tasks, history, resolveAssigneeLabel]
+    [tasks, history, detail?.errorMessagesByActivityId, resolveAssigneeLabel]
   );
 
   const { containerRef, error: viewerError } = useBpmnReadonlyViewer({
@@ -933,29 +934,56 @@ function browserStatusLabel(status: string): string {
 export const formatTimestamp = formatTimestampUtil;
 export const describeError = describeErrorUtil;
 
-// Builds the data the BPMN hover tooltip shows on a UserTask element.
-// Resolution order, in priority:
-//   1. Active runtime tasks (taskDefinitionKey match) — show actual assignee
-//      and the absolute dueDate Flowable computed at task-creation time.
-//   2. Most-recent historic record for the activity — completed assignee.
-//   3. Design-time BPMN attributes — assignee may be a literal or a
-//      ${expression}; dueDate may be a literal date OR an ISO 8601 duration
-//      like "P3D" / "PT3H" which Flowable evaluates relative to task start.
-//      The duration case renders as "+3 days" so the diagram makes the
-//      relative semantics obvious before the task ever runs.
-function buildUserTaskHoverInfo(args: {
+// Builds the data the BPMN hover tooltip shows on a node. Resolution order,
+// in priority:
+//   1. Errored — the activityId is in errorMessagesByActivityId. Render
+//      Status: Errored + Error: <message or "(no message captured)">.
+//      Wins over userTask state because an errored node is the most
+//      actionable info on the diagram.
+//   2. Active runtime tasks (taskDefinitionKey match) — userTask only.
+//   3. Most-recent historic record for the activity — userTask only.
+//   4. Design-time BPMN attributes — userTask only.
+function buildActivityHoverInfo(args: {
   activityId: string;
   activityName: string | null;
   bpmn: { assignee: string | null; dueDate: string | null };
   tasks: readonly FlowableTaskSummary[];
   history: readonly WorkflowExecutionHistoryEvent[];
+  errorMessagesByActivityId: Record<string, string>;
   resolveAssigneeLabel: (raw: string | null | undefined) => string;
 }): UserTaskHoverInfo {
-  const { activityId, activityName, bpmn, tasks, history, resolveAssigneeLabel } = args;
+  const {
+    activityId,
+    activityName,
+    bpmn,
+    tasks,
+    history,
+    errorMessagesByActivityId,
+    resolveAssigneeLabel
+  } = args;
 
   const title = activityName ?? activityId;
   const rows: Array<{ label: string; value: string }> = [];
 
+  // 1. Errored branch
+  const erroredMessage = Object.prototype.hasOwnProperty.call(errorMessagesByActivityId, activityId)
+    ? errorMessagesByActivityId[activityId]
+    : null;
+  const isErrored = erroredMessage !== null
+    || history.some((e) => e.activityId === activityId && e.isErrored === true);
+  if (isErrored) {
+    rows.push({ label: "Status", value: "Errored" });
+    rows.push({
+      label: "Error",
+      value:
+        typeof erroredMessage === "string" && erroredMessage.length > 0
+          ? erroredMessage
+          : "(no message captured)"
+    });
+    return { title, rows };
+  }
+
+  // 2-4. Existing userTask resolution (unchanged).
   const activeMatches = tasks.filter((t) => t.taskDefinitionKey === activityId);
   if (activeMatches.length > 0) {
     if (activeMatches.length === 1) {
@@ -963,7 +991,6 @@ function buildUserTaskHoverInfo(args: {
       rows.push({ label: "Assignee", value: resolveAssigneeLabel(t.assignee) });
       rows.push({ label: "Due", value: formatAbsoluteDueDate(t.dueDate) });
     } else {
-      // Multi-instance / parallel: list each runtime instance's assignee + due.
       rows.push({
         label: "Assignees",
         value: activeMatches.map((t) => resolveAssigneeLabel(t.assignee)).join(", ")
@@ -987,7 +1014,6 @@ function buildUserTaskHoverInfo(args: {
     return { title, rows };
   }
 
-  // Future / never-reached: fall back to design-time BPMN attributes.
   rows.push({ label: "Assignee", value: resolveAssigneeLabel(bpmn.assignee) });
   rows.push({ label: "Due", value: formatBpmnDueDate(bpmn.dueDate) });
   return { title, rows };
