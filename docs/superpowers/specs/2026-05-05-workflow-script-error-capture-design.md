@@ -1,5 +1,7 @@
 # Workflow Script Task Error Capture & Display
 
+**Status:** Implemented on 2026-05-05. See `docs/superpowers/plans/2026-05-05-workflow-script-error-capture.md` for the implementation plan.
+
 ## Goal
 
 When a workflow execution errors at a script task (or any other activity that
