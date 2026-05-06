@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useExecutionHistory } from "@/hooks/useExecutions";
 import { useUserDirectory, userFullDisplay } from "@/hooks/useUserDirectory";
 import { describeError, formatTimestamp } from "./utils";
@@ -85,9 +86,10 @@ export default function ExecutionHistory({ processInstanceId }: Props) {
             )}
           </div>
           {event.errorMessage && (
-            <div className="small text-danger mt-1">
-              <code className="text-danger">{event.errorMessage}</code>
-            </div>
+            <ErrorDetails
+              message={event.errorMessage}
+              stackTrace={event.errorStackTrace}
+            />
           )}
         </li>
       ))}
@@ -123,5 +125,39 @@ function formatDuration(ms: number): string {
   const hours = Math.floor(minutes / 60);
   const remMinutes = minutes % 60;
   return remMinutes === 0 ? `${hours}h` : `${hours}h ${remMinutes}m`;
+}
+
+type ErrorDetailsProps = {
+  message: string;
+  stackTrace: string | null;
+};
+
+function ErrorDetails({ message, stackTrace }: ErrorDetailsProps) {
+  const [expanded, setExpanded] = useState(false);
+  const hasStack = typeof stackTrace === "string" && stackTrace.length > 0;
+
+  return (
+    <div className="small text-danger mt-1">
+      <code className="text-danger">{message}</code>
+      {hasStack && (
+        <>
+          {" "}
+          <button
+            type="button"
+            className="btn btn-link btn-sm p-0 align-baseline text-danger"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "Hide stack trace" : "Show stack trace"}
+          </button>
+          {expanded && (
+            <pre className="workflow-execution-history-stack mt-1 mb-0 small">
+              {stackTrace}
+            </pre>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 

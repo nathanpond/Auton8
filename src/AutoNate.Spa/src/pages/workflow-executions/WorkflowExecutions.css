@@ -537,3 +537,14 @@
         align-items: stretch;
     }
 }
+
+.workflow-execution-history-stack {
+    background: rgba(220, 53, 69, 0.08);
+    color: var(--bs-danger);
+    padding: .5rem .75rem;
+    border-radius: .25rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 18rem;
+    overflow: auto;
+}
