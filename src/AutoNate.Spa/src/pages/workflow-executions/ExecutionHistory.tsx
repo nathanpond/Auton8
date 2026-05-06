@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useExecutionHistory } from "@/hooks/useExecutions";
 import { useUserDirectory, userFullDisplay } from "@/hooks/useUserDirectory";
 import { describeError, formatTimestamp } from "./utils";
@@ -134,6 +134,7 @@ type ErrorDetailsProps = {
 
 function ErrorDetails({ message, stackTrace }: ErrorDetailsProps) {
   const [expanded, setExpanded] = useState(false);
+  const stackId = useId();
   const hasStack = typeof stackTrace === "string" && stackTrace.length > 0;
 
   return (
@@ -146,12 +147,17 @@ function ErrorDetails({ message, stackTrace }: ErrorDetailsProps) {
             type="button"
             className="btn btn-link btn-sm p-0 align-baseline text-danger"
             aria-expanded={expanded}
+            aria-controls={stackId}
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "Hide stack trace" : "Show stack trace"}
           </button>
           {expanded && (
-            <pre className="workflow-execution-history-stack mt-1 mb-0 small">
+            <pre
+              id={stackId}
+              tabIndex={0}
+              className="workflow-execution-history-stack mt-1 mb-0 small"
+            >
               {stackTrace}
             </pre>
           )}

@@ -544,7 +544,7 @@
     padding: .5rem .75rem;
     border-radius: .25rem;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
     max-height: 18rem;
     overflow: auto;
 }

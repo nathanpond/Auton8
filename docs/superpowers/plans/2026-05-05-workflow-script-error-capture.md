@@ -1580,10 +1580,10 @@ git commit -m "Show error message on hover over errored execution nodes"
 
 - [ ] **Step 1: Replace the inline `<code>` block with `<ErrorDetails>`**
 
-In `src/AutoNate.Spa/src/pages/workflow-executions/ExecutionHistory.tsx`, change the import section to add `useState`:
+In `src/AutoNate.Spa/src/pages/workflow-executions/ExecutionHistory.tsx`, change the import section to add `useId` and `useState`:
 
 ```tsx
-import { useState } from "react";
+import { useId, useState } from "react";
 ```
 
 Replace the existing message block (lines 87–91):
@@ -1617,6 +1617,7 @@ type ErrorDetailsProps = {
 
 function ErrorDetails({ message, stackTrace }: ErrorDetailsProps) {
   const [expanded, setExpanded] = useState(false);
+  const stackId = useId();
   const hasStack = typeof stackTrace === "string" && stackTrace.length > 0;
 
   return (
@@ -1629,12 +1630,17 @@ function ErrorDetails({ message, stackTrace }: ErrorDetailsProps) {
             type="button"
             className="btn btn-link btn-sm p-0 align-baseline text-danger"
             aria-expanded={expanded}
+            aria-controls={stackId}
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "Hide stack trace" : "Show stack trace"}
           </button>
           {expanded && (
-            <pre className="workflow-execution-history-stack mt-1 mb-0 small">
+            <pre
+              id={stackId}
+              tabIndex={0}
+              className="workflow-execution-history-stack mt-1 mb-0 small"
+            >
               {stackTrace}
             </pre>
           )}
@@ -1656,7 +1662,7 @@ In `src/AutoNate.Spa/src/pages/workflow-executions/WorkflowExecutions.css`, appe
     padding: .5rem .75rem;
     border-radius: .25rem;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
     max-height: 18rem;
     overflow: auto;
 }
