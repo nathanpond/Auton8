@@ -138,6 +138,41 @@ export async function listPermissionGrants(
   return data;
 }
 
+export type ListPermissionGrantsPageRequest = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: string;
+  sortDir?: "asc" | "desc";
+  principalKind?: "user" | "group" | "role";
+  effect?: "allow" | "deny";
+};
+
+export type ListPermissionGrantsPageResult = {
+  items: PermissionGrant[];
+  totalCount: number;
+};
+
+export async function listPermissionGrantsPage(
+  req: ListPermissionGrantsPageRequest,
+  signal?: AbortSignal
+): Promise<ListPermissionGrantsPageResult> {
+  const params: Record<string, string | number> = {
+    page: req.page,
+    pageSize: req.pageSize
+  };
+  if (req.search) params.q = req.search;
+  if (req.sort) params.sort = req.sort;
+  if (req.sortDir) params.sortDir = req.sortDir;
+  if (req.principalKind) params.principalKind = req.principalKind;
+  if (req.effect) params.effect = req.effect;
+  const { data } = await api.get<ListPermissionGrantsPageResult>(
+    "/api/admin/grants/page",
+    { params, signal }
+  );
+  return data;
+}
+
 export async function createPermissionGrant(body: {
   principalKind: "user" | "group" | "role";
   principalId: string;

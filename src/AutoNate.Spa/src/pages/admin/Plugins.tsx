@@ -1,15 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { ColumnDef } from "@tanstack/react-table";
 import {
   useDeletePlugin,
   useDisablePlugin,
   useEnablePlugin,
-  usePlugins,
 } from "@/hooks/usePlugins";
-import type { Plugin } from "@/api/plugins";
+import { Plugin, listPlugins } from "@/api/plugins";
+import { DataTable } from "@/components/data-table/DataTable";
 import UploadPluginModal from "./UploadPluginModal";
 
+const COLUMN_WIDTHS = ["32%", "14%", "14%", "22%", "18%"];
+
 export default function Plugins() {
-  const { data: plugins = [], isLoading } = usePlugins();
   const enable = useEnablePlugin();
   const disable = useDisablePlugin();
   const remove = useDeletePlugin();
@@ -29,6 +31,106 @@ export default function Plugins() {
     }
   };
 
+  const columns = useMemo<ColumnDef<Plugin>[]>(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <>
+            <strong>{row.original.name}</strong>
+            {row.original.lastError && (
+              <div className="small text-danger" title={row.original.lastError}>
+                Last error:{" "}
+                {row.original.lastError.length > 80
+                  ? row.original.lastError.slice(0, 80) + "…"
+                  : row.original.lastError}
+              </div>
+            )}
+          </>
+        )
+      },
+      {
+        id: "version",
+        accessorKey: "version",
+        header: "Version",
+        cell: ({ row }) => <span className="font-monospace small">{row.original.version}</span>
+      },
+      {
+        id: "status",
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => renderStatusBadge(row.original)
+      },
+      {
+        id: "uploadedAt",
+        header: "Uploaded",
+        accessorFn: (p) => p.uploadedAt,
+        cell: ({ row }) => (
+          <span className="small text-muted">{new Date(row.original.uploadedAt).toLocaleString()}</span>
+        )
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => {
+          const p = row.original;
+          return (
+            <div className="data-table-row-actions">
+              {p.status === "Disabled" && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-success"
+                  disabled={busyId === p.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void runAction(p.id, () => enable.mutateAsync(p.id));
+                  }}
+                >
+                  Enable
+                </button>
+              )}
+              {p.status === "Enabled" && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-warning"
+                  disabled={busyId === p.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void runAction(p.id, () => disable.mutateAsync(p.id));
+                  }}
+                >
+                  Disable
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-danger"
+                disabled={busyId === p.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (
+                    confirm(
+                      `Delete plugin '${p.name}'? This removes the row and all uploaded files.`
+                    )
+                  ) {
+                    void runAction(p.id, () => remove.mutateAsync(p.id));
+                  }
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          );
+        }
+      }
+    ],
+    [busyId, enable, disable, remove]
+  );
+
   return (
     <>
       <div className="page-head">
@@ -40,96 +142,31 @@ export default function Plugins() {
 
       {error && <div className="alert alert-danger">{error}</div>}
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading d-flex justify-content-between align-items-center">
-          <h4 className="panel-title">Installed plugins</h4>
+      <DataTable<Plugin>
+        mode="client"
+        loadAll={() => listPlugins()}
+        queryKey={["admin", "plugins"]}
+        columns={columns}
+        rowKey={(p) => p.id}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "name", desc: false }]}
+        searchPlaceholder="Search plugins…"
+        emptyMessage="No plugins installed yet."
+        loadingMessage="Loading plugins…"
+        globalFilterFn={(p, search) => {
+          const needle = search.toLowerCase();
+          return `${p.name} ${p.version}`.toLowerCase().includes(needle);
+        }}
+        toolbarRight={
           <button
             type="button"
-            className="btn btn-sm btn-primary"
+            className="btn btn-add-user"
             onClick={() => setShowUpload(true)}
           >
-            Upload plugin…
+            <i className="fa fa-plus me-2"></i>Upload plugin
           </button>
-        </div>
-        <div className="panel-body">
-          {isLoading && <div>Loading…</div>}
-          {!isLoading && plugins.length === 0 && (
-            <div className="text-muted">No plugins installed yet.</div>
-          )}
-          {!isLoading && plugins.length > 0 && (
-            <div className="table-responsive">
-              <table className="table table-striped align-middle">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Version</th>
-                    <th>Status</th>
-                    <th>Uploaded</th>
-                    <th style={{ width: "1%", whiteSpace: "nowrap" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plugins.map((p) => (
-                    <tr key={p.id}>
-                      <td>
-                        <strong>{p.name}</strong>
-                        {p.lastError && (
-                          <div className="small text-danger" title={p.lastError}>
-                            Last error: {p.lastError.length > 80 ? p.lastError.slice(0, 80) + "…" : p.lastError}
-                          </div>
-                        )}
-                      </td>
-                      <td className="font-monospace small">{p.version}</td>
-                      <td>{renderStatusBadge(p)}</td>
-                      <td className="small text-muted">
-                        {new Date(p.uploadedAt).toLocaleString()}
-                      </td>
-                      <td className="text-nowrap">
-                        {p.status === "Disabled" && (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-success me-1"
-                            disabled={busyId === p.id}
-                            onClick={() => runAction(p.id, () => enable.mutateAsync(p.id))}
-                          >
-                            Enable
-                          </button>
-                        )}
-                        {p.status === "Enabled" && (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-warning me-1"
-                            disabled={busyId === p.id}
-                            onClick={() => runAction(p.id, () => disable.mutateAsync(p.id))}
-                          >
-                            Disable
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-danger"
-                          disabled={busyId === p.id}
-                          onClick={() => {
-                            if (
-                              confirm(
-                                `Delete plugin '${p.name}'? This removes the row and all uploaded files.`,
-                              )
-                            ) {
-                              void runAction(p.id, () => remove.mutateAsync(p.id));
-                            }
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       {showUpload && <UploadPluginModal onClose={() => setShowUpload(false)} />}
     </>

@@ -49,6 +49,11 @@ export default function SimpleCompleteTaskModal({ config, onClose, onComplete }:
                   {config.processInstanceName}
                 </p>
               )}
+              {config.description && (
+                <p className="mb-2" style={{ whiteSpace: "pre-wrap" }}>
+                  {config.description}
+                </p>
+              )}
               <p>
                 Mark this task complete? The workflow will continue from here using the
                 process variables already on the instance.

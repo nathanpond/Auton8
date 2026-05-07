@@ -1,17 +1,19 @@
 import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
+import { ColumnDef } from "@tanstack/react-table";
 import {
   SystemIssueCategory,
   SystemIssueModel,
   SystemIssueSeverity,
-  SystemIssueState
+  SystemIssueState,
+  listSystemIssues
 } from "@/api/systemIssues";
 import {
   useAcknowledgeSystemIssue,
   useResolveSystemIssue,
-  useSystemIssue,
-  useSystemIssues
+  useSystemIssue
 } from "@/hooks/useSystemIssues";
+import { DataTable } from "@/components/data-table/DataTable";
 
 const STATE_OPTIONS: { value: SystemIssueState | ""; label: string }[] = [
   { value: "open", label: "Open" },
@@ -40,151 +42,149 @@ const CATEGORY_OPTIONS: { value: SystemIssueCategory | ""; label: string }[] = [
   { value: "plugin", label: "Plugin" }
 ];
 
+const COLUMN_WIDTHS = ["10%", "38%", "13%", "16%", "8%", "15%"];
+
 export default function SystemIssues() {
   const [state, setState] = useState<SystemIssueState | "">("open");
   const [severity, setSeverity] = useState<SystemIssueSeverity | "">("");
   const [category, setCategory] = useState<SystemIssueCategory | "">("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const list = useSystemIssues({
-    state,
-    severity: severity || undefined,
-    category: category || undefined
-  });
   const detail = useSystemIssue(selectedId);
 
-  const items = list.data?.items ?? [];
+  const columns = useMemo<ColumnDef<SystemIssueModel>[]>(
+    () => [
+      {
+        id: "severity",
+        accessorKey: "severity",
+        header: "Severity",
+        cell: ({ row }) => <SeverityBadge severity={row.original.severity} />
+      },
+      {
+        id: "title",
+        accessorKey: "title",
+        header: "Title",
+        cell: ({ row }) => (
+          <>
+            <div className="fw-semibold">{row.original.title}</div>
+            {row.original.summary && (
+              <div className="text-muted small">{row.original.summary}</div>
+            )}
+          </>
+        )
+      },
+      {
+        id: "category",
+        accessorKey: "category",
+        header: "Category",
+        cell: ({ row }) => <span className="small text-muted">{row.original.category}</span>
+      },
+      {
+        id: "detectorId",
+        accessorKey: "detectorId",
+        header: "Detector",
+        cell: ({ row }) => <span className="small text-muted">{row.original.detectorId}</span>
+      },
+      {
+        id: "occurrenceCount",
+        accessorKey: "occurrenceCount",
+        header: "Count"
+      },
+      {
+        id: "lastSeenAtUtc",
+        accessorKey: "lastSeenAtUtc",
+        header: "Last seen",
+        cell: ({ row }) => (
+          <span className="small text-muted">
+            {new Date(row.original.lastSeenAtUtc).toLocaleString()}
+          </span>
+        )
+      }
+    ],
+    []
+  );
 
   return (
     <>
-      <div className="page-head d-flex justify-content-between align-items-start gap-3">
-        <div>
-          <h1 className="page-header mb-1">System Issues</h1>
-          <p className="page-head-copy mb-0">
-            Persistent log of issues detectors have surfaced. Refreshes every 15 seconds. Phase 1
-            ships read-only; acknowledge / resolve / auto-remediate land in subsequent phases.
-          </p>
-        </div>
-        {list.isFetching && (
-          <div className="text-muted small">
-            <i className="fa fa-rotate fa-spin me-1" aria-hidden="true" />
-            Refreshing…
+      <div className="page-head">
+        <h1 className="page-header mb-1">System Issues</h1>
+        <p className="page-head-copy">
+          Persistent log of issues detectors have surfaced. Refreshes every 15 seconds.
+        </p>
+      </div>
+
+      <DataTable<SystemIssueModel>
+        mode="client"
+        loadAll={async () => {
+          const r = await listSystemIssues({
+            state,
+            severity: severity || undefined,
+            category: category || undefined
+          });
+          return r.items;
+        }}
+        // Filter selections are part of the backend request, so they go in
+        // the queryKey so react-query refetches when any facet changes.
+        queryKey={["system-issues", { state, severity, category }]}
+        columns={columns}
+        rowKey={(i) => i.id}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "lastSeenAtUtc", desc: true }]}
+        searchPlaceholder="Search issues…"
+        emptyMessage="No issues match the current filters."
+        loadingMessage="Loading issues…"
+        onRowClick={(i) => setSelectedId(i.id)}
+        getRowAriaLabel={(i) => `Open ${i.title}`}
+        globalFilterFn={(i, search) => {
+          const needle = search.toLowerCase();
+          return `${i.title} ${i.summary ?? ""} ${i.category} ${i.detectorId}`
+            .toLowerCase()
+            .includes(needle);
+        }}
+        toolbarLeft={
+          <div className="d-flex align-items-center gap-2">
+            <select
+              className="form-select form-select-sm"
+              style={{ width: "auto" }}
+              value={state}
+              onChange={(e) => setState(e.target.value as SystemIssueState | "")}
+              aria-label="Filter by state"
+            >
+              {STATE_OPTIONS.map((opt) => (
+                <option key={opt.value || "all"} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <select
+              className="form-select form-select-sm"
+              style={{ width: "auto" }}
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value as SystemIssueSeverity | "")}
+              aria-label="Filter by severity"
+            >
+              {SEVERITY_OPTIONS.map((opt) => (
+                <option key={opt.value || "any"} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <select
+              className="form-select form-select-sm"
+              style={{ width: "auto" }}
+              value={category}
+              onChange={(e) => setCategory(e.target.value as SystemIssueCategory | "")}
+              aria-label="Filter by category"
+            >
+              {CATEGORY_OPTIONS.map((opt) => (
+                <option key={opt.value || "any"} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
-      </div>
-
-      <div className="panel panel-inverse mb-3">
-        <div className="panel-heading">
-          <h4 className="panel-title">Filters</h4>
-        </div>
-        <div className="panel-body">
-          <div className="row g-2 align-items-end">
-            <div className="col-sm-4">
-              <label className="form-label small text-muted">State</label>
-              <select
-                className="form-select form-select-sm"
-                value={state}
-                onChange={(e) => setState(e.target.value as SystemIssueState | "")}
-              >
-                {STATE_OPTIONS.map((opt) => (
-                  <option key={opt.value || "all"} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-sm-4">
-              <label className="form-label small text-muted">Severity</label>
-              <select
-                className="form-select form-select-sm"
-                value={severity}
-                onChange={(e) => setSeverity(e.target.value as SystemIssueSeverity | "")}
-              >
-                {SEVERITY_OPTIONS.map((opt) => (
-                  <option key={opt.value || "any"} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-sm-4">
-              <label className="form-label small text-muted">Category</label>
-              <select
-                className="form-select form-select-sm"
-                value={category}
-                onChange={(e) => setCategory(e.target.value as SystemIssueCategory | "")}
-              >
-                {CATEGORY_OPTIONS.map((opt) => (
-                  <option key={opt.value || "any"} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {list.isError && (
-        <div className="alert alert-danger">
-          {list.error instanceof Error ? list.error.message : "Failed to load system issues."}
-        </div>
-      )}
-
-      <div className="panel panel-inverse">
-        <div className="panel-heading d-flex justify-content-between align-items-center">
-          <h4 className="panel-title">Issues</h4>
-          <span className="text-muted small">{items.length} shown</span>
-        </div>
-        <div className="panel-body p-0">
-          {list.isLoading ? (
-            <div className="p-3 text-muted">Loading…</div>
-          ) : items.length === 0 ? (
-            <div className="p-3 text-muted">
-              No issues match the current filters. With the default <code>state=open</code>{" "}
-              filter, an empty list means everything detectors can currently see is healthy.
-            </div>
-          ) : (
-            <div className="table-responsive">
-              <table className="table table-hover mb-0 align-middle">
-                <thead>
-                  <tr>
-                    <th style={{ width: "90px" }}>Severity</th>
-                    <th>Title</th>
-                    <th style={{ width: "140px" }}>Category</th>
-                    <th style={{ width: "180px" }}>Detector</th>
-                    <th style={{ width: "70px" }}>Count</th>
-                    <th style={{ width: "180px" }}>Last seen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <tr
-                      key={item.id}
-                      style={{ cursor: "pointer" }}
-                      onClick={() => setSelectedId(item.id)}
-                    >
-                      <td>
-                        <SeverityBadge severity={item.severity} />
-                      </td>
-                      <td>
-                        <div className="fw-semibold">{item.title}</div>
-                        {item.summary && <div className="text-muted small">{item.summary}</div>}
-                      </td>
-                      <td className="small text-muted">{item.category}</td>
-                      <td className="small text-muted">{item.detectorId}</td>
-                      <td>{item.occurrenceCount}</td>
-                      <td className="small text-muted">
-                        {new Date(item.lastSeenAtUtc).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       {selectedId && (
         <IssueDetailDrawer

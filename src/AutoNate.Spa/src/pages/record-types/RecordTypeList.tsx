@@ -1,17 +1,18 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  useCreateRecordType,
-  useRecordTypes,
-  useRestoreRecordType
-} from "@/hooks/useRecordTypes";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ColumnDef } from "@tanstack/react-table";
+import { useCreateRecordType, useRestoreRecordType } from "@/hooks/useRecordTypes";
+import { listRecordTypes } from "@/api/recordTypes";
 import { CreateRecordTypeRequest, RecordType } from "@/types/records";
 import IconPicker from "@/components/IconPicker";
 import ColorPicker from "@/components/ColorPicker";
+import { DataTable } from "@/components/data-table/DataTable";
+
+const COLUMN_WIDTHS = ["10%", "22%", "26%", "16%", "14%", "12%"];
 
 export default function RecordTypeList() {
   const [includeArchived, setIncludeArchived] = useState(false);
-  const { data: types = [], isLoading } = useRecordTypes(includeArchived);
+  const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const restore = useRestoreRecordType();
@@ -24,6 +25,79 @@ export default function RecordTypeList() {
       setFlash({ kind: "error", message: describeError(err) });
     }
   };
+
+  const columns = useMemo<ColumnDef<RecordType>[]>(
+    () => [
+      {
+        id: "shortCode",
+        accessorKey: "shortCode",
+        header: "Code",
+        cell: ({ row }) => <code>{row.original.shortCode}</code>
+      },
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <Link to={`/record-types/${row.original.id}`} className="fw-semibold">
+            {row.original.name}
+          </Link>
+        )
+      },
+      {
+        id: "description",
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) => row.original.description ?? ""
+      },
+      {
+        id: "updatedAtUtc",
+        accessorKey: "updatedAtUtc",
+        header: "Updated",
+        cell: ({ row }) => formatWhen(row.original.updatedAtUtc)
+      },
+      {
+        id: "status",
+        accessorFn: (t) => (t.isArchived ? "Archived" : "Active"),
+        header: "Status",
+        cell: ({ row }) =>
+          row.original.isArchived ? (
+            <>
+              <span className="badge bg-secondary me-2">Archived</span>
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onRestore(row.original);
+                }}
+                disabled={restore.isPending}
+              >
+                Restore
+              </button>
+            </>
+          ) : (
+            <span className="badge bg-success">Active</span>
+          )
+      },
+      {
+        id: "records",
+        header: "Records",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => (
+          <Link
+            to={`/records/${row.original.shortCode}`}
+            className="btn btn-outline-secondary btn-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Records
+          </Link>
+        )
+      }
+    ],
+    [restore.isPending]
+  );
 
   return (
     <>
@@ -46,99 +120,48 @@ export default function RecordTypeList() {
         </div>
       )}
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">All Record Types</h4>
-        </div>
-        <div className="panel-body">
-          <div className="d-flex justify-content-between align-items-center mb-3">
-            <div>
-              <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
-                <i className="fa fa-plus me-2"></i>New Record Type
-              </button>
-            </div>
-            <div className="form-check form-switch">
-              <input
-                type="checkbox"
-                className="form-check-input"
-                id="include-archived"
-                checked={includeArchived}
-                onChange={(e) => setIncludeArchived(e.target.checked)}
-              />
-              <label className="form-check-label" htmlFor="include-archived">
-                Show archived
-              </label>
-            </div>
+      <DataTable<RecordType>
+        mode="client"
+        loadAll={() => listRecordTypes(includeArchived)}
+        queryKey={["record-types", { includeArchived }]}
+        columns={columns}
+        rowKey={(t) => t.id}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "shortCode", desc: false }]}
+        searchPlaceholder="Search record types…"
+        emptyMessage='No record types yet. Click "New record type" to create one.'
+        loadingMessage="Loading record types…"
+        getRowClassName={(t) => (t.isArchived ? "row-archived" : undefined)}
+        onRowClick={(t) => navigate(`/record-types/${t.id}`)}
+        getRowAriaLabel={(t) => `Open ${t.shortCode}`}
+        globalFilterFn={(t, search) => {
+          const needle = search.toLowerCase();
+          return `${t.shortCode} ${t.name} ${t.description ?? ""}`.toLowerCase().includes(needle);
+        }}
+        toolbarLeft={
+          <div className="form-check form-switch ms-2">
+            <input
+              type="checkbox"
+              className="form-check-input"
+              id="include-archived-record-types"
+              checked={includeArchived}
+              onChange={(e) => setIncludeArchived(e.target.checked)}
+            />
+            <label className="form-check-label" htmlFor="include-archived-record-types">
+              Show archived
+            </label>
           </div>
-
-          <div className="table-responsive">
-            <table className="table table-striped table-bordered align-middle">
-              <thead>
-                <tr>
-                  <th style={{ width: "6rem" }}>Code</th>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th style={{ width: "10rem" }}>Updated</th>
-                  <th style={{ width: "9rem" }}>Status</th>
-                  <th style={{ width: "8rem" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={6} className="text-center text-body text-opacity-50 p-4">
-                      Loading...
-                    </td>
-                  </tr>
-                )}
-                {!isLoading && types.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="text-center text-body text-opacity-50 p-4">
-                      No record types yet. Click "New Record Type" to create one.
-                    </td>
-                  </tr>
-                )}
-                {types.map((t) => (
-                  <tr key={t.id} className={t.isArchived ? "text-body text-opacity-50" : undefined}>
-                    <td>
-                      <code>{t.shortCode}</code>
-                    </td>
-                    <td>
-                      <Link to={`/record-types/${t.id}`} className="fw-semibold">
-                        {t.name}
-                      </Link>
-                    </td>
-                    <td>{t.description ?? ""}</td>
-                    <td>{formatWhen(t.updatedAtUtc)}</td>
-                    <td>
-                      {t.isArchived ? (
-                        <>
-                          <span className="badge bg-secondary me-2">Archived</span>
-                          <button
-                            type="button"
-                            className="btn btn-link btn-sm p-0"
-                            onClick={() => onRestore(t)}
-                            disabled={restore.isPending}
-                          >
-                            Restore
-                          </button>
-                        </>
-                      ) : (
-                        <span className="badge bg-success">Active</span>
-                      )}
-                    </td>
-                    <td>
-                      <Link to={`/records/${t.shortCode}`} className="btn btn-outline-secondary btn-sm">
-                        Records
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+        }
+        toolbarRight={
+          <button
+            type="button"
+            className="btn btn-add-user"
+            onClick={() => setModalOpen(true)}
+          >
+            <i className="fa fa-plus me-2"></i>New record type
+          </button>
+        }
+      />
 
       {modalOpen && (
         <CreateModal

@@ -13,6 +13,41 @@ export async function listExecutions(signal?: AbortSignal): Promise<WorkflowExec
   return data;
 }
 
+export type ListExecutionsPageRequest = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: string;
+  sortDir?: "asc" | "desc";
+  status?: string;
+  workflowModelId?: string;
+};
+
+export type ListExecutionsPageResult = {
+  items: WorkflowExecutionSummary[];
+  totalCount: number;
+};
+
+export async function listExecutionsPage(
+  req: ListExecutionsPageRequest,
+  signal?: AbortSignal
+): Promise<ListExecutionsPageResult> {
+  const params: Record<string, string | number> = {
+    page: req.page,
+    pageSize: req.pageSize
+  };
+  if (req.search) params.q = req.search;
+  if (req.sort) params.sort = req.sort;
+  if (req.sortDir) params.sortDir = req.sortDir;
+  if (req.status) params.status = req.status;
+  if (req.workflowModelId) params.workflowModelId = req.workflowModelId;
+  const { data } = await api.get<ListExecutionsPageResult>("/api/executions/page", {
+    params,
+    signal
+  });
+  return data;
+}
+
 export async function getExecutionDiagram(
   processInstanceId: string,
   signal?: AbortSignal
@@ -95,6 +130,12 @@ export type TaskFormWorkflowSnapshot = {
   isDraftFallback: boolean;
 };
 
+export type GatewayChoice = {
+  flowId: string;
+  label: string;
+  description: string | null;
+};
+
 export type TaskFormConfig = {
   taskId: string;
   taskName: string;
@@ -106,7 +147,14 @@ export type TaskFormConfig = {
   formShortCode: string | null;
   form: TaskFormWorkflowSnapshot | null;
   variables: Record<string, unknown>;
+  description: string | null;
+  gatewayChoices: GatewayChoice[] | null;
 };
+
+// Reserved variable name. Mirrors WorkflowBpmnXml.GatewayChoiceVariableName on
+// the backend — synthetic conditions injected at publish time read this
+// variable to route through gateways after default-mode user tasks.
+export const GATEWAY_CHOICE_VARIABLE = "__autonateChosenFlow";
 
 export async function getTaskFormConfig(
   taskId: string,

@@ -22,6 +22,11 @@ public interface INotificationStore
         int? limit,
         CancellationToken cancellationToken = default);
 
+    Task<NotificationPage> ListPagedForUserAsync(
+        Guid userId,
+        ListNotificationsRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default);
 
     Task<Notification?> MarkReadAsync(Guid notificationId, Guid userId, CancellationToken cancellationToken = default);
@@ -47,3 +52,13 @@ public interface INotificationStore
         string parentEntityId,
         CancellationToken cancellationToken = default);
 }
+
+public sealed record ListNotificationsRequest(
+    int Page = 0,
+    int PageSize = 25,
+    string? Search = null,
+    string? SortBy = null,
+    string? SortDir = null,
+    bool UnreadOnly = false);
+
+public sealed record NotificationPage(IReadOnlyList<Notification> Items, int TotalCount, int UnreadCount);

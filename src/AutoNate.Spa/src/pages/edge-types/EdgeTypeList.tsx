@@ -1,16 +1,17 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  useCreateEdgeType,
-  useEdgeTypes,
-  useRestoreEdgeType
-} from "@/hooks/useRecordEdges";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ColumnDef } from "@tanstack/react-table";
+import { useCreateEdgeType, useRestoreEdgeType } from "@/hooks/useRecordEdges";
+import { listEdgeTypes } from "@/api/recordEdges";
 import { CreateEdgeTypeRequest, EdgeType } from "@/types/records";
+import { DataTable } from "@/components/data-table/DataTable";
+
+const COLUMN_WIDTHS = ["12%", "40%", "14%", "18%", "16%"];
 
 export default function EdgeTypeList() {
   const [includeArchived, setIncludeArchived] = useState(false);
-  const { data: types = [], isLoading } = useEdgeTypes(includeArchived);
   const restore = useRestoreEdgeType();
+  const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
@@ -22,6 +23,67 @@ export default function EdgeTypeList() {
       setFlash({ kind: "error", message: describeError(err) });
     }
   };
+
+  const columns = useMemo<ColumnDef<EdgeType>[]>(
+    () => [
+      {
+        id: "shortCode",
+        accessorKey: "shortCode",
+        header: "Code",
+        cell: ({ row }) => <code>{row.original.shortCode}</code>
+      },
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Forward / Inverse",
+        cell: ({ row }) => (
+          <>
+            <Link to={`/record-edge-types/${row.original.id}`} className="fw-semibold">
+              {row.original.name}
+            </Link>
+            {row.original.inverseName && (
+              <span className="text-body text-opacity-50 ms-2">/ {row.original.inverseName}</span>
+            )}
+          </>
+        )
+      },
+      {
+        id: "direction",
+        accessorFn: (t) => (t.isDirected ? "Directed" : "Undirected"),
+        header: "Direction"
+      },
+      {
+        id: "cardinality",
+        accessorKey: "cardinality",
+        header: "Cardinality"
+      },
+      {
+        id: "status",
+        accessorFn: (t) => (t.isArchived ? "Archived" : "Active"),
+        header: "Status",
+        cell: ({ row }) =>
+          row.original.isArchived ? (
+            <>
+              <span className="badge bg-secondary me-2">Archived</span>
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onRestore(row.original);
+                }}
+                disabled={restore.isPending}
+              >
+                Restore
+              </button>
+            </>
+          ) : (
+            <span className="badge bg-success">Active</span>
+          )
+      }
+    ],
+    [restore.isPending]
+  );
 
   return (
     <>
@@ -42,94 +104,48 @@ export default function EdgeTypeList() {
         </div>
       )}
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">All Edge Types</h4>
-        </div>
-        <div className="panel-body">
-          <div className="d-flex justify-content-between align-items-center mb-3">
-            <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
-              <i className="fa fa-plus me-2"></i>New Edge Type
-            </button>
-            <div className="form-check form-switch">
-              <input
-                type="checkbox"
-                className="form-check-input"
-                id="include-archived-edges"
-                checked={includeArchived}
-                onChange={(e) => setIncludeArchived(e.target.checked)}
-              />
-              <label className="form-check-label" htmlFor="include-archived-edges">
-                Show archived
-              </label>
-            </div>
+      <DataTable<EdgeType>
+        mode="client"
+        loadAll={() => listEdgeTypes(includeArchived)}
+        queryKey={["edge-types", { includeArchived }]}
+        columns={columns}
+        rowKey={(t) => t.id}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "shortCode", desc: false }]}
+        searchPlaceholder="Search edge types…"
+        emptyMessage="No edge types yet. Create one to let records link to each other."
+        loadingMessage="Loading edge types…"
+        getRowClassName={(t) => (t.isArchived ? "row-archived" : undefined)}
+        onRowClick={(t) => navigate(`/record-edge-types/${t.id}`)}
+        getRowAriaLabel={(t) => `Open ${t.shortCode}`}
+        globalFilterFn={(t, search) => {
+          const needle = search.toLowerCase();
+          return `${t.shortCode} ${t.name} ${t.inverseName ?? ""}`.toLowerCase().includes(needle);
+        }}
+        toolbarLeft={
+          <div className="form-check form-switch ms-2">
+            <input
+              type="checkbox"
+              className="form-check-input"
+              id="include-archived-edges"
+              checked={includeArchived}
+              onChange={(e) => setIncludeArchived(e.target.checked)}
+            />
+            <label className="form-check-label" htmlFor="include-archived-edges">
+              Show archived
+            </label>
           </div>
-
-          <div className="table-responsive">
-            <table className="table table-striped table-bordered align-middle">
-              <thead>
-                <tr>
-                  <th style={{ width: "8rem" }}>Code</th>
-                  <th>Forward / Inverse</th>
-                  <th style={{ width: "9rem" }}>Direction</th>
-                  <th style={{ width: "11rem" }}>Cardinality</th>
-                  <th style={{ width: "9rem" }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={5} className="text-center text-body text-opacity-50 p-4">
-                      Loading...
-                    </td>
-                  </tr>
-                )}
-                {!isLoading && types.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="text-center text-body text-opacity-50 p-4">
-                      No edge types yet. Create one to let records link to each other.
-                    </td>
-                  </tr>
-                )}
-                {types.map((t) => (
-                  <tr key={t.id} className={t.isArchived ? "text-body text-opacity-50" : undefined}>
-                    <td>
-                      <code>{t.shortCode}</code>
-                    </td>
-                    <td>
-                      <Link to={`/record-edge-types/${t.id}`} className="fw-semibold">
-                        {t.name}
-                      </Link>
-                      {t.inverseName && (
-                        <span className="text-body text-opacity-50 ms-2">/ {t.inverseName}</span>
-                      )}
-                    </td>
-                    <td>{t.isDirected ? "Directed" : "Undirected"}</td>
-                    <td>{t.cardinality}</td>
-                    <td>
-                      {t.isArchived ? (
-                        <>
-                          <span className="badge bg-secondary me-2">Archived</span>
-                          <button
-                            type="button"
-                            className="btn btn-link btn-sm p-0"
-                            onClick={() => onRestore(t)}
-                            disabled={restore.isPending}
-                          >
-                            Restore
-                          </button>
-                        </>
-                      ) : (
-                        <span className="badge bg-success">Active</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+        }
+        toolbarRight={
+          <button
+            type="button"
+            className="btn btn-add-user"
+            onClick={() => setModalOpen(true)}
+          >
+            <i className="fa fa-plus me-2"></i>New edge type
+          </button>
+        }
+      />
 
       {modalOpen && (
         <CreateModal

@@ -1,11 +1,20 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useRecordSearch } from "@/hooks/useRecords";
+import { ColumnDef } from "@tanstack/react-table";
 import { useRecordTypeFields, useRecordTypes } from "@/hooks/useRecordTypes";
-import { SearchFilterClause, SearchRecordsRequest } from "@/types/records";
+import { searchRecords } from "@/api/records";
+import {
+  RecordModel,
+  SearchFilterClause,
+  SearchRecordsRequest
+} from "@/types/records";
 import "./fields/renderers"; // ensure renderers register on first import
 import { getRenderer } from "./fields/registry";
 import RecordFilterBuilder from "./RecordFilterBuilder";
+import {
+  DataTable,
+  DataTablePageRequest
+} from "@/components/data-table/DataTable";
 
 export default function RecordList() {
   const { typeShortCode = "" } = useParams<{ typeShortCode: string }>();
@@ -15,32 +24,128 @@ export default function RecordList() {
   const { data: types = [], isLoading: loadingTypes } = useRecordTypes(true);
   const type = types.find((t) => t.shortCode === code) ?? null;
 
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(25);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [sort, setSort] = useState<string>("updated_desc");
   const [filters, setFilters] = useState<SearchFilterClause[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const { data: fields = [] } = useRecordTypeFields(type?.id ?? null, false);
-  const visibleFields = fields.filter((f) => !f.isArchived).slice(0, 4);
-
-  const searchRequest = useMemo<SearchRecordsRequest>(
-    () => ({
-      recordTypeId: type?.id ?? "",
-      filters,
-      includeArchived,
-      page,
-      pageSize,
-      sort
-    }),
-    [type?.id, filters, includeArchived, page, pageSize, sort]
+  const visibleFields = useMemo(
+    () => fields.filter((f) => !f.isArchived).slice(0, 4),
+    [fields]
   );
 
-  const { data: searchPage, isLoading: loadingRecords } = useRecordSearch(
-    searchRequest,
-    Boolean(type?.id)
-  );
+  const filtersActive = filters.length > 0;
+
+  const loadPage = useMemo(() => {
+    return async (req: DataTablePageRequest) => {
+      if (!type?.id) return { items: [], totalCount: 0 };
+      const request: SearchRecordsRequest = {
+        recordTypeId: type.id,
+        filters,
+        includeArchived,
+        page: req.page,
+        pageSize: req.pageSize,
+        sort
+      };
+      const r = await searchRecords(request);
+      return { items: r.items, totalCount: r.totalCount };
+    };
+  }, [type?.id, filters, includeArchived, sort]);
+
+  // Column definitions are dynamic — depend on the record type's first 4
+  // configured fields. TanStack handles dynamic column lists fine; the only
+  // caveat is sort state may reference a stale column id when types switch.
+  // We avoid that by surfacing sort through the page-level dropdown rather
+  // than DataTable's clickable-header sort.
+  const columns = useMemo<ColumnDef<RecordModel>[]>(() => {
+    const base: ColumnDef<RecordModel>[] = [
+      {
+        id: "key",
+        header: "Key",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => (
+          <Link to={`/record/${row.original.key}`} onClick={(e) => e.stopPropagation()}>
+            <code>{row.original.key}</code>
+          </Link>
+        )
+      },
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        enableSorting: false
+      },
+      {
+        id: "status",
+        accessorKey: "status",
+        header: "Status",
+        enableSorting: false,
+        cell: ({ row }) =>
+          row.original.status ?? <span className="text-body text-opacity-50">—</span>
+      },
+      {
+        id: "dueDate",
+        header: "Due Date",
+        enableSorting: false,
+        cell: ({ row }) =>
+          row.original.dueDate ? (
+            formatDate(row.original.dueDate)
+          ) : (
+            <span className="text-body text-opacity-50">—</span>
+          )
+      },
+      ...visibleFields.map((f): ColumnDef<RecordModel> => ({
+        id: `field-${f.fieldKey}`,
+        header: f.displayName,
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => {
+          const renderer = getRenderer(f.dataType);
+          return renderer
+            ? renderer.formatValue(f, row.original.values[f.fieldKey])
+            : String(row.original.values[f.fieldKey] ?? "");
+        }
+      })),
+      {
+        id: "updatedAtUtc",
+        header: "Updated",
+        enableSorting: false,
+        cell: ({ row }) => formatWhen(row.original.updatedAtUtc)
+      },
+      {
+        id: "archive",
+        header: "Archive",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) =>
+          row.original.isArchived ? (
+            <span className="badge bg-secondary">Archived</span>
+          ) : (
+            <span className="badge bg-success">Active</span>
+          )
+      }
+    ];
+    return base;
+  }, [visibleFields]);
+
+  // 4 fixed columns (Key, Name, Status, Due Date) + dynamic field columns +
+  // 2 trailing (Updated, Archive). Distribute width evenly across the
+  // dynamic fields with fixed widths on the bookend columns.
+  const columnWidths = useMemo(() => {
+    const dynamicCount = visibleFields.length;
+    const remaining = Math.max(8, Math.floor(48 / Math.max(1, dynamicCount)));
+    return [
+      "10%",
+      "16%",
+      "10%",
+      "10%",
+      ...Array(dynamicCount).fill(`${remaining}%`),
+      "16%",
+      "10%"
+    ];
+  }, [visibleFields.length]);
 
   if (!loadingTypes && !type) {
     return (
@@ -53,9 +158,6 @@ export default function RecordList() {
       </div>
     );
   }
-
-  const totalCount = searchPage?.totalCount ?? 0;
-  const filtersActive = filters.length > 0;
 
   return (
     <>
@@ -81,225 +183,87 @@ export default function RecordList() {
         </div>
       </div>
 
-      <div className="panel panel-inverse">
-        <div className="panel-body">
-          <div className="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap">
-            <div className="d-flex align-items-center gap-3">
-              <button
-                type="button"
-                className={`btn btn-sm ${filtersActive ? "btn-primary" : "btn-outline-secondary"}`}
-                onClick={() => setFiltersOpen((o) => !o)}
-              >
-                <i className="fa fa-filter me-2"></i>
-                Filters
-                {filtersActive && (
-                  <span className="badge bg-light text-dark ms-2">{filters.length}</span>
-                )}
-              </button>
-              <label className="d-flex align-items-center gap-2 mb-0 small">
-                Sort:
-                <select
-                  className="form-select form-select-sm"
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value)}
-                >
-                  <option value="updated_desc">Updated (newest)</option>
-                  <option value="created_desc">Created (newest)</option>
-                  <option value="key_asc">Key ascending</option>
-                  <option value="key_desc">Key descending</option>
-                  <option value="name_asc">Name A-Z</option>
-                  <option value="name_desc">Name Z-A</option>
-                  <option value="status_asc">Status A-Z</option>
-                  <option value="status_desc">Status Z-A</option>
-                  <option value="due_date_asc">Due date (earliest)</option>
-                  <option value="due_date_desc">Due date (latest)</option>
-                </select>
-              </label>
-              <div className="form-check form-switch mb-0">
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  id="include-archived-records"
-                  checked={includeArchived}
-                  onChange={(e) => {
-                    setIncludeArchived(e.target.checked);
-                    setPage(0);
-                  }}
-                />
-                <label className="form-check-label small" htmlFor="include-archived-records">
-                  Show archived
-                </label>
-              </div>
-            </div>
-            <div className="text-body text-opacity-75 small">
-              {searchPage
-                ? `${totalCount} record${totalCount === 1 ? "" : "s"}${filtersActive ? " match" : ""}`
-                : ""}
-            </div>
-          </div>
-
-          {filtersOpen && (
-            <div className="border rounded p-3 mb-3">
-              <RecordFilterBuilder
-                fields={fields}
-                initialFilters={filters}
-                onApply={(applied) => {
-                  setFilters(applied);
-                  setPage(0);
-                }}
-                onClear={() => {
-                  setFilters([]);
-                  setPage(0);
-                }}
-              />
-            </div>
-          )}
-
-          <div className="table-responsive">
-            <table className="table table-striped table-bordered align-middle">
-              <thead>
-                <tr>
-                  <th style={{ width: "8rem" }}>Key</th>
-                  <th>Name</th>
-                  <th style={{ width: "10rem" }}>Status</th>
-                  <th style={{ width: "8rem" }}>Due Date</th>
-                  {visibleFields.map((f) => (
-                    <th key={f.id}>{f.displayName}</th>
-                  ))}
-                  <th style={{ width: "11rem" }}>Updated</th>
-                  <th style={{ width: "6rem" }}>Archive</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loadingRecords && (
-                  <tr>
-                    <td colSpan={6 + visibleFields.length} className="text-center text-body text-opacity-50 p-4">
-                      Loading...
-                    </td>
-                  </tr>
-                )}
-                {!loadingRecords && (searchPage?.items.length ?? 0) === 0 && (
-                  <tr>
-                    <td colSpan={6 + visibleFields.length} className="text-center text-body text-opacity-50 p-4">
-                      {filtersActive ? (
-                        <>
-                          No records match your filters.{" "}
-                          <button
-                            type="button"
-                            className="btn btn-link p-0 align-baseline"
-                            onClick={() => {
-                              setFilters([]);
-                              setPage(0);
-                            }}
-                          >
-                            Clear filters
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          No records yet.{" "}
-                          <button
-                            type="button"
-                            className="btn btn-link p-0 align-baseline"
-                            onClick={() => navigate(`/records/${code}/new`)}
-                          >
-                            Create the first one
-                          </button>
-                          .
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                )}
-                {searchPage?.items.map((rec) => (
-                  <tr key={rec.id} className={rec.isArchived ? "text-body text-opacity-50" : undefined}>
-                    <td>
-                      <Link to={`/record/${rec.key}`}>
-                        <code>{rec.key}</code>
-                      </Link>
-                    </td>
-                    <td>{rec.name}</td>
-                    <td>
-                      {rec.status ?? <span className="text-body text-opacity-50">—</span>}
-                    </td>
-                    <td>
-                      {rec.dueDate ? formatDate(rec.dueDate) : <span className="text-body text-opacity-50">—</span>}
-                    </td>
-                    {visibleFields.map((f) => {
-                      const renderer = getRenderer(f.dataType);
-                      const formatted = renderer
-                        ? renderer.formatValue(f, rec.values[f.fieldKey])
-                        : String(rec.values[f.fieldKey] ?? "");
-                      return <td key={f.id}>{formatted}</td>;
-                    })}
-                    <td>{formatWhen(rec.updatedAtUtc)}</td>
-                    <td>
-                      {rec.isArchived ? (
-                        <span className="badge bg-secondary">Archived</span>
-                      ) : (
-                        <span className="badge bg-success">Active</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {searchPage && totalCount > pageSize && (
-            <div className="d-flex justify-content-between align-items-center mt-3">
-              <label className="d-flex align-items-center gap-2 mb-0 small">
-                Page size:
-                <select
-                  className="form-select form-select-sm"
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setPage(0);
-                  }}
-                >
-                  {[10, 25, 50, 100].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <nav aria-label="Pagination">
-                <ul className="pagination pagination-sm mb-0">
-                  <li className={`page-item ${page === 0 ? "disabled" : ""}`}>
-                    <button
-                      type="button"
-                      className="page-link"
-                      onClick={() => setPage((p) => Math.max(0, p - 1))}
-                      disabled={page === 0}
-                    >
-                      Previous
-                    </button>
-                  </li>
-                  <li className="page-item disabled">
-                    <span className="page-link">
-                      Page {page + 1} of {Math.max(1, Math.ceil(totalCount / pageSize))}
-                    </span>
-                  </li>
-                  <li
-                    className={`page-item ${(page + 1) * pageSize >= totalCount ? "disabled" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      className="page-link"
-                      onClick={() => setPage((p) => p + 1)}
-                      disabled={(page + 1) * pageSize >= totalCount}
-                    >
-                      Next
-                    </button>
-                  </li>
-                </ul>
-              </nav>
-            </div>
-          )}
+      {filtersOpen && (
+        <div className="border rounded p-3 mb-3">
+          <RecordFilterBuilder
+            fields={fields}
+            initialFilters={filters}
+            onApply={(applied) => setFilters(applied)}
+            onClear={() => setFilters([])}
+          />
         </div>
-      </div>
+      )}
+
+      <DataTable<RecordModel>
+        mode="server"
+        loadPage={loadPage}
+        // The full key is what react-query caches by. Including filter/sort/
+        // archived in the key means tweaking any of them invalidates and
+        // refetches without us touching DataTable internals.
+        queryKey={["records", type?.id ?? "", { filters, sort, includeArchived }]}
+        // ...and resetPaginationKey jumps the user back to page 0 when the
+        // scope changes (so they don't sit on empty page 5 of a new filter).
+        resetPaginationKey={`${sort}|${includeArchived}|${filters.length}`}
+        columns={columns}
+        rowKey={(r) => r.id}
+        columnWidths={columnWidths}
+        searchEnabled={false}
+        emptyMessage={
+          filtersActive
+            ? "No records match your filters."
+            : `No records yet. Create the first ${type?.name ?? "record"}.`
+        }
+        loadingMessage="Loading records…"
+        getRowClassName={(r) => (r.isArchived ? "row-archived" : undefined)}
+        onRowClick={(r) => navigate(`/record/${r.key}`)}
+        getRowAriaLabel={(r) => `Open ${r.key}`}
+        toolbarLeft={
+          <div className="d-flex align-items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              className={`btn btn-sm ${filtersActive ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={() => setFiltersOpen((o) => !o)}
+            >
+              <i className="fa fa-filter me-2"></i>
+              Filters
+              {filtersActive && (
+                <span className="badge bg-light text-dark ms-2">{filters.length}</span>
+              )}
+            </button>
+            <label className="d-flex align-items-center gap-2 mb-0 small">
+              Sort:
+              <select
+                className="form-select form-select-sm"
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+              >
+                <option value="updated_desc">Updated (newest)</option>
+                <option value="created_desc">Created (newest)</option>
+                <option value="key_asc">Key ascending</option>
+                <option value="key_desc">Key descending</option>
+                <option value="name_asc">Name A-Z</option>
+                <option value="name_desc">Name Z-A</option>
+                <option value="status_asc">Status A-Z</option>
+                <option value="status_desc">Status Z-A</option>
+                <option value="due_date_asc">Due date (earliest)</option>
+                <option value="due_date_desc">Due date (latest)</option>
+              </select>
+            </label>
+            <div className="form-check form-switch mb-0">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                id="include-archived-records"
+                checked={includeArchived}
+                onChange={(e) => setIncludeArchived(e.target.checked)}
+              />
+              <label className="form-check-label small" htmlFor="include-archived-records">
+                Show archived
+              </label>
+            </div>
+          </div>
+        }
+      />
     </>
   );
 }

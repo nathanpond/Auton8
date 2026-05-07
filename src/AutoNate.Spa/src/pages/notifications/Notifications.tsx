@@ -1,24 +1,95 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { NotificationModel } from "@/api/notifications";
+import { ColumnDef } from "@tanstack/react-table";
 import {
-  useAllNotifications,
+  NotificationModel,
+  listNotificationsPage
+} from "@/api/notifications";
+import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead
 } from "@/hooks/useNotifications";
+import {
+  DataTable,
+  DataTableFilterOption,
+  DataTablePageRequest
+} from "@/components/data-table/DataTable";
+
+const COLUMN_WIDTHS = ["4%", "60%", "16%", "20%"];
+
+const FILTERS: DataTableFilterOption<NotificationModel>[] = [
+  { id: "unread", label: "Unread", predicate: (n) => !n.isRead }
+];
 
 export default function Notifications() {
-  const { data, isLoading, isError, error } = useAllNotifications();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
   const navigate = useNavigate();
 
-  const items = data?.items ?? [];
-  const unreadCount = data?.unreadCount ?? 0;
-
   const handleRowClick = (n: NotificationModel) => {
     if (!n.isRead) markRead.mutate(n.id);
     if (n.linkPath) navigate(n.linkPath);
+  };
+
+  const columns = useMemo<ColumnDef<NotificationModel>[]>(
+    () => [
+      {
+        id: "unread-dot",
+        header: "",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) =>
+          row.original.isRead ? null : (
+            <span
+              className="d-inline-block bg-primary rounded-circle"
+              style={{ width: "0.5rem", height: "0.5rem" }}
+              title="Unread"
+            />
+          )
+      },
+      {
+        id: "title",
+        accessorKey: "title",
+        header: "Notification",
+        cell: ({ row }) => (
+          <>
+            <div>{row.original.title}</div>
+            <div className="small text-muted">{row.original.body}</div>
+          </>
+        )
+      },
+      {
+        id: "kind",
+        accessorKey: "kind",
+        header: "Type",
+        cell: ({ row }) => (
+          <span className="small text-muted">{labelForKind(row.original.kind)}</span>
+        )
+      },
+      {
+        id: "createdAtUtc",
+        accessorKey: "createdAtUtc",
+        header: "Received",
+        cell: ({ row }) => (
+          <span className="small text-muted">
+            {new Date(row.original.createdAtUtc).toLocaleString()}
+          </span>
+        )
+      }
+    ],
+    []
+  );
+
+  const loadPage = async (req: DataTablePageRequest) => {
+    const result = await listNotificationsPage({
+      page: req.page,
+      pageSize: req.pageSize,
+      search: req.search || undefined,
+      sort: req.sort?.id,
+      sortDir: req.sort ? (req.sort.desc ? "desc" : "asc") : undefined,
+      unreadOnly: req.filter === "unread"
+    });
+    return { items: result.items, totalCount: result.totalCount };
   };
 
   return (
@@ -31,95 +102,35 @@ export default function Notifications() {
             you.
           </p>
         </div>
-        {unreadCount > 0 && (
-          <div className="page-head-actions">
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => markAll.mutate()}
-              disabled={markAll.isPending}
-            >
-              Mark all read
-            </button>
-          </div>
-        )}
       </div>
 
-      <div className="card">
-        <div className="card-body p-0">
-          {isLoading && <div className="p-4 text-muted">Loading…</div>}
-          {isError && (
-            <div className="p-4 text-danger">
-              Failed to load notifications: {(error as Error)?.message ?? "unknown error"}
-            </div>
-          )}
-          {!isLoading && !isError && items.length === 0 && (
-            <div className="p-4 text-muted">No notifications yet.</div>
-          )}
-          {!isLoading && !isError && items.length > 0 && (
-            <div className="table-responsive">
-              <table className="table table-hover align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th style={{ width: "1.5rem" }}></th>
-                    <th>Notification</th>
-                    <th style={{ width: "12rem" }}>Type</th>
-                    <th style={{ width: "12rem" }}>Received</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((n) => (
-                    <NotificationRow
-                      key={n.id}
-                      notification={n}
-                      onClick={() => handleRowClick(n)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
+      <DataTable<NotificationModel>
+        mode="server"
+        loadPage={loadPage}
+        queryKey={["notifications", "all"]}
+        columns={columns}
+        rowKey={(n) => n.id}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "createdAtUtc", desc: true }]}
+        searchPlaceholder="Search notifications…"
+        emptyMessage="No notifications yet."
+        loadingMessage="Loading notifications…"
+        filters={FILTERS}
+        onRowClick={handleRowClick}
+        getRowAriaLabel={(n) => `Open ${n.title}`}
+        getRowClassName={(n) => (n.isRead ? undefined : "notification-unread")}
+        toolbarRight={
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            onClick={() => markAll.mutate()}
+            disabled={markAll.isPending}
+          >
+            Mark all read
+          </button>
+        }
+      />
     </>
-  );
-}
-
-function NotificationRow({
-  notification,
-  onClick
-}: {
-  notification: NotificationModel;
-  onClick: () => void;
-}) {
-  const received = useMemo(
-    () => new Date(notification.createdAtUtc).toLocaleString(),
-    [notification.createdAtUtc]
-  );
-  const typeLabel = labelForKind(notification.kind);
-  const isClickable = Boolean(notification.linkPath);
-  return (
-    <tr
-      onClick={onClick}
-      style={{ cursor: isClickable ? "pointer" : "default" }}
-      className={notification.isRead ? "" : "fw-semibold"}
-    >
-      <td className="text-center">
-        {!notification.isRead && (
-          <span
-            className="d-inline-block bg-primary rounded-circle"
-            style={{ width: "0.5rem", height: "0.5rem" }}
-            title="Unread"
-          />
-        )}
-      </td>
-      <td>
-        <div>{notification.title}</div>
-        <div className="small text-muted">{notification.body}</div>
-      </td>
-      <td className="small text-muted">{typeLabel}</td>
-      <td className="small text-muted">{received}</td>
-    </tr>
   );
 }
 

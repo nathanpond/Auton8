@@ -1,15 +1,24 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSupervisorHierarchy } from "@/api/users";
+import { ColumnDef } from "@tanstack/react-table";
+import { fetchSupervisorHierarchy, listUsers, listUsersPage } from "@/api/users";
 import { useUsers, useSetUserSupervisor } from "@/hooks/useUsers";
 import { LocalUser } from "@/types/flowable";
+import {
+  DataTable,
+  DataTablePageRequest
+} from "@/components/data-table/DataTable";
+
+const COLUMN_WIDTHS = ["28%", "32%", "40%"];
 
 // Hierarchy management. One row per user with an inline dropdown to pick
 // (or clear) their supervisor. Saves on change. The supervisor edges drive
 // multi-hop selectors like /record/*[assignee=user[supervisor=user]].
 export default function Hierarchy() {
-  const { data: users = [], isLoading: usersLoading } = useUsers();
-  const { data: pairs = [], isLoading: pairsLoading } = useQuery({
+  // useUsers() fetches the full user list; the supervisor dropdown needs every
+  // user (not just the current page) so we can offer them all as options.
+  const { data: allUsers = [] } = useUsers();
+  const { data: pairs = [] } = useQuery({
     queryKey: ["hierarchy", "supervisors"],
     queryFn: ({ signal }) => fetchSupervisorHierarchy(signal)
   });
@@ -17,7 +26,6 @@ export default function Hierarchy() {
 
   const [savingFor, setSavingFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
 
   const supervisorByUserId = useMemo(() => {
     const m = new Map<string, string>();
@@ -27,17 +35,9 @@ export default function Hierarchy() {
 
   const userByGuid = useMemo(() => {
     const m = new Map<string, LocalUser>();
-    for (const u of users) m.set(u.userId, u);
+    for (const u of allUsers) m.set(u.userId, u);
     return m;
-  }, [users]);
-
-  const visibleUsers = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    if (!needle) return users;
-    return users.filter((u) =>
-      `${u.username} ${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(needle)
-    );
-  }, [users, filter]);
+  }, [allUsers]);
 
   const onChange = async (user: LocalUser, value: string) => {
     setError(null);
@@ -56,7 +56,85 @@ export default function Hierarchy() {
     }
   };
 
-  const isLoading = usersLoading || pairsLoading;
+  const loadPage = async (req: DataTablePageRequest) => {
+    const result = await listUsersPage({
+      page: req.page,
+      pageSize: req.pageSize,
+      search: req.search || undefined,
+      sort: req.sort?.id,
+      sortDir: req.sort ? (req.sort.desc ? "desc" : "asc") : undefined
+    });
+    return { items: result.items, totalCount: result.totalCount };
+  };
+
+  const columns = useMemo<ColumnDef<LocalUser>[]>(
+    () => [
+      {
+        id: "username",
+        accessorKey: "username",
+        header: "User",
+        cell: ({ row }) => (
+          <div>
+            <strong>{row.original.username}</strong>
+            {(row.original.firstName || row.original.lastName) && (
+              <small className="d-block text-body text-opacity-75">
+                {`${row.original.firstName ?? ""} ${row.original.lastName ?? ""}`.trim()}
+              </small>
+            )}
+          </div>
+        )
+      },
+      {
+        id: "supervisor",
+        header: "Supervisor",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => {
+          const user = row.original;
+          const currentId = supervisorByUserId.get(user.userId) ?? "";
+          const saving = savingFor === user.userId;
+          return (
+            <select
+              className="form-select form-select-sm"
+              value={currentId}
+              disabled={saving}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => void onChange(user, e.target.value)}
+            >
+              <option value="">— none —</option>
+              {allUsers
+                .filter((other) => other.userId !== user.userId)
+                .map((other) => (
+                  <option key={other.userId} value={other.userId}>
+                    {other.username}
+                  </option>
+                ))}
+            </select>
+          );
+        }
+      },
+      {
+        id: "currentlySetTo",
+        header: "Currently set to",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => {
+          const currentId = supervisorByUserId.get(row.original.userId) ?? "";
+          const currentUser = currentId ? userByGuid.get(currentId) : null;
+          if (!currentUser) {
+            return <span className="text-body text-opacity-50">—</span>;
+          }
+          return (
+            <span>
+              <strong>{currentUser.username}</strong>
+              <small className="ms-2 text-body text-opacity-50">{currentUser.userId}</small>
+            </span>
+          );
+        }
+      }
+    ],
+    [allUsers, supervisorByUserId, userByGuid, savingFor]
+  );
 
   return (
     <>
@@ -71,84 +149,26 @@ export default function Hierarchy() {
 
       {error && <div className="alert alert-danger">{error}</div>}
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading d-flex justify-content-between align-items-center">
-          <h4 className="panel-title mb-0">Users</h4>
-          <input
-            type="search"
-            className="form-control form-control-sm"
-            style={{ width: "16rem" }}
-            placeholder="Search users…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        </div>
-        <div className="panel-body">
-          {isLoading && <div>Loading…</div>}
-          {!isLoading && visibleUsers.length === 0 && <div>No users match.</div>}
-          {!isLoading && visibleUsers.length > 0 && (
-            <div className="table-responsive">
-              <table className="table table-sm align-middle">
-                <thead>
-                  <tr>
-                    <th style={{ width: "20rem" }}>User</th>
-                    <th style={{ width: "20rem" }}>Supervisor</th>
-                    <th>Currently set to</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleUsers.map((user) => {
-                    const currentId = supervisorByUserId.get(user.userId) ?? "";
-                    const currentUser = currentId ? userByGuid.get(currentId) : null;
-                    const saving = savingFor === user.userId;
-                    return (
-                      <tr key={user.userId}>
-                        <td>
-                          <strong>{user.username}</strong>
-                          {(user.firstName || user.lastName) && (
-                            <small className="d-block text-body text-opacity-75">
-                              {`${user.firstName ?? ""} ${user.lastName ?? ""}`.trim()}
-                            </small>
-                          )}
-                        </td>
-                        <td>
-                          <select
-                            className="form-select form-select-sm"
-                            value={currentId}
-                            disabled={saving}
-                            onChange={(e) => onChange(user, e.target.value)}
-                          >
-                            <option value="">— none —</option>
-                            {users
-                              .filter((other) => other.userId !== user.userId)
-                              .map((other) => (
-                                <option key={other.userId} value={other.userId}>
-                                  {other.username}
-                                </option>
-                              ))}
-                          </select>
-                        </td>
-                        <td>
-                          {currentUser ? (
-                            <span>
-                              <strong>{currentUser.username}</strong>
-                              <small className="ms-2 text-body text-opacity-50">
-                                {currentUser.userId}
-                              </small>
-                            </span>
-                          ) : (
-                            <span className="text-body text-opacity-50">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
+      <DataTable<LocalUser>
+        mode="auto"
+        autoThreshold={1000}
+        loadAll={() => listUsers()}
+        loadPage={loadPage}
+        queryKey={["users"]}
+        columns={columns}
+        rowKey={(u) => u.userId}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "username", desc: false }]}
+        searchPlaceholder="Search users…"
+        emptyMessage="No users match."
+        loadingMessage="Loading users…"
+        globalFilterFn={(u, search) => {
+          const needle = search.toLowerCase();
+          return `${u.username} ${u.firstName} ${u.lastName} ${u.email ?? ""}`
+            .toLowerCase()
+            .includes(needle);
+        }}
+      />
     </>
   );
 }

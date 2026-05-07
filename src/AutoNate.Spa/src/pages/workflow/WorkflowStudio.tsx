@@ -3712,27 +3712,67 @@ function UserTaskModal({
         </fieldset>
 
         <fieldset className="workflow-field">
-          <legend>User Form</legend>
+          <legend>Behaviour</legend>
           <p className="workflow-modal-note mb-2">
-            Choose how the assignee will see this task. Simple Complete shows a confirm-and-complete
-            modal; Form Modal renders the chosen form in a modal; Form Page navigates to a full-page
-            route at <code>/workflow-tasks/&lt;taskId&gt;/form</code>.
+            <strong>Default Behavior</strong> shows a built-in modal — a single
+            "Complete Task" button when this task flows into a normal node, or one
+            button per outgoing path when it flows directly into an exclusive
+            gateway. <strong>Form</strong> renders a custom form instead.
           </p>
-          <select
-            className="form-select"
-            value={editor.userFormMode}
-            onChange={(e) =>
-              onChange({ ...editor, userFormMode: e.target.value as UserFormMode })
-            }
-          >
-            <option value="simple">Simple Complete</option>
-            <option value="modal">Form Modal</option>
-            <option value="page">Form Page</option>
-          </select>
+          <div className="form-check">
+            <input
+              type="radio"
+              id="userTask-behaviour-default"
+              name="userTask-behaviour"
+              className="form-check-input"
+              checked={editor.userFormMode === "simple"}
+              onChange={() =>
+                onChange({ ...editor, userFormMode: "simple", userFormShortCode: "" })
+              }
+            />
+            <label htmlFor="userTask-behaviour-default" className="form-check-label">
+              Default Behavior
+            </label>
+          </div>
+          <div className="form-check">
+            <input
+              type="radio"
+              id="userTask-behaviour-form"
+              name="userTask-behaviour"
+              className="form-check-input"
+              checked={formNeedsPick}
+              onChange={() =>
+                onChange({
+                  ...editor,
+                  userFormMode:
+                    editor.userFormMode === "modal" || editor.userFormMode === "page"
+                      ? editor.userFormMode
+                      : "modal"
+                })
+              }
+            />
+            <label htmlFor="userTask-behaviour-form" className="form-check-label">
+              Form
+            </label>
+          </div>
 
           {formNeedsPick && (
-            <div className="mt-2">
-              <label className="form-label">Form</label>
+            <div className="mt-3">
+              <label className="form-label">Render mode</label>
+              <select
+                className="form-select"
+                value={editor.userFormMode}
+                onChange={(e) =>
+                  onChange({ ...editor, userFormMode: e.target.value as UserFormMode })
+                }
+              >
+                <option value="modal">Form Modal — render the form in a modal</option>
+                <option value="page">
+                  Form Page — navigate to /workflow-tasks/&lt;taskId&gt;/form
+                </option>
+              </select>
+
+              <label className="form-label mt-3">Form</label>
               <select
                 className={`form-select${userFormError ? " is-invalid" : ""}`}
                 value={editor.userFormShortCode}

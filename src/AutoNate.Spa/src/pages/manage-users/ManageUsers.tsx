@@ -1,15 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  ColumnDef,
-  PaginationState,
-  SortingState,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable
-} from "@tanstack/react-table";
+import { ColumnDef } from "@tanstack/react-table";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -17,11 +7,17 @@ import {
   useDeleteUser,
   useResetUserPassword,
   useUnlockUser,
-  useUpdateUser,
-  useUsers
+  useUpdateUser
 } from "@/hooks/useUsers";
+import { useRoleAssignments, useRoles } from "@/hooks/useAdmin";
 import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
+import { listUsers, listUsersPage } from "@/api/users";
 import { LocalUser } from "@/types/flowable";
+import {
+  DataTable,
+  DataTableFilterOption,
+  DataTablePageRequest
+} from "@/components/data-table/DataTable";
 import {
   CreateUserForm,
   EditUserForm,
@@ -38,15 +34,29 @@ type ModalState =
   | { kind: "reset"; user: LocalUser }
   | { kind: "delete"; user: LocalUser };
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+type UserStatus = "Active" | "Disabled" | "Invited" | "Locked";
+
+// Status is derived from the LocalUser flags. There is no "Disabled" field on
+// the data model today, so that filter never matches — kept here so the chip
+// row matches the spec and lights up automatically once the field exists.
+function getUserStatus(u: LocalUser): UserStatus {
+  if (u.isLocked) return "Locked";
+  if (!u.lastLoginDate) return "Invited";
+  return "Active";
+}
+
+const STATUS_FILTERS: DataTableFilterOption<LocalUser>[] = [
+  { id: "Active", label: "Active", predicate: (u) => getUserStatus(u) === "Active" },
+  { id: "Disabled", label: "Disabled", predicate: (u) => getUserStatus(u) === "Disabled" },
+  { id: "Invited", label: "Invited", predicate: (u) => getUserStatus(u) === "Invited" },
+  { id: "Locked", label: "Locked", predicate: (u) => getUserStatus(u) === "Locked" }
+];
+
+const COLUMN_WIDTHS = ["22%", "22%", "22%", "20%", "14%", "90px"];
 
 export default function ManageUsers() {
-  const { data: users = [], isLoading } = useUsers();
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [sorting, setSorting] = useState<SortingState>([{ id: "username", desc: false }]);
-  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
 
   // Kind-level check for the unlock switch on the edit modal. Backend gate
   // uses id="*" (RequireKindPermissionFilter), so the SPA mirrors that.
@@ -57,48 +67,66 @@ export default function ManageUsers() {
   const { data: unlockPermissions } = usePermissionChecks(unlockCheck);
   const canUnlock = unlockPermissions?.get(permissionKey(unlockCheck[0])) ?? false;
 
+  // Admin badge: light up the avatar for direct SuperAdmin role assignees.
+  // Group-mediated admin membership isn't reflected here — the badge is a
+  // hint, not an authorization check.
+  const { data: roles = [] } = useRoles();
+  const superAdminRoleId = useMemo(
+    () => roles.find((r) => r.isSystem && r.name === "SuperAdmin")?.id ?? null,
+    [roles]
+  );
+  const { data: adminAssignments = [] } = useRoleAssignments(superAdminRoleId);
+  const adminUserIds = useMemo(
+    () =>
+      new Set(
+        adminAssignments
+          .filter((a) => a.principalKind === "user")
+          .map((a) => a.principalId)
+      ),
+    [adminAssignments]
+  );
+
   const columns = useMemo<ColumnDef<LocalUser>[]>(
     () => [
       {
         id: "username",
         accessorKey: "username",
-        header: "Username",
-        cell: ({ row }) => (
-          <button
-            type="button"
-            className="btn btn-link p-0 text-decoration-none fw-semibold align-baseline"
-            onClick={() => setModal({ kind: "edit", user: row.original })}
-          >
-            {row.original.username}
-          </button>
-        )
+        header: "User",
+        cell: ({ row }) => {
+          const isAdmin = adminUserIds.has(row.original.userId);
+          return (
+            <div className="manage-users-identity">
+              <UserAvatar isAdmin={isAdmin} />
+              <span className="manage-users-identity-name">{row.original.username}</span>
+            </div>
+          );
+        }
       },
       {
         id: "fullName",
-        header: "Full Name",
+        header: "Full name",
         accessorFn: (u) => `${u.firstName} ${u.lastName}`.trim()
       },
       {
         id: "lastName",
         accessorKey: "lastName",
-        header: "Last Name"
+        header: "Last name"
       },
       {
         id: "lastLogin",
-        header: "Last Login",
+        header: "Last login",
         accessorFn: (u) => u.lastLoginDate ?? "",
-        cell: ({ row }) => formatLastLogin(row.original.lastLoginDate)
+        cell: ({ row }) => (
+          <span className={row.original.lastLoginDate ? "manage-users-last-login" : "manage-users-last-login-never"}>
+            {formatLastLogin(row.original.lastLoginDate)}
+          </span>
+        )
       },
       {
-        id: "locked",
+        id: "status",
         header: "Status",
-        accessorFn: (u) => (u.isLocked ? "Locked" : "Active"),
-        cell: ({ row }) =>
-          row.original.isLocked ? (
-            <span className="badge bg-danger">Locked</span>
-          ) : (
-            <span className="badge bg-success-subtle text-success-emphasis">Active</span>
-          )
+        accessorFn: (u) => getUserStatus(u),
+        cell: ({ row }) => <StatusDot status={getUserStatus(row.original)} />
       },
       {
         id: "actions",
@@ -106,20 +134,28 @@ export default function ManageUsers() {
         enableSorting: false,
         enableGlobalFilter: false,
         cell: ({ row }) => (
-          <div className="d-flex align-items-center gap-2">
+          <div className="data-table-row-actions">
             <button
               type="button"
-              className="btn btn-outline-warning btn-sm"
+              className="btn btn-icon"
               title="Reset password"
-              onClick={() => setModal({ kind: "reset", user: row.original })}
+              aria-label={`Reset password for ${row.original.username}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setModal({ kind: "reset", user: row.original });
+              }}
             >
               <i className="fa fa-key"></i>
             </button>
             <button
               type="button"
-              className="btn btn-outline-danger btn-sm"
+              className="btn btn-icon btn-icon-danger"
               title="Delete user"
-              onClick={() => setModal({ kind: "delete", user: row.original })}
+              aria-label={`Delete ${row.original.username}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setModal({ kind: "delete", user: row.original });
+              }}
             >
               <i className="fa fa-trash"></i>
             </button>
@@ -127,32 +163,22 @@ export default function ManageUsers() {
         )
       }
     ],
-    []
+    [adminUserIds]
   );
 
-  const table = useReactTable({
-    data: users,
-    columns,
-    state: { sorting, globalFilter, pagination },
-    onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
-    onPaginationChange: setPagination,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    globalFilterFn: (row, _columnId, value) => {
-      const needle = String(value).toLowerCase();
-      const u = row.original;
-      return `${u.username} ${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(needle);
-    }
-  });
-
-  const { pageIndex, pageSize } = table.getState().pagination;
-  const filteredCount = table.getFilteredRowModel().rows.length;
-  const totalPages = table.getPageCount();
-  const pageButtons = useMemo(() => buildPageWindow(pageIndex, totalPages, 7), [pageIndex, totalPages]);
   const close = () => setModal({ kind: "none" });
+
+  const loadPage = async (req: DataTablePageRequest) => {
+    const result = await listUsersPage({
+      page: req.page,
+      pageSize: req.pageSize,
+      search: req.search || undefined,
+      sort: req.sort?.id,
+      sortDir: req.sort ? (req.sort.desc ? "desc" : "asc") : undefined,
+      status: req.filter ?? undefined
+    });
+    return { items: result.items, totalCount: result.totalCount };
+  };
 
   return (
     <>
@@ -160,7 +186,7 @@ export default function ManageUsers() {
         <div>
           <h1 className="page-header mb-1">Manage Users</h1>
           <p className="page-head-copy">
-            Manage local users with client-side search, sorting, paging, and quick account actions.
+            Manage local users with search, sorting, paging, and quick account actions.
           </p>
         </div>
       </div>
@@ -174,167 +200,38 @@ export default function ManageUsers() {
         </div>
       )}
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">Users</h4>
-        </div>
-        <div className="panel-body">
-          <div className="manage-users-toolbar d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
-            <div className="manage-users-toolbar-start d-flex flex-column flex-sm-row align-items-sm-center gap-2">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setModal({ kind: "add" })}
-              >
-                <i className="fa fa-plus me-2"></i>Add User
-              </button>
-            </div>
-            <div className="manage-users-toolbar-end">
-              <label className="d-flex align-items-center gap-2 mb-0">
-                <span>Search:</span>
-                <input
-                  type="search"
-                  className="form-control form-control-sm"
-                  value={globalFilter}
-                  onChange={(e) => {
-                    setGlobalFilter(e.target.value);
-                    table.setPageIndex(0);
-                  }}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="table-responsive">
-            <table
-              id="manage-users-table"
-              width="100%"
-              className="table table-striped table-bordered align-middle text-nowrap"
-            >
-              <thead>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => {
-                      const canSort = header.column.getCanSort();
-                      const sortDir = header.column.getIsSorted();
-                      return (
-                        <th
-                          key={header.id}
-                          className="text-nowrap"
-                          onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
-                          style={canSort ? { cursor: "pointer", userSelect: "none" } : undefined}
-                          aria-sort={
-                            sortDir === "asc"
-                              ? "ascending"
-                              : sortDir === "desc"
-                                ? "descending"
-                                : canSort
-                                  ? "none"
-                                  : undefined
-                          }
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                          {canSort && <SortIndicator dir={sortDir || null} />}
-                        </th>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </thead>
-              <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={columns.length} className="text-center text-body text-opacity-50 p-4">
-                      Loading users...
-                    </td>
-                  </tr>
-                )}
-                {!isLoading && table.getRowModel().rows.length === 0 && (
-                  <tr>
-                    <td colSpan={columns.length} className="text-center text-body text-opacity-50 p-4">
-                      No users found.
-                    </td>
-                  </tr>
-                )}
-                {table.getRowModel().rows.map((row) => (
-                  <tr key={row.id}>
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="manage-users-footer d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mt-3">
-            <div className="manage-users-footer-start d-flex flex-column flex-sm-row align-items-sm-center gap-3">
-              <label className="manage-users-length d-flex align-items-center gap-2 mb-0">
-                <select
-                  className="form-select form-select-sm"
-                  value={pageSize}
-                  onChange={(e) => table.setPageSize(Number(e.target.value))}
-                  style={{ width: "auto" }}
-                >
-                  {PAGE_SIZE_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-                <span>entries per page</span>
-              </label>
-              <div className="manage-users-info">
-                {filteredCount === 0
-                  ? "Showing 0 entries"
-                  : `Showing ${pageIndex * pageSize + 1} to ${Math.min(
-                      (pageIndex + 1) * pageSize,
-                      filteredCount
-                    )} of ${filteredCount} entries`}
-              </div>
-            </div>
-            <nav aria-label="Table pagination" className="manage-users-paging">
-              <ul className="pagination pagination-sm mb-0">
-                <li className={`page-item ${!table.getCanPreviousPage() ? "disabled" : ""}`}>
-                  <button
-                    type="button"
-                    className="page-link"
-                    onClick={() => table.previousPage()}
-                    disabled={!table.getCanPreviousPage()}
-                  >
-                    Previous
-                  </button>
-                </li>
-                {pageButtons.map((p) => (
-                  <li key={p} className={`page-item ${p === pageIndex ? "active" : ""}`}>
-                    <button
-                      type="button"
-                      className="page-link"
-                      onClick={() => table.setPageIndex(p)}
-                    >
-                      {p + 1}
-                    </button>
-                  </li>
-                ))}
-                <li className={`page-item ${!table.getCanNextPage() ? "disabled" : ""}`}>
-                  <button
-                    type="button"
-                    className="page-link"
-                    onClick={() => table.nextPage()}
-                    disabled={!table.getCanNextPage()}
-                  >
-                    Next
-                  </button>
-                </li>
-              </ul>
-            </nav>
-          </div>
-        </div>
-      </div>
+      <DataTable<LocalUser>
+        mode="auto"
+        autoThreshold={1000}
+        loadAll={() => listUsers()}
+        loadPage={loadPage}
+        queryKey={["users"]}
+        columns={columns}
+        rowKey={(u) => String(u.id)}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "username", desc: false }]}
+        searchPlaceholder="Search users…"
+        filters={STATUS_FILTERS}
+        onRowClick={(user) => setModal({ kind: "edit", user })}
+        getRowAriaLabel={(user) => `Edit ${user.username}`}
+        emptyMessage="No users found."
+        loadingMessage="Loading users…"
+        globalFilterFn={(u, search) => {
+          const needle = search.toLowerCase();
+          return `${u.username} ${u.firstName} ${u.lastName} ${u.email ?? ""}`
+            .toLowerCase()
+            .includes(needle);
+        }}
+        toolbarRight={
+          <button
+            type="button"
+            className="btn btn-add-user"
+            onClick={() => setModal({ kind: "add" })}
+          >
+            <i className="fa fa-plus me-2"></i>Add user
+          </button>
+        }
+      />
 
       {modal.kind === "add" && (
         <AddUserModal
@@ -387,21 +284,26 @@ export default function ManageUsers() {
   );
 }
 
-function SortIndicator({ dir }: { dir: "asc" | "desc" | null }) {
-  if (dir === "asc") return <i className="fa fa-sort-up ms-1"></i>;
-  if (dir === "desc") return <i className="fa fa-sort-down ms-1"></i>;
-  return <i className="fa fa-sort ms-1 text-body text-opacity-25"></i>;
+function UserAvatar({ isAdmin }: { isAdmin: boolean }) {
+  const label = isAdmin ? "Admin" : "User";
+  return (
+    <span
+      className={`user-avatar user-avatar-${isAdmin ? "admin" : "user"}`}
+      title={label}
+      aria-label={label}
+    >
+      {isAdmin ? "A" : "U"}
+    </span>
+  );
 }
 
-function buildPageWindow(pageIndex: number, totalPages: number, max: number): number[] {
-  if (totalPages <= 0) return [0];
-  const half = Math.floor(max / 2);
-  let start = Math.max(0, pageIndex - half);
-  const end = Math.min(totalPages, start + max);
-  start = Math.max(0, end - max);
-  const out: number[] = [];
-  for (let i = start; i < end; i++) out.push(i);
-  return out;
+function StatusDot({ status }: { status: UserStatus }) {
+  return (
+    <span className="manage-users-status">
+      <span className={`manage-users-status-indicator manage-users-status-${status.toLowerCase()}`} aria-hidden="true" />
+      {status}
+    </span>
+  );
 }
 
 type AddProps = {

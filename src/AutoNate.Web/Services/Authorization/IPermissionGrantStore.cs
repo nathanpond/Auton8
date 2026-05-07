@@ -19,6 +19,10 @@ public interface IPermissionGrantStore
 {
     Task<IReadOnlyList<PermissionGrant>> ListAsync(CancellationToken cancellationToken = default);
 
+    Task<PermissionGrantPage> ListPagedAsync(
+        ListPermissionGrantsRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<PermissionGrant>> ListForPrincipalAsync(
         string principalKind,
         string principalId,
@@ -31,3 +35,14 @@ public interface IPermissionGrantStore
 
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }
+
+public sealed record ListPermissionGrantsRequest(
+    int Page = 0,
+    int PageSize = 25,
+    string? Search = null,
+    string? SortBy = null,
+    string? SortDir = null,
+    string? PrincipalKind = null,
+    string? Effect = null);
+
+public sealed record PermissionGrantPage(IReadOnlyList<PermissionGrant> Items, int TotalCount);

@@ -43,6 +43,48 @@ public static class PermissionGrantEndpoints
             return Results.Ok(all);
         }).RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
+        // Paged variant — same shape as /api/users/page. pageSize=0 is the
+        // count probe used by the SPA's auto-mode DataTable.
+        group.MapGet("/page", async (
+            int? page,
+            int? pageSize,
+            string? q,
+            string? sort,
+            string? sortDir,
+            string? principalKind,
+            string? effect,
+            IPermissionGrantStore store,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            var request = new ListPermissionGrantsRequest(
+                Page: page ?? 0,
+                PageSize: pageSize ?? 25,
+                Search: q,
+                SortBy: sort,
+                SortDir: sortDir,
+                PrincipalKind: principalKind,
+                Effect: effect);
+            var result = await store.ListPagedAsync(request, ct);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.PermissionGrantListViewed,
+                IamResourceKinds.PermissionGrant,
+                resource: null,
+                details: new
+                {
+                    resultCount = result.Items.Count,
+                    totalCount = result.TotalCount,
+                    page = request.Page,
+                    pageSize = request.PageSize,
+                    search = request.Search,
+                    principalKind = request.PrincipalKind,
+                    effect = request.Effect
+                },
+                ct);
+            return Results.Ok(result);
+        }).RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
+
         group.MapPost("/", async (
             CreateGrantRequest request,
             HttpContext http,

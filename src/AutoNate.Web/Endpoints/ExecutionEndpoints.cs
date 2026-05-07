@@ -71,6 +71,122 @@ public static class ExecutionEndpoints
             return Results.Ok(projected);
         });
 
+        // Paged variant — same { items, totalCount } shape the SPA's
+        // DataTable expects. The flowable client returns the full list per
+        // call so we filter/sort/page in-memory; switching to a flowable-side
+        // page query would mean upgrading the client and its REST mapping.
+        executions.MapGet("/page", async (
+            int? page,
+            int? pageSize,
+            string? q,
+            string? sort,
+            string? sortDir,
+            string? status,
+            string? workflowModelId,
+            IFlowableClient flowable,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var rawList = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
+
+            // Compute Errored overlay the same way the unpaged endpoint does.
+            IReadOnlyList<WorkflowExecutionSummary> withStatus;
+            if (rawList.Count == 0)
+            {
+                withStatus = rawList;
+            }
+            else
+            {
+                var ids = rawList.Select(e => e.Id).ToList();
+                await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+                var erroredInstanceIds = await db.WorkflowExecutionErrors.AsNoTracking()
+                    .Where(e => ids.Contains(e.ProcessInstanceId))
+                    .Select(e => e.ProcessInstanceId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+                var erroredSet = new HashSet<string>(erroredInstanceIds, StringComparer.Ordinal);
+                withStatus = rawList
+                    .Select(execution => execution.Status == "Cancelled" || !erroredSet.Contains(execution.Id)
+                        ? execution
+                        : execution with { Status = "Errored" })
+                    .ToList();
+            }
+
+            IEnumerable<WorkflowExecutionSummary> filtered = withStatus;
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var needle = q.Trim();
+                filtered = filtered.Where(e =>
+                    (e.Name ?? string.Empty).Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                    e.Id.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                    (e.WorkflowModelName ?? string.Empty).Contains(needle, StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                filtered = filtered.Where(e =>
+                    string.Equals(e.Status, status, StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(workflowModelId))
+            {
+                // The flowable summary only carries WorkflowModelName, so this
+                // filter matches by name. The query param keeps the SPA-side
+                // contract aligned with /api/users/page.
+                filtered = filtered.Where(e =>
+                    string.Equals(e.WorkflowModelName, workflowModelId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            var materialized = filtered.ToList();
+            var totalCount = materialized.Count;
+
+            var desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+            // Tie-break on Id so paging is stable when the sort key has dupes.
+            IEnumerable<WorkflowExecutionSummary> ordered = (sort, desc) switch
+            {
+                ("name", true) => materialized.OrderByDescending(e => e.Name ?? string.Empty).ThenBy(e => e.Id),
+                ("name", false) => materialized.OrderBy(e => e.Name ?? string.Empty).ThenBy(e => e.Id),
+                ("workflowModel", true) => materialized.OrderByDescending(e => e.WorkflowModelName ?? string.Empty).ThenBy(e => e.Id),
+                ("workflowModel", false) => materialized.OrderBy(e => e.WorkflowModelName ?? string.Empty).ThenBy(e => e.Id),
+                ("status", true) => materialized.OrderByDescending(e => e.Status).ThenBy(e => e.Id),
+                ("status", false) => materialized.OrderBy(e => e.Status).ThenBy(e => e.Id),
+                ("startedAtUtc", false) => materialized.OrderBy(e => e.StartedAtUtc ?? DateTimeOffset.MinValue).ThenBy(e => e.Id),
+                _ => materialized.OrderByDescending(e => e.StartedAtUtc ?? DateTimeOffset.MinValue).ThenBy(e => e.Id)
+            };
+
+            var pageIndex = Math.Max(0, page ?? 0);
+            var size = pageSize ?? 25;
+            IEnumerable<WorkflowExecutionSummary> sliced;
+            if (size > 0)
+            {
+                sliced = ordered.Skip(pageIndex * size).Take(size);
+            }
+            else
+            {
+                sliced = Array.Empty<WorkflowExecutionSummary>();
+            }
+
+            var items = sliced.ToArray();
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionListViewed,
+                WorkflowResourceKinds.Execution,
+                resource: null,
+                details: new
+                {
+                    resultCount = items.Length,
+                    totalCount,
+                    page = pageIndex,
+                    pageSize = size,
+                    search = q,
+                    status,
+                    workflowModelId
+                },
+                cancellationToken);
+
+            return Results.Ok(new { items, totalCount });
+        });
+
         executions.MapGet("/{processInstanceId}/diagram", async (
             string processInstanceId,
             IFlowableClient flowable,
@@ -697,6 +813,27 @@ public static class ExecutionEndpoints
                     task.ProcessInstanceId!, cancellationToken);
             }
 
+            // For default-mode tasks: pull <bpmn:documentation> and any
+            // exclusive-gateway choices out of the published BPMN so the SPA
+            // can render the right modal (single-button vs path-buttons).
+            string? description = null;
+            IReadOnlyList<GatewayChoiceDto>? gatewayChoices = null;
+            if (mode == TaskFormModes.Simple)
+            {
+                var description_ = WorkflowBpmnXml.TryDescribeGatewayChoices(
+                    bpmnXml, task.TaskDefinitionKey);
+                if (description_ is not null)
+                {
+                    description = description_.Description;
+                    gatewayChoices = description_.Choices.Count == 0
+                        ? null
+                        : description_.Choices
+                            .Select(choice => new GatewayChoiceDto(
+                                choice.FlowId, choice.Label, choice.Description))
+                            .ToArray();
+                }
+            }
+
             return Results.Ok(new TaskFormConfigDto(
                 TaskId: task.Id,
                 TaskName: task.Name,
@@ -707,7 +844,9 @@ public static class ExecutionEndpoints
                 Mode: mode,
                 FormShortCode: formShortCode,
                 Form: formSnapshot,
-                Variables: variables));
+                Variables: variables,
+                Description: description,
+                GatewayChoices: gatewayChoices));
         }).RequirePermission(EntityKinds.WorkflowTask, Actions.View, "taskId");
 
         tasks.MapPost("/{taskId}/complete", async (
@@ -767,7 +906,11 @@ public static class ExecutionEndpoints
         string Mode,
         string? FormShortCode,
         FormWorkflowSnapshot? Form,
-        IReadOnlyDictionary<string, JsonElement> Variables);
+        IReadOnlyDictionary<string, JsonElement> Variables,
+        string? Description,
+        IReadOnlyList<GatewayChoiceDto>? GatewayChoices);
+
+    public sealed record GatewayChoiceDto(string FlowId, string Label, string? Description);
 
     private static async Task<string?> ResolveBpmnXmlForProcessDefinitionAsync(
         IDbContextFactory<AutoNateDbContext> dbFactory,
@@ -811,9 +954,7 @@ public static class ExecutionEndpoints
 
         // The BPMN spec lets several namespace prefixes coexist, so match the
         // userTask element by local name + id rather than a fully-qualified
-        // XName. The flowable: attributes are in their own namespace; look up
-        // both the namespaced form (what bpmn-js writes) and the legacy
-        // attribute-only form just in case.
+        // XName. The flowable: attributes are in their own namespace.
         var task = doc.Descendants()
             .FirstOrDefault(e => e.Name.LocalName == "userTask"
                                  && (string?)e.Attribute("id") == taskDefinitionKey);
@@ -823,10 +964,8 @@ public static class ExecutionEndpoints
         }
 
         var ns = XNamespace.Get(FlowableNamespace);
-        var rawMode = (string?)task.Attribute(ns + "userFormMode")
-                      ?? (string?)task.Attribute("flowable:userFormMode");
-        var rawShortCode = (string?)task.Attribute(ns + "userFormShortCode")
-                           ?? (string?)task.Attribute("flowable:userFormShortCode");
+        var rawMode = (string?)task.Attribute(ns + "userFormMode");
+        var rawShortCode = (string?)task.Attribute(ns + "userFormShortCode");
 
         var mode = (rawMode ?? string.Empty).Trim().ToLowerInvariant() switch
         {

@@ -19,6 +19,7 @@ import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { findIcon, preferredStyle, stripFaPrefix } from "@/lib/faIcons";
 import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
 import SimpleCompleteTaskModal from "@/components/workflow/SimpleCompleteTaskModal";
+import GatewayChoiceModal from "@/components/workflow/GatewayChoiceModal";
 import TaskFormModal from "@/components/workflow/TaskFormModal";
 
 const PAGE_SIZE = 10;
@@ -220,13 +221,20 @@ export default function MyTasksPanel() {
         )}
       </div>
 
-      {activeTaskConfig?.mode === "simple" && (
-        <SimpleCompleteTaskModal
-          config={activeTaskConfig}
-          onClose={closeActiveTask}
-          onComplete={(taskId) => completeFromModal(taskId)}
-        />
-      )}
+      {activeTaskConfig?.mode === "simple" &&
+        (activeTaskConfig.gatewayChoices && activeTaskConfig.gatewayChoices.length > 0 ? (
+          <GatewayChoiceModal
+            config={activeTaskConfig}
+            onClose={closeActiveTask}
+            onComplete={(taskId, variables) => completeFromModal(taskId, variables)}
+          />
+        ) : (
+          <SimpleCompleteTaskModal
+            config={activeTaskConfig}
+            onClose={closeActiveTask}
+            onComplete={(taskId) => completeFromModal(taskId)}
+          />
+        ))}
       {activeTaskConfig?.mode === "modal" && (
         <TaskFormModal
           config={activeTaskConfig}

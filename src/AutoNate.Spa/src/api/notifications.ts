@@ -45,3 +45,37 @@ export async function markAllNotificationsRead(): Promise<number> {
   const { data } = await api.post<{ updated: number }>(`${base}/mark-all-read`);
   return data.updated;
 }
+
+export type ListNotificationsPageRequest = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: string;
+  sortDir?: "asc" | "desc";
+  unreadOnly?: boolean;
+};
+
+export type ListNotificationsPageResult = {
+  items: NotificationModel[];
+  totalCount: number;
+  unreadCount: number;
+};
+
+export async function listNotificationsPage(
+  req: ListNotificationsPageRequest,
+  signal?: AbortSignal
+): Promise<ListNotificationsPageResult> {
+  const params: Record<string, string | number | boolean> = {
+    page: req.page,
+    pageSize: req.pageSize
+  };
+  if (req.search) params.q = req.search;
+  if (req.sort) params.sort = req.sort;
+  if (req.sortDir) params.sortDir = req.sortDir;
+  if (req.unreadOnly) params.unreadOnly = true;
+  const { data } = await api.get<ListNotificationsPageResult>(`${base}/page`, {
+    params,
+    signal
+  });
+  return data;
+}

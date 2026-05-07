@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { ColumnDef } from "@tanstack/react-table";
 import { useBusConnection } from "@/hooks/useBusConnection";
 import {
   EXECUTIONS_QUERY_KEY,
@@ -19,6 +20,11 @@ import {
   useReassignTask,
   useUpdateTaskDueDate
 } from "@/hooks/useExecutions";
+import {
+  DataTable,
+  DataTablePageRequest
+} from "@/components/data-table/DataTable";
+import { listExecutions, listExecutionsPage } from "@/api/executions";
 import {
   ContextMenuActiveTask,
   UserTaskHoverInfo,
@@ -162,6 +168,142 @@ export default function WorkflowExecutions() {
     return counts;
   }, [executions]);
 
+  const loadPage = useCallback(async (req: DataTablePageRequest) => {
+    const r = await listExecutionsPage({
+      page: req.page,
+      pageSize: req.pageSize,
+      search: req.search || undefined,
+      sort: req.sort?.id,
+      sortDir: req.sort ? (req.sort.desc ? "desc" : "asc") : undefined
+    });
+    return { items: r.items, totalCount: r.totalCount };
+  }, []);
+
+  const columns = useMemo<ColumnDef<WorkflowExecutionSummary>[]>(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Execution",
+        cell: ({ row }) => {
+          const displayName = row.original.name ?? row.original.id;
+          return (
+            <>
+              <div className="workflow-execution-name">{displayName}</div>
+              {row.original.name && (
+                <div className="workflow-execution-id workflow-execution-id-secondary">
+                  {row.original.id}
+                </div>
+              )}
+            </>
+          );
+        }
+      },
+      {
+        id: "workflowModel",
+        accessorKey: "workflowModelName",
+        header: "Workflow Model",
+        cell: ({ row }) => row.original.workflowModelName ?? "Unknown"
+      },
+      {
+        id: "startedAtUtc",
+        accessorKey: "startedAtUtc",
+        header: "Started",
+        cell: ({ row }) => formatTimestamp(row.original.startedAtUtc)
+      },
+      {
+        id: "lastActivityAtUtc",
+        accessorKey: "lastActivityAtUtc",
+        header: "Last Activity",
+        cell: ({ row }) => formatTimestamp(row.original.lastActivityAtUtc)
+      },
+      {
+        id: "status",
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => (
+          <span
+            className="badge rounded-pill"
+            style={statusBadgeStyle(row.original.status, statusAppearance)}
+          >
+            {row.original.status}
+          </span>
+        )
+      },
+      {
+        id: "currentStep",
+        accessorKey: "currentStep",
+        header: "Current Step",
+        cell: ({ row }) => row.original.currentStep ?? "Not running"
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => {
+          const execution = row.original;
+          const canCancel =
+            rowActionPermissions?.get(
+              permissionKey({ kind: "workflowexecution", action: "cancel", id: execution.id })
+            ) ?? false;
+          const canDelete =
+            rowActionPermissions?.get(
+              permissionKey({ kind: "workflowexecution", action: "delete", id: execution.id })
+            ) ?? false;
+          const isRunning = execution.status === "Running";
+          const cancelInFlight =
+            cancelExecution.isPending && cancelExecution.variables === execution.id;
+          const displayName = execution.name ?? execution.id;
+          return (
+            <div className="data-table-row-actions workflow-executions-actions-cell">
+              {isRunning && canCancel && (
+                <button
+                  type="button"
+                  className="btn btn-outline-warning btn-sm workflow-execution-cancel-button"
+                  title="Cancel execution"
+                  aria-label={`Cancel execution ${displayName}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestCancel(execution);
+                  }}
+                  disabled={cancelInFlight}
+                >
+                  <span>Cancel</span>
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
+                  title="Delete execution"
+                  aria-label={`Delete execution ${displayName}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestDelete(execution);
+                  }}
+                  disabled={
+                    deleteExecution.isPending && deleteExecution.variables === execution.id
+                  }
+                >
+                  <span>Delete</span>
+                </button>
+              )}
+            </div>
+          );
+        }
+      }
+    ],
+    [
+      rowActionPermissions,
+      statusAppearance,
+      cancelExecution,
+      deleteExecution,
+      requestCancel,
+      requestDelete
+    ]
+  );
+
   return (
     <>
       <div className="page-head">
@@ -241,106 +383,28 @@ export default function WorkflowExecutions() {
         )}
       </div>
 
-      <div className="workflow-executions-card">
-        {executions.length === 0 && !isLoading ? (
-          <p className="workflow-executions-empty">No workflow executions have been recorded yet.</p>
-        ) : (
-          <div className="table-responsive">
-            <table className="table table-hover align-middle workflow-executions-table">
-              <thead>
-                <tr>
-                  <th scope="col">Execution</th>
-                  <th scope="col">Workflow Model</th>
-                  <th scope="col">Started</th>
-                  <th scope="col">Last Activity Date</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Current Step</th>
-                  <th scope="col" className="workflow-executions-actions-header">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {executions.map((execution) => {
-                  const canCancel =
-                    rowActionPermissions?.get(
-                      permissionKey({ kind: "workflowexecution", action: "cancel", id: execution.id })
-                    ) ?? false;
-                  const canDelete =
-                    rowActionPermissions?.get(
-                      permissionKey({ kind: "workflowexecution", action: "delete", id: execution.id })
-                    ) ?? false;
-                  const isRunning = execution.status === "Running";
-                  const cancelInFlight =
-                    cancelExecution.isPending && cancelExecution.variables === execution.id;
-
-                  const displayName = execution.name ?? execution.id;
-                  return (
-                    <tr
-                      key={execution.id}
-                      className="workflow-execution-row"
-                      onClick={() => setSelectedId(execution.id)}
-                    >
-                      <td>
-                        <div className="workflow-execution-name">{displayName}</div>
-                        {execution.name && (
-                          <div className="workflow-execution-id workflow-execution-id-secondary">
-                            {execution.id}
-                          </div>
-                        )}
-                      </td>
-                      <td>{execution.workflowModelName ?? "Unknown"}</td>
-                      <td>{formatTimestamp(execution.startedAtUtc)}</td>
-                      <td>{formatTimestamp(execution.lastActivityAtUtc)}</td>
-                      <td>
-                        <span
-                          className="badge rounded-pill"
-                          style={statusBadgeStyle(execution.status, statusAppearance)}
-                        >
-                          {execution.status}
-                        </span>
-                      </td>
-                      <td>{execution.currentStep ?? "Not running"}</td>
-                      <td className="workflow-executions-actions-cell">
-                        {isRunning && canCancel && (
-                          <button
-                            type="button"
-                            className="btn btn-outline-warning btn-sm workflow-execution-cancel-button"
-                            title="Cancel execution"
-                            aria-label={`Cancel execution ${displayName}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              requestCancel(execution);
-                            }}
-                            disabled={cancelInFlight}
-                          >
-                            <span>Cancel</span>
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button
-                            type="button"
-                            className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
-                            title="Delete execution"
-                            aria-label={`Delete execution ${displayName}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              requestDelete(execution);
-                            }}
-                            disabled={deleteExecution.isPending && deleteExecution.variables === execution.id}
-                          >
-                            <span>Delete</span>
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <DataTable<WorkflowExecutionSummary>
+        mode="auto"
+        autoThreshold={1000}
+        loadAll={() => listExecutions()}
+        loadPage={loadPage}
+        queryKey={EXECUTIONS_QUERY_KEY as readonly unknown[]}
+        columns={columns}
+        rowKey={(e) => e.id}
+        columnWidths={["18%", "16%", "12%", "12%", "10%", "16%", "16%"]}
+        initialSort={[{ id: "startedAtUtc", desc: true }]}
+        searchPlaceholder="Search executions…"
+        emptyMessage="No workflow executions have been recorded yet."
+        loadingMessage="Loading executions…"
+        onRowClick={(e) => setSelectedId(e.id)}
+        getRowAriaLabel={(e) => `Open ${e.name ?? e.id}`}
+        globalFilterFn={(e, search) => {
+          const needle = search.toLowerCase();
+          return `${e.name ?? ""} ${e.id} ${e.workflowModelName ?? ""}`
+            .toLowerCase()
+            .includes(needle);
+        }}
+      />
 
       {selectedId && (
         <div

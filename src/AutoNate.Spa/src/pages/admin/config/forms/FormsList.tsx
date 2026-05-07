@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { CreateFormRequest, FormSummary } from "@/api/forms";
-import { useCreateForm, useDeleteForm, useForms } from "@/hooks/useForms";
+import { ColumnDef } from "@tanstack/react-table";
+import { CreateFormRequest, FormSummary, listForms } from "@/api/forms";
+import { useCreateForm, useDeleteForm } from "@/hooks/useForms";
+import { DataTable } from "@/components/data-table/DataTable";
+
+const COLUMN_WIDTHS = ["14%", "30%", "16%", "13%", "17%", "10%"];
 
 export default function FormsList() {
-  const { data: forms = [], isLoading } = useForms();
   const [modalOpen, setModalOpen] = useState(false);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(
     null
@@ -20,6 +23,90 @@ export default function FormsList() {
       setFlash({ kind: "error", message: describeError(err) });
     }
   };
+
+  const columns = useMemo<ColumnDef<FormSummary>[]>(
+    () => [
+      {
+        id: "shortCode",
+        accessorKey: "shortCode",
+        header: "Short code",
+        cell: ({ row }) => <code>{row.original.shortCode}</code>
+      },
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <Link to={`/admin/config/forms/${row.original.id}`} className="fw-semibold">
+            {row.original.name}
+          </Link>
+        )
+      },
+      {
+        id: "status",
+        accessorFn: (f) =>
+          f.publishedVersionNumber === null
+            ? "Draft"
+            : f.isDraft
+              ? "Has changes"
+              : f.siteAvailable
+                ? "Live"
+                : "Published",
+        header: "Status",
+        cell: ({ row }) => <StatusBadges form={row.original} />
+      },
+      {
+        id: "versions",
+        accessorFn: (f) => f.draftVersionNumber,
+        header: "Versions",
+        cell: ({ row }) => (
+          <>
+            <span className="text-body text-opacity-75">
+              Draft v{row.original.draftVersionNumber}
+            </span>
+            {row.original.publishedVersionNumber !== null && (
+              <>
+                <br />
+                <span className="text-body text-opacity-50">
+                  Pub v{row.original.publishedVersionNumber}
+                </span>
+              </>
+            )}
+          </>
+        )
+      },
+      {
+        id: "updatedAtUtc",
+        accessorKey: "updatedAtUtc",
+        header: "Updated",
+        cell: ({ row }) => formatWhen(row.original.updatedAtUtc)
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => (
+          <div className="data-table-row-actions">
+            <button
+              type="button"
+              className="btn btn-icon btn-icon-danger"
+              title="Delete form"
+              aria-label={`Delete ${row.original.shortCode}`}
+              disabled={deleteForm.isPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onDelete(row.original);
+              }}
+            >
+              <i className="fa fa-trash"></i>
+            </button>
+          </div>
+        )
+      }
+    ],
+    [deleteForm.isPending]
+  );
 
   return (
     <>
@@ -43,88 +130,31 @@ export default function FormsList() {
         </div>
       )}
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">All Forms</h4>
-        </div>
-        <div className="panel-body">
-          <div className="d-flex justify-content-between align-items-center mb-3">
-            <button type="button" className="btn btn-primary" onClick={() => setModalOpen(true)}>
-              <i className="fa fa-plus me-2"></i>New Form
-            </button>
-          </div>
-
-          <div className="table-responsive">
-            <table className="table table-striped table-bordered align-middle">
-              <thead>
-                <tr>
-                  <th style={{ width: "10rem" }}>Short code</th>
-                  <th>Name</th>
-                  <th style={{ width: "10rem" }}>Status</th>
-                  <th style={{ width: "8rem" }}>Versions</th>
-                  <th style={{ width: "12rem" }}>Updated</th>
-                  <th style={{ width: "10rem" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={6} className="text-center text-body text-opacity-50 p-4">
-                      Loading…
-                    </td>
-                  </tr>
-                )}
-                {!isLoading && forms.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="text-center text-body text-opacity-50 p-4">
-                      No forms yet. Click "New Form" to create one.
-                    </td>
-                  </tr>
-                )}
-                {forms.map((f) => (
-                  <tr key={f.id}>
-                    <td>
-                      <code>{f.shortCode}</code>
-                    </td>
-                    <td>
-                      <Link to={`/admin/config/forms/${f.id}`} className="fw-semibold">
-                        {f.name}
-                      </Link>
-                    </td>
-                    <td>
-                      <StatusBadges form={f} />
-                    </td>
-                    <td>
-                      <span className="text-body text-opacity-75">
-                        Draft v{f.draftVersionNumber}
-                      </span>
-                      {f.publishedVersionNumber !== null && (
-                        <>
-                          <br />
-                          <span className="text-body text-opacity-50">
-                            Pub v{f.publishedVersionNumber}
-                          </span>
-                        </>
-                      )}
-                    </td>
-                    <td>{formatWhen(f.updatedAtUtc)}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-outline-danger btn-sm"
-                        onClick={() => onDelete(f)}
-                        disabled={deleteForm.isPending}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <DataTable<FormSummary>
+        mode="client"
+        loadAll={() => listForms()}
+        queryKey={["forms"]}
+        columns={columns}
+        rowKey={(f) => f.id}
+        columnWidths={COLUMN_WIDTHS}
+        initialSort={[{ id: "shortCode", desc: false }]}
+        searchPlaceholder="Search forms…"
+        emptyMessage="No forms yet. Click 'New form' to create one."
+        loadingMessage="Loading forms…"
+        globalFilterFn={(f, search) => {
+          const needle = search.toLowerCase();
+          return `${f.shortCode} ${f.name}`.toLowerCase().includes(needle);
+        }}
+        toolbarRight={
+          <button
+            type="button"
+            className="btn btn-add-user"
+            onClick={() => setModalOpen(true)}
+          >
+            <i className="fa fa-plus me-2"></i>New form
+          </button>
+        }
+      />
 
       {modalOpen && (
         <CreateModal

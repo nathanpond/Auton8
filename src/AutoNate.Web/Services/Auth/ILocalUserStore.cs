@@ -6,6 +6,8 @@ public interface ILocalUserStore
 {
     Task<IReadOnlyList<LocalUser>> ListAsync(CancellationToken cancellationToken = default);
 
+    Task<LocalUserPage> ListPagedAsync(ListLocalUsersRequest request, CancellationToken cancellationToken = default);
+
     Task<LocalUser?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default);
 
     // By-id lookup the delete endpoint uses to snapshot the username into the
@@ -44,3 +46,13 @@ public interface ILocalUserStore
 
     Task<bool> DeleteAsync(long id, CancellationToken cancellationToken = default);
 }
+
+public sealed record ListLocalUsersRequest(
+    int Page = 0,
+    int PageSize = 25,
+    string? Search = null,
+    string? SortBy = null,
+    string? SortDir = null,
+    string? Status = null);
+
+public sealed record LocalUserPage(IReadOnlyList<LocalUser> Items, int TotalCount);

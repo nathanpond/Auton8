@@ -25,6 +25,64 @@ public sealed class EfCorePermissionGrantStore(
         return rows.Select(ToModel).ToList();
     }
 
+    public async Task<PermissionGrantPage> ListPagedAsync(
+        ListPermissionGrantsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.PermissionGrants.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var pattern = $"%{request.Search.Trim()}%";
+            query = query.Where(g =>
+                EF.Functions.ILike(g.PrincipalId, pattern) ||
+                EF.Functions.ILike(g.Action, pattern) ||
+                EF.Functions.ILike(g.SelectorString, pattern));
+        }
+        if (!string.IsNullOrWhiteSpace(request.PrincipalKind))
+        {
+            var kind = request.PrincipalKind;
+            query = query.Where(g => g.PrincipalKind == kind);
+        }
+        if (!string.IsNullOrWhiteSpace(request.Effect))
+        {
+            var effect = request.Effect.ToLowerInvariant();
+            query = query.Where(g => g.Effect == effect);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var desc = string.Equals(request.SortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        // Tie-break on Id so paging stays stable when the sort key has dupes.
+        query = (request.SortBy, desc) switch
+        {
+            ("principalKind", true) => query.OrderByDescending(g => g.PrincipalKind).ThenByDescending(g => g.Id),
+            ("principalKind", false) => query.OrderBy(g => g.PrincipalKind).ThenBy(g => g.Id),
+            ("action", true) => query.OrderByDescending(g => g.Action).ThenByDescending(g => g.Id),
+            ("action", false) => query.OrderBy(g => g.Action).ThenBy(g => g.Id),
+            ("selectorString", true) => query.OrderByDescending(g => g.SelectorString).ThenByDescending(g => g.Id),
+            ("selectorString", false) => query.OrderBy(g => g.SelectorString).ThenBy(g => g.Id),
+            ("effect", true) => query.OrderByDescending(g => g.Effect).ThenByDescending(g => g.Id),
+            ("effect", false) => query.OrderBy(g => g.Effect).ThenBy(g => g.Id),
+            ("priority", true) => query.OrderByDescending(g => g.Priority).ThenByDescending(g => g.Id),
+            ("priority", false) => query.OrderBy(g => g.Priority).ThenBy(g => g.Id),
+            _ => query.OrderBy(g => g.PrincipalKind).ThenBy(g => g.PrincipalId).ThenBy(g => g.Id)
+        };
+
+        if (request.PageSize > 0)
+        {
+            query = query.Skip(Math.Max(0, request.Page) * request.PageSize).Take(request.PageSize);
+        }
+        else
+        {
+            query = query.Take(0);
+        }
+
+        var rows = await query.ToListAsync(cancellationToken);
+        return new PermissionGrantPage(rows.Select(ToModel).ToList(), totalCount);
+    }
+
     public async Task<IReadOnlyList<PermissionGrant>> ListForPrincipalAsync(
         string principalKind,
         string principalId,

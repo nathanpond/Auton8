@@ -22,6 +22,11 @@ public sealed record NotificationListResponse(
     NotificationDto[] Items,
     int UnreadCount);
 
+public sealed record NotificationPageResponse(
+    NotificationDto[] Items,
+    int TotalCount,
+    int UnreadCount);
+
 public sealed record UnreadCountResponse(int UnreadCount);
 
 public sealed record MarkAllReadResponse(int Updated);
@@ -57,6 +62,53 @@ public static class NotificationEndpoints
             return Results.Ok(new NotificationListResponse(
                 notifications.Select(ToDto).ToArray(),
                 unreadCount));
+        });
+
+        // Paged variant for the full inbox page. Mirrors /api/users/page so
+        // the SPA's DataTable count probe (pageSize=0) just works.
+        group.MapGet("/page", async (
+            int? page,
+            int? pageSize,
+            string? q,
+            string? sort,
+            string? sortDir,
+            bool? unreadOnly,
+            HttpContext http,
+            INotificationStore store,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            var userId = GetUserId(http);
+            if (userId == Guid.Empty) return Results.Unauthorized();
+
+            var request = new ListNotificationsRequest(
+                Page: page ?? 0,
+                PageSize: pageSize ?? 25,
+                Search: q,
+                SortBy: sort,
+                SortDir: sortDir,
+                UnreadOnly: unreadOnly ?? false);
+            var result = await store.ListPagedForUserAsync(userId, request, ct);
+            await auditPublisher.PublishAsync(
+                DaprNotificationEventPublisher.TopicName,
+                NotificationEventTypes.ListViewed,
+                NotificationResourceKinds.NotificationCollection,
+                resource: new { userId },
+                details: new
+                {
+                    resultCount = result.Items.Count,
+                    totalCount = result.TotalCount,
+                    unreadCount = result.UnreadCount,
+                    page = request.Page,
+                    pageSize = request.PageSize,
+                    search = request.Search,
+                    unreadOnly = request.UnreadOnly
+                },
+                ct);
+            return Results.Ok(new NotificationPageResponse(
+                result.Items.Select(ToDto).ToArray(),
+                result.TotalCount,
+                result.UnreadCount));
         });
 
         // Polled every few seconds by the SPA's bell icon — coalesce per user

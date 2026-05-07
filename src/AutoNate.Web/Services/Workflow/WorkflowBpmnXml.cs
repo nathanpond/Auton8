@@ -100,6 +100,12 @@ public static partial class WorkflowBpmnXml
         return ApplyProcessMetadata(document, processKey, workflowName);
     }
 
+    // Reserved variable name set by the SPA when the user clicks a button
+    // in the gateway-choice modal. Synthetic conditions emitted by
+    // ApplyAutoNateGatewayConditions reference this variable; treat it as
+    // off-limits to authors — the system overwrites it on every choice.
+    public const string GatewayChoiceVariableName = "__autonateChosenFlow";
+
     private static string ApplyProcessMetadata(XDocument document, string processKey, string workflowName)
     {
         var processElement = document.Descendants(BpmnNamespace + "process").FirstOrDefault()
@@ -126,6 +132,7 @@ public static partial class WorkflowBpmnXml
         }
 
         ForceAsyncScriptTasks(document);
+        ApplyAutoNateGatewayConditions(document);
 
         var declaration = document.Declaration is null
             ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -143,6 +150,184 @@ public static partial class WorkflowBpmnXml
         {
             scriptTask.SetAttributeValue(FlowableNamespace + "async", "true");
         }
+    }
+
+    // For every default-mode user task that flows directly into an exclusive
+    // gateway, inject a synthetic ${__autonateChosenFlow == 'FlowId'} condition
+    // on each unconditioned outgoing flow. The SPA's gateway-choice modal sets
+    // that variable when a user clicks a path button. Author-written conditions
+    // are preserved untouched. Idempotent: re-running publish doesn't duplicate.
+    private static void ApplyAutoNateGatewayConditions(XDocument document)
+    {
+        var flowsBySource = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .GroupBy(flow => flow.Attribute("sourceRef")?.Value ?? string.Empty)
+            .Where(group => !string.IsNullOrEmpty(group.Key))
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        foreach (var userTask in document.Descendants(BpmnNamespace + "userTask"))
+        {
+            if (!IsDefaultBehaviorUserTask(userTask))
+            {
+                continue;
+            }
+
+            var taskId = userTask.Attribute("id")?.Value;
+            if (string.IsNullOrEmpty(taskId)
+                || !flowsBySource.TryGetValue(taskId, out var taskOutflows)
+                || taskOutflows.Count != 1)
+            {
+                continue;
+            }
+
+            var targetRef = taskOutflows[0].Attribute("targetRef")?.Value;
+            if (string.IsNullOrEmpty(targetRef))
+            {
+                continue;
+            }
+
+            var target = document
+                .Descendants()
+                .FirstOrDefault(e =>
+                    e.Name.Namespace == BpmnNamespace &&
+                    e.Attribute("id")?.Value == targetRef);
+            if (target is null || target.Name.LocalName != "exclusiveGateway")
+            {
+                continue;
+            }
+
+            if (!flowsBySource.TryGetValue(targetRef, out var gatewayOutflows))
+            {
+                continue;
+            }
+
+            foreach (var gatewayFlow in gatewayOutflows)
+            {
+                if (gatewayFlow.Element(BpmnNamespace + "conditionExpression") is not null)
+                {
+                    continue;
+                }
+
+                var flowId = gatewayFlow.Attribute("id")?.Value;
+                if (string.IsNullOrEmpty(flowId))
+                {
+                    continue;
+                }
+
+                var conditionElement = new XElement(
+                    BpmnNamespace + "conditionExpression",
+                    new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                    $"${{{GatewayChoiceVariableName} == '{flowId}'}}");
+                gatewayFlow.Add(conditionElement);
+            }
+        }
+    }
+
+    private static bool IsDefaultBehaviorUserTask(XElement userTask)
+    {
+        var rawMode = userTask.Attribute(FlowableNamespace + "userFormMode")?.Value;
+        if (string.IsNullOrWhiteSpace(rawMode))
+        {
+            return true;
+        }
+
+        return string.Equals(rawMode.Trim(), "simple", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public sealed record GatewayChoice(string FlowId, string Label, string? Description);
+
+    public sealed record UserTaskGatewayDescription(
+        string? Description,
+        IReadOnlyList<GatewayChoice> Choices);
+
+    // Pulls (description, gateway-button choices) for one user task from the
+    // published BPMN. Returns null choices when the task isn't a default-mode
+    // task that flows into an exclusive gateway. Description comes from the
+    // standard <bpmn:documentation> child element.
+    public static UserTaskGatewayDescription? TryDescribeGatewayChoices(string? bpmnXml, string? userTaskId)
+    {
+        if (string.IsNullOrWhiteSpace(bpmnXml) || string.IsNullOrWhiteSpace(userTaskId))
+        {
+            return null;
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(bpmnXml);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return null;
+        }
+
+        var userTask = document
+            .Descendants()
+            .FirstOrDefault(e =>
+                e.Name.LocalName == "userTask" &&
+                (string?)e.Attribute("id") == userTaskId);
+        if (userTask is null)
+        {
+            return null;
+        }
+
+        var description = ReadDocumentationText(userTask);
+
+        if (!IsDefaultBehaviorUserTask(userTask))
+        {
+            return new UserTaskGatewayDescription(description, Array.Empty<GatewayChoice>());
+        }
+
+        var taskOutflows = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .Where(flow => flow.Attribute("sourceRef")?.Value == userTaskId)
+            .ToArray();
+        if (taskOutflows.Length != 1)
+        {
+            return new UserTaskGatewayDescription(description, Array.Empty<GatewayChoice>());
+        }
+
+        var targetRef = taskOutflows[0].Attribute("targetRef")?.Value;
+        if (string.IsNullOrEmpty(targetRef))
+        {
+            return new UserTaskGatewayDescription(description, Array.Empty<GatewayChoice>());
+        }
+
+        var target = document
+            .Descendants(BpmnNamespace + "exclusiveGateway")
+            .FirstOrDefault(e => e.Attribute("id")?.Value == targetRef);
+        if (target is null)
+        {
+            return new UserTaskGatewayDescription(description, Array.Empty<GatewayChoice>());
+        }
+
+        var choices = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .Where(flow => flow.Attribute("sourceRef")?.Value == targetRef)
+            .Select(flow =>
+            {
+                var flowId = flow.Attribute("id")?.Value ?? string.Empty;
+                var label = flow.Attribute("name")?.Value;
+                if (string.IsNullOrWhiteSpace(label))
+                {
+                    label = flowId;
+                }
+                var flowDescription = ReadDocumentationText(flow);
+                return new GatewayChoice(flowId, label!, flowDescription);
+            })
+            .Where(choice => !string.IsNullOrEmpty(choice.FlowId))
+            .ToArray();
+
+        return new UserTaskGatewayDescription(description, choices);
+    }
+
+    private static string? ReadDocumentationText(XElement element)
+    {
+        var text = element
+            .Elements(BpmnNamespace + "documentation")
+            .Select(doc => doc.Value)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        return string.IsNullOrWhiteSpace(text) ? null : text!.Trim();
     }
 
     public static WorkflowBpmnValidationResult ValidateProcess(string xml)
@@ -1438,6 +1623,56 @@ public static partial class WorkflowBpmnXml
             if (outgoing.Any(f => f.Element(BpmnNamespace + "conditionExpression") is not null))
             {
                 warnings.Add($"Parallel gateway '{GatewayLabel(parallel)}' has condition expressions on outgoing flows. Flowable ignores conditions on parallel-gateway outflows; remove them to clarify intent.");
+            }
+        }
+
+        // Default-mode user tasks that feed an exclusive gateway expose one
+        // button per outgoing flow in the runtime modal — buttons need a label.
+        // Surface unnamed flows so the author can fix them before users see
+        // a button captioned with a raw flow ID.
+        foreach (var userTask in document.Descendants(BpmnNamespace + "userTask"))
+        {
+            if (!IsDefaultBehaviorUserTask(userTask))
+            {
+                continue;
+            }
+
+            var taskId = userTask.Attribute("id")?.Value ?? string.Empty;
+            if (!flowsBySource.TryGetValue(taskId, out var taskOutflows) || taskOutflows.Count != 1)
+            {
+                continue;
+            }
+
+            var targetRef = taskOutflows[0].Attribute("targetRef")?.Value;
+            if (string.IsNullOrEmpty(targetRef))
+            {
+                continue;
+            }
+
+            var target = document
+                .Descendants(BpmnNamespace + "exclusiveGateway")
+                .FirstOrDefault(e => e.Attribute("id")?.Value == targetRef);
+            if (target is null)
+            {
+                continue;
+            }
+
+            if (!flowsBySource.TryGetValue(targetRef, out var gatewayFlows))
+            {
+                continue;
+            }
+
+            var unnamed = gatewayFlows
+                .Where(f => string.IsNullOrWhiteSpace(f.Attribute("name")?.Value))
+                .Select(f => f.Attribute("id")?.Value ?? "(no id)")
+                .ToArray();
+            if (unnamed.Length > 0)
+            {
+                var taskLabel = userTask.Attribute("name")?.Value
+                    ?? userTask.Attribute("id")?.Value
+                    ?? "(unnamed)";
+                warnings.Add(
+                    $"User task '{taskLabel}' feeds an exclusive gateway whose outgoing flow(s) have no name: {string.Join(", ", unnamed)}. The default-behavior modal will caption these buttons with the flow id.");
             }
         }
 

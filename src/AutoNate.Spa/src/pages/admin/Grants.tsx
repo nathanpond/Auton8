@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ColumnDef } from "@tanstack/react-table";
 import SelectorBuilder from "@/components/SelectorBuilder";
 import GrantsHelpModal from "./GrantsHelpModal";
 import { useUsers } from "@/hooks/useUsers";
@@ -6,17 +7,29 @@ import {
   useCreatePermissionGrant,
   useDeletePermissionGrant,
   useGroups,
-  usePermissionGrants,
   useRoles
 } from "@/hooks/useAdmin";
+import { PermissionGrant, listPermissionGrants, listPermissionGrantsPage } from "@/api/admin";
+import {
+  DataTable,
+  DataTableFilterOption,
+  DataTablePageRequest
+} from "@/components/data-table/DataTable";
 
 type PrincipalKind = "user" | "group" | "role";
+
+const COLUMN_WIDTHS = ["8%", "18%", "12%", "32%", "10%", "10%", "10%"];
+
+const KIND_FILTERS: DataTableFilterOption<PermissionGrant>[] = [
+  { id: "user", label: "Users", predicate: (g) => g.principalKind === "user" },
+  { id: "group", label: "Groups", predicate: (g) => g.principalKind === "group" },
+  { id: "role", label: "Roles", predicate: (g) => g.principalKind === "role" }
+];
 
 // Single source of truth for permissions. Every grant — whether attached to a
 // user, a group, or a role — lives in permission_grants. This page is the
 // only place to author them.
 export default function Grants() {
-  const { data: grants = [], isLoading } = usePermissionGrants();
   const { data: users = [] } = useUsers();
   const { data: groups = [] } = useGroups();
   const { data: roles = [] } = useRoles();
@@ -30,7 +43,6 @@ export default function Grants() {
   const [effect, setEffect] = useState<"allow" | "deny">("allow");
   const [priority, setPriority] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | PrincipalKind>("all");
   const [helpOpen, setHelpOpen] = useState(false);
 
   const principalLabel = useMemo(() => {
@@ -44,11 +56,6 @@ export default function Grants() {
       return groups.find((x) => x.id === g.principalId)?.name ?? g.principalId;
     };
   }, [users, groups, roles]);
-
-  const visible = useMemo(
-    () => (filter === "all" ? grants : grants.filter((g) => g.principalKind === filter)),
-    [grants, filter]
-  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +79,71 @@ export default function Grants() {
       setError(describeError(err));
     }
   };
+
+  const columns = useMemo<ColumnDef<PermissionGrant>[]>(
+    () => [
+      {
+        id: "principalKind",
+        accessorKey: "principalKind",
+        header: "Kind"
+      },
+      {
+        id: "principal",
+        header: "Principal",
+        accessorFn: (g) => principalLabel(g),
+        cell: ({ row }) => principalLabel(row.original)
+      },
+      {
+        id: "action",
+        accessorKey: "action",
+        header: "Action"
+      },
+      {
+        id: "selectorString",
+        accessorKey: "selectorString",
+        header: "Selector",
+        cell: ({ row }) => <span className="font-monospace small">{row.original.selectorString}</span>
+      },
+      {
+        id: "effect",
+        accessorKey: "effect",
+        header: "Effect",
+        cell: ({ row }) => (
+          <span className={`badge bg-${row.original.effect === "allow" ? "success" : "danger"}`}>
+            {row.original.effect}
+          </span>
+        )
+      },
+      {
+        id: "priority",
+        accessorKey: "priority",
+        header: "Priority"
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row }) => (
+          <div className="data-table-row-actions">
+            <button
+              type="button"
+              className="btn btn-icon btn-icon-danger"
+              title="Revoke grant"
+              aria-label="Revoke grant"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm("Revoke this grant?")) void remove.mutateAsync(row.original.id);
+              }}
+            >
+              <i className="fa fa-trash"></i>
+            </button>
+          </div>
+        )
+      }
+    ],
+    [principalLabel, remove]
+  );
 
   return (
     <>
@@ -193,87 +265,38 @@ export default function Grants() {
         </div>
 
         <div className="col-12">
-          <div className="panel panel-inverse">
-            <div className="panel-heading d-flex justify-content-between align-items-center">
-              <h4 className="panel-title mb-0">Existing grants</h4>
-              <div className="btn-group btn-group-sm">
-                <button
-                  type="button"
-                  className={`btn btn-outline-secondary ${filter === "all" ? "active" : ""}`}
-                  onClick={() => setFilter("all")}
-                >
-                  All
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-outline-secondary ${filter === "user" ? "active" : ""}`}
-                  onClick={() => setFilter("user")}
-                >
-                  Users
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-outline-secondary ${filter === "group" ? "active" : ""}`}
-                  onClick={() => setFilter("group")}
-                >
-                  Groups
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-outline-secondary ${filter === "role" ? "active" : ""}`}
-                  onClick={() => setFilter("role")}
-                >
-                  Roles
-                </button>
-              </div>
-            </div>
-            <div className="panel-body">
-              {isLoading && <div>Loading…</div>}
-              {!isLoading && visible.length === 0 && <div className="text-muted">No grants.</div>}
-              {visible.length > 0 && (
-                <table className="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>Kind</th>
-                      <th>Principal</th>
-                      <th>Action</th>
-                      <th>Selector</th>
-                      <th>Effect</th>
-                      <th>Priority</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map((g) => (
-                      <tr key={g.id}>
-                        <td>{g.principalKind}</td>
-                        <td>{principalLabel(g)}</td>
-                        <td>{g.action}</td>
-                        <td className="font-monospace">{g.selectorString}</td>
-                        <td>
-                          <span className={`badge bg-${g.effect === "allow" ? "success" : "danger"}`}>
-                            {g.effect}
-                          </span>
-                        </td>
-                        <td>{g.priority}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() =>
-                              confirm("Revoke this grant?") && void remove.mutateAsync(g.id)
-                            }
-                          >
-                            Revoke
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
+          <h4 className="mb-3">Existing grants</h4>
+          <DataTable<PermissionGrant>
+            mode="auto"
+            autoThreshold={1000}
+            loadAll={() => listPermissionGrants()}
+            loadPage={async (req: DataTablePageRequest) => {
+              const r = await listPermissionGrantsPage({
+                page: req.page,
+                pageSize: req.pageSize,
+                search: req.search || undefined,
+                sort: req.sort?.id,
+                sortDir: req.sort ? (req.sort.desc ? "desc" : "asc") : undefined,
+                principalKind: (req.filter ?? undefined) as PrincipalKind | undefined
+              });
+              return { items: r.items, totalCount: r.totalCount };
+            }}
+            queryKey={["admin", "grants"]}
+            columns={columns}
+            rowKey={(g) => g.id}
+            columnWidths={COLUMN_WIDTHS}
+            initialSort={[{ id: "principalKind", desc: false }]}
+            searchPlaceholder="Search grants…"
+            emptyMessage="No grants."
+            loadingMessage="Loading grants…"
+            filters={KIND_FILTERS}
+            globalFilterFn={(g, search) => {
+              const needle = search.toLowerCase();
+              return `${g.principalKind} ${principalLabel(g)} ${g.action} ${g.selectorString}`
+                .toLowerCase()
+                .includes(needle);
+            }}
+          />
         </div>
       </div>
 

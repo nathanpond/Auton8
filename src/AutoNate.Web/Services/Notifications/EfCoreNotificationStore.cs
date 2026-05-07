@@ -75,6 +75,59 @@ public sealed class EfCoreNotificationStore(
             .CountAsync(n => n.UserId == userId && !n.IsRead, cancellationToken);
     }
 
+    public async Task<NotificationPage> ListPagedForUserAsync(
+        Guid userId,
+        ListNotificationsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var baseQuery = dbContext.Notifications.AsNoTracking().Where(n => n.UserId == userId);
+        // Unread count over the user's entire inbox (independent of search/
+        // unreadOnly filter), so the bell-badge stays accurate.
+        var unreadCount = await baseQuery.CountAsync(n => !n.IsRead, cancellationToken);
+
+        var query = baseQuery;
+        if (request.UnreadOnly)
+        {
+            query = query.Where(n => !n.IsRead);
+        }
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var pattern = $"%{request.Search.Trim()}%";
+            query = query.Where(n =>
+                EF.Functions.ILike(n.Title, pattern) ||
+                EF.Functions.ILike(n.Body, pattern) ||
+                EF.Functions.ILike(n.Kind, pattern));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var desc = string.Equals(request.SortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        IQueryable<NotificationEntity> ordered = (request.SortBy, desc) switch
+        {
+            ("title", true) => query.OrderByDescending(n => n.Title).ThenByDescending(n => n.Id),
+            ("title", false) => query.OrderBy(n => n.Title).ThenBy(n => n.Id),
+            ("kind", true) => query.OrderByDescending(n => n.Kind).ThenByDescending(n => n.Id),
+            ("kind", false) => query.OrderBy(n => n.Kind).ThenBy(n => n.Id),
+            ("createdAtUtc", false) => query.OrderBy(n => n.CreatedAtUtc).ThenBy(n => n.Id),
+            _ => query.OrderByDescending(n => n.CreatedAtUtc).ThenByDescending(n => n.Id)
+        };
+
+        IQueryable<NotificationEntity> paged = ordered;
+        if (request.PageSize > 0)
+        {
+            paged = ordered.Skip(Math.Max(0, request.Page) * request.PageSize).Take(request.PageSize);
+        }
+        else
+        {
+            paged = ordered.Take(0);
+        }
+
+        var rows = await paged.ToListAsync(cancellationToken);
+        return new NotificationPage(rows.Select(ToModel).ToList(), totalCount, unreadCount);
+    }
+
     public async Task<Notification?> MarkReadAsync(
         Guid notificationId,
         Guid userId,

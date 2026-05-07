@@ -35,6 +35,49 @@ public static class UserEndpoints
             return Results.Ok(users);
         }).RequireKindPermission(EntityKinds.User, Actions.View);
 
+        // Paged variant of GET /api/users for tables that fetch one screen at
+        // a time. Returns { items, totalCount } and supports search, status
+        // filter, and sort by username/fullName/lastName/lastLogin/status.
+        // pageSize=0 is a "count probe" — items come back empty, totalCount is
+        // populated; clients use this to decide between client- and server-
+        // side modes without paying to download the full list.
+        group.MapGet("/page", async (
+            int? page,
+            int? pageSize,
+            string? q,
+            string? sort,
+            string? sortDir,
+            string? status,
+            ILocalUserStore store,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var request = new ListLocalUsersRequest(
+                Page: page ?? 0,
+                PageSize: pageSize ?? 25,
+                Search: q,
+                SortBy: sort,
+                SortDir: sortDir,
+                Status: status);
+            var result = await store.ListPagedAsync(request, cancellationToken);
+            await auditPublisher.PublishAsync(
+                IamEventTopic.TopicName,
+                IamEventTypes.UserListViewed,
+                IamResourceKinds.User,
+                resource: null,
+                details: new
+                {
+                    resultCount = result.Items.Count,
+                    totalCount = result.TotalCount,
+                    page = request.Page,
+                    pageSize = request.PageSize,
+                    search = request.Search,
+                    status = request.Status
+                },
+                cancellationToken);
+            return Results.Ok(result);
+        }).RequireKindPermission(EntityKinds.User, Actions.View);
+
         group.MapPost("/", async (
             CreateUserRequest request,
             ILocalUserStore store,

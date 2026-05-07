@@ -21,6 +21,36 @@ export async function listUsers(signal?: AbortSignal): Promise<LocalUser[]> {
   return data;
 }
 
+export type ListUsersPageRequest = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: string;
+  sortDir?: "asc" | "desc";
+  status?: string;
+};
+
+export type ListUsersPageResult = {
+  items: LocalUser[];
+  totalCount: number;
+};
+
+export async function listUsersPage(
+  req: ListUsersPageRequest,
+  signal?: AbortSignal
+): Promise<ListUsersPageResult> {
+  const params: Record<string, string | number> = {
+    page: req.page,
+    pageSize: req.pageSize
+  };
+  if (req.search) params.q = req.search;
+  if (req.sort) params.sort = req.sort;
+  if (req.sortDir) params.sortDir = req.sortDir;
+  if (req.status) params.status = req.status;
+  const { data } = await api.get<ListUsersPageResult>("/api/users/page", { params, signal });
+  return data;
+}
+
 export async function createUser(request: CreateUserRequest): Promise<LocalUser> {
   const { data } = await api.post<LocalUser>("/api/users", request);
   return data;

@@ -21,6 +21,69 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
         return users.Select(user => user.ToModel()).ToList();
     }
 
+    public async Task<LocalUserPage> ListPagedAsync(
+        ListLocalUsersRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var query = dbContext.LocalUsers.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var pattern = $"%{request.Search.Trim()}%";
+            query = query.Where(user =>
+                EF.Functions.ILike(user.Username, pattern) ||
+                EF.Functions.ILike(user.FirstName, pattern) ||
+                EF.Functions.ILike(user.LastName, pattern) ||
+                EF.Functions.ILike(user.Email, pattern));
+        }
+
+        // Status mapping mirrors the SPA's getUserStatus(): "Disabled" has no
+        // backing column today and is intentionally a no-match filter.
+        query = request.Status switch
+        {
+            "Locked" => query.Where(user => user.IsLocked),
+            "Invited" => query.Where(user => !user.IsLocked && user.LastLoginDate == null),
+            "Active" => query.Where(user => !user.IsLocked && user.LastLoginDate != null),
+            "Disabled" => query.Where(_ => false),
+            _ => query
+        };
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var desc = string.Equals(request.SortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        query = (request.SortBy, desc) switch
+        {
+            ("username", true) => query.OrderByDescending(u => u.Username),
+            ("username", false) => query.OrderBy(u => u.Username),
+            ("lastName", true) => query.OrderByDescending(u => u.LastName).ThenBy(u => u.Username),
+            ("lastName", false) => query.OrderBy(u => u.LastName).ThenBy(u => u.Username),
+            ("fullName", true) => query.OrderByDescending(u => u.FirstName + " " + u.LastName).ThenBy(u => u.Username),
+            ("fullName", false) => query.OrderBy(u => u.FirstName + " " + u.LastName).ThenBy(u => u.Username),
+            ("lastLogin", true) => query.OrderByDescending(u => u.LastLoginDate).ThenBy(u => u.Username),
+            ("lastLogin", false) => query.OrderBy(u => u.LastLoginDate).ThenBy(u => u.Username),
+            ("status", true) => query.OrderByDescending(u => u.IsLocked).ThenByDescending(u => u.LastLoginDate).ThenBy(u => u.Username),
+            ("status", false) => query.OrderBy(u => u.IsLocked).ThenBy(u => u.LastLoginDate).ThenBy(u => u.Username),
+            _ => query.OrderBy(u => u.Username)
+        };
+
+        if (request.PageSize > 0)
+        {
+            query = query
+                .Skip(Math.Max(0, request.Page) * request.PageSize)
+                .Take(request.PageSize);
+        }
+        else
+        {
+            // pageSize == 0 means "count probe": return total only, no items.
+            query = query.Take(0);
+        }
+
+        var rows = await query.ToListAsync(cancellationToken);
+        return new LocalUserPage(rows.Select(u => u.ToModel()).ToList(), totalCount);
+    }
+
     public async Task<LocalUser?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default)
     {
         var normalizedUsername = NormalizeRequired(username, nameof(username));

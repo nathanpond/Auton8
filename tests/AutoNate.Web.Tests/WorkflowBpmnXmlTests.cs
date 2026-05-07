@@ -1946,4 +1946,228 @@ public sealed class WorkflowBpmnXmlTests
         Assert.DoesNotContain("flowable:recordTypeShortCodes", updated);
         Assert.DoesNotContain("signalRef", updated); // pre-existing behavior — sanity check
     }
+
+    // ----- Default-behavior user task → exclusive gateway auto-rewrite -----
+
+    private const string GatewayChoiceFlowVariable = WorkflowBpmnXml.GatewayChoiceVariableName;
+
+    private static string DefaultModeUserTaskBeforeGatewayXml(
+        string? userTaskMode = null,
+        bool firstFlowConditioned = false) =>
+        $$"""
+          <?xml version="1.0" encoding="UTF-8"?>
+          <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                            xmlns:flowable="http://flowable.org/bpmn"
+                            id="Definitions_1"
+                            targetNamespace="http://autonate.dev/workflows">
+            <bpmn:process id="approval_flow" name="Approval" isExecutable="true">
+              <bpmn:startEvent id="StartEvent_1" />
+              <bpmn:userTask id="Task_Approve" name="Approve"{{(userTaskMode is null ? string.Empty : $" flowable:userFormMode=\"{userTaskMode}\"")}}>
+                <bpmn:documentation>Please review and pick a path.</bpmn:documentation>
+              </bpmn:userTask>
+              <bpmn:exclusiveGateway id="Gateway_1" />
+              <bpmn:endEvent id="End_Approved" />
+              <bpmn:endEvent id="End_Rejected" />
+              <bpmn:sequenceFlow id="Flow_StartToTask" sourceRef="StartEvent_1" targetRef="Task_Approve" />
+              <bpmn:sequenceFlow id="Flow_TaskToGateway" sourceRef="Task_Approve" targetRef="Gateway_1" />
+              <bpmn:sequenceFlow id="Flow_Approve" name="Approve" sourceRef="Gateway_1" targetRef="End_Approved">
+                {{(firstFlowConditioned ? "<bpmn:conditionExpression xsi:type=\"bpmn:tFormalExpression\">${author == 'wrote-this'}</bpmn:conditionExpression>" : string.Empty)}}
+              </bpmn:sequenceFlow>
+              <bpmn:sequenceFlow id="Flow_Reject" name="Reject" sourceRef="Gateway_1" targetRef="End_Rejected" />
+            </bpmn:process>
+          </bpmn:definitions>
+          """;
+
+    [Fact]
+    public void ApplyProcessMetadata_InjectsGatewayChoiceConditions_ForDefaultUserTaskBeforeExclusiveGateway()
+    {
+        var updated = WorkflowBpmnXml.ApplyProcessMetadata(
+            DefaultModeUserTaskBeforeGatewayXml(),
+            "approval_flow",
+            "Approval");
+
+        var document = XDocument.Parse(updated);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        var approveFlow = document.Descendants(bpmn + "sequenceFlow").Single(f => f.Attribute("id")?.Value == "Flow_Approve");
+        var rejectFlow = document.Descendants(bpmn + "sequenceFlow").Single(f => f.Attribute("id")?.Value == "Flow_Reject");
+
+        Assert.Equal(
+            $"${{{GatewayChoiceFlowVariable} == 'Flow_Approve'}}",
+            approveFlow.Element(bpmn + "conditionExpression")?.Value);
+        Assert.Equal(
+            $"${{{GatewayChoiceFlowVariable} == 'Flow_Reject'}}",
+            rejectFlow.Element(bpmn + "conditionExpression")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_PreservesAuthorAuthoredConditions_OnGatewayFlows()
+    {
+        var updated = WorkflowBpmnXml.ApplyProcessMetadata(
+            DefaultModeUserTaskBeforeGatewayXml(firstFlowConditioned: true),
+            "approval_flow",
+            "Approval");
+
+        var document = XDocument.Parse(updated);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        var approveFlow = document.Descendants(bpmn + "sequenceFlow").Single(f => f.Attribute("id")?.Value == "Flow_Approve");
+        var rejectFlow = document.Descendants(bpmn + "sequenceFlow").Single(f => f.Attribute("id")?.Value == "Flow_Reject");
+
+        Assert.Equal(
+            "${author == 'wrote-this'}",
+            approveFlow.Element(bpmn + "conditionExpression")?.Value);
+        Assert.Equal(
+            $"${{{GatewayChoiceFlowVariable} == 'Flow_Reject'}}",
+            rejectFlow.Element(bpmn + "conditionExpression")?.Value);
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_IsIdempotent_ForGatewayChoiceConditions()
+    {
+        var first = WorkflowBpmnXml.ApplyProcessMetadata(
+            DefaultModeUserTaskBeforeGatewayXml(),
+            "approval_flow",
+            "Approval");
+        var second = WorkflowBpmnXml.ApplyProcessMetadata(first, "approval_flow", "Approval");
+
+        var document = XDocument.Parse(second);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        foreach (var flowId in new[] { "Flow_Approve", "Flow_Reject" })
+        {
+            var flow = document.Descendants(bpmn + "sequenceFlow").Single(f => f.Attribute("id")?.Value == flowId);
+            Assert.Single(flow.Elements(bpmn + "conditionExpression"));
+        }
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_DoesNotInjectConditions_ForFormModeUserTask()
+    {
+        var updated = WorkflowBpmnXml.ApplyProcessMetadata(
+            DefaultModeUserTaskBeforeGatewayXml(userTaskMode: "modal"),
+            "approval_flow",
+            "Approval");
+
+        var document = XDocument.Parse(updated);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        foreach (var flowId in new[] { "Flow_Approve", "Flow_Reject" })
+        {
+            var flow = document.Descendants(bpmn + "sequenceFlow").Single(f => f.Attribute("id")?.Value == flowId);
+            Assert.Null(flow.Element(bpmn + "conditionExpression"));
+        }
+    }
+
+    [Fact]
+    public void ApplyProcessMetadata_DoesNotInjectConditions_WhenGatewayIsInclusiveOrParallel()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="approval_flow" name="Approval" isExecutable="true">
+                               <bpmn:userTask id="Task_Approve" name="Approve" />
+                               <bpmn:inclusiveGateway id="Gateway_1" />
+                               <bpmn:endEvent id="End_A" />
+                               <bpmn:endEvent id="End_B" />
+                               <bpmn:sequenceFlow id="Flow_TaskToGateway" sourceRef="Task_Approve" targetRef="Gateway_1" />
+                               <bpmn:sequenceFlow id="Flow_A" name="A" sourceRef="Gateway_1" targetRef="End_A" />
+                               <bpmn:sequenceFlow id="Flow_B" name="B" sourceRef="Gateway_1" targetRef="End_B" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updated = WorkflowBpmnXml.ApplyProcessMetadata(xml, "approval_flow", "Approval");
+
+        var document = XDocument.Parse(updated);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        foreach (var flowId in new[] { "Flow_A", "Flow_B" })
+        {
+            var flow = document.Descendants(bpmn + "sequenceFlow").Single(f => f.Attribute("id")?.Value == flowId);
+            Assert.Null(flow.Element(bpmn + "conditionExpression"));
+        }
+    }
+
+    [Fact]
+    public void TryDescribeGatewayChoices_ReturnsChoicesAndDescription_ForDefaultModeUserTaskBeforeGateway()
+    {
+        var prepared = WorkflowBpmnXml.ApplyProcessMetadata(
+            DefaultModeUserTaskBeforeGatewayXml(),
+            "approval_flow",
+            "Approval");
+
+        var description = WorkflowBpmnXml.TryDescribeGatewayChoices(prepared, "Task_Approve");
+
+        Assert.NotNull(description);
+        Assert.Equal("Please review and pick a path.", description!.Description);
+        Assert.Equal(2, description.Choices.Count);
+        Assert.Equal("Flow_Approve", description.Choices[0].FlowId);
+        Assert.Equal("Approve", description.Choices[0].Label);
+        Assert.Equal("Flow_Reject", description.Choices[1].FlowId);
+        Assert.Equal("Reject", description.Choices[1].Label);
+    }
+
+    [Fact]
+    public void TryDescribeGatewayChoices_ReturnsEmptyChoices_WhenTaskIsFormMode()
+    {
+        var prepared = WorkflowBpmnXml.ApplyProcessMetadata(
+            DefaultModeUserTaskBeforeGatewayXml(userTaskMode: "modal"),
+            "approval_flow",
+            "Approval");
+
+        var description = WorkflowBpmnXml.TryDescribeGatewayChoices(prepared, "Task_Approve");
+
+        Assert.NotNull(description);
+        Assert.Empty(description!.Choices);
+    }
+
+    [Fact]
+    public void TryDescribeGatewayChoices_ReturnsEmptyChoices_WhenTaskIsNotBeforeAnExclusiveGateway()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="simple_flow" name="Simple" isExecutable="true">
+                               <bpmn:userTask id="Task_1" name="Step" />
+                               <bpmn:endEvent id="End_1" />
+                               <bpmn:sequenceFlow id="Flow_1" sourceRef="Task_1" targetRef="End_1" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var description = WorkflowBpmnXml.TryDescribeGatewayChoices(xml, "Task_1");
+
+        Assert.NotNull(description);
+        Assert.Empty(description!.Choices);
+    }
+
+    [Fact]
+    public void ValidateProcess_WarnsAboutUnnamedGatewayFlows_UnderDefaultUserTask()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="approval_flow" name="Approval" isExecutable="true">
+                               <bpmn:userTask id="Task_Approve" name="Approve" />
+                               <bpmn:exclusiveGateway id="Gateway_1" />
+                               <bpmn:endEvent id="End_A" />
+                               <bpmn:endEvent id="End_B" />
+                               <bpmn:sequenceFlow id="Flow_TaskToGateway" sourceRef="Task_Approve" targetRef="Gateway_1" />
+                               <bpmn:sequenceFlow id="Flow_A" name="Yes" sourceRef="Gateway_1" targetRef="End_A" />
+                               <bpmn:sequenceFlow id="Flow_B" sourceRef="Gateway_1" targetRef="End_B" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var result = WorkflowBpmnXml.ValidateProcess(xml);
+
+        Assert.Contains(result.Warnings, w => w.Contains("Flow_B", StringComparison.Ordinal));
+    }
 }
