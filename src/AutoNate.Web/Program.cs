@@ -250,6 +250,10 @@ builder.Services.AddScoped<IChatProviderResolver, ChatProviderResolver>();
 builder.Services.AddScoped<IAgentSkill, ExplainWorkflowSkill>();
 builder.Services.AddScoped<IAgentSkill, LookupRecordsSkill>();
 builder.Services.AddScoped<IAgentSkill, AnalyzeSystemIssueSkill>();
+// First mutating skill. Tools default to confirmed=false (dry-run); the
+// agent narrates the proposal and asks the user; only confirmed=true issues
+// the actual IRecordStore mutation under the calling user's principal.
+builder.Services.AddScoped<IAgentSkill, ManageRecordsSkill>();
 // WebFetchSkill is always registered; AgentSession filters its tool out of
 // the per-turn ChatRequest when chatbot.internetAccessEnabled is off.
 builder.Services.AddScoped<IAgentSkill, WebFetchSkill>();

@@ -6,18 +6,19 @@ namespace AutoNate.Web.Tests;
 public sealed class SkillRegistryTests
 {
     [Fact]
-    public void Registers_the_three_phase_5_skills_with_unique_tool_names()
+    public void Registers_the_diagnostic_and_management_skills_with_unique_tool_names()
     {
         var skills = new IAgentSkill[]
         {
             new ExplainWorkflowSkill(),
             new LookupRecordsSkill(),
-            new AnalyzeSystemIssueSkill()
+            new AnalyzeSystemIssueSkill(),
+            new ManageRecordsSkill()
         };
 
         var registry = new SkillRegistry(skills);
 
-        Assert.Equal(3, registry.All.Count);
+        Assert.Equal(4, registry.All.Count);
 
         // Spot-check tool names so the agent loop's ChatRequest.Tools list lines up.
         var names = registry.ChatTools.Select(t => t.Name).ToHashSet();
@@ -26,8 +27,11 @@ public sealed class SkillRegistryTests
         Assert.Contains("list_record_types", names);
         Assert.Contains("search_records", names);
         Assert.Contains("get_record", names);
+        Assert.Contains("describe_record_type", names);
         Assert.Contains("list_system_issues", names);
         Assert.Contains("get_system_issue", names);
+        Assert.Contains("create_record", names);
+        Assert.Contains("update_record", names);
     }
 
     [Fact]

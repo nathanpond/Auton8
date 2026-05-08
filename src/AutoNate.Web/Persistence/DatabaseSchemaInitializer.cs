@@ -1311,7 +1311,8 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configPlugins', 'Manage Plugins (Site Config)', 'Plugin management mounted inside Site Config.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How AutoNate plugins work and the patterns for working within them.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configForms', 'Forms (Site Config)', 'Define and manage form definitions.', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configFormMappings', 'Form Mappings (Site Config)', 'Map forms to record types and fields.', TRUE, NOW(), NOW())
+              (gen_random_uuid(), 'configFormMappings', 'Form Mappings (Site Config)', 'Map forms to record types and fields.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configChatbotSettings', 'Chatbot Settings (Site Config)', 'Configure agent capabilities; applies to the next message.', TRUE, NOW(), NOW())
             ON CONFLICT (key) DO NOTHING;
 
             INSERT INTO menus (id, key, name, description, is_system,

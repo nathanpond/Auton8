@@ -64,12 +64,27 @@ public sealed class LookupRecordsSkill : IAgentSkill
                       "additionalProperties": false
                     }
                     """),
-                Invoke: InvokeGetRecordAsync)
+                Invoke: InvokeGetRecordAsync),
+
+            new AgentTool(
+                Name: "describe_record_type",
+                Description: "Return the field schema for a record type — field keys, display names, data types, required flags, and option lists. Call this before proposing record values you don't already know.",
+                JsonSchema: ParseSchema("""
+                    {
+                      "type": "object",
+                      "properties": {
+                        "typeShortCode": { "type": "string", "description": "Short code of the record type, e.g. INC or ACC." }
+                      },
+                      "required": ["typeShortCode"],
+                      "additionalProperties": false
+                    }
+                    """),
+                Invoke: InvokeDescribeRecordTypeAsync)
         };
     }
 
     public string? SystemPromptFragment(AgentSessionContext context) =>
-        "When the user asks about records, call list_record_types first if you don't know the short code. Then use search_records to narrow, and get_record by key for details.";
+        "When the user asks about records, call list_record_types first if you don't know the short code. Then use search_records to narrow, and get_record by key for details. Before proposing record values via create_record / update_record, call describe_record_type to learn which fields are required and what data types they expect.";
 
     private static async Task<JsonElement> InvokeListRecordTypesAsync(
         JsonElement args,
@@ -178,6 +193,50 @@ public sealed class LookupRecordsSkill : IAgentSkill
                 values = record.Values,
                 createdAtUtc = record.CreatedAtUtc,
                 updatedAtUtc = record.UpdatedAtUtc
+            }
+        });
+    }
+
+    private static async Task<JsonElement> InvokeDescribeRecordTypeAsync(
+        JsonElement args,
+        AgentToolContext context,
+        CancellationToken ct)
+    {
+        if (!args.TryGetProperty("typeShortCode", out var sc) || sc.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(sc.GetString()))
+        {
+            return ErrorElement("describe_record_type", "typeShortCode is required.");
+        }
+
+        var typeStore = context.Services.GetRequiredService<IRecordTypeStore>();
+        var type = await typeStore.GetByShortCodeAsync(sc.GetString()!, ct);
+        if (type is null)
+        {
+            return ErrorElement("describe_record_type", $"No record type with short code '{sc.GetString()}'.");
+        }
+
+        var fields = await typeStore.ListFieldsAsync(type.Id, includeArchived: false, ct);
+
+        return JsonSerializer.SerializeToElement(new
+        {
+            kind = "record_type_schema",
+            source = "IRecordTypeStore",
+            data = new
+            {
+                id = type.Id,
+                shortCode = type.ShortCode,
+                name = type.Name,
+                description = type.Description,
+                isArchived = type.IsArchived,
+                fields = fields.Select(f => new
+                {
+                    fieldKey = f.FieldKey,
+                    displayName = f.DisplayName,
+                    dataType = f.DataType,
+                    isRequired = f.IsRequired,
+                    sortOrder = f.SortOrder,
+                    config = f.Config
+                }).ToArray()
             }
         });
     }

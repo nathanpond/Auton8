@@ -25,16 +25,30 @@ public static class UnhandledExceptionRecording
             {
                 await next(context);
             }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                // Client disconnected mid-request (browser closed, navigation,
+                // polling abort). Not an application bug — don't record, just
+                // rethrow so the framework can finish unwinding the pipeline.
+                throw;
+            }
             catch (Exception ex)
             {
                 try
                 {
                     var recorder = context.RequestServices.GetRequiredService<ISystemIssueRecorder>();
+                    // Intentionally NOT context.RequestAborted: when the request
+                    // faults, the client often disconnects, which cancels the
+                    // abort token. Threading that into the recorder cancels the
+                    // DB write before the row is inserted — the very case we
+                    // most want recorded. Decouple the recording from the
+                    // request lifetime so the issue lands even if the caller
+                    // walked away.
                     await UnhandledExceptionRecorder.RecordHttpAsync(
                         recorder,
                         context,
                         ex,
-                        context.RequestAborted);
+                        CancellationToken.None);
                 }
                 catch (Exception recordEx)
                 {
