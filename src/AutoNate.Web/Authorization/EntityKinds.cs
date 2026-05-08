@@ -21,4 +21,9 @@ public static class EntityKinds
     public const string SystemIssue = "systemissue";
 
     public const string Form = "form";
+
+    // Generic kind-discriminated outbound integration config (LLM provider api
+    // keys today, future SMTP/S3/IdP). Single coarse Manage action gates
+    // create/edit/delete/test/set-default; View gates list+read.
+    public const string ExternalConnection = "externalconnection";
 }

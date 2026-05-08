@@ -80,6 +80,14 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<FormVersion> FormVersions { get; set; }
 
+    public virtual DbSet<ExternalConnection> ExternalConnections { get; set; }
+
+    public virtual DbSet<AgentConversation> AgentConversations { get; set; }
+
+    public virtual DbSet<AgentMessage> AgentMessages { get; set; }
+
+    public virtual DbSet<AgentToolCall> AgentToolCalls { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -937,6 +945,130 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Note).HasColumnName("note");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<ExternalConnection>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("external_connection_pkey");
+
+            entity.ToTable("external_connection");
+
+            entity.HasIndex(e => new { e.Kind, e.IsEnabled }, "ix_external_connection_kind_enabled");
+            entity.HasIndex(e => e.Kind, "ux_external_connection_default_per_kind")
+                .IsUnique()
+                .HasFilter("is_default");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.IsEnabled).HasColumnName("is_enabled");
+            entity.Property(e => e.IsDefault).HasColumnName("is_default");
+            entity.Property(e => e.MetadataJson)
+                .HasColumnName("metadata_json")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.SecretCiphertext).HasColumnName("secret_ciphertext");
+            entity.Property(e => e.SecretFingerprint).HasColumnName("secret_fingerprint");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<AgentConversation>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("agent_conversation_pkey");
+
+            entity.ToTable("agent_conversation");
+
+            entity.HasIndex(e => new { e.UserId, e.PageKey, e.LastMessageAtUtc }, "ix_agent_conversation_user_page")
+                .IsDescending(false, false, true);
+            entity.HasIndex(e => new { e.UserId, e.LastMessageAtUtc }, "ix_agent_conversation_user")
+                .IsDescending(false, true);
+
+            entity.HasOne<ExternalConnection>()
+                .WithMany()
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.PageKey).HasColumnName("page_key");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.ProviderKind).HasColumnName("provider_kind");
+            entity.Property(e => e.ModelId).HasColumnName("model_id");
+            entity.Property(e => e.ConnectionId).HasColumnName("connection_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.LastMessageAtUtc).HasColumnName("last_message_at_utc");
+        });
+
+        modelBuilder.Entity<AgentMessage>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("agent_message_pkey");
+
+            entity.ToTable("agent_message");
+
+            entity.HasIndex(e => new { e.ConversationId, e.CreatedAtUtc }, "ix_agent_message_conversation");
+
+            entity.HasOne<AgentConversation>()
+                .WithMany()
+                .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id");
+            entity.Property(e => e.ParentMessageId).HasColumnName("parent_message_id");
+            entity.Property(e => e.Role).HasColumnName("role");
+            entity.Property(e => e.ContentJson)
+                .HasColumnName("content_json")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.ProviderKind).HasColumnName("provider_kind");
+            entity.Property(e => e.ModelId).HasColumnName("model_id");
+            entity.Property(e => e.InputTokens).HasColumnName("input_tokens");
+            entity.Property(e => e.OutputTokens).HasColumnName("output_tokens");
+            entity.Property(e => e.CacheReadTokens).HasColumnName("cache_read_tokens");
+            entity.Property(e => e.CacheWriteTokens).HasColumnName("cache_write_tokens");
+            entity.Property(e => e.StopReason).HasColumnName("stop_reason");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+        });
+
+        modelBuilder.Entity<AgentToolCall>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("agent_tool_call_pkey");
+
+            entity.ToTable("agent_tool_call");
+
+            entity.HasIndex(e => e.MessageId, "ix_agent_tool_call_message");
+
+            entity.HasOne<AgentMessage>()
+                .WithMany()
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.MessageId).HasColumnName("message_id");
+            entity.Property(e => e.ToolUseId).HasColumnName("tool_use_id");
+            entity.Property(e => e.ToolName).HasColumnName("tool_name");
+            entity.Property(e => e.ArgsJson)
+                .HasColumnName("args_json")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.ResultJson)
+                .HasColumnName("result_json")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.ErrorText).HasColumnName("error_text");
+            entity.Property(e => e.StartedAtUtc).HasColumnName("started_at_utc");
+            entity.Property(e => e.FinishedAtUtc).HasColumnName("finished_at_utc");
+            entity.Property(e => e.DurationMs).HasColumnName("duration_ms");
         });
 
         OnModelCreatingPartial(modelBuilder);

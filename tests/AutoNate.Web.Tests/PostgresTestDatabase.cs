@@ -158,6 +158,21 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
                 .Take(limit ?? int.MaxValue)
                 .ToList());
 
+        public Task<NotificationPage> ListPagedForUserAsync(Guid userId, ListNotificationsRequest request, CancellationToken cancellationToken = default)
+        {
+            var all = _notifications
+                .Where(n => n.UserId == userId)
+                .OrderByDescending(n => n.CreatedAtUtc)
+                .ToList();
+            var unreadCount = all.Count(n => !n.IsRead);
+            var filtered = request.UnreadOnly ? all.Where(n => !n.IsRead).ToList() : all;
+            var page = filtered
+                .Skip(request.Page * request.PageSize)
+                .Take(request.PageSize)
+                .ToList();
+            return Task.FromResult(new NotificationPage(page, filtered.Count, unreadCount));
+        }
+
         public Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_notifications.Count(n => n.UserId == userId && !n.IsRead));
 

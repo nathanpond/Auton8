@@ -164,6 +164,9 @@ public sealed class CriticalIssueNotifierTests
         public Task<IReadOnlyList<Notification>> ListForUserAsync(Guid userId, int? limit, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<Notification>>(Array.Empty<Notification>());
 
+        public Task<NotificationPage> ListPagedForUserAsync(Guid userId, ListNotificationsRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new NotificationPage(Array.Empty<Notification>(), 0, 0));
+
         public Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default)
             => Task.FromResult(0);
 

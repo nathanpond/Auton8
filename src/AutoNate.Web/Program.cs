@@ -16,7 +16,13 @@ using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Dapr;
+using AutoNate.Web.Services.Agent;
+using AutoNate.Web.Services.Agent.Conversations;
+using AutoNate.Web.Services.Agent.Loop;
+using AutoNate.Web.Services.Agent.Providers;
+using AutoNate.Web.Services.Agent.Skills;
 using AutoNate.Web.Services.Events;
+using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Forms;
 using AutoNate.Web.Services.Menus;
@@ -217,6 +223,39 @@ builder.Services.AddScoped<IPageTemplateStore, EfCorePageTemplateStore>();
 builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();
 builder.Services.AddScoped<IWorkflowModelStore, EfCoreWorkflowModelStore>();
 builder.Services.AddScoped<IFormStore, EfCoreFormStore>();
+
+// External Connections — admin-managed config for outbound integrations
+// (LLM providers today, future SMTP/S3/IdP). DataProtection encrypts the
+// stored secret; the keyring lives under the host's content root by default
+// so a single-host deploy works without ceremony. Tests register a stub
+// IDataProtectionProvider through the standard test factory.
+builder.Services.AddDataProtection();
+builder.Services.AddSingleton<IConnectionSecretProtector, DataProtectionConnectionSecretProtector>();
+builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionStore>();
+// Phase 4 replaces this with kind-routed Anthropic/OpenAI testers; until then
+// the stub just confirms the secret decrypts cleanly.
+builder.Services.AddScoped<ITestConnectionService, StubTestConnectionService>();
+
+// Agent provider abstraction. Per-provider HttpClients have generous timeouts
+// because token streaming for a tool-using turn can run minutes.
+builder.Services.AddHttpClient("agent.anthropic", c => c.Timeout = TimeSpan.FromMinutes(5));
+builder.Services.AddHttpClient("agent.openai", c => c.Timeout = TimeSpan.FromMinutes(5));
+builder.Services.AddScoped<IChatProviderResolver, ChatProviderResolver>();
+
+// Read-only diagnostic skills. Skills are scoped because their tools resolve
+// further scoped services (record stores, workflow stores) at invocation
+// time. The registry is also scoped so it can construct a per-request snapshot
+// of the active skill list.
+builder.Services.AddScoped<IAgentSkill, ExplainWorkflowSkill>();
+builder.Services.AddScoped<IAgentSkill, LookupRecordsSkill>();
+builder.Services.AddScoped<IAgentSkill, AnalyzeSystemIssueSkill>();
+builder.Services.AddScoped<ISkillRegistry, SkillRegistry>();
+
+// Conversation persistence + the orchestrator that runs the tool-using loop.
+builder.Services.AddOptions<AgentOptions>().BindConfiguration(AgentOptions.SectionName);
+builder.Services.AddScoped<IAgentConversationStore, EfCoreAgentConversationStore>();
+builder.Services.AddScoped<SystemPromptBuilder>();
+builder.Services.AddScoped<IAgentSession, AgentSession>();
 builder.Services.AddSingleton<IFieldType, TextFieldType>();
 builder.Services.AddSingleton<IFieldType, NumberFieldType>();
 builder.Services.AddSingleton<IFieldType, DateFieldType>();
@@ -665,6 +704,8 @@ app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();
 app.MapAdminPluginsEndpoints();
 app.MapFormEndpoints();
+app.MapExternalConnectionEndpoints();
+app.MapAgentEndpoints();
 
 // Runtime-mutable public assets live under /data/wwwroot and are served at the
 // configured prefix (default /files). MapStaticAssets only handles compile-time

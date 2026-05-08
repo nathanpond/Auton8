@@ -4,6 +4,7 @@ using RecordTypeModel = AutoNate.Web.Models.Records.RecordType;
 using RecordModel = AutoNate.Web.Models.Records.Record;
 using WorkflowModelModel = AutoNate.Web.Models.WorkflowModel;
 using FormModel = AutoNate.Web.Models.Forms.Form;
+using ExternalConnectionModel = AutoNate.Web.Persistence.Scaffolded.ExternalConnection;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
@@ -19,7 +20,7 @@ public static class CoreEntityTypes
         {
             User!, Group!, Role!, RecordType!, Record!,
             WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
-            Form!
+            Form!, ExternalConnection!
         });
 
     public static EntityTypeDefinition User { get; } = new(
@@ -128,4 +129,15 @@ public static class CoreEntityTypes
             Actions.Delete, Actions.Publish
         },
         tags: new[] { "shortcode", "siteAvailable", "draft", "published" });
+
+    // Outbound integration config registered through the External Connections
+    // admin page. Manage gates write paths (create/edit/delete/test/set-default);
+    // View gates list and read so admins without write authority can still
+    // inspect what's configured.
+    public static EntityTypeDefinition ExternalConnection { get; } = new(
+        kind: EntityKinds.ExternalConnection,
+        clrType: typeof(ExternalConnectionModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Manage },
+        tags: new[] { "kind", "name", "default" });
 }

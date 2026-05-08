@@ -2012,6 +2012,107 @@ internal static class DatabaseSchemaInitializer
             ON form_versions (form_id);
         """;
 
+    // Generic kind-discriminated table for outbound integrations whose
+    // configuration must be admin-editable: LLM providers (Anthropic, OpenAI),
+    // and future kinds like SMTP, S3, identity providers. The api key (or
+    // equivalent secret) is encrypted via DataProtection — see
+    // IConnectionSecretProtector. metadata_json carries kind-specific fields
+    // (base url, default model, custom headers) so adding a new kind doesn't
+    // require schema changes. The partial unique index makes "set as default
+    // for kind X" a one-row guarantee.
+    private const string ExternalConnectionsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS external_connection (
+            id UUID PRIMARY KEY,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            is_default BOOLEAN NOT NULL DEFAULT FALSE,
+            metadata_json JSONB NOT NULL,
+            secret_ciphertext BYTEA NULL,
+            secret_fingerprint TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_external_connection_kind_enabled
+            ON external_connection (kind, is_enabled);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_external_connection_default_per_kind
+            ON external_connection (kind)
+            WHERE is_default;
+        """;
+
+    // Agentic-AI conversation storage. Per-user, per-page (page_key derived in
+    // the SPA so the right-side chat sidebar can scope conversations to the
+    // user's current route). Hard-delete on user request — the audit event
+    // agent.conversation.deleted preserves the trail. content_json stores
+    // provider-neutral content blocks (text / tool_use / tool_result) so a
+    // conversation started against one provider can be replayed against a
+    // different one without rewrites. tool calls live in their own table so
+    // the agent loop can correlate provider-issued tool_use ids with our row
+    // ids and persist intermediate "pending" status while a tool runs.
+    private const string AgentConversationsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS agent_conversation (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL,
+            page_key TEXT NOT NULL,
+            title TEXT NULL,
+            provider_kind TEXT NULL,
+            model_id TEXT NULL,
+            connection_id UUID NULL REFERENCES external_connection (id) ON DELETE SET NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            last_message_at_utc TIMESTAMPTZ NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_agent_conversation_user_page
+            ON agent_conversation (user_id, page_key, last_message_at_utc DESC);
+
+        CREATE INDEX IF NOT EXISTS ix_agent_conversation_user
+            ON agent_conversation (user_id, last_message_at_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS agent_message (
+            id UUID PRIMARY KEY,
+            conversation_id UUID NOT NULL REFERENCES agent_conversation (id) ON DELETE CASCADE,
+            parent_message_id UUID NULL REFERENCES agent_message (id) ON DELETE SET NULL,
+            role TEXT NOT NULL,
+            content_json JSONB NOT NULL,
+            provider_kind TEXT NULL,
+            model_id TEXT NULL,
+            input_tokens INTEGER NULL,
+            output_tokens INTEGER NULL,
+            cache_read_tokens INTEGER NULL,
+            cache_write_tokens INTEGER NULL,
+            stop_reason TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_agent_message_conversation
+            ON agent_message (conversation_id, created_at_utc);
+
+        CREATE TABLE IF NOT EXISTS agent_tool_call (
+            id UUID PRIMARY KEY,
+            message_id UUID NOT NULL REFERENCES agent_message (id) ON DELETE CASCADE,
+            tool_use_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            args_json JSONB NOT NULL,
+            result_json JSONB NULL,
+            status TEXT NOT NULL,
+            error_text TEXT NULL,
+            started_at_utc TIMESTAMPTZ NOT NULL,
+            finished_at_utc TIMESTAMPTZ NULL,
+            duration_ms INTEGER NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_agent_tool_call_message
+            ON agent_tool_call (message_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -2053,6 +2154,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxDeadLettersSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SystemIssuesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(LocalUserLockoutSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ExternalConnectionsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(AgentConversationsSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

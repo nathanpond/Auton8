@@ -72,14 +72,7 @@ export function SitewideAppearance() {
   );
 }
 
-export function SitewideExternalConnections() {
-  return (
-    <Stub
-      title="External Connections"
-      blurb="Configure integrations with external systems such as identity providers, message buses, and APIs."
-    />
-  );
-}
+export { ExternalConnectionsPage as SitewideExternalConnections } from "./external-connections/ExternalConnectionsPage";
 
 export function SecurityManageUsers() {
   return (

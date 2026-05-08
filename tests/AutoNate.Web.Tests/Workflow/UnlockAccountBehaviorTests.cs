@@ -237,6 +237,12 @@ internal sealed class FakeLocalUserStore : ILocalUserStore
         Task.FromResult<IReadOnlyList<LocalUser>>(
             _user is null ? Array.Empty<LocalUser>() : new[] { _user });
 
+    public Task<LocalUserPage> ListPagedAsync(ListLocalUsersRequest request, CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<LocalUser> items = _user is null ? Array.Empty<LocalUser>() : new[] { _user };
+        return Task.FromResult(new LocalUserPage(items, items.Count));
+    }
+
     public Task<LocalUser?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default) =>
         Task.FromResult(_user is not null
             && string.Equals(_user.Username, username, StringComparison.Ordinal)

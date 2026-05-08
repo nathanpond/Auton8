@@ -13,6 +13,7 @@ import { resolveItemPath } from "@/menus/resolveItemPath";
 import { reportMenuRenderFailure } from "@/api/systemIssues";
 import SiteBrand from "@/components/SiteBrand";
 import NotificationBell from "@/components/notifications/NotificationBell";
+import AgentChatTrigger from "@/agent/AgentChatTrigger";
 
 // Tiny helper used by the silent-drop sites in IconMenuItem / DropdownEntry /
 // UserDropdownEntry. Reporting at the moment we drop the item is what makes
@@ -255,6 +256,8 @@ export default function NavMenu() {
         ))}
 
         {me?.authenticated === true && notificationsEnabled && <NotificationBell />}
+
+        {me?.authenticated === true && <AgentChatTrigger />}
 
         <div className="menu-item dropdown">
           <a

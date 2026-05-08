@@ -1,8 +1,10 @@
 using AutoNate.Web.Configuration;
+using AutoNate.Web.Services.Agent;
 using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.SiteSettings;
@@ -61,7 +63,9 @@ public sealed class NatsStreamProvisioner(
             // SiteEventTopic uses TopicRoot="site" and SystemIssueEventTopic
             // uses TopicRoot="system" — distinct prefixes so the wildcards
             // don't overlap.
-            $"{SystemIssueEventTopic.TopicRoot}.>"
+            $"{SystemIssueEventTopic.TopicRoot}.>",
+            $"{AgentEventTopic.TopicRoot}.>",
+            $"{ExternalConnectionEventTopic.TopicRoot}.>"
         })
         {
             MaxAge = StreamMaxAge
