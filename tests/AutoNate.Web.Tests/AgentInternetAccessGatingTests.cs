@@ -17,7 +17,7 @@ public sealed class AgentInternetAccessGatingTests
     private static readonly Guid TestUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     [Fact]
-    public async Task With_setting_off_fetch_url_is_NOT_offered_to_the_provider()
+    public async Task With_setting_off_internet_tools_are_NOT_offered_to_the_provider()
     {
         var capture = new ToolCapturingProvider();
         await using var factory = await BuildFactoryAsync(capture);
@@ -27,12 +27,13 @@ public sealed class AgentInternetAccessGatingTests
 
         var seen = Assert.Single(capture.RequestsSeen);
         Assert.DoesNotContain(seen, t => t.Name == "fetch_url");
+        Assert.DoesNotContain(seen, t => t.Name == "web_search");
         // Sanity: other diagnostic tools should still be there.
         Assert.Contains(seen, t => t.Name == "find_workflow");
     }
 
     [Fact]
-    public async Task With_setting_on_fetch_url_IS_offered_to_the_provider()
+    public async Task With_setting_on_internet_tools_ARE_offered_to_the_provider()
     {
         var capture = new ToolCapturingProvider();
         await using var factory = await BuildFactoryAsync(capture);
@@ -42,6 +43,7 @@ public sealed class AgentInternetAccessGatingTests
 
         var seen = Assert.Single(capture.RequestsSeen);
         Assert.Contains(seen, t => t.Name == "fetch_url");
+        Assert.Contains(seen, t => t.Name == "web_search");
     }
 
     private static async Task<WebApplicationFactoryHandle> BuildFactoryAsync(IChatProvider provider)

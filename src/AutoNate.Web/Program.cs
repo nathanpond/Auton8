@@ -20,6 +20,7 @@ using AutoNate.Web.Services.Agent;
 using AutoNate.Web.Services.Agent.Conversations;
 using AutoNate.Web.Services.Agent.Loop;
 using AutoNate.Web.Services.Agent.Providers;
+using AutoNate.Web.Services.Agent.Search;
 using AutoNate.Web.Services.Agent.Skills;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.ExternalConnections;
@@ -266,6 +267,21 @@ builder.Services.AddHttpClient("agent.webfetch", c =>
     MaxAutomaticRedirections = 5,
     UseCookies = false
 });
+
+// WebSearchSkill — same gating as fetch_url. Provider abstraction lets us
+// add Brave / Serper / Google later by appending to the resolver's switch.
+builder.Services.AddScoped<IAgentSkill, WebSearchSkill>();
+builder.Services.AddScoped<IWebSearchProviderResolver, WebSearchProviderResolver>();
+builder.Services.AddHttpClient("agent.websearch", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(15);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("AutoNate-Agent/1.0");
+}).ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+{
+    AllowAutoRedirect = false,
+    UseCookies = false
+});
+
 builder.Services.AddScoped<ISkillRegistry, SkillRegistry>();
 
 // Conversation persistence + the orchestrator that runs the tool-using loop.

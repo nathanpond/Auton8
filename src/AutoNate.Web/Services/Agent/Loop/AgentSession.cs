@@ -14,6 +14,15 @@ namespace AutoNate.Web.Services.Agent.Loop;
 
 public sealed class AgentSession : IAgentSession
 {
+    // Tool names that the chatbot.internetAccessEnabled setting controls.
+    // Both fetch_url and web_search reach the public internet; both ride
+    // on the same toggle so admins have one switch.
+    private static readonly HashSet<string> InternetGatedTools = new(StringComparer.Ordinal)
+    {
+        WebFetchSkill.ToolName,
+        WebSearchSkill.ToolName
+    };
+
     private readonly IAgentConversationStore _conversationStore;
     private readonly IChatProviderResolver _providerResolver;
     private readonly ISkillRegistry _skillRegistry;
@@ -138,7 +147,7 @@ public sealed class AgentSession : IAgentSession
         var allTools = _skillRegistry.ChatTools;
         IReadOnlyList<ChatTool> filteredTools = internetAccessEnabled
             ? allTools
-            : allTools.Where(t => t.Name != WebFetchSkill.ToolName).ToList();
+            : allTools.Where(t => !InternetGatedTools.Contains(t.Name)).ToList();
 
         var iteration = 0;
         while (iteration < _options.MaxIterations)

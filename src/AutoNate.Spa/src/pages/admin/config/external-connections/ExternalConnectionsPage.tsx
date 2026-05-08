@@ -12,18 +12,78 @@ import {
   updateExternalConnection
 } from "@/api/externalConnections";
 
-const KINDS: Array<{ value: string; label: string; defaultBaseUrl: string; defaultModel: string }> = [
+// One field a connector kind needs the admin to fill in (in addition to the
+// always-present name/description/secret/enabled). Adding a new connector
+// means adding a row to KINDS below — the modal renders these fields
+// generically, so no other code touches the form.
+type ConnectionFieldDef = {
+  key: string;            // metadata.json key
+  label: string;
+  placeholder?: string;
+  defaultValue?: string;
+  hint?: string;          // small grey text under the input
+};
+
+type ConnectionKindDef = {
+  value: string;
+  label: string;
+  // Helper text shown under the secret field. Defaults to a generic
+  // "Stored encrypted; never echoed back." line.
+  secretHint?: string;
+  fields: ConnectionFieldDef[];
+};
+
+const KINDS: ConnectionKindDef[] = [
   {
     value: "LlmProvider:Anthropic",
     label: "Anthropic (Claude)",
-    defaultBaseUrl: "https://api.anthropic.com",
-    defaultModel: "claude-sonnet-4-6"
+    fields: [
+      {
+        key: "baseUrl",
+        label: "Base URL",
+        placeholder: "https://api.anthropic.com",
+        defaultValue: "https://api.anthropic.com"
+      },
+      {
+        key: "model",
+        label: "Default model",
+        placeholder: "claude-sonnet-4-6",
+        defaultValue: "claude-sonnet-4-6",
+        hint: "Conversations created against this connection use this model."
+      }
+    ]
   },
   {
     value: "LlmProvider:OpenAI",
     label: "OpenAI (GPT)",
-    defaultBaseUrl: "https://api.openai.com",
-    defaultModel: "gpt-4.1"
+    fields: [
+      {
+        key: "baseUrl",
+        label: "Base URL",
+        placeholder: "https://api.openai.com",
+        defaultValue: "https://api.openai.com"
+      },
+      {
+        key: "model",
+        label: "Default model",
+        placeholder: "gpt-4.1",
+        defaultValue: "gpt-4.1",
+        hint: "Conversations created against this connection use this model."
+      }
+    ]
+  },
+  {
+    value: "WebSearchProvider:Tavily",
+    label: "Tavily (web search)",
+    fields: [
+      {
+        key: "baseUrl",
+        label: "Base URL",
+        placeholder: "https://api.tavily.com",
+        defaultValue: "https://api.tavily.com",
+        hint: "Override only if proxying through a custom endpoint."
+      }
+    ]
   }
 ];
 
@@ -32,22 +92,37 @@ type FormState = {
   kind: string;
   name: string;
   description: string;
-  baseUrl: string;
-  model: string;
   isEnabled: boolean;
   secret: string;
+  // Field values keyed by ConnectionFieldDef.key. Empty strings are dropped
+  // before submit so the backend metadata stays sparse.
+  metadata: Record<string, string>;
 };
 
-const emptyForm: FormState = {
-  id: null,
-  kind: KINDS[0].value,
-  name: "",
-  description: "",
-  baseUrl: KINDS[0].defaultBaseUrl,
-  model: KINDS[0].defaultModel,
-  isEnabled: true,
-  secret: ""
-};
+function findKind(value: string): ConnectionKindDef | undefined {
+  return KINDS.find((k) => k.value === value);
+}
+
+function defaultMetadataFor(kind: ConnectionKindDef): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of kind.fields) {
+    if (f.defaultValue !== undefined) out[f.key] = f.defaultValue;
+  }
+  return out;
+}
+
+function makeEmptyForm(kindValue: string = KINDS[0].value): FormState {
+  const kind = findKind(kindValue) ?? KINDS[0];
+  return {
+    id: null,
+    kind: kind.value,
+    name: "",
+    description: "",
+    isEnabled: true,
+    secret: "",
+    metadata: defaultMetadataFor(kind)
+  };
+}
 
 export function ExternalConnectionsPage() {
   const queryClient = useQueryClient();
@@ -89,24 +164,40 @@ export function ExternalConnectionsPage() {
     }
   });
 
-  const startNew = () => setEditing({ ...emptyForm });
-  const startEdit = (row: ExternalConnection) => setEditing({
-    id: row.id,
-    kind: row.kind,
-    name: row.name,
-    description: row.description ?? "",
-    baseUrl: typeof row.metadata?.baseUrl === "string" ? row.metadata.baseUrl : "",
-    model: typeof row.metadata?.model === "string" ? row.metadata.model : "",
-    isEnabled: row.isEnabled,
-    secret: ""
-  });
+  const startNew = () => setEditing(makeEmptyForm());
+
+  const startEdit = (row: ExternalConnection) => {
+    const kind = findKind(row.kind);
+    // Pre-populate every field this kind declares from the persisted
+    // metadata; unknown / missing values become empty strings.
+    const metadata: Record<string, string> = {};
+    if (kind) {
+      for (const f of kind.fields) {
+        const v = row.metadata?.[f.key];
+        metadata[f.key] = typeof v === "string" ? v : "";
+      }
+    }
+    setEditing({
+      id: row.id,
+      kind: row.kind,
+      name: row.name,
+      description: row.description ?? "",
+      isEnabled: row.isEnabled,
+      secret: "",
+      metadata
+    });
+  };
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editing) return;
+
+    // Drop empty strings so a blank field doesn't store metadata noise like
+    // baseUrl: "". The backend just sees the keys the kind needs.
     const metadata: ExternalConnectionMetadata = {};
-    if (editing.baseUrl) metadata.baseUrl = editing.baseUrl;
-    if (editing.model) metadata.model = editing.model;
+    for (const [k, v] of Object.entries(editing.metadata)) {
+      if (v !== "") metadata[k] = v;
+    }
 
     if (editing.id) {
       updateMutation.mutate({
@@ -142,7 +233,7 @@ export function ExternalConnectionsPage() {
         {listQuery.isLoading && <p>Loading…</p>}
         {listQuery.isError && <p className="text-danger">Failed to load connections.</p>}
         {listQuery.data && listQuery.data.length === 0 && (
-          <p className="text-muted">No external connections yet. Add one to wire an LLM provider into the agent.</p>
+          <p className="text-muted">No external connections yet. Add one to wire an LLM or search provider into the agent.</p>
         )}
         {listQuery.data && listQuery.data.length > 0 && (
           <div className="table-responsive">
@@ -164,7 +255,7 @@ export function ExternalConnectionsPage() {
                     <td>
                       <div className="fw-semibold">{row.name}</div>
                       {row.description && <div className="text-muted small">{row.description}</div>}
-                      {typeof row.metadata?.model === "string" && (
+                      {typeof row.metadata?.model === "string" && row.metadata.model !== "" && (
                         <div className="text-muted small">Model: {row.metadata.model}</div>
                       )}
                     </td>
@@ -259,19 +350,22 @@ type ConnectionFormModalProps = {
 };
 
 function ConnectionFormModal({ form, onChange, onSubmit, onCancel, submitting, submitError }: ConnectionFormModalProps) {
-  // When creating a new row, switching kind also resets baseUrl/model defaults
-  // so the admin doesn't have to remember API URLs by hand.
+  const kindDef = findKind(form.kind);
+
+  // When creating a new row, switching the kind dropdown resets the
+  // dynamic-field values to that kind's defaults (so the admin doesn't
+  // have to remember API URLs by hand). Edits never re-key, so we
+  // skip this for existing rows.
   useEffect(() => {
     if (form.id !== null) return;
-    const kind = KINDS.find((k) => k.value === form.kind);
-    if (!kind) return;
-    if (form.baseUrl === "" || KINDS.some((k) => k.defaultBaseUrl === form.baseUrl)) {
-      onChange({ ...form, baseUrl: kind.defaultBaseUrl, model: kind.defaultModel });
-    }
+    if (!kindDef) return;
+    onChange({ ...form, metadata: defaultMetadataFor(kindDef) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.kind]);
 
   const update = (patch: Partial<FormState>) => onChange({ ...form, ...patch });
+  const updateField = (fieldKey: string, value: string) =>
+    onChange({ ...form, metadata: { ...form.metadata, [fieldKey]: value } });
 
   return (
     <>
@@ -322,25 +416,18 @@ function ConnectionFormModal({ form, onChange, onSubmit, onCancel, submitting, s
                   />
                 </div>
 
-                <div className="mb-3">
-                  <label className="form-label">Base URL</label>
-                  <input
-                    className="form-control"
-                    value={form.baseUrl}
-                    onChange={(e) => update({ baseUrl: e.target.value })}
-                    placeholder="https://api.example.com"
-                  />
-                </div>
-
-                <div className="mb-3">
-                  <label className="form-label">Default model</label>
-                  <input
-                    className="form-control"
-                    value={form.model}
-                    onChange={(e) => update({ model: e.target.value })}
-                    placeholder="e.g. claude-sonnet-4-6"
-                  />
-                </div>
+                {(kindDef?.fields ?? []).map((field) => (
+                  <div className="mb-3" key={field.key}>
+                    <label className="form-label">{field.label}</label>
+                    <input
+                      className="form-control"
+                      value={form.metadata[field.key] ?? ""}
+                      onChange={(e) => updateField(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                    />
+                    {field.hint && <small className="text-muted">{field.hint}</small>}
+                  </div>
+                ))}
 
                 <div className="mb-3">
                   <label className="form-label">API key</label>
@@ -353,7 +440,7 @@ function ConnectionFormModal({ form, onChange, onSubmit, onCancel, submitting, s
                     autoComplete="off"
                   />
                   <small className="text-muted">
-                    Stored encrypted via DataProtection. Never echoed back.
+                    {kindDef?.secretHint ?? "Stored encrypted via DataProtection. Never echoed back."}
                   </small>
                 </div>
 
