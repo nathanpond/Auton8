@@ -2,26 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   acknowledgeSystemIssue,
   getSystemIssue,
-  listSystemIssues,
   resolveSystemIssue,
-  SystemIssueListOptions,
-  SystemIssueListResponse,
   SystemIssueModel
 } from "@/api/systemIssues";
 
 export const SYSTEM_ISSUES_QUERY_KEY = ["system-issues"] as const;
-
-// Refresh on a 15-second cadence so the page reflects detector ticks
-// (SystemHealthSnapshotDetector runs every 60s, others slower) without the
-// user needing to refresh.
-export function useSystemIssues(options: SystemIssueListOptions = {}) {
-  return useQuery<SystemIssueListResponse>({
-    queryKey: [...SYSTEM_ISSUES_QUERY_KEY, "list", options],
-    queryFn: ({ signal }) => listSystemIssues(options, signal),
-    refetchInterval: 15_000,
-    staleTime: 0
-  });
-}
 
 export function useSystemIssue(id: string | null) {
   return useQuery<SystemIssueModel>({

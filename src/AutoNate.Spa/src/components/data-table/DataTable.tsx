@@ -73,6 +73,9 @@ type DataTableProps<T> = {
   emptyMessage?: string;
   loadingMessage?: string;
   globalFilterFn?: (row: T, search: string) => boolean;
+
+  // Poll the data source on this cadence (ms). Omit to disable polling.
+  refetchInterval?: number;
 };
 
 // Auto mode probes /loadPage with pageSize=0 to learn the total without
@@ -104,7 +107,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
     getRowClassName,
     emptyMessage = "No records found.",
     loadingMessage = "Loading…",
-    globalFilterFn
+    globalFilterFn,
+    refetchInterval
   } = props;
 
   const [sorting, setSorting] = useState<SortingState>(initialSort);
@@ -149,7 +153,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const clientQuery = useQuery({
     queryKey: [...queryKey, "all"],
     queryFn: () => loadAll!(),
-    enabled: effectiveMode === "client" && !!loadAll
+    enabled: effectiveMode === "client" && !!loadAll,
+    refetchInterval
   });
 
   const sortKey = sorting[0] ? `${sorting[0].id}:${sorting[0].desc ? "desc" : "asc"}` : null;
@@ -173,7 +178,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
         filter
       }),
     enabled: effectiveMode === "server" && !!loadPage,
-    placeholderData: (prev) => prev
+    placeholderData: (prev) => prev,
+    refetchInterval
   });
 
   const allRows: T[] = clientQuery.data ?? [];

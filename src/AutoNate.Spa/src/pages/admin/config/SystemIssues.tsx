@@ -126,6 +126,7 @@ export default function SystemIssues() {
         // Filter selections are part of the backend request, so they go in
         // the queryKey so react-query refetches when any facet changes.
         queryKey={["system-issues", { state, severity, category }]}
+        refetchInterval={15_000}
         columns={columns}
         rowKey={(i) => i.id}
         columnWidths={COLUMN_WIDTHS}
