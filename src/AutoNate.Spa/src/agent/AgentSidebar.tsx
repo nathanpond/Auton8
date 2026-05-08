@@ -15,6 +15,7 @@ import {
 import { usePageKey } from "./usePageKey";
 import { useAgentStream } from "./useAgentStream";
 import { useAgentSidebar } from "./AgentSidebarContext";
+import { MarkdownView } from "./MarkdownView";
 import "./AgentSidebar.css";
 
 export function AgentSidebar() {
@@ -278,7 +279,7 @@ function ChatThread({ detail, loading, streamText, streaming, toolCalls, errorTe
                 durationMs={tc.durationMs}
               />
             ))}
-            <div>{streamText}</div>
+            {streamText && <MarkdownView source={streamText} />}
           </div>
         )}
         {errorText && <div className="alert alert-danger m-2">{errorText}</div>}
@@ -315,7 +316,9 @@ function MessageBubble({ message, toolCallsForMessage }: MessageBubbleProps) {
           durationMs={tc.durationMs ?? undefined}
         />
       ))}
-      {text && <div>{text}</div>}
+      {text && (message.role === "assistant"
+        ? <MarkdownView source={text} />
+        : <div>{text}</div>)}
     </div>
   );
 }

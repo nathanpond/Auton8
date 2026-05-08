@@ -116,3 +116,84 @@
   max-height: 220px;
   overflow: auto;
 }
+
+/* MarkdownView output for assistant messages. The bubble's pre-wrap is
+   dropped here because <p>/<ul>/<pre> handle their own whitespace; user
+   bubbles keep the bubble-level pre-wrap so typed newlines still display. */
+.agent-bubble--assistant {
+  white-space: normal;
+}
+
+.agent-markdown > :first-child { margin-top: 0; }
+.agent-markdown > :last-child  { margin-bottom: 0; }
+
+.agent-markdown p,
+.agent-markdown ul,
+.agent-markdown ol {
+  margin: 0.4rem 0;
+}
+
+.agent-markdown h1,
+.agent-markdown h2,
+.agent-markdown h3,
+.agent-markdown h4 {
+  margin: 0.75rem 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.agent-markdown ul,
+.agent-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.agent-markdown li + li {
+  margin-top: 0.15rem;
+}
+
+.agent-markdown code {
+  background: var(--surface-secondary-bg, #f1f3f5);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.85em;
+}
+
+.agent-markdown pre {
+  background: var(--surface-secondary-bg, #f1f3f5);
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.3rem;
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 0.85em;
+  margin: 0.4rem 0;
+}
+
+.agent-markdown pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+.agent-markdown blockquote {
+  border-left: 3px solid var(--border-color, #dee2e6);
+  padding-left: 0.6rem;
+  margin: 0.4rem 0;
+  color: var(--text-muted, #6c757d);
+}
+
+.agent-markdown table {
+  border-collapse: collapse;
+  margin: 0.4rem 0;
+  font-size: 0.85em;
+}
+
+.agent-markdown th,
+.agent-markdown td {
+  border: 1px solid var(--border-color, #dee2e6);
+  padding: 0.2rem 0.4rem;
+}
+
+.agent-markdown a {
+  color: inherit;
+  text-decoration: underline;
+}
