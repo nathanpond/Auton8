@@ -1,7 +1,7 @@
 import { api } from "./client";
 
 export type SiteSettingType = "bool" | "string" | "int";
-export type SiteSettingGroup = "general" | "features";
+export type SiteSettingGroup = "general" | "features" | "chatbot";
 
 export type SettingDefinition = {
   key: string;

@@ -127,6 +127,7 @@ public static class SiteSettingsEndpoints
     {
         SettingGroup.General => "general",
         SettingGroup.Features => "features",
+        SettingGroup.Chatbot => "chatbot",
         _ => throw new InvalidOperationException($"Unknown setting group: {group}")
     };
 

@@ -249,6 +249,23 @@ builder.Services.AddScoped<IChatProviderResolver, ChatProviderResolver>();
 builder.Services.AddScoped<IAgentSkill, ExplainWorkflowSkill>();
 builder.Services.AddScoped<IAgentSkill, LookupRecordsSkill>();
 builder.Services.AddScoped<IAgentSkill, AnalyzeSystemIssueSkill>();
+// WebFetchSkill is always registered; AgentSession filters its tool out of
+// the per-turn ChatRequest when chatbot.internetAccessEnabled is off.
+builder.Services.AddScoped<IAgentSkill, WebFetchSkill>();
+builder.Services.AddSingleton<IDnsResolver, SystemDnsResolver>();
+// Dedicated HttpClient — short timeout, no cookies, capped redirects, fixed
+// User-Agent. The fetch tool can never accidentally reuse cookies from any
+// other named client (notifications etc.) because UseCookies is off.
+builder.Services.AddHttpClient("agent.webfetch", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(10);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("AutoNate-Agent/1.0");
+}).ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+{
+    AllowAutoRedirect = true,
+    MaxAutomaticRedirections = 5,
+    UseCookies = false
+});
 builder.Services.AddScoped<ISkillRegistry, SkillRegistry>();
 
 // Conversation persistence + the orchestrator that runs the tool-using loop.

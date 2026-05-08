@@ -6,6 +6,7 @@ using AutoNate.Web.Services.Agent.Conversations;
 using AutoNate.Web.Services.Agent.Providers;
 using AutoNate.Web.Services.Agent.Skills;
 using AutoNate.Web.Services.Events;
+using AutoNate.Web.Services.SiteSettings;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -18,6 +19,7 @@ public sealed class AgentSession : IAgentSession
     private readonly ISkillRegistry _skillRegistry;
     private readonly SystemPromptBuilder _promptBuilder;
     private readonly IAuditEventPublisher _auditPublisher;
+    private readonly ISiteSettingsStore _siteSettingsStore;
     private readonly IServiceProvider _services;
     private readonly AgentOptions _options;
     private readonly ILogger<AgentSession> _logger;
@@ -28,6 +30,7 @@ public sealed class AgentSession : IAgentSession
         ISkillRegistry skillRegistry,
         SystemPromptBuilder promptBuilder,
         IAuditEventPublisher auditPublisher,
+        ISiteSettingsStore siteSettingsStore,
         IServiceProvider services,
         IOptions<AgentOptions> options,
         ILogger<AgentSession> logger)
@@ -37,6 +40,7 @@ public sealed class AgentSession : IAgentSession
         _skillRegistry = skillRegistry;
         _promptBuilder = promptBuilder;
         _auditPublisher = auditPublisher;
+        _siteSettingsStore = siteSettingsStore;
         _services = services;
         _options = options.Value;
         _logger = logger;
@@ -126,6 +130,16 @@ public sealed class AgentSession : IAgentSession
         var history = (await _conversationStore.LoadMessagesAsync(conversationId, cancellationToken)).ToList();
         var maxTokens = _options.DefaultMaxTokens;
 
+        // Apply per-turn capability gates from site settings. Read once per
+        // SendMessageAsync call so toggles take effect on the next user
+        // message, not mid-turn.
+        var internetAccessEnabled = await _siteSettingsStore.GetBoolAsync(
+            SiteSettingsKeys.ChatbotInternetAccessEnabled, cancellationToken);
+        var allTools = _skillRegistry.ChatTools;
+        IReadOnlyList<ChatTool> filteredTools = internetAccessEnabled
+            ? allTools
+            : allTools.Where(t => t.Name != WebFetchSkill.ToolName).ToList();
+
         var iteration = 0;
         while (iteration < _options.MaxIterations)
         {
@@ -133,7 +147,7 @@ public sealed class AgentSession : IAgentSession
             var request = new ChatRequest(
                 Messages: history,
                 SystemPrompt: systemPrompt,
-                Tools: _skillRegistry.ChatTools,
+                Tools: filteredTools,
                 ModelId: conversation.ModelId ?? "default",
                 MaxTokens: maxTokens);
 

@@ -1963,6 +1963,76 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // Adds a "Chatbot" group to the site-config left-nav with one child
+    // template item: "Chatbot Settings". Mirrors the SiteConfigFormsSql shape
+    // (own group at the end of top-level groups) so future chatbot config
+    // items can slot in alongside without disturbing other sections.
+    // Idempotent via auth_seed_state and content guards.
+    private const string SiteConfigChatbotSettingsSql =
+        """
+        DO $$
+        DECLARE
+            site_id UUID := '00000000-0000-0000-0001-000000000004';
+            chatbot_group_id UUID;
+            next_sort INT;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'site_config_chatbot_settings_v1') THEN
+                IF EXISTS (SELECT 1 FROM menus WHERE id = site_id) THEN
+                    SELECT id INTO chatbot_group_id
+                    FROM menu_items
+                    WHERE menu_id = site_id
+                      AND parent_id IS NULL
+                      AND display_name = 'Chatbot'
+                      AND item_type = 'group'
+                    LIMIT 1;
+
+                    IF chatbot_group_id IS NULL THEN
+                        SELECT COALESCE(MAX(sort_order), -1) + 1 INTO next_sort
+                        FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id IS NULL;
+
+                        chatbot_group_id := gen_random_uuid();
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            chatbot_group_id, site_id, NULL, next_sort,
+                            'Chatbot', 'fa fa-robot',
+                            'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id = chatbot_group_id
+                          AND config->>'templateKey' = 'configChatbotSettings'
+                    ) THEN
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            gen_random_uuid(), site_id, chatbot_group_id, 0,
+                            'Chatbot Settings', 'fa fa-sliders',
+                            'template',
+                            '{{"templateKey":"configChatbotSettings","path":"/admin/config/chatbot-settings"}}'::jsonb,
+                            TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('site_config_chatbot_settings_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
     // Forms feature: admin-authored JSX bound to backend data. `forms` holds
     // the editable draft (latest FormCode + metadata); `form_versions` is an
     // append-only history written every save / publish / restore. The SPA
@@ -2147,6 +2217,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemIssuesSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigFormsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotSettingsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(FormsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);

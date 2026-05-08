@@ -63,6 +63,16 @@ export function SitewideFeatures() {
   );
 }
 
+export function SitewideChatbotSettings() {
+  return (
+    <SiteSettingsForm
+      group="chatbot"
+      title="Chatbot Settings"
+      blurb="Configure agent capabilities. Changes apply on the next message."
+    />
+  );
+}
+
 export function SitewideAppearance() {
   return (
     <Stub

@@ -25,6 +25,7 @@ import {
   SecurityManageUsers,
   SecurityPermissionChecker,
   SecuritySetPermissions,
+  SitewideChatbotSettings,
   SitewideExternalConnections,
   SitewideFeatures,
   SitewideGeneral
@@ -64,5 +65,6 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configPlugins: <AdminPlugins />,
   configPluginDocumentation: <PluginDocumentation />,
   configForms: <FormsList />,
-  configFormMappings: <FormsFormMappings />
+  configFormMappings: <FormsFormMappings />,
+  configChatbotSettings: <SitewideChatbotSettings />
 };

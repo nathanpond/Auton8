@@ -23,7 +23,8 @@ public enum SettingType
 public enum SettingGroup
 {
     General,
-    Features
+    Features,
+    Chatbot
 }
 
 public sealed record class SettingDefinition(
@@ -41,6 +42,12 @@ public static class SiteSettingsKeys
     // header. Off hides the bell entirely (and the live websocket subscription
     // is skipped), but the underlying notifications API stays reachable.
     public const string NotificationsHeaderEnabled = "notifications.headerEnabled";
+
+    // When enabled, the agent gets a fetch_url tool that issues HTTP GETs
+    // against arbitrary public URLs (private/link-local IPs blocked, response
+    // capped at 256 KB). Off by default so a fresh install doesn't leak the
+    // server's network position. Read per-turn in AgentSession.SendMessageAsync.
+    public const string ChatbotInternetAccessEnabled = "chatbot.internetAccessEnabled";
 }
 
 public static class SiteSettingsRegistry
@@ -48,6 +55,7 @@ public static class SiteSettingsRegistry
     // Pre-parsed JSON literal for boolean true so we can hand back a real
     // JsonElement without each definition having to allocate a JsonDocument.
     private static readonly JsonElement TrueElement = JsonDocument.Parse("true").RootElement.Clone();
+    private static readonly JsonElement FalseElement = JsonDocument.Parse("false").RootElement.Clone();
 
     public static readonly IReadOnlyList<SettingDefinition> All = new ReadOnlyCollection<SettingDefinition>(
     [
@@ -58,7 +66,16 @@ public static class SiteSettingsRegistry
             Label: "Show notifications in header",
             Description: "When enabled, the bell icon and notifications dropdown appear in the site header.",
             DefaultValue: TrueElement,
-            IsPublic: true)
+            IsPublic: true),
+
+        new SettingDefinition(
+            Key: SiteSettingsKeys.ChatbotInternetAccessEnabled,
+            Type: SettingType.Bool,
+            Group: SettingGroup.Chatbot,
+            Label: "Enable Internet Access to Chatbot",
+            Description: "When enabled, the assistant can fetch URLs via a fetch_url tool. Private IPs and oversized responses are always blocked. Changes apply to the next message.",
+            DefaultValue: FalseElement,
+            IsPublic: false)
     ]);
 
     private static readonly Dictionary<string, SettingDefinition> ByKey =
