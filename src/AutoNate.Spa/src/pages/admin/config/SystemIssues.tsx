@@ -39,7 +39,8 @@ const CATEGORY_OPTIONS: { value: SystemIssueCategory | ""; label: string }[] = [
   { value: "auth", label: "Auth" },
   { value: "config", label: "Config" },
   { value: "resource", label: "Resource" },
-  { value: "plugin", label: "Plugin" }
+  { value: "plugin", label: "Plugin" },
+  { value: "unhandled", label: "Unhandled" }
 ];
 
 const COLUMN_WIDTHS = ["10%", "38%", "13%", "16%", "8%", "15%"];

@@ -12,4 +12,5 @@ public static class SystemIssueCategories
     public const string Config = "config";
     public const string Resource = "resource";
     public const string Plugin = "plugin";
+    public const string Unhandled = "unhandled";
 }

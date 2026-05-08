@@ -342,6 +342,15 @@ builder.Services.AddHostedService<StuckWorkflowExecutionDetector>();
 builder.Services.AddSingleton<MisconfiguredMenuItemDetector>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MisconfiguredMenuItemDetector>());
 
+// Global exception traps. Pair with app.UseUnhandledExceptionSystemIssues()
+// below — together they catch unhandled HTTP exceptions, AppDomain unhandled
+// exceptions (incl. terminating ones), and unobserved task exceptions, and
+// record each as a fingerprint-deduped SystemIssue under the "unhandled"
+// category. Detector-quality issues (audit_outbox backlog, locked accounts,
+// etc.) remain authoritative for their domains; this is the catch-all for
+// genuinely unexpected failures.
+builder.Services.AddHostedService<BackgroundExceptionTrap>();
+
 // Phase 4 remediators. Each registered as IIssueRemediator; the dispatcher
 // picks the right one by DetectorId + CanRemediate. Only safe deterministic
 // remediators are registered here — anything that mutates business data
@@ -423,6 +432,12 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
     app.UseHttpsRedirection();
 }
+
+// Sits as the outermost user-registered middleware so it wraps everything
+// that follows. Records an unhandled exception as a SystemIssue then
+// rethrows, leaving the existing dev-exception-page (development) or
+// default 500 handler (production) in charge of the response.
+app.UseUnhandledExceptionSystemIssues();
 
 app.UseWebSockets();
 app.UseAuthentication();

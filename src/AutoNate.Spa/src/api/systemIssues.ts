@@ -11,7 +11,8 @@ export type SystemIssueCategory =
   | "auth"
   | "config"
   | "resource"
-  | "plugin";
+  | "plugin"
+  | "unhandled";
 
 export type SystemIssueModel = {
   id: string;
