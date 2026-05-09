@@ -80,6 +80,96 @@ public sealed class ManageRecordTypesSkillTests
             toolNames);
     }
 
+    [Fact]
+    public async Task CreateType_dry_run_returns_proposal_and_does_not_call_CreateAsync()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            description = "Vehicles",
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        var data = result.GetProperty("data");
+        Assert.Equal("create_type", data.GetProperty("operation").GetString());
+        Assert.Equal("CAR", data.GetProperty("after").GetProperty("shortCode").GetString());
+        Assert.True(data.GetProperty("validation").GetProperty("ok").GetBoolean());
+        Assert.Empty(typeStore.CreateCalls);
+    }
+
+    [Fact]
+    public async Task CreateType_commit_calls_CreateAsync_with_session_userId()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_committed", result.GetProperty("kind").GetString());
+        Assert.Equal("CAR", result.GetProperty("data").GetProperty("shortCode").GetString());
+        Assert.Equal(0, result.GetProperty("data").GetProperty("createdFieldCount").GetInt32());
+
+        var call = Assert.Single(typeStore.CreateCalls);
+        Assert.Equal(SessionUserId, call.ActorId);
+        Assert.Equal("CAR", call.Input.ShortCode);
+        Assert.Equal("Car", call.Input.Name);
+    }
+
+    [Fact]
+    public async Task CreateType_authorizer_denial_returns_error_and_short_circuits()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer
+        {
+            Default = AuthEffect.Allow,
+            Decisions = { [(Actions.Create, EntityKinds.RecordType, "*")] = AuthEffect.Deny }
+        };
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.CreateCalls);
+    }
+
+    [Fact]
+    public async Task CreateType_commit_surfaces_validation_exception_as_failed_envelope()
+    {
+        var typeStore = new FakeTypeStore
+        {
+            CreateThrows = new RecordTypeValidationException("short_code 'CAR' is already in use.")
+        };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_failed", result.GetProperty("kind").GetString());
+        Assert.False(result.GetProperty("data").GetProperty("validation").GetProperty("ok").GetBoolean());
+    }
+
     // --- helpers / fakes ---
 
     private static async Task<JsonElement> Invoke(
