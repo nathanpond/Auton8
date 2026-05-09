@@ -31,6 +31,14 @@ src/AutoNate.Web/wwwroot/
 .idea/
 Test Results/
 
+# Per-user Rider settings (the shared `.DotSettings` file without the .user
+# suffix is fine to commit; the .user variant is per-machine state).
+*.DotSettings.user
+
+# Playwright MCP tool output (console logs and page snapshots from
+# browser-driving sessions). Pure debug scratch — same category as /temp/.
+.playwright-mcp/
+
 # Scratch directory for ad-hoc dev artifacts (debug screenshots, captured
 # logs, throwaway exports). Anything worth keeping belongs in docs/ or
 # alongside the code it documents — /temp is for things you don't want
