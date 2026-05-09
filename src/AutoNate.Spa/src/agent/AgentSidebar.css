@@ -33,6 +33,16 @@
   z-index: 1010;
 }
 
+/* Portal-mounted clone of the header trigger (see AgentChatTrigger.tsx).
+   #top-menu (z-index 1015) traps the in-flow icon's stacking context, so
+   the clone is rendered to document.body where this z-index actually wins
+   against the over-header sidebar's 1030. */
+.agent-chat-trigger-overlay {
+  z-index: 1031;
+  display: flex;
+  align-items: center;
+}
+
 /* "Fill" mode: AgentSidebar.tsx sets body.agent-sidebar-fill so the page
    content can be pushed narrower. Fixed-position sidebar itself doesn't move,
    so the right-edge padding lives on #app (covers both header and content). */
