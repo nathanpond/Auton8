@@ -31,6 +31,12 @@ src/AutoNate.Web/wwwroot/
 .idea/
 Test Results/
 
+# Scratch directory for ad-hoc dev artifacts (debug screenshots, captured
+# logs, throwaway exports). Anything worth keeping belongs in docs/ or
+# alongside the code it documents — /temp is for things you don't want
+# in git history.
+/temp/
+
 # Runtime data root: user uploads, persisted plugins, public /files assets,
 # repositories. Container deployments mount this as a volume; locally it's
 # auto-created on startup. Never commit anything that lands here.

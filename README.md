@@ -123,6 +123,8 @@ export ConnectionStrings__Default='Host=localhost;Port=5432;Database=AutoNate;Us
 - `infra/docker-compose.yml` now includes a health check for `flowable`, so Docker Compose and Rider can surface when that service is actually ready instead of merely started.
 - Container mounts are standardized under `infra/mounts/<service>/<purpose>`.
 - The `infra/mounts` tree is intentionally not tracked in git, except for placeholder `.gitkeep` files that preserve the service layout.
+- `.run/` is intentionally tracked in git. The Rider run configurations under it (`infra: Local Stack`, `dapr: AutoNate.Web Sidecar`, `AutoNate.Web: Rider`, etc.) are shared across the team — change them deliberately.
+- `/temp/` (root only) is intentionally not tracked in git. Use it as a scratchpad for debug screenshots, captured logs, and other throwaway artifacts that don't belong in the repo.
 - `infra/dapr/components` remains the tracked source of truth for component YAML, and the Makefile mirrors those files into `infra/mounts/dapr-dashboard/components` for the dashboard and local `dapr run` workflow.
 - The mounted component files point Dapr to `localhost`, because the sidecar runs on the host while Redis runs in Docker with published ports.
 - The Postgres init script creates the `AutoNate` database while `flowable` remains the default database created by the Postgres image.
