@@ -6,6 +6,7 @@ import {
   TestConnectionResult,
   createExternalConnection,
   deleteExternalConnection,
+  listExternalConnectionModels,
   listExternalConnections,
   setDefaultExternalConnection,
   testExternalConnection,
@@ -22,6 +23,12 @@ type ConnectionFieldDef = {
   placeholder?: string;
   defaultValue?: string;
   hint?: string;          // small grey text under the input
+  // When true, the field renders as a dropdown populated by hitting the
+  // provider's /v1/models endpoint via /api/external-connections/list-models.
+  // The current value is preserved as a "(custom)" option until it appears
+  // in the loaded list, so saved connections referencing a non-listed model
+  // don't silently switch.
+  loadModels?: boolean;
 };
 
 type ConnectionKindDef = {
@@ -49,7 +56,8 @@ const KINDS: ConnectionKindDef[] = [
         label: "Default model",
         placeholder: "claude-sonnet-4-6",
         defaultValue: "claude-sonnet-4-6",
-        hint: "Conversations created against this connection use this model."
+        hint: "Conversations created against this connection use this model.",
+        loadModels: true
       }
     ]
   },
@@ -68,7 +76,8 @@ const KINDS: ConnectionKindDef[] = [
         label: "Default model",
         placeholder: "gpt-4.1",
         defaultValue: "gpt-4.1",
-        hint: "Conversations created against this connection use this model."
+        hint: "Conversations created against this connection use this model.",
+        loadModels: true
       }
     ]
   },
@@ -352,6 +361,13 @@ type ConnectionFormModalProps = {
 function ConnectionFormModal({ form, onChange, onSubmit, onCancel, submitting, submitError }: ConnectionFormModalProps) {
   const kindDef = findKind(form.kind);
 
+  // Models loaded from the provider for the currently-selected kind.
+  // null = "haven't tried yet"; empty array = "loaded, none returned".
+  // Reset whenever the kind changes so a stale Anthropic list doesn't
+  // leak into an OpenAI form.
+  const [loadedModels, setLoadedModels] = useState<string[] | null>(null);
+  const [modelsLoadError, setModelsLoadError] = useState<string | null>(null);
+
   // When creating a new row, switching the kind dropdown resets the
   // dynamic-field values to that kind's defaults (so the admin doesn't
   // have to remember API URLs by hand). Edits never re-key, so we
@@ -363,9 +379,50 @@ function ConnectionFormModal({ form, onChange, onSubmit, onCancel, submitting, s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.kind]);
 
+  // Switching kind also invalidates any models we already fetched.
+  useEffect(() => {
+    setLoadedModels(null);
+    setModelsLoadError(null);
+  }, [form.kind]);
+
   const update = (patch: Partial<FormState>) => onChange({ ...form, ...patch });
   const updateField = (fieldKey: string, value: string) =>
     onChange({ ...form, metadata: { ...form.metadata, [fieldKey]: value } });
+
+  const modelsMutation = useMutation({
+    mutationFn: listExternalConnectionModels,
+    onSuccess: (result) => {
+      if (result.ok) {
+        setLoadedModels(result.models);
+        setModelsLoadError(null);
+      } else {
+        setLoadedModels(null);
+        setModelsLoadError(result.error ?? "Failed to load models.");
+      }
+    },
+    onError: (err: Error) => {
+      setLoadedModels(null);
+      setModelsLoadError(err.message ?? "Failed to load models.");
+    }
+  });
+
+  // Use the stored secret only when editing AND the admin hasn't typed a
+  // new key. A typed key takes precedence so admins can validate a
+  // not-yet-saved rotation.
+  const canLoadModels =
+    form.secret.length > 0 || (form.id !== null);
+
+  const triggerLoadModels = () => {
+    if (form.secret.length > 0) {
+      modelsMutation.mutate({
+        kind: form.kind,
+        baseUrl: form.metadata.baseUrl || null,
+        secret: form.secret
+      });
+    } else if (form.id !== null) {
+      modelsMutation.mutate({ connectionId: form.id });
+    }
+  };
 
   return (
     <>
@@ -416,18 +473,68 @@ function ConnectionFormModal({ form, onChange, onSubmit, onCancel, submitting, s
                   />
                 </div>
 
-                {(kindDef?.fields ?? []).map((field) => (
-                  <div className="mb-3" key={field.key}>
-                    <label className="form-label">{field.label}</label>
-                    <input
-                      className="form-control"
-                      value={form.metadata[field.key] ?? ""}
-                      onChange={(e) => updateField(field.key, e.target.value)}
-                      placeholder={field.placeholder}
-                    />
-                    {field.hint && <small className="text-muted">{field.hint}</small>}
-                  </div>
-                ))}
+                {(kindDef?.fields ?? []).map((field) => {
+                  const value = form.metadata[field.key] ?? "";
+                  if (field.loadModels) {
+                    // The current value is always present in the option list
+                    // so the existing selection survives even before the
+                    // admin loads the live list (or if the server returns a
+                    // pruned set).
+                    const options = loadedModels ?? [];
+                    const merged = value && !options.includes(value)
+                      ? [value, ...options]
+                      : options;
+                    return (
+                      <div className="mb-3" key={field.key}>
+                        <label className="form-label">{field.label}</label>
+                        <div className="d-flex gap-2">
+                          <select
+                            className="form-select"
+                            value={value}
+                            onChange={(e) => updateField(field.key, e.target.value)}
+                          >
+                            {merged.length === 0 && (
+                              <option value="">— Load models to choose —</option>
+                            )}
+                            {merged.map((m) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-outline-secondary"
+                            onClick={triggerLoadModels}
+                            disabled={modelsMutation.isPending || !canLoadModels}
+                            title={canLoadModels
+                              ? "Fetch the current model list from the provider"
+                              : "Enter an API key first"}
+                          >
+                            {modelsMutation.isPending ? "Loading…" : "Load models"}
+                          </button>
+                        </div>
+                        {field.hint && <small className="text-muted d-block">{field.hint}</small>}
+                        {modelsLoadError && (
+                          <small className="text-danger d-block">Failed: {modelsLoadError}</small>
+                        )}
+                        {loadedModels && loadedModels.length === 0 && !modelsLoadError && (
+                          <small className="text-muted d-block">Provider returned no models.</small>
+                        )}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="mb-3" key={field.key}>
+                      <label className="form-label">{field.label}</label>
+                      <input
+                        className="form-control"
+                        value={value}
+                        onChange={(e) => updateField(field.key, e.target.value)}
+                        placeholder={field.placeholder}
+                      />
+                      {field.hint && <small className="text-muted">{field.hint}</small>}
+                    </div>
+                  );
+                })}
 
                 <div className="mb-3">
                   <label className="form-label">API key</label>

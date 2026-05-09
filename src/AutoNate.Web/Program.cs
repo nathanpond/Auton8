@@ -237,6 +237,7 @@ builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionSto
 // Phase 4 replaces this with kind-routed Anthropic/OpenAI testers; until then
 // the stub just confirms the secret decrypts cleanly.
 builder.Services.AddScoped<ITestConnectionService, StubTestConnectionService>();
+builder.Services.AddScoped<IConnectionModelLister, ConnectionModelLister>();
 
 // Agent provider abstraction. Per-provider HttpClients have generous timeouts
 // because token streaming for a tool-using turn can run minutes.

@@ -52,6 +52,16 @@ export type TestConnectionResult = {
   error: string | null;
 };
 
+export type ListModelsRequest =
+  | { connectionId: string }
+  | { kind: string; baseUrl?: string | null; secret: string };
+
+export type ListModelsResult = {
+  ok: boolean;
+  models: string[];
+  error: string | null;
+};
+
 const BASE = "/api/external-connections";
 
 export async function listExternalConnections(
@@ -99,5 +109,12 @@ export async function testExternalConnection(id: string): Promise<TestConnection
 
 export async function setDefaultExternalConnection(id: string): Promise<ExternalConnection> {
   const res = await api.post<ExternalConnection>(`${BASE}/${id}/set-default`);
+  return res.data;
+}
+
+export async function listExternalConnectionModels(
+  request: ListModelsRequest
+): Promise<ListModelsResult> {
+  const res = await api.post<ListModelsResult>(`${BASE}/list-models`, request);
   return res.data;
 }

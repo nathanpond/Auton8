@@ -124,6 +124,50 @@ public static class ExternalConnectionEndpoints
         }).RequirePermission(EntityKinds.ExternalConnection, Actions.Manage)
           .DisableAntiforgery();
 
+        group.MapPost("/list-models", async (
+            ListModelsRequest request,
+            IConnectionModelLister lister,
+            IExternalConnectionStore store,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+
+            // Two modes:
+            //   1. {connectionId}: reuse the stored secret/kind/baseUrl of an
+            //      existing connection (admin doesn't have to re-type the key
+            //      to refresh the model list).
+            //   2. {kind, secret, baseUrl?}: explicit creds for a new
+            //      connection that hasn't been saved yet.
+            string kind;
+            string secret;
+            string? baseUrl;
+            if (request.ConnectionId is Guid connId && connId != Guid.Empty)
+            {
+                var revealed = await store.RevealForResolverAsync(connId, ct);
+                if (revealed is null)
+                {
+                    return Results.BadRequest(new { reason = "Connection has no stored secret. Save an api key first." });
+                }
+                kind = revealed.Kind;
+                secret = revealed.Secret;
+                baseUrl = TryReadString(revealed.Metadata, "baseUrl");
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(request.Kind) || string.IsNullOrWhiteSpace(request.Secret))
+                {
+                    return Results.BadRequest(new { reason = "Either connectionId or (kind + secret) is required." });
+                }
+                kind = request.Kind;
+                secret = request.Secret;
+                baseUrl = request.BaseUrl;
+            }
+
+            var result = await lister.ListModelsAsync(new ListModelsInput(kind, baseUrl, secret), ct);
+            return Results.Ok(result);
+        }).RequireKindPermission(EntityKinds.ExternalConnection, Actions.Manage)
+          .DisableAntiforgery();
+
         group.MapPost("/{id:guid}/set-default", async (
             Guid id,
             HttpContext http,
@@ -151,6 +195,13 @@ public static class ExternalConnectionEndpoints
         using var doc = JsonDocument.Parse("{}");
         return doc.RootElement.Clone();
     }
+
+    private static string? TryReadString(JsonElement metadata, string property)
+    {
+        if (metadata.ValueKind != JsonValueKind.Object) return null;
+        if (!metadata.TryGetProperty(property, out var prop)) return null;
+        return prop.ValueKind == JsonValueKind.String ? prop.GetString() : null;
+    }
 }
 
 public sealed record class CreateExternalConnectionRequest(
@@ -166,4 +217,10 @@ public sealed record class UpdateExternalConnectionRequest(
     string? Description,
     bool? IsEnabled,
     JsonElement? Metadata,
+    string? Secret);
+
+public sealed record class ListModelsRequest(
+    Guid? ConnectionId,
+    string? Kind,
+    string? BaseUrl,
     string? Secret);

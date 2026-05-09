@@ -157,8 +157,17 @@ public sealed class AgentSession : IAgentSession
             yield break;
         }
 
+        // Build a principal carrying the NameIdentifier claim so skills that
+        // call IAuthorizer (e.g. ManageRecordTypesSkill) can resolve the actor.
+        // The endpoint's HttpContext.User isn't piped through here — Authorizer
+        // only needs the user id to load grants/roles from the DB itself.
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString())
+        }, authenticationType: "AgentSession"));
+
         var sessionContext = new AgentSessionContext(
-            User: new ClaimsPrincipal(),
+            User: principal,
             UserId: userId,
             PageKey: conversation.PageKey,
             ConversationId: conversationId,

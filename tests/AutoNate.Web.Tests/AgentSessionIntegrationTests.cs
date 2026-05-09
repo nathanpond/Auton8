@@ -1,8 +1,10 @@
+using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Services.Agent;
 using AutoNate.Web.Services.Agent.Conversations;
 using AutoNate.Web.Services.Agent.Loop;
 using AutoNate.Web.Services.Agent.Providers;
+using AutoNate.Web.Services.Agent.Skills;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
@@ -142,10 +144,91 @@ public sealed class AgentSessionIntegrationTests
             e => e.EventType == AgentEventTypes.MessageAssistantFailed);
     }
 
+    [Fact]
+    public async Task Session_principal_carries_user_id_claim_for_authorizer()
+    {
+        // Regression: AgentSession used to construct AgentSessionContext with
+        // an empty ClaimsPrincipal, which made every skill that calls
+        // IAuthorizer.AuthorizeAsync (e.g. ManageRecordTypesSkill) trip the
+        // "no user identity" deny path. Capture the principal a skill sees
+        // during a tool_use and verify it carries the NameIdentifier claim.
+        var fakeProvider = new ScriptedChatProvider(new[]
+        {
+            new[]
+            {
+                (ChatStreamChunk)new ChatStreamChunk.ToolUseStarted("call_a", PrincipalCapturingSkill.ToolName),
+                new ChatStreamChunk.ToolUseCompleted("call_a", PrincipalCapturingSkill.ToolName, ParseElement("{}")),
+                new ChatStreamChunk.MessageStop(ChatStopReason.ToolUse, new Usage(1, 1, null, null))
+            },
+            new[]
+            {
+                (ChatStreamChunk)new ChatStreamChunk.TextDelta("ok"),
+                new ChatStreamChunk.MessageStop(ChatStopReason.EndTurn, new Usage(1, 1, null, null))
+            }
+        });
+
+        var captured = new PrincipalCapture();
+
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var customised = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IChatProviderResolver>();
+                services.AddSingleton<IChatProviderResolver>(_ => new FakeProviderResolver(fakeProvider));
+                services.AddSingleton(captured);
+                services.AddScoped<IAgentSkill, PrincipalCapturingSkill>();
+            });
+        });
+        _ = customised.CreateClient();
+
+        using var scope = customised.Services.CreateScope();
+        var session = scope.ServiceProvider.GetRequiredService<IAgentSession>();
+
+        var convo = await session.StartAsync(TestUserId, pageKey: "workflow", connectionId: null);
+        await foreach (var _ in session.SendMessageAsync(convo.Id, TestUserId, "go"))
+        {
+        }
+
+        Assert.NotNull(captured.Principal);
+        var nameId = captured.Principal!.FindFirstValue(ClaimTypes.NameIdentifier);
+        Assert.Equal(TestUserId.ToString(), nameId);
+    }
+
     private static JsonElement ParseElement(string raw)
     {
         using var doc = JsonDocument.Parse(raw);
         return doc.RootElement.Clone();
+    }
+
+    private sealed class PrincipalCapture
+    {
+        public ClaimsPrincipal? Principal { get; set; }
+    }
+
+    private sealed class PrincipalCapturingSkill : IAgentSkill
+    {
+        public const string ToolName = "__test_capture_principal__";
+        private readonly PrincipalCapture _capture;
+
+        public PrincipalCapturingSkill(PrincipalCapture capture) => _capture = capture;
+
+        public string Name => "test-principal-capture";
+        public string Description => "Test-only skill that captures the actor principal.";
+        public string? SystemPromptFragment(AgentSessionContext context) => null;
+
+        public IReadOnlyList<AgentTool> Tools => new[]
+        {
+            new AgentTool(
+                Name: ToolName,
+                Description: "Capture the session principal.",
+                JsonSchema: ParseElement("""{"type":"object","properties":{},"additionalProperties":false}"""),
+                Invoke: (_, ctx, _) =>
+                {
+                    _capture.Principal = ctx.Session.User;
+                    return Task.FromResult(ParseElement("""{"ok":true}"""));
+                })
+        };
     }
 
     // Hands the agent loop a pre-canned sequence of chunks per iteration. The
