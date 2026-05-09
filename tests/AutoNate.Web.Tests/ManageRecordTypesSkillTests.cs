@@ -774,6 +774,10 @@ public sealed class ManageRecordTypesSkillTests
         }, typeStore, authorizer);
 
         Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        var data = result.GetProperty("data");
+        Assert.Equal(false, data.GetProperty("before").GetProperty("isArchived").GetBoolean());
+        Assert.Equal(true,  data.GetProperty("after").GetProperty("isArchived").GetBoolean());
+        Assert.Equal("model", data.GetProperty("before").GetProperty("fieldKey").GetString());
         Assert.Empty(typeStore.ArchiveFieldCalls);
     }
 

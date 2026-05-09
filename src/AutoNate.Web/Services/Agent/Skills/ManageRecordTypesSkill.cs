@@ -652,8 +652,8 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                     summary = archived
                         ? $"Archive field {shortCode}.{fieldKey}. Existing records' values for this field stay in storage but disappear from forms."
                         : $"Restore field {shortCode}.{fieldKey}.",
-                    before = new { field.FieldKey, field.IsArchived },
-                    after = new { field.FieldKey, isArchived = archived },
+                    before = new { fieldKey = field.FieldKey, isArchived = field.IsArchived },
+                    after = new { fieldKey = field.FieldKey, isArchived = archived },
                     validation = new { ok = true, errors = Array.Empty<object>() }
                 }
             });
