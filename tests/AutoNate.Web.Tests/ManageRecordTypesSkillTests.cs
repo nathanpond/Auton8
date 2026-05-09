@@ -170,6 +170,154 @@ public sealed class ManageRecordTypesSkillTests
         Assert.False(result.GetProperty("data").GetProperty("validation").GetProperty("ok").GetBoolean());
     }
 
+    [Fact]
+    public async Task CreateType_with_inline_fields_dry_run_validates_each_field()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            fields = new object[]
+            {
+                new { fieldKey = "model", displayName = "Model", dataType = "text", isRequired = true, sortOrder = 0 },
+                new { fieldKey = "color", displayName = "Color", dataType = "option", config = new { choices = new[] { new { value = "red", label = "Red" } } }, isRequired = false, sortOrder = 10 }
+            },
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        var fields = result.GetProperty("data").GetProperty("after").GetProperty("fields");
+        Assert.Equal(2, fields.GetArrayLength());
+        Assert.True(result.GetProperty("data").GetProperty("validation").GetProperty("ok").GetBoolean());
+        Assert.Empty(typeStore.CreateCalls);
+        Assert.Empty(typeStore.CreateFieldCalls);
+    }
+
+    [Fact]
+    public async Task CreateType_with_inline_fields_dry_run_flags_invalid_option_config()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            fields = new object[]
+            {
+                new { fieldKey = "color", displayName = "Color", dataType = "option", config = new { } } // missing choices
+            },
+            confirmed = false
+        }, typeStore, authorizer);
+
+        var validation = result.GetProperty("data").GetProperty("validation");
+        Assert.False(validation.GetProperty("ok").GetBoolean());
+        Assert.Contains("choices", validation.GetProperty("errors")[0].GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task CreateType_with_inline_fields_dry_run_flags_unknown_dataType()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            fields = new object[]
+            {
+                new { fieldKey = "x", displayName = "X", dataType = "lol", config = new { } }
+            },
+            confirmed = false
+        }, typeStore, authorizer);
+
+        var validation = result.GetProperty("data").GetProperty("validation");
+        Assert.False(validation.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CreateType_with_inline_fields_commit_creates_type_then_each_field()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            fields = new object[]
+            {
+                new { fieldKey = "model", displayName = "Model", dataType = "text", isRequired = true, sortOrder = 0 },
+                new { fieldKey = "year",  displayName = "Year",  dataType = "number", isRequired = false, sortOrder = 10 }
+            },
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_committed", result.GetProperty("kind").GetString());
+        Assert.Equal(2, result.GetProperty("data").GetProperty("createdFieldCount").GetInt32());
+
+        Assert.Single(typeStore.CreateCalls);
+        Assert.Equal(2, typeStore.CreateFieldCalls.Count);
+        Assert.Equal("model", typeStore.CreateFieldCalls[0].Input.FieldKey);
+        Assert.Equal("year",  typeStore.CreateFieldCalls[1].Input.FieldKey);
+    }
+
+    [Fact]
+    public async Task CreateType_with_inline_fields_commit_partial_failure_returns_failed_with_partial_state()
+    {
+        var typeStore = new FakeTypeStore
+        {
+            CreateFieldThrows = new RecordTypeValidationException("field_key 'year' is already in use for this record type.")
+        };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            fields = new object[]
+            {
+                new { fieldKey = "year",  displayName = "Year",  dataType = "number", isRequired = false, sortOrder = 0 }
+            },
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_failed", result.GetProperty("kind").GetString());
+        Assert.Single(typeStore.CreateCalls); // type WAS created
+    }
+
+    [Fact]
+    public async Task CreateType_with_inline_fields_requires_DefineFields_authorization()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer
+        {
+            Default = AuthEffect.Allow,
+            Decisions = { [(Actions.DefineFields, EntityKinds.RecordType, "*")] = AuthEffect.Deny }
+        };
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "create_record_type", new
+        {
+            shortCode = "CAR",
+            name = "Car",
+            fields = new object[] { new { fieldKey = "x", displayName = "X", dataType = "text" } },
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.CreateCalls);
+    }
+
     // --- helpers / fakes ---
 
     private static async Task<JsonElement> Invoke(

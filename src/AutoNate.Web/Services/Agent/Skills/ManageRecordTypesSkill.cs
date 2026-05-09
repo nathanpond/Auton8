@@ -107,15 +107,43 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
         var icon = ReadOptionalString(args, "icon");
         var color = ReadOptionalString(args, "color");
 
+        var fieldInputs = ReadFieldArray(args, "fields", out var fieldParseError);
+        if (fieldParseError is not null) return Error(CreateTypeToolName, fieldParseError);
+
         var authorizer = context.Services.GetRequiredService<IAuthorizer>();
-        var allowed = await authorizer.AuthorizeAsync(
-            context.Session.User,
-            Actions.Create,
-            new EntityRef(EntityKinds.RecordType, "*"),
-            ct);
-        if (!allowed.IsAllowed)
+        var createDecision = await authorizer.AuthorizeAsync(
+            context.Session.User, Actions.Create, new EntityRef(EntityKinds.RecordType, "*"), ct);
+        if (!createDecision.IsAllowed)
+            return Error(CreateTypeToolName, $"Not authorized to create record types ({createDecision.Reason}).");
+
+        if (fieldInputs.Count > 0)
         {
-            return Error(CreateTypeToolName, $"Not authorized to create record types ({allowed.Reason}).");
+            var defineDecision = await authorizer.AuthorizeAsync(
+                context.Session.User, Actions.DefineFields, new EntityRef(EntityKinds.RecordType, "*"), ct);
+            if (!defineDecision.IsAllowed)
+                return Error(CreateTypeToolName, $"Not authorized to define fields on record types ({defineDecision.Reason}).");
+        }
+
+        // Dry-run validation: normalize each field's config via the registry.
+        var registry = context.Services.GetRequiredService<IFieldTypeRegistry>();
+        var validationErrors = new List<object>();
+        var normalizedFields = new List<(FieldInput Raw, JsonElement NormalizedConfig)>();
+        foreach (var field in fieldInputs)
+        {
+            if (!registry.TryGet(field.DataType, out var fieldType))
+            {
+                validationErrors.Add(new { code = "unknown_data_type", fieldKey = field.FieldKey, message = $"Unknown data_type '{field.DataType}'." });
+                continue;
+            }
+            try
+            {
+                var normalized = fieldType.NormalizeConfig(field.Config);
+                normalizedFields.Add((field, normalized));
+            }
+            catch (FieldConfigException ex)
+            {
+                validationErrors.Add(new { code = "field_config", fieldKey = field.FieldKey, message = ex.Message });
+            }
         }
 
         var confirmed = args.TryGetProperty("confirmed", out var c) && c.ValueKind == JsonValueKind.True;
@@ -129,38 +157,110 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                 data = new
                 {
                     operation = "create_type",
-                    summary = $"Create record type {shortCode}: '{name}'.",
-                    after = new { shortCode, name, description, icon, color },
-                    validation = new { ok = true, errors = Array.Empty<object>() }
+                    summary = BuildCreateTypeSummary(shortCode, name, fieldInputs),
+                    after = new
+                    {
+                        shortCode, name, description, icon, color,
+                        fields = fieldInputs.Select((f, i) => new
+                        {
+                            fieldKey = f.FieldKey,
+                            displayName = f.DisplayName,
+                            dataType = f.DataType,
+                            isRequired = f.IsRequired,
+                            sortOrder = f.SortOrder ?? (i * 10)
+                        }).ToArray()
+                    },
+                    validation = new
+                    {
+                        ok = validationErrors.Count == 0,
+                        errors = validationErrors.ToArray()
+                    }
+                }
+            });
+        }
+
+        if (validationErrors.Count > 0)
+        {
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "record_type_change_failed",
+                source = "ManageRecordTypesSkill",
+                data = new
+                {
+                    operation = "create_type",
+                    message = "One or more fields failed validation.",
+                    validation = new { ok = false, errors = validationErrors.ToArray() }
                 }
             });
         }
 
         var typeStore = context.Services.GetRequiredService<IRecordTypeStore>();
+        RecordType created;
         try
         {
-            var created = await typeStore.CreateAsync(
+            created = await typeStore.CreateAsync(
                 new CreateRecordTypeInput(shortCode, name, description, icon, color),
                 context.Session.UserId,
                 ct);
-
-            return JsonSerializer.SerializeToElement(new
-            {
-                kind = "record_type_change_committed",
-                source = "ManageRecordTypesSkill",
-                data = new
-                {
-                    operation = "create_type",
-                    id = created.Id,
-                    shortCode = created.ShortCode,
-                    createdFieldCount = 0
-                }
-            });
         }
         catch (RecordTypeValidationException ex)
         {
             return Failed("create_type", ex);
         }
+
+        var createdFieldCount = 0;
+        foreach (var (raw, normalizedConfig) in normalizedFields)
+        {
+            try
+            {
+                await typeStore.CreateFieldAsync(
+                    created.Id,
+                    new CreateRecordTypeFieldInput(
+                        raw.FieldKey,
+                        raw.DisplayName,
+                        raw.DataType,
+                        normalizedConfig,
+                        raw.IsRequired,
+                        raw.SortOrder ?? (createdFieldCount * 10)),
+                    context.Session.UserId,
+                    ct);
+                createdFieldCount++;
+            }
+            catch (RecordTypeValidationException ex)
+            {
+                return JsonSerializer.SerializeToElement(new
+                {
+                    kind = "record_type_change_failed",
+                    source = "ManageRecordTypesSkill",
+                    data = new
+                    {
+                        operation = "create_type",
+                        message = $"Type '{created.ShortCode}' was created but field '{raw.FieldKey}' failed: {ex.Message}",
+                        typeId = created.Id,
+                        shortCode = created.ShortCode,
+                        createdFieldCount,
+                        validation = new
+                        {
+                            ok = false,
+                            errors = new[] { new { code = "field_create", fieldKey = raw.FieldKey, message = ex.Message } }
+                        }
+                    }
+                });
+            }
+        }
+
+        return JsonSerializer.SerializeToElement(new
+        {
+            kind = "record_type_change_committed",
+            source = "ManageRecordTypesSkill",
+            data = new
+            {
+                operation = "create_type",
+                id = created.Id,
+                shortCode = created.ShortCode,
+                createdFieldCount
+            }
+        });
     }
 
     // --- helpers ---
@@ -206,4 +306,59 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                 }
             }
         });
+
+    private sealed record class FieldInput(
+        string FieldKey,
+        string DisplayName,
+        string DataType,
+        JsonElement Config,
+        bool IsRequired,
+        int? SortOrder);
+
+    private static IReadOnlyList<FieldInput> ReadFieldArray(JsonElement args, string property, out string? error)
+    {
+        error = null;
+        if (!args.TryGetProperty(property, out var prop)) return Array.Empty<FieldInput>();
+        if (prop.ValueKind == JsonValueKind.Null) return Array.Empty<FieldInput>();
+        if (prop.ValueKind != JsonValueKind.Array)
+        {
+            error = $"{property} must be an array.";
+            return Array.Empty<FieldInput>();
+        }
+
+        var list = new List<FieldInput>();
+        foreach (var item in prop.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) { error = "fields[] entries must be objects."; return Array.Empty<FieldInput>(); }
+            var fieldKey = ReadRequiredString(item, "fieldKey");
+            if (fieldKey is null) { error = "fields[].fieldKey is required."; return Array.Empty<FieldInput>(); }
+            var displayName = ReadRequiredString(item, "displayName");
+            if (displayName is null) { error = "fields[].displayName is required."; return Array.Empty<FieldInput>(); }
+            var dataType = ReadRequiredString(item, "dataType");
+            if (dataType is null) { error = "fields[].dataType is required."; return Array.Empty<FieldInput>(); }
+
+            var config = item.TryGetProperty("config", out var cfg) && cfg.ValueKind == JsonValueKind.Object
+                ? cfg.Clone()
+                : ParseSchema("{}");
+            var isRequired = item.TryGetProperty("isRequired", out var req) && req.ValueKind == JsonValueKind.True;
+            int? sortOrder = item.TryGetProperty("sortOrder", out var so) && so.ValueKind == JsonValueKind.Number
+                ? so.GetInt32()
+                : null;
+
+            list.Add(new FieldInput(fieldKey, displayName, dataType, config, isRequired, sortOrder));
+        }
+        return list;
+    }
+
+    private static string BuildCreateTypeSummary(string shortCode, string name, IReadOnlyList<FieldInput> fields)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Create record type ").Append(shortCode).Append(": '").Append(name).Append("'");
+        if (fields.Count > 0)
+        {
+            sb.Append(" with ").Append(fields.Count).Append(" field").Append(fields.Count == 1 ? "" : "s");
+            sb.Append(" (").Append(string.Join(", ", fields.Select(f => $"{f.FieldKey}[{f.DataType}{(f.IsRequired ? "*" : "")}]"))).Append(')');
+        }
+        return sb.ToString();
+    }
 }
