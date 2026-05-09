@@ -642,6 +642,100 @@ public sealed class ManageRecordTypesSkillTests
         Assert.Empty(typeStore.CreateFieldCalls);
     }
 
+    [Fact]
+    public async Task UpdateField_unknown_field_returns_error()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "update_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "nope",
+            displayName = "New",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.UpdateFieldCalls);
+    }
+
+    [Fact]
+    public async Task UpdateField_dry_run_returns_per_attribute_diff()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "update_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "model",
+            displayName = "Make/Model",
+            isRequired = false,
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        var changes = result.GetProperty("data").GetProperty("fieldChanges");
+        var changeKeys = changes.EnumerateArray().Select(e => e.GetProperty("attribute").GetString()).ToArray();
+        Assert.Contains("displayName", changeKeys);
+        Assert.Contains("isRequired", changeKeys);
+        Assert.Empty(typeStore.UpdateFieldCalls);
+    }
+
+    [Fact]
+    public async Task UpdateField_commit_layers_patch_onto_existing_values()
+    {
+        var typeStore = new FakeTypeStore
+        {
+            Types = { CarType },
+            FieldsByType = { [CarTypeId] = new() { ModelField } }
+        };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        // Only patching displayName — isRequired/sortOrder/config should keep current value.
+        await Invoke(skill, "update_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "model",
+            displayName = "Make/Model",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        var call = Assert.Single(typeStore.UpdateFieldCalls);
+        Assert.Equal(ModelField.Id, call.FieldId);
+        Assert.Equal(SessionUserId, call.ActorId);
+        Assert.Equal("Make/Model", call.Input.DisplayName);
+        Assert.True(call.Input.IsRequired);     // preserved
+        Assert.Equal(0, call.Input.SortOrder);  // preserved
+    }
+
+    [Fact]
+    public async Task UpdateField_authorizer_denial_returns_error()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField } } };
+        var authorizer = new FakeAuthorizer
+        {
+            Default = AuthEffect.Allow,
+            Decisions = { [(Actions.DefineFields, EntityKinds.RecordType, CarTypeId.ToString())] = AuthEffect.Deny }
+        };
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "update_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "model",
+            displayName = "X",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.UpdateFieldCalls);
+    }
+
     // --- helpers / fakes ---
 
     private static async Task<JsonElement> Invoke(

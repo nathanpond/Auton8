@@ -129,7 +129,26 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                     }
                     """),
                 Invoke: InvokeAddFieldAsync),
-            new AgentTool(UpdateFieldToolName,       "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
+            new AgentTool(
+                Name: UpdateFieldToolName,
+                Description: "Update an existing field on a record type. fieldKey is the lookup, not editable. dataType cannot be changed — archive the old field and add a new one instead. ALWAYS call with confirmed=false first.",
+                JsonSchema: ParseSchema("""
+                    {
+                      "type": "object",
+                      "properties": {
+                        "typeShortCode": { "type": "string" },
+                        "fieldKey":      { "type": "string" },
+                        "displayName":   { "type": "string" },
+                        "config":        { "type": "object" },
+                        "isRequired":    { "type": "boolean" },
+                        "sortOrder":     { "type": "integer" },
+                        "confirmed":     { "type": "boolean" }
+                      },
+                      "required": ["typeShortCode","fieldKey"],
+                      "additionalProperties": false
+                    }
+                    """),
+                Invoke: InvokeUpdateFieldAsync),
             new AgentTool(SetFieldArchivedToolName,  "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
         };
     }
@@ -672,6 +691,122 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
             list.Add(new FieldInput(fieldKey, displayName, dataType, config, isRequired, sortOrder));
         }
         return list;
+    }
+
+    private static async Task<JsonElement> InvokeUpdateFieldAsync(
+        JsonElement args,
+        AgentToolContext context,
+        CancellationToken ct)
+    {
+        var shortCode = ReadRequiredString(args, "typeShortCode");
+        if (shortCode is null) return Error(UpdateFieldToolName, "typeShortCode is required.");
+        var fieldKey = ReadRequiredString(args, "fieldKey");
+        if (fieldKey is null) return Error(UpdateFieldToolName, "fieldKey is required.");
+
+        var typeStore = context.Services.GetRequiredService<IRecordTypeStore>();
+        var existing = await typeStore.GetByShortCodeAsync(shortCode, ct);
+        if (existing is null) return Error(UpdateFieldToolName, $"No record type with short code '{shortCode}'.");
+        if (existing.IsSystem) return Error(UpdateFieldToolName, $"Record type '{shortCode}' is a system type and cannot be modified by the agent.");
+
+        var fields = await typeStore.ListFieldsAsync(existing.Id, includeArchived: true, ct);
+        var field = fields.FirstOrDefault(f => f.FieldKey == fieldKey);
+        if (field is null) return Error(UpdateFieldToolName, $"No field '{fieldKey}' on record type '{shortCode}'.");
+
+        var authorizer = context.Services.GetRequiredService<IAuthorizer>();
+        var decision = await authorizer.AuthorizeAsync(
+            context.Session.User, Actions.DefineFields, new EntityRef(EntityKinds.RecordType, existing.Id.ToString()), ct);
+        if (!decision.IsAllowed)
+            return Error(UpdateFieldToolName, $"Not authorized to define fields on '{shortCode}' ({decision.Reason}).");
+
+        var newDisplayName = args.TryGetProperty("displayName", out var dn) && dn.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(dn.GetString())
+            ? dn.GetString()!
+            : field.DisplayName;
+        var newIsRequired = args.TryGetProperty("isRequired", out var ir) && (ir.ValueKind == JsonValueKind.True || ir.ValueKind == JsonValueKind.False)
+            ? ir.ValueKind == JsonValueKind.True
+            : field.IsRequired;
+        var newSortOrder = args.TryGetProperty("sortOrder", out var so) && so.ValueKind == JsonValueKind.Number
+            ? so.GetInt32()
+            : field.SortOrder;
+
+        var registry = context.Services.GetRequiredService<IFieldTypeRegistry>();
+        if (!registry.TryGet(field.DataType, out var fieldType))
+            return Error(UpdateFieldToolName, $"Unknown data_type '{field.DataType}' on existing field.");
+
+        JsonElement newConfig = field.Config;
+        if (args.TryGetProperty("config", out var cfg) && cfg.ValueKind == JsonValueKind.Object)
+        {
+            try { newConfig = fieldType.NormalizeConfig(cfg.Clone()); }
+            catch (FieldConfigException ex)
+            {
+                return JsonSerializer.SerializeToElement(new
+                {
+                    kind = "record_type_change_failed",
+                    source = "ManageRecordTypesSkill",
+                    data = new
+                    {
+                        operation = "update_field",
+                        message = ex.Message,
+                        validation = new { ok = false, errors = new[] { new { code = "field_config", fieldKey, message = ex.Message } } }
+                    }
+                });
+            }
+        }
+
+        var changes = new List<object>();
+        if (!string.Equals(field.DisplayName, newDisplayName, StringComparison.Ordinal))
+            changes.Add(new { attribute = "displayName", before = field.DisplayName, after = newDisplayName });
+        if (field.IsRequired != newIsRequired)
+            changes.Add(new { attribute = "isRequired", before = field.IsRequired, after = newIsRequired });
+        if (field.SortOrder != newSortOrder)
+            changes.Add(new { attribute = "sortOrder", before = field.SortOrder, after = newSortOrder });
+        if (!string.Equals(field.Config.GetRawText(), newConfig.GetRawText(), StringComparison.Ordinal))
+            changes.Add(new { attribute = "config", before = field.Config, after = newConfig });
+
+        var confirmed = args.TryGetProperty("confirmed", out var c) && c.ValueKind == JsonValueKind.True;
+
+        if (!confirmed)
+        {
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "record_type_change_proposal",
+                source = "ManageRecordTypesSkill",
+                data = new
+                {
+                    operation = "update_field",
+                    summary = $"{shortCode}.{fieldKey}: {changes.Count} change{(changes.Count == 1 ? "" : "s")}.",
+                    fieldChanges = changes.ToArray(),
+                    validation = new { ok = true, errors = Array.Empty<object>() }
+                }
+            });
+        }
+
+        try
+        {
+            var updated = await typeStore.UpdateFieldAsync(
+                existing.Id,
+                field.Id,
+                new UpdateRecordTypeFieldInput(newDisplayName, newConfig, newIsRequired, newSortOrder),
+                context.Session.UserId,
+                ct);
+
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "record_type_change_committed",
+                source = "ManageRecordTypesSkill",
+                data = new
+                {
+                    operation = "update_field",
+                    typeId = existing.Id,
+                    shortCode = existing.ShortCode,
+                    fieldId = updated.Id,
+                    fieldKey = updated.FieldKey
+                }
+            });
+        }
+        catch (RecordTypeValidationException ex)
+        {
+            return Failed("update_field", ex);
+        }
     }
 
     private static string BuildCreateTypeSummary(string shortCode, string name, IReadOnlyList<FieldInput> fields)
