@@ -22,4 +22,11 @@ public interface IWorkflowModelStore
     Task<IReadOnlyList<WorkflowModelVersion>> ListVersionsAsync(
         Guid workflowModelId,
         CancellationToken cancellationToken = default);
+
+    // Hard delete. Cascades to workflow_model_versions via the FK. Returns
+    // the deleted row's pre-delete projection for audit purposes, or null
+    // when the row doesn't exist. Does NOT touch the Flowable deployment if
+    // the workflow was published — operators are expected to pause + undeploy
+    // on the Flowable side first.
+    Task<WorkflowModel?> DeleteAsync(Guid workflowModelId, CancellationToken cancellationToken = default);
 }

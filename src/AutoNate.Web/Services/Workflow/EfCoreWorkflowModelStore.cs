@@ -186,6 +186,30 @@ public sealed class EfCoreWorkflowModelStore(
         return versions.Select(version => version.ToModel()).ToList();
     }
 
+    public async Task<WorkflowModel?> DeleteAsync(Guid workflowModelId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.WorkflowModels
+            .SingleOrDefaultAsync(model => model.Id == workflowModelId, cancellationToken);
+        if (entity is null) return null;
+
+        var snapshot = entity.ToModel();
+
+        // workflow_model_versions has ON DELETE CASCADE so EF doesn't have to
+        // remove versions explicitly; the Postgres engine handles it.
+        dbContext.WorkflowModels.Remove(entity);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Re-derive the topic→signal map. If the deleted workflow was published
+        // it may have been backing one or more signal subscriptions; the
+        // streaming subscriber needs to release those topics now that no
+        // published version owns them.
+        await _signalRegistry.RefreshAsync(cancellationToken);
+        await _streamingSubscriber.SyncAsync(cancellationToken);
+
+        return snapshot;
+    }
+
     private static WorkflowModel NormalizeDraftState(
         Persistence.Scaffolded.WorkflowModel? existingEntity,
         WorkflowModel incomingModel)

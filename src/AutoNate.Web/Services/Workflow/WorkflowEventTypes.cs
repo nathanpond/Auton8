@@ -30,6 +30,7 @@ public static class WorkflowAdminEventTypes
     public const string ModelPaused = "workflow.model.paused";
     public const string ModelResumed = "workflow.model.resumed";
     public const string ModelStarted = "workflow.start.invoked";
+    public const string ModelDeleted = "workflow.model.deleted";
 
     // Execution admin commands (user-initiated; system-generated equivalents
     // live on workflow.execution.events from the Flowable extension).

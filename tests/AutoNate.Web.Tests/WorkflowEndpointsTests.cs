@@ -450,6 +450,75 @@ public sealed class WorkflowEndpointsTests
         Assert.True(found.IsSuspended);
     }
 
+    [Fact]
+    public async Task DeleteWorkflow_OnUnknownId_Returns404()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var response = await client.DeleteAsync($"/api/workflows/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteWorkflow_RemovesUnpublishedRow()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        (await client.PostAsJsonAsync("/api/workflows/", new WorkflowModel
+        {
+            Id = id,
+            Name = "Disposable",
+            ProcessKey = "disposable",
+            BpmnXml = SimpleBpmn
+        })).EnsureSuccessStatusCode();
+
+        var deleteResponse = await client.DeleteAsync($"/api/workflows/{id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        var listed = await client.GetFromJsonAsync<WorkflowModel[]>("/api/workflows/");
+        Assert.NotNull(listed);
+        Assert.Empty(listed);
+    }
+
+    [Fact]
+    public async Task DeleteWorkflow_CascadesVersionsForPublishedRow()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel
+        {
+            Id = id,
+            Name = "Published",
+            ProcessKey = "published_to_delete",
+            BpmnXml = SimpleBpmn
+        };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model)).EnsureSuccessStatusCode();
+
+        // Sanity: version row exists pre-delete.
+        var versionsBefore = await client.GetFromJsonAsync<WorkflowModelVersion[]>(
+            $"/api/workflows/{id}/versions");
+        Assert.NotNull(versionsBefore);
+        Assert.NotEmpty(versionsBefore);
+
+        var deleteResponse = await client.DeleteAsync($"/api/workflows/{id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        // Versions cascade-deleted by the FK.
+        var versionsAfter = await client.GetFromJsonAsync<WorkflowModelVersion[]>(
+            $"/api/workflows/{id}/versions");
+        Assert.NotNull(versionsAfter);
+        Assert.Empty(versionsAfter);
+    }
+
     private static async Task PrimeAuthAsync(HttpClient client)
     {
         (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();

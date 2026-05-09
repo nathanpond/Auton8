@@ -844,6 +844,14 @@ public static class EventCatalog
                     "Fires from POST /api/workflows/{processKey}/start after Flowable.StartProcessInstanceAsync. The system-generated process.started event still fires from Flowable on workflow.execution.events.",
                     ["resource: { processKey, processInstanceId, name }. details: { hadVariables }."]),
                 new EventCatalogEntry(
+                    WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.ModelDeleted,
+                    "A workflow model row was hard-deleted from autonate. Cascades to workflow_model_versions; does NOT undeploy the Flowable-side deployment if the workflow had been published.",
+                    "Fires from DELETE /api/workflows/{id} after the row commits.",
+                    [
+                        "resource: { id, name, processKey } captured pre-delete so consumers can identify what was removed.",
+                        "details: { wasPublished, processDefinitionId } — wasPublished is true when LastDeployment was set; processDefinitionId is null for never-published workflows."
+                    ]),
+                new EventCatalogEntry(
                     WorkflowAdminEventTopic.TopicName, WorkflowAdminEventTypes.ExecutionVariablesSet,
                     "An admin replaced one or more variables on a running execution (PUT semantics).",
                     "Fires from PUT /api/executions/{processInstanceId}/variables.",

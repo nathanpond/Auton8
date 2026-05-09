@@ -41,7 +41,7 @@ public static class WorkflowEndpoints
                 details: new { resultCount = augmented.Length },
                 cancellationToken);
             return Results.Ok(augmented);
-        });
+        }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.View);
 
         group.MapGet("/latest", async (
             IWorkflowModelStore store, IFlowableClient flowable,
@@ -58,7 +58,7 @@ public static class WorkflowEndpoints
                 details: null,
                 cancellationToken);
             return Results.Ok(augmented);
-        });
+        }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.View);
 
         group.MapGet("/{id:guid}", async (
             Guid id, IWorkflowModelStore store, IFlowableClient flowable,
@@ -75,7 +75,7 @@ public static class WorkflowEndpoints
                 details: null,
                 cancellationToken);
             return Results.Ok(augmented);
-        });
+        }).RequirePermission(EntityKinds.WorkflowModel, Actions.View, "id");
 
         group.MapGet("/{id:guid}/versions", async (
             Guid id, IWorkflowModelStore store,
@@ -93,7 +93,7 @@ public static class WorkflowEndpoints
                 details: new { resultCount = versions.Count },
                 cancellationToken);
             return Results.Ok(versions);
-        });
+        }).RequirePermission(EntityKinds.WorkflowModel, Actions.View, "id");
 
         // Telemetry-only endpoint: publishes a ModelViewed event WITHOUT
         // re-fetching the model BPMN or talking to Flowable. The SPA's
@@ -115,8 +115,13 @@ public static class WorkflowEndpoints
                 details: new { source = "studio" },
                 cancellationToken);
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowModel, Actions.View, "id");
 
+        // Save covers both initial create and subsequent edits (the id is in
+        // the body, not the route), so gate at the kind level. Per-instance
+        // restrictions on which model an admin may edit are enforced by their
+        // grants on the (workflowmodel, edit, /workflowmodel/{id}) selector.
         group.MapPost("/", async (
             WorkflowModel model,
             IWorkflowModelStore store,
@@ -132,7 +137,8 @@ public static class WorkflowEndpoints
                 details: null,
                 cancellationToken);
             return Results.Ok(saved);
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.WorkflowModel, Actions.Edit);
 
         // Normalize the BPMN payload coming from the browser's modeler: patch the process key,
         // workflow name, and element-level snapshots, then validate. The UI calls this before
@@ -182,7 +188,8 @@ public static class WorkflowEndpoints
             };
 
             return Results.Ok(new PrepareWorkflowResponse(prepared, combinedWarnings, validation.Errors));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.WorkflowModel, Actions.Edit);
 
         group.MapPost("/{id:guid}/publish", async (
             Guid id,
@@ -210,7 +217,8 @@ public static class WorkflowEndpoints
                 details: new { deploymentId = deployment.DeploymentId, processDefinitionId = deployment.ProcessDefinitionId },
                 cancellationToken);
             return Results.Ok(new PublishResponse(augmented, deployment));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowModel, Actions.Publish, "id");
 
         group.MapPost("/{processKey}/start", async (
             string processKey,
@@ -251,7 +259,36 @@ public static class WorkflowEndpoints
                 },
                 cancellationToken);
             return Results.Ok(instance);
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowModel, Actions.Start, "processKey");
+
+        // Hard delete. Cascades to workflow_model_versions via the FK. Does
+        // not undeploy from Flowable — operators are expected to pause +
+        // undeploy on the Flowable side first when removing a published
+        // workflow, otherwise the deployment lingers and will be re-discovered
+        // by tooling that lists Flowable deployments directly.
+        group.MapDelete("/{id:guid}", async (
+            Guid id,
+            IWorkflowModelStore store,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var snapshot = await store.DeleteAsync(id, cancellationToken);
+            if (snapshot is null) return Results.NotFound();
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ModelDeleted,
+                WorkflowResourceKinds.WorkflowModel,
+                resource: new { id = snapshot.Id, name = snapshot.Name, processKey = snapshot.ProcessKey },
+                details: new
+                {
+                    wasPublished = snapshot.LastDeployment is not null,
+                    processDefinitionId = snapshot.LastDeployment?.ProcessDefinitionId
+                },
+                cancellationToken);
+            return Results.NoContent();
+        }).RequirePermission(EntityKinds.WorkflowModel, Actions.Delete, "id");
 
         group.MapPost("/{id:guid}/pause", async (
             Guid id,

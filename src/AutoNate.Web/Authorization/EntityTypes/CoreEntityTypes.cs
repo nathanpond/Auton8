@@ -74,6 +74,12 @@ public static class CoreEntityTypes
         },
         tags: new[] { "recordtype", "status", "assignee", "creator", "duedate" });
 
+    // Actions.Start uses the processKey route token for instance gating (see
+    // WorkflowEndpoints.cs); Pause/Resume both use the Pause action so a
+    // single grant covers the lifecycle pair. Delete hard-deletes the
+    // workflow_models row (versions cascade) — Flowable deployments are not
+    // auto-undeployed, so operators should pause + handle Flowable cleanup
+    // first when removing a published workflow.
     public static EntityTypeDefinition WorkflowModel { get; } = new(
         kind: EntityKinds.WorkflowModel,
         clrType: typeof(WorkflowModelModel),
@@ -81,7 +87,7 @@ public static class CoreEntityTypes
         actions: new[]
         {
             Actions.View, Actions.Edit, Actions.Delete,
-            Actions.Publish, Actions.Pause
+            Actions.Publish, Actions.Start, Actions.Pause
         },
         tags: new[] { "processkey", "draft", "published" });
 
