@@ -66,5 +66,6 @@ export type AgentStreamEvent =
         cacheWriteTokens: number | null;
       } | null;
     }
+  | { kind: "page_query_request"; queryId: string; topic: string; args?: unknown }
   | { kind: "error"; message: string }
   | { kind: "done" };

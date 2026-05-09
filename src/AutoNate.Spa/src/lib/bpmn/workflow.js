@@ -1342,6 +1342,30 @@ export function getElementSnapshots(modelerHandle) {
     .map((businessObject) => describeBusinessObject(businessObject));
 }
 
+// IDs of the elements currently selected in the modeler. Returns [] when no
+// modeler instance is available (still loading) or no selection.
+export function getSelectedElementIds(modelerHandle) {
+  const selection = modelerHandle?.modeler?.get?.("selection", false);
+  if (!selection || typeof selection.get !== "function") return [];
+  const elements = selection.get() ?? [];
+  return elements
+    .map((element) => (element && typeof element.id === "string" ? element.id : null))
+    .filter((id) => id !== null);
+}
+
+// Full describe of one element by id, reading the live businessObject. Used
+// by the page-context provider to answer 'fresh' per-node queries from the
+// chatbot. Returns null when the element id is not in the registry.
+export function describeElementById(modelerHandle, id) {
+  if (typeof id !== "string" || id.length === 0) return null;
+  const elementRegistry = modelerHandle?.modeler?.get?.("elementRegistry", false);
+  if (!elementRegistry) return null;
+  const element = elementRegistry.get(id);
+  const businessObject = element?.businessObject;
+  if (!businessObject) return null;
+  return describeBusinessObject(businessObject);
+}
+
 export function updateScriptTaskProperties(modelerHandle, task) {
   const modeler = modelerHandle?.modeler;
   const elementRegistry = modeler?.get?.("elementRegistry", false);

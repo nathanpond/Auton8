@@ -49,6 +49,7 @@ import { useEventCatalog } from "@/hooks/useEventCatalog";
 import type { EventCatalogResponse } from "@/api/eventCatalog";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { useWorkflowBehaviors } from "@/hooks/useWorkflowBehaviors";
+import { useWorkflowStudioPageContext } from "./useWorkflowStudioPageContext";
 import "./Workflow.css";
 
 type ScriptTaskEditor = {
@@ -629,6 +630,18 @@ export default function WorkflowStudio() {
   const { containerRef, handle, loading: modelerLoading, error: modelerError } = useBpmnModeler({
     xml: loadedXml,
     callbacks
+  });
+
+  // Expose the live, possibly-unsaved workflow model + selection to the
+  // chatbot's page-context registry. The chatbot reads it via inspect_page
+  // (per-message snapshot) and can fetch fresh slices via query_page (e.g.
+  // bpmn.xml, node.byId).
+  const behaviorsQuery = useWorkflowBehaviors();
+  useWorkflowStudioPageContext({
+    modelerHandle: handle,
+    model: currentModel,
+    isDirty: dirty,
+    behaviorsCatalog: behaviorsQuery.data
   });
 
   const saveMutation = useSaveWorkflow();

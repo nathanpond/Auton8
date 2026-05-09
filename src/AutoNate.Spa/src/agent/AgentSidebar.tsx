@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AgentConversation,
@@ -15,12 +15,31 @@ import {
 import { usePageKey } from "./usePageKey";
 import { useAgentStream } from "./useAgentStream";
 import { useAgentSidebar } from "./AgentSidebarContext";
+import { useUserPreferences } from "@/preferences/UserPreferencesContext";
 import { MarkdownView } from "./MarkdownView";
+import { useActivePageSummary, usePageContextRegistry } from "./pageContext/PageContextRegistry";
 import "./AgentSidebar.css";
 
 export function AgentSidebar() {
   const pageKey = usePageKey();
   const { isOpen, close } = useAgentSidebar();
+  const { chatbotWindowMode, chatbotOverHeader } = useUserPreferences();
+  const pageContextRegistry = usePageContextRegistry();
+  const activePageSummary = useActivePageSummary(pageKey);
+
+  // Toggle a body class for "fill" mode so the layout can push #app's
+  // children left to make room for the sidebar. Fixed-position sidebar stays
+  // pinned to the viewport regardless. Cleared on close so closed sidebar
+  // never reserves space.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const body = document.body;
+    const shouldFill = isOpen && chatbotWindowMode === "fill";
+    body.classList.toggle("agent-sidebar-fill", shouldFill);
+    return () => {
+      body.classList.remove("agent-sidebar-fill");
+    };
+  }, [isOpen, chatbotWindowMode]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
@@ -69,6 +88,18 @@ export function AgentSidebar() {
   // persisted bubble is there before this one disappears.
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
 
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Tracks the previous streaming flag so we focus the composer specifically
+  // on the true→false transition (a reply just finished), not on initial
+  // mount or any other rerender that finds streaming = false.
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (wasStreamingRef.current && !stream.state.streaming) {
+      composerRef.current?.focus();
+    }
+    wasStreamingRef.current = stream.state.streaming;
+  }, [stream.state.streaming]);
+
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     let id = conversationId;
@@ -82,7 +113,11 @@ export function AgentSidebar() {
     setComposer("");
     setPendingUserText(text);
     try {
-      await stream.send(id, text);
+      const pageContext = pageContextRegistry.getActiveSnapshot(pageKey);
+      await stream.send(id, text, {
+        pageContext,
+        onPageQuery: (req) => pageContextRegistry.dispatchPageQuery(pageKey, req)
+      });
       // Refetch AFTER the stream finishes so the persisted user + assistant
       // messages appear together; await so the "clear pending" line below
       // only runs once the persisted copy is in the cache.
@@ -94,12 +129,26 @@ export function AgentSidebar() {
   };
 
   return (
-    <aside className={`agent-sidebar ${isOpen ? "agent-sidebar--open" : ""}`} aria-hidden={!isOpen}>
+    <aside
+      className={[
+        "agent-sidebar",
+        isOpen ? "agent-sidebar--open" : "",
+        `agent-sidebar--mode-${chatbotWindowMode}`,
+        chatbotOverHeader ? "agent-sidebar--over-header" : "agent-sidebar--under-header"
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-hidden={!isOpen}
+    >
       {isOpen && (
         <div className="agent-sidebar__inner">
           <header className="agent-sidebar__header">
             <div className="fw-semibold">AutoNate Assistant</div>
-            <small className="text-muted">page: {pageKey}</small>
+            <small className="text-muted" title={activePageSummary ?? undefined}>
+              {activePageSummary
+                ? `page: ${pageKey} · ${truncate(activePageSummary, 60)}`
+                : `page: ${pageKey}`}
+            </small>
             <button
               type="button"
               className="btn btn-sm btn-link ms-auto"
@@ -147,6 +196,7 @@ export function AgentSidebar() {
 
             <form className="agent-sidebar__composer" onSubmit={onSubmit}>
               <textarea
+                ref={composerRef}
                 className="form-control"
                 rows={2}
                 value={composer}
@@ -240,6 +290,18 @@ type ChatThreadProps = {
 };
 
 function ChatThread({ detail, loading, streamText, streaming, toolCalls, errorText, pendingUserText, onBack, onDelete }: ChatThreadProps) {
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  // Pin the scroll viewport to the bottom whenever new content lands — a new
+  // persisted message from either side, the user's just-sent pending bubble,
+  // or streaming tokens / tool-call cards from the assistant. Unconditional
+  // by request: always follow the latest activity.
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [detail?.messages.length, pendingUserText, streamText, toolCalls.length, streaming]);
+
   if (loading || !detail) return <div className="p-3 text-muted">Loading…</div>;
 
   return (
@@ -259,7 +321,7 @@ function ChatThread({ detail, loading, streamText, streaming, toolCalls, errorTe
           <i className="fa fa-trash" /> Delete
         </button>
       </div>
-      <div className="agent-thread__messages">
+      <div className="agent-thread__messages" ref={messagesRef}>
         {detail.messages.map((m) => (
           <MessageBubble key={m.id} message={m} toolCallsForMessage={detail.toolCalls.filter((tc) => tc.messageId === m.id)} />
         ))}
@@ -280,6 +342,7 @@ function ChatThread({ detail, loading, streamText, streaming, toolCalls, errorTe
               />
             ))}
             {streamText && <MarkdownView source={streamText} />}
+            {!streamText && toolCalls.length === 0 && <TypingIndicator />}
           </div>
         )}
         {errorText && <div className="alert alert-danger m-2">{errorText}</div>}
@@ -319,6 +382,21 @@ function MessageBubble({ message, toolCallsForMessage }: MessageBubbleProps) {
       {text && (message.role === "assistant"
         ? <MarkdownView source={text} />
         : <div>{text}</div>)}
+    </div>
+  );
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return value.slice(0, max - 1) + "…";
+}
+
+function TypingIndicator() {
+  return (
+    <div className="agent-typing" aria-label="Assistant is typing">
+      <span className="agent-typing__dot" />
+      <span className="agent-typing__dot" />
+      <span className="agent-typing__dot" />
     </div>
   );
 }

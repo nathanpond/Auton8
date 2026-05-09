@@ -7,8 +7,10 @@
   background: var(--surface-bg, #fff);
   border-left: 1px solid var(--border-color, #dee2e6);
   box-shadow: -2px 0 12px rgba(0, 0, 0, 0.06);
-  transition: width 160ms ease;
-  z-index: 1030;
+  transition: width 160ms ease, top 160ms ease;
+  /* Default z-index keeps the sidebar above page content but below the
+     top-menu (1015). The over-header modifier bumps it above. */
+  z-index: 1010;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -16,6 +18,27 @@
 
 .agent-sidebar--open {
   width: 380px;
+}
+
+/* When the user picks "Show Chatbot Over Header" the sidebar covers the top
+   nav. Otherwise it slides down to start beneath the top-menu. The variable
+   is set by the ColorAdmin theme; the fallback matches its 40px default. */
+.agent-sidebar--over-header {
+  top: 0;
+  z-index: 1030;
+}
+
+.agent-sidebar--under-header {
+  top: var(--bs-app-top-menu-height, 40px);
+  z-index: 1010;
+}
+
+/* "Fill" mode: AgentSidebar.tsx sets body.agent-sidebar-fill so the page
+   content can be pushed narrower. Fixed-position sidebar itself doesn't move,
+   so the right-edge padding lives on #app (covers both header and content). */
+body.agent-sidebar-fill #app {
+  padding-right: 380px;
+  transition: padding-right 160ms ease;
 }
 
 .agent-sidebar__inner {
@@ -196,4 +219,28 @@
 .agent-markdown a {
   color: inherit;
   text-decoration: underline;
+}
+
+.agent-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0;
+}
+
+.agent-typing__dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--text-muted, #6c757d);
+  opacity: 0.4;
+  animation: agent-typing-bounce 1.2s infinite ease-in-out;
+}
+
+.agent-typing__dot:nth-child(2) { animation-delay: 0.15s; }
+.agent-typing__dot:nth-child(3) { animation-delay: 0.30s; }
+
+@keyframes agent-typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-0.25rem); opacity: 1; }
 }

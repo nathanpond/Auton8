@@ -19,6 +19,7 @@ using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Agent;
 using AutoNate.Web.Services.Agent.Conversations;
 using AutoNate.Web.Services.Agent.Loop;
+using AutoNate.Web.Services.Agent.PageQuery;
 using AutoNate.Web.Services.Agent.Providers;
 using AutoNate.Web.Services.Agent.Search;
 using AutoNate.Web.Services.Agent.Skills;
@@ -286,7 +287,18 @@ builder.Services.AddHttpClient("agent.websearch", c =>
     UseCookies = false
 });
 
+// Generic page-awareness skill. Always registered; both tools (inspect_page,
+// query_page) self-degrade when no snapshot is present on the conversation.
+builder.Services.AddScoped<IAgentSkill, InspectPageSkill>();
+
 builder.Services.AddScoped<ISkillRegistry, SkillRegistry>();
+
+// Page-query bridge: a singleton router that holds in-flight TaskCompletionSource
+// awaiters keyed by (conversationId, queryId), and a per-request channel that
+// agent sessions activate to emit PageQueryRequested events and await replies.
+builder.Services.AddSingleton<IPageQueryRouter, PageQueryRouter>();
+builder.Services.AddScoped<PageQueryChannel>();
+builder.Services.AddScoped<IPageQueryChannel>(sp => sp.GetRequiredService<PageQueryChannel>());
 
 // Conversation persistence + the orchestrator that runs the tool-using loop.
 builder.Services.AddOptions<AgentOptions>().BindConfiguration(AgentOptions.SectionName);

@@ -39,6 +39,15 @@ public abstract record class AgentEvent
         public override string Kind => "message_completed";
     }
 
+    // Server → SPA request to fetch a slice of live page state. Emitted by
+    // IPageQueryChannel mid-tool-invocation when a skill needs data the
+    // per-message snapshot doesn't carry. The SPA replies via
+    // POST /api/agent/conversations/{id}/page-query-results.
+    public sealed record class PageQueryRequested(string QueryId, string Topic, JsonElement? Args) : AgentEvent
+    {
+        public override string Kind => "page_query_request";
+    }
+
     public sealed record class Error(string Message) : AgentEvent
     {
         public override string Kind => "error";

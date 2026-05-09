@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Threading.Channels;
 using AutoNate.Web.Services.Agent.Conversations;
+using AutoNate.Web.Services.Agent.PageQuery;
 using AutoNate.Web.Services.Agent.Providers;
 using AutoNate.Web.Services.Agent.Skills;
 using AutoNate.Web.Services.Events;
@@ -23,12 +25,19 @@ public sealed class AgentSession : IAgentSession
         WebSearchSkill.ToolName
     };
 
+    // Caps for the SPA-provided page snapshot. Validated again in AgentSession
+    // (defense in depth) so tests / direct callers that bypass the endpoint
+    // can't smuggle oversized payloads into the system prompt.
+    public const int MaxSnapshotDataBytes = 64 * 1024;
+    public const int MaxSnapshotSummaryChars = 1024;
+
     private readonly IAgentConversationStore _conversationStore;
     private readonly IChatProviderResolver _providerResolver;
     private readonly ISkillRegistry _skillRegistry;
     private readonly SystemPromptBuilder _promptBuilder;
     private readonly IAuditEventPublisher _auditPublisher;
     private readonly ISiteSettingsStore _siteSettingsStore;
+    private readonly PageQueryChannel _pageQueryChannel;
     private readonly IServiceProvider _services;
     private readonly AgentOptions _options;
     private readonly ILogger<AgentSession> _logger;
@@ -40,6 +49,7 @@ public sealed class AgentSession : IAgentSession
         SystemPromptBuilder promptBuilder,
         IAuditEventPublisher auditPublisher,
         ISiteSettingsStore siteSettingsStore,
+        PageQueryChannel pageQueryChannel,
         IServiceProvider services,
         IOptions<AgentOptions> options,
         ILogger<AgentSession> logger)
@@ -50,6 +60,7 @@ public sealed class AgentSession : IAgentSession
         _promptBuilder = promptBuilder;
         _auditPublisher = auditPublisher;
         _siteSettingsStore = siteSettingsStore;
+        _pageQueryChannel = pageQueryChannel;
         _services = services;
         _options = options.Value;
         _logger = logger;
@@ -77,6 +88,7 @@ public sealed class AgentSession : IAgentSession
         Guid conversationId,
         Guid userId,
         string userText,
+        PageContextInput? pageContext = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var detail = await _conversationStore.GetForUserAsync(conversationId, userId, cancellationToken);
@@ -87,6 +99,16 @@ public sealed class AgentSession : IAgentSession
             yield break;
         }
         var conversation = detail.Conversation;
+
+        // Validate / normalize the SPA-supplied page snapshot. Defense in
+        // depth: the endpoint already enforces these, but tests and direct
+        // callers may skip it. A bad snapshot is dropped (never throws) so
+        // the conversation can still proceed without page awareness.
+        PageContextSnapshot? snapshot = null;
+        if (pageContext is not null)
+        {
+            snapshot = TryNormalizeSnapshot(pageContext, conversation.PageKey);
+        }
 
         // Persist the user message first.
         var userBlocks = new ChatContentBlock[] { new ChatContentBlock.TextBlock(userText) };
@@ -105,7 +127,14 @@ public sealed class AgentSession : IAgentSession
             AgentEventTypes.MessageUserSent,
             AgentResourceKinds.Message,
             resource: new { conversationId, messageId = userMessageId },
-            details: new { length = userText.Length, pageKey = conversation.PageKey },
+            details: new
+            {
+                length = userText.Length,
+                pageKey = conversation.PageKey,
+                pageSummary = snapshot?.Summary,
+                pageSchemaVersion = snapshot?.SchemaVersion,
+                pageVersion = snapshot?.Version
+            },
             cancellationToken);
 
         // Resolve the provider. If the conversation has no connection, fall
@@ -128,7 +157,9 @@ public sealed class AgentSession : IAgentSession
         var sessionContext = new AgentSessionContext(
             User: new ClaimsPrincipal(),
             UserId: userId,
-            PageKey: conversation.PageKey);
+            PageKey: conversation.PageKey,
+            ConversationId: conversationId,
+            PageContext: snapshot);
 
         var systemPrompt = _promptBuilder.Build(
             sessionContext,
@@ -278,32 +309,39 @@ public sealed class AgentSession : IAgentSession
                     }
                     else
                     {
+                        // Side-channel for events emitted from inside the tool
+                        // (currently only the page-query channel emits here).
+                        // We pump it concurrently with the tool's await so
+                        // PageQueryRequested events reach the SPA in real time.
+                        var sideEvents = Channel.CreateUnbounded<AgentEvent>();
+                        _pageQueryChannel.Activate(conversationId, ev => sideEvents.Writer.WriteAsync(ev, cancellationToken));
+
                         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                         timeoutCts.CancelAfter(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds));
-                        try
+
+                        var toolContext = new AgentToolContext(sessionContext, _services);
+                        var invokeTask = SafeInvokeToolAsync(
+                            tool!, info.Args, toolContext,
+                            outerCt: cancellationToken,
+                            combinedCt: timeoutCts.Token,
+                            timeoutSeconds: _options.ToolTimeoutSeconds);
+
+                        while (!invokeTask.IsCompleted)
                         {
-                            var toolContext = new AgentToolContext(sessionContext, _services);
-                            resultValue = await tool!.Invoke(info.Args, toolContext, timeoutCts.Token).ConfigureAwait(false);
+                            if (cancellationToken.IsCancellationRequested) break;
+                            var readWait = sideEvents.Reader.WaitToReadAsync(cancellationToken).AsTask();
+                            await Task.WhenAny(invokeTask, readWait).ConfigureAwait(false);
+                            while (sideEvents.Reader.TryRead(out var sideEv)) yield return sideEv;
                         }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                        {
-                            isError = true;
-                            toolErrorText = "Cancelled.";
-                            resultValue = JsonSerializer.SerializeToElement(new { error = toolErrorText });
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            isError = true;
-                            toolErrorText = $"Tool timed out after {_options.ToolTimeoutSeconds}s.";
-                            resultValue = JsonSerializer.SerializeToElement(new { error = toolErrorText });
-                        }
-                        catch (Exception ex)
-                        {
-                            isError = true;
-                            toolErrorText = ex.Message;
-                            resultValue = JsonSerializer.SerializeToElement(new { error = ex.Message });
-                            _logger.LogWarning(ex, "Tool {ToolName} threw", info.Name);
-                        }
+                        sideEvents.Writer.TryComplete();
+                        while (sideEvents.Reader.TryRead(out var sideEv)) yield return sideEv;
+
+                        _pageQueryChannel.Deactivate();
+
+                        var outcome = await invokeTask.ConfigureAwait(false);
+                        resultValue = outcome.Result;
+                        isError = outcome.IsError;
+                        toolErrorText = outcome.ErrorText;
                     }
                     sw.Stop();
 
@@ -370,5 +408,88 @@ public sealed class AgentSession : IAgentSession
     {
         using var doc = JsonDocument.Parse("{}");
         return doc.RootElement.Clone();
+    }
+
+    // Wraps a tool invocation in the same exception model the loop uses to
+    // emit ToolFailed events. Lifted out of the loop body so the loop itself
+    // (which yields events) can stay free of try/catch around await.
+    private async Task<(JsonElement Result, bool IsError, string? ErrorText)> SafeInvokeToolAsync(
+        AgentTool tool,
+        JsonElement args,
+        AgentToolContext context,
+        CancellationToken outerCt,
+        CancellationToken combinedCt,
+        int timeoutSeconds)
+    {
+        try
+        {
+            var result = await tool.Invoke(args, context, combinedCt).ConfigureAwait(false);
+            return (result, false, null);
+        }
+        catch (OperationCanceledException) when (outerCt.IsCancellationRequested)
+        {
+            const string msg = "Cancelled.";
+            return (JsonSerializer.SerializeToElement(new { error = msg }), true, msg);
+        }
+        catch (OperationCanceledException)
+        {
+            var msg = $"Tool timed out after {timeoutSeconds}s.";
+            return (JsonSerializer.SerializeToElement(new { error = msg }), true, msg);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Tool {ToolName} threw", tool.Name);
+            return (JsonSerializer.SerializeToElement(new { error = ex.Message }), true, ex.Message);
+        }
+    }
+
+    // Validates and normalizes a SPA-supplied page snapshot into the
+    // server-side record skills consume. Returns null (and logs) if the
+    // snapshot is unsafe — page key mismatch, oversized, or otherwise
+    // malformed. Conversation flow proceeds without page awareness rather
+    // than failing the message; the user can retry.
+    private PageContextSnapshot? TryNormalizeSnapshot(PageContextInput input, string conversationPageKey)
+    {
+        if (!string.Equals(input.PageKey, conversationPageKey, StringComparison.Ordinal))
+        {
+            _logger.LogInformation(
+                "Dropping page snapshot: pageKey mismatch (snapshot={SnapshotKey}, conversation={ConvKey})",
+                input.PageKey, conversationPageKey);
+            return null;
+        }
+
+        var summary = input.Summary;
+        if (!string.IsNullOrEmpty(summary) && summary.Length > MaxSnapshotSummaryChars)
+        {
+            summary = summary.Substring(0, MaxSnapshotSummaryChars - 1) + "…";
+        }
+
+        // The endpoint already enforces the size cap on Data; here we
+        // re-check for direct callers (tests). Cheap to compute since
+        // JsonElement.GetRawText returns a string slice over the underlying
+        // buffer.
+        try
+        {
+            var raw = input.Data.GetRawText();
+            if (raw.Length > MaxSnapshotDataBytes)
+            {
+                _logger.LogInformation(
+                    "Dropping page snapshot: data exceeds {Cap} bytes (got {Size}).",
+                    MaxSnapshotDataBytes, raw.Length);
+                return null;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Disposed/invalid JsonElement — drop snapshot.
+            return null;
+        }
+
+        return new PageContextSnapshot(
+            PageKey: input.PageKey,
+            SchemaVersion: input.SchemaVersion,
+            Summary: summary,
+            Version: input.Version,
+            Data: input.Data);
     }
 }

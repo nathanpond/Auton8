@@ -33,3 +33,7 @@ export async function deleteConversation(id: string): Promise<void> {
 export function sendMessageUrl(conversationId: string): string {
   return `${BASE}/conversations/${conversationId}/messages`;
 }
+
+export function pageQueryResultsUrl(conversationId: string): string {
+  return `${BASE}/conversations/${conversationId}/page-query-results`;
+}

@@ -14,6 +14,7 @@ import { reportMenuRenderFailure } from "@/api/systemIssues";
 import SiteBrand from "@/components/SiteBrand";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import AgentChatTrigger from "@/agent/AgentChatTrigger";
+import { useUserPreferences } from "@/preferences/UserPreferencesContext";
 
 // Tiny helper used by the silent-drop sites in IconMenuItem / DropdownEntry /
 // UserDropdownEntry. Reporting at the moment we drop the item is what makes
@@ -36,6 +37,7 @@ export default function NavMenu() {
   const { data: recordTypes = [] } = useRecordTypes(false);
   const { data: pageTemplates } = usePageTemplates();
   const { effectiveAppearance } = useSiteAppearance();
+  const { openModal: openPreferences } = useUserPreferences();
 
   const publicSettings = usePublicSiteSettings();
   const notificationsEnabled = publicSettings.getBool(
@@ -276,6 +278,17 @@ export default function NavMenu() {
             </span>
           </a>
           <div className="dropdown-menu dropdown-menu-end me-1">
+            <button
+              type="button"
+              className="dropdown-item"
+              onClick={() => openPreferences()}
+            >
+              <i className="fa fa-gear me-2" />
+              User Preferences
+            </button>
+            {(userMenu?.items ?? []).length > 0 && (
+              <div className="dropdown-divider" />
+            )}
             {(userMenu?.items ?? []).map((item) => (
               <UserDropdownEntry key={item.id} item={item} templates={pageTemplates} />
             ))}

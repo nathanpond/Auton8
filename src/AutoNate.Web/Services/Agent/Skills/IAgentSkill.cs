@@ -27,10 +27,27 @@ public interface IAgentSkill
 // Per-turn context the agent loop hands to skills. The principal is the only
 // authorization source — skills MUST route reads through stores that already
 // gate by IAuthorizer, never query the DbContext directly for gated entities.
+//
+// PageContext (optional) is the structured snapshot the SPA bundled with the
+// user's message. When non-null, two affordances are advertised to the model:
+// inspect_page (cheap snapshot read) and query_page (round-trip to the live
+// page). Skills that don't care about page state simply ignore this field.
 public sealed record class AgentSessionContext(
     ClaimsPrincipal User,
     Guid UserId,
-    string PageKey);
+    string PageKey,
+    Guid ConversationId = default,
+    PageContextSnapshot? PageContext = null);
+
+// Server-side received view of a SPA-supplied page snapshot. Lives in the
+// Skills namespace so any skill can read it via AgentSessionContext without
+// importing endpoint types.
+public sealed record class PageContextSnapshot(
+    string PageKey,
+    int SchemaVersion,
+    string? Summary,
+    long Version,
+    JsonElement Data);
 
 public sealed record class AgentTool(
     string Name,

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
-import { sendMessageUrl } from "./api";
+import { pageQueryResultsUrl, sendMessageUrl } from "./api";
 import { AgentStreamEvent } from "./types";
+import { PageQueryResult, PageSnapshot } from "./pageContext/types";
 
 export type AgentStreamState = {
   streaming: boolean;
@@ -27,6 +28,14 @@ const initial: AgentStreamState = {
   lastEvent: null
 };
 
+// Handler the chat sidebar passes when it sends a message. Invoked when the
+// server streams a page_query_request SSE event mid-tool-call. The handler
+// asks the registered page provider for the data and POSTs the result back
+// to the server, where it unblocks the awaiting skill.
+export type PageQueryDispatcher = (
+  request: { queryId: string; topic: string; args?: unknown }
+) => Promise<PageQueryResult>;
+
 export function useAgentStream() {
   const [state, setState] = useState<AgentStreamState>(initial);
   const abortRef = useRef<AbortController | null>(null);
@@ -40,17 +49,24 @@ export function useAgentStream() {
   const send = useCallback(async (
     conversationId: string,
     text: string,
-    onComplete?: () => void
+    options?: {
+      pageContext?: PageSnapshot | null;
+      onPageQuery?: PageQueryDispatcher;
+      onComplete?: () => void;
+    }
   ): Promise<void> => {
     const controller = new AbortController();
     abortRef.current = controller;
 
     setState({ streaming: true, text: "", toolCalls: [], error: null, lastEvent: null });
 
+    const body: { text: string; pageContext?: PageSnapshot } = { text };
+    if (options?.pageContext) body.pageContext = options.pageContext;
+
     try {
       const res = await fetch(sendMessageUrl(conversationId), {
         method: "POST",
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(body),
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal
@@ -83,6 +99,12 @@ export function useAgentStream() {
           } catch {
             continue;
           }
+          // Page-query requests are NOT applied to UI state — they're
+          // routed to the page provider and replied to out-of-band.
+          if (event.kind === "page_query_request") {
+            void handlePageQuery(conversationId, event, options?.onPageQuery, controller.signal);
+            continue;
+          }
           setState((s) => applyEvent(s, event));
           if (event.kind === "done" || event.kind === "error") {
             break;
@@ -98,11 +120,50 @@ export function useAgentStream() {
       }));
     } finally {
       setState((s) => ({ ...s, streaming: false }));
-      onComplete?.();
+      options?.onComplete?.();
     }
   }, []);
 
   return { state, send, cancel, reset };
+}
+
+async function handlePageQuery(
+  conversationId: string,
+  event: Extract<AgentStreamEvent, { kind: "page_query_request" }>,
+  dispatcher: PageQueryDispatcher | undefined,
+  signal: AbortSignal
+): Promise<void> {
+  let result: PageQueryResult;
+  if (!dispatcher) {
+    result = { ok: false, error: "page_unreachable", message: "No page provider registered." };
+  } else {
+    try {
+      result = await dispatcher({ queryId: event.queryId, topic: event.topic, args: event.args });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result = { ok: false, error: "handler_threw", message };
+    }
+  }
+
+  // Map the SPA-internal result shape to the wire-format the server expects.
+  // (server expects: { ok, data?, error?, message? })
+  const wireResult = result.ok
+    ? { ok: true, data: result.data ?? null }
+    : { ok: false, error: result.error, message: result.message ?? null };
+
+  try {
+    await fetch(pageQueryResultsUrl(conversationId), {
+      method: "POST",
+      body: JSON.stringify({ queryId: event.queryId, result: wireResult }),
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      signal
+    });
+  } catch (err) {
+    if ((err as { name?: string })?.name !== "AbortError") {
+      console.warn("page-query: failed to deliver result", err);
+    }
+  }
 }
 
 function applyEvent(state: AgentStreamState, event: AgentStreamEvent): AgentStreamState {
