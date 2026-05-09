@@ -5,6 +5,7 @@ using RecordModel = AutoNate.Web.Models.Records.Record;
 using WorkflowModelModel = AutoNate.Web.Models.WorkflowModel;
 using FormModel = AutoNate.Web.Models.Forms.Form;
 using ExternalConnectionModel = AutoNate.Web.Persistence.Scaffolded.ExternalConnection;
+using SystemIssueModel = AutoNate.Web.Services.SystemIssues.SystemIssue;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
@@ -20,7 +21,7 @@ public static class CoreEntityTypes
         {
             User!, Group!, Role!, RecordType!, Record!,
             WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
-            Form!, ExternalConnection!
+            Form!, ExternalConnection!, SystemIssue!
         });
 
     public static EntityTypeDefinition User { get; } = new(
@@ -140,4 +141,19 @@ public static class CoreEntityTypes
         idClrType: typeof(Guid),
         actions: new[] { Actions.View, Actions.Manage },
         tags: new[] { "kind", "name", "default" });
+
+    // Self-healing platform: rows in system_issues. View gates list+detail,
+    // Acknowledge/Resolve gate the operator-action endpoints, Remediate gates
+    // the on-demand POST /system-issues/{id}/remediate endpoint. EntityKinds
+    // notes this is a kind-only gate (no instance authorizer) — every issue
+    // is administrative and we currently grant access at the kind level.
+    public static EntityTypeDefinition SystemIssue { get; } = new(
+        kind: EntityKinds.SystemIssue,
+        clrType: typeof(SystemIssueModel),
+        idClrType: typeof(Guid),
+        actions: new[]
+        {
+            Actions.View, Actions.Acknowledge, Actions.Resolve, Actions.Remediate
+        },
+        tags: new[] { "category", "severity", "state", "detector" });
 }
