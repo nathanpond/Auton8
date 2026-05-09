@@ -149,14 +149,27 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                     }
                     """),
                 Invoke: InvokeUpdateFieldAsync),
-            new AgentTool(SetFieldArchivedToolName,  "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
+            new AgentTool(
+                Name: SetFieldArchivedToolName,
+                Description: "Archive or restore a field on a record type. Archiving a field hides it from forms but does NOT remove existing records' values for that field. Always narrate this consequence to the user when archiving.",
+                JsonSchema: ParseSchema("""
+                    {
+                      "type": "object",
+                      "properties": {
+                        "typeShortCode": { "type": "string" },
+                        "fieldKey":      { "type": "string" },
+                        "archived":      { "type": "boolean" },
+                        "confirmed":     { "type": "boolean" }
+                      },
+                      "required": ["typeShortCode","fieldKey","archived"],
+                      "additionalProperties": false
+                    }
+                    """),
+                Invoke: InvokeSetFieldArchivedAsync),
         };
     }
 
     public string? SystemPromptFragment(AgentSessionContext context) => null;
-
-    private static Task<JsonElement> NotImplementedAsync(JsonElement args, AgentToolContext context, CancellationToken ct) =>
-        Task.FromResult(JsonSerializer.SerializeToElement(new { kind = "error", source = "ManageRecordTypesSkill", data = new { message = "not implemented" } }));
 
     private static JsonElement ParseSchema(string raw)
     {
@@ -594,6 +607,73 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
         {
             return Failed("add_field", ex);
         }
+    }
+
+    private static async Task<JsonElement> InvokeSetFieldArchivedAsync(
+        JsonElement args,
+        AgentToolContext context,
+        CancellationToken ct)
+    {
+        var shortCode = ReadRequiredString(args, "typeShortCode");
+        if (shortCode is null) return Error(SetFieldArchivedToolName, "typeShortCode is required.");
+        var fieldKey = ReadRequiredString(args, "fieldKey");
+        if (fieldKey is null) return Error(SetFieldArchivedToolName, "fieldKey is required.");
+        if (!args.TryGetProperty("archived", out var arch) || (arch.ValueKind != JsonValueKind.True && arch.ValueKind != JsonValueKind.False))
+            return Error(SetFieldArchivedToolName, "archived must be a boolean.");
+        var archived = arch.ValueKind == JsonValueKind.True;
+
+        var typeStore = context.Services.GetRequiredService<IRecordTypeStore>();
+        var existing = await typeStore.GetByShortCodeAsync(shortCode, ct);
+        if (existing is null) return Error(SetFieldArchivedToolName, $"No record type with short code '{shortCode}'.");
+        if (existing.IsSystem) return Error(SetFieldArchivedToolName, $"Record type '{shortCode}' is a system type and cannot be modified by the agent.");
+
+        var fields = await typeStore.ListFieldsAsync(existing.Id, includeArchived: true, ct);
+        var field = fields.FirstOrDefault(f => f.FieldKey == fieldKey);
+        if (field is null) return Error(SetFieldArchivedToolName, $"No field '{fieldKey}' on record type '{shortCode}'.");
+
+        var authorizer = context.Services.GetRequiredService<IAuthorizer>();
+        var decision = await authorizer.AuthorizeAsync(
+            context.Session.User, Actions.DefineFields, new EntityRef(EntityKinds.RecordType, existing.Id.ToString()), ct);
+        if (!decision.IsAllowed)
+            return Error(SetFieldArchivedToolName, $"Not authorized to define fields on '{shortCode}' ({decision.Reason}).");
+
+        var op = archived ? "archive_field" : "restore_field";
+        var confirmed = args.TryGetProperty("confirmed", out var c) && c.ValueKind == JsonValueKind.True;
+
+        if (!confirmed)
+        {
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "record_type_change_proposal",
+                source = "ManageRecordTypesSkill",
+                data = new
+                {
+                    operation = op,
+                    summary = archived
+                        ? $"Archive field {shortCode}.{fieldKey}. Existing records' values for this field stay in storage but disappear from forms."
+                        : $"Restore field {shortCode}.{fieldKey}.",
+                    before = new { field.FieldKey, field.IsArchived },
+                    after = new { field.FieldKey, isArchived = archived },
+                    validation = new { ok = true, errors = Array.Empty<object>() }
+                }
+            });
+        }
+
+        var updated = await typeStore.SetFieldArchivedAsync(existing.Id, field.Id, archived, context.Session.UserId, ct);
+        return JsonSerializer.SerializeToElement(new
+        {
+            kind = "record_type_change_committed",
+            source = "ManageRecordTypesSkill",
+            data = new
+            {
+                operation = op,
+                typeId = existing.Id,
+                shortCode = existing.ShortCode,
+                fieldId = updated.Id,
+                fieldKey = updated.FieldKey,
+                isArchived = updated.IsArchived
+            }
+        });
     }
 
     private static object SnapshotType(RecordType type) => new

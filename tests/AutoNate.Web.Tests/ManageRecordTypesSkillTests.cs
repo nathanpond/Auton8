@@ -736,6 +736,66 @@ public sealed class ManageRecordTypesSkillTests
         Assert.Empty(typeStore.UpdateFieldCalls);
     }
 
+    [Fact]
+    public async Task SetFieldArchived_archive_calls_SetFieldArchivedAsync()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField, YearField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "set_record_type_field_archived", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "year",
+            archived = true,
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_committed", result.GetProperty("kind").GetString());
+        var call = Assert.Single(typeStore.ArchiveFieldCalls);
+        Assert.Equal(YearField.Id, call.FieldId);
+        Assert.True(call.Archived);
+        Assert.Contains(authorizer.Calls, c => c.Action == Actions.DefineFields && c.Target.Id == CarTypeId.ToString());
+    }
+
+    [Fact]
+    public async Task SetFieldArchived_dry_run_does_not_call_store()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "set_record_type_field_archived", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "model",
+            archived = true,
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.ArchiveFieldCalls);
+    }
+
+    [Fact]
+    public async Task SetFieldArchived_unknown_field_returns_error()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "set_record_type_field_archived", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "nope",
+            archived = true,
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.ArchiveFieldCalls);
+    }
+
     // --- helpers / fakes ---
 
     private static async Task<JsonElement> Invoke(
