@@ -125,7 +125,7 @@ function NotificationDropdownRow({
 
 // Compact relative time for the dropdown — full timestamps go on the
 // /notifications page where there's room for them.
-export function formatRelative(iso: string): string {
+function formatRelative(iso: string): string {
   const ts = Date.parse(iso);
   if (Number.isNaN(ts)) return "";
   const diffMs = Date.now() - ts;
