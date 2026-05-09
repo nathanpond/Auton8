@@ -127,9 +127,12 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
         // Dry-run validation: normalize each field's config via the registry.
         var registry = context.Services.GetRequiredService<IFieldTypeRegistry>();
         var validationErrors = new List<object>();
-        var normalizedFields = new List<(FieldInput Raw, JsonElement NormalizedConfig)>();
-        foreach (var field in fieldInputs)
+        var normalizedFields = new List<(FieldInput Raw, JsonElement NormalizedConfig, int ResolvedSortOrder)>();
+        for (var i = 0; i < fieldInputs.Count; i++)
         {
+            var field = fieldInputs[i];
+            var resolvedSortOrder = field.SortOrder ?? (i * 10);
+
             if (!registry.TryGet(field.DataType, out var fieldType))
             {
                 validationErrors.Add(new { code = "unknown_data_type", fieldKey = field.FieldKey, message = $"Unknown data_type '{field.DataType}'." });
@@ -138,7 +141,7 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
             try
             {
                 var normalized = fieldType.NormalizeConfig(field.Config);
-                normalizedFields.Add((field, normalized));
+                normalizedFields.Add((field, normalized, resolvedSortOrder));
             }
             catch (FieldConfigException ex)
             {
@@ -209,7 +212,7 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
         }
 
         var createdFieldCount = 0;
-        foreach (var (raw, normalizedConfig) in normalizedFields)
+        foreach (var (raw, normalizedConfig, resolvedSortOrder) in normalizedFields)
         {
             try
             {
@@ -221,7 +224,7 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                         raw.DataType,
                         normalizedConfig,
                         raw.IsRequired,
-                        raw.SortOrder ?? (createdFieldCount * 10)),
+                        resolvedSortOrder),
                     context.Session.UserId,
                     ct);
                 createdFieldCount++;
