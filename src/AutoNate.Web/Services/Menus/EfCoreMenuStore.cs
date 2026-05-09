@@ -17,20 +17,32 @@ namespace AutoNate.Web.Services.Menus;
 // the store wakes the detector's BackgroundService loop after every menu_item
 // mutation so a save that produces an invisible-in-nav row surfaces an
 // issue within seconds instead of waiting for the 30-min periodic sweep.
+//
+// `pageRegistrySnapshot` is similarly optional. When present, ListPagesAsync
+// reads the unauthorized row set from the cache (one DB hit per 30s window
+// across all replicas) and mutations bump its Invalidate() so admins see
+// their changes immediately. Tests that don't register the cache fall back
+// to a per-request DB read.
 public sealed class EfCoreMenuStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
     IAuthorizer authorizer,
-    MisconfiguredMenuItemDetector? menuMisconfigurationDetector = null) : IMenuStore
+    MisconfiguredMenuItemDetector? menuMisconfigurationDetector = null,
+    PageRegistrySnapshotCache? pageRegistrySnapshot = null) : IMenuStore
 {
-    // Bumps the singleton detector's wake-signal so its already-running
-    // BackgroundService loop runs the next tick immediately instead of
-    // waiting for the full Interval. Multiple bursting mutations coalesce
-    // into a single wake-up via the SemaphoreSlim's capacity=1 cap — no
-    // unbounded Task.Run per request, no extra threadpool work, no shared
-    // state on the per-request scoped store.
-    private void TriggerMenuMisconfigurationScan()
+    // Single helper called from every mutation site so the two singleton
+    // reactions (detector wake-up + page-registry cache invalidation) stay
+    // in sync — one missed call from a future endpoint and the SPA shows
+    // stale routes for up to 30 seconds.
+    private void OnMenuItemsChanged()
     {
+        // Bumps the singleton detector's wake-signal so its already-running
+        // BackgroundService loop runs the next tick immediately instead of
+        // waiting for the full Interval. Multiple bursting mutations
+        // coalesce into a single wake-up via the SemaphoreSlim's capacity=1
+        // cap — no unbounded Task.Run per request, no extra threadpool
+        // work, no shared state on the per-request scoped store.
         menuMisconfigurationDetector?.RequestImmediateScan();
+        pageRegistrySnapshot?.Invalidate();
     }
 
     private static readonly HashSet<string> AllowedItemTypes = new(StringComparer.Ordinal)
@@ -177,7 +189,7 @@ public sealed class EfCoreMenuStore(
         await db.SaveChangesAsync(cancellationToken);
         // Cascade-deletes menu_items, which can resolve open misconfiguration
         // issues; trigger a fresh scan so they auto-resolve immediately.
-        TriggerMenuMisconfigurationScan();
+        OnMenuItemsChanged();
         return true;
     }
 
@@ -238,7 +250,7 @@ public sealed class EfCoreMenuStore(
         };
         db.MenuItems.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
-        TriggerMenuMisconfigurationScan();
+        OnMenuItemsChanged();
         return ToItemModel(entity);
     }
 
@@ -353,7 +365,7 @@ public sealed class EfCoreMenuStore(
         {
             entity.UpdatedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            TriggerMenuMisconfigurationScan();
+            OnMenuItemsChanged();
         }
 
         return ToItemModel(entity);
@@ -366,7 +378,7 @@ public sealed class EfCoreMenuStore(
         if (entity is null) return false;
         db.MenuItems.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        TriggerMenuMisconfigurationScan();
+        OnMenuItemsChanged();
         return true;
     }
 
@@ -434,21 +446,39 @@ public sealed class EfCoreMenuStore(
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        TriggerMenuMisconfigurationScan();
+        OnMenuItemsChanged();
     }
 
     public async Task<IReadOnlyList<PageRegistryEntry>> ListPagesAsync(ClaimsPrincipal actor, CancellationToken cancellationToken = default)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         // Pages own their URL via item_type='page'. Routes can also "claim" a
         // URL via config.aliasPath — those become aliases the catch-all
         // resolves to the target route's component. Template items mount a
         // built-in SPA template at their config.path (templates do not carry
         // a default URL — every mounted template item owns its own path).
-        var rows = await db.MenuItems.AsNoTracking()
-            .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
-            .ToListAsync(cancellationToken);
+        //
+        // The unauthorized row set is invariant of the calling actor and
+        // changes only on menu_item writes. Read it from the singleton
+        // snapshot cache when wired (production); fall back to a per-request
+        // DB read in test contexts that don't register the cache.
+        IReadOnlyList<MenuItemEntity> rows;
+        if (pageRegistrySnapshot is not null)
+        {
+            rows = await pageRegistrySnapshot.GetAsync(cancellationToken);
+        }
+        else
+        {
+            await using var fallbackDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            rows = await fallbackDb.MenuItems.AsNoTracking()
+                .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
+                .ToListAsync(cancellationToken);
+        }
 
+        // Template metadata varies independently of the menu_items rows
+        // (plugins enable/disable, page_templates upserts), so it stays a
+        // live read for now. The candidate set is bounded by the cached
+        // rows above so the cost is small.
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var templateInfo = await LoadTemplateInfoAsync(db, rows, cancellationToken);
 
         var permissionCache = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -467,9 +497,25 @@ public sealed class EfCoreMenuStore(
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var rows = await db.MenuItems.AsNoTracking()
-            .Where(i => (i.ItemType == "page" || i.ItemType == "route" || i.ItemType == "template") && i.IsVisible)
+        // Indexed lookup: filter by config->>'path' (page + template) OR
+        // config->>'aliasPath' (route) directly in SQL. Postgres uses
+        // ix_menu_items_config_path / ix_menu_items_config_alias_path so
+        // this is an O(log n) jsonb-path probe — at most a couple of
+        // candidate rows come back, even when menu_items has thousands of
+        // entries. Authorization runs on those candidates only, not on the
+        // whole visible set.
+        var rows = await db.MenuItems
+            .FromSqlInterpolated($@"
+                SELECT * FROM menu_items
+                WHERE is_visible = TRUE
+                  AND (
+                        (item_type IN ('page', 'template') AND config->>'path' = {path})
+                     OR (item_type = 'route' AND config->>'aliasPath' = {path})
+                      )")
+            .AsNoTracking()
             .ToListAsync(cancellationToken);
+
+        if (rows.Count == 0) return null;
 
         var templateInfo = await LoadTemplateInfoAsync(db, rows, cancellationToken);
 
@@ -477,8 +523,11 @@ public sealed class EfCoreMenuStore(
         foreach (var row in rows)
         {
             var (rowPath, contentType, content) = ParsePageOrAlias(row, templateInfo);
-            if (rowPath is null) continue;
-            if (!string.Equals(rowPath, path, StringComparison.Ordinal)) continue;
+            // The query already filtered by path; the in-memory check is a
+            // belt-and-braces guard for a future Parse helper that resolves
+            // paths differently than the SQL predicate (e.g. trailing-slash
+            // normalization). Today these always match.
+            if (rowPath is null || !string.Equals(rowPath, path, StringComparison.Ordinal)) continue;
             if (!await IsAllowedAsync(row.PermissionRequired, permissionCache, actor, cancellationToken)) return null;
             return new PageContent(row.Id, rowPath, content ?? string.Empty, contentType);
         }

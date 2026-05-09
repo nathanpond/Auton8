@@ -249,6 +249,7 @@ builder.Services.AddScoped<IRoleStore, EfCoreRoleStore>();
 builder.Services.AddScoped<IGroupStore, EfCoreGroupStore>();
 builder.Services.AddScoped<IRoleAssignmentStore, EfCoreRoleAssignmentStore>();
 builder.Services.AddScoped<IPermissionGrantStore, EfCorePermissionGrantStore>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Menus.PageRegistrySnapshotCache>();
 builder.Services.AddScoped<IMenuStore, EfCoreMenuStore>();
 builder.Services.AddScoped<IPageTemplateStore, EfCorePageTemplateStore>();
 builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();

@@ -757,9 +757,26 @@ internal static class DatabaseSchemaInitializer
         CREATE INDEX IF NOT EXISTS ix_menu_items_menu_parent_sort
             ON menu_items (menu_id, parent_id NULLS FIRST, sort_order);
 
-        CREATE INDEX IF NOT EXISTS ix_menu_items_page_path
-            ON menu_items ((config->>'path'))
-            WHERE item_type = 'page';
+        -- Legacy partial index (Phase 1, page items only). Superseded by the
+        -- broader ix_menu_items_config_path below which also covers template
+        -- items that mount themselves at config.path. Drop so we don't
+        -- maintain two overlapping indexes on inserts/updates.
+        DROP INDEX IF EXISTS ix_menu_items_page_path;
+
+        -- Lookup index for GetPageByPathAsync. Covers page + template (whose
+        -- URL is in config->>'path') so a per-request page resolution is an
+        -- O(log n) jsonb-path probe instead of a full scan + in-memory
+        -- filter. No partial WHERE so the planner can use it for any future
+        -- item_type that stores a path here; selectivity is high either way.
+        CREATE INDEX IF NOT EXISTS ix_menu_items_config_path
+            ON menu_items ((config->>'path'));
+
+        -- Symmetric index for the route-alias case (config->>'aliasPath').
+        -- Same lookup uses both indexes via Postgres BitmapOr when the two
+        -- candidate paths overlap.
+        CREATE INDEX IF NOT EXISTS ix_menu_items_config_alias_path
+            ON menu_items ((config->>'aliasPath'))
+            WHERE item_type = 'route';
 
         CREATE TABLE IF NOT EXISTS status_appearance_entries (
             id UUID PRIMARY KEY,
