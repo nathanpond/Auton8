@@ -847,13 +847,13 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
 
         var changes = new List<object>();
         if (!string.Equals(field.DisplayName, newDisplayName, StringComparison.Ordinal))
-            changes.Add(new { attribute = "displayName", before = field.DisplayName, after = newDisplayName });
+            changes.Add(new { key = "displayName", displayName = "Display name", before = field.DisplayName, after = newDisplayName });
         if (field.IsRequired != newIsRequired)
-            changes.Add(new { attribute = "isRequired", before = field.IsRequired, after = newIsRequired });
+            changes.Add(new { key = "isRequired", displayName = "Required", before = field.IsRequired, after = newIsRequired });
         if (field.SortOrder != newSortOrder)
-            changes.Add(new { attribute = "sortOrder", before = field.SortOrder, after = newSortOrder });
+            changes.Add(new { key = "sortOrder", displayName = "Sort order", before = field.SortOrder, after = newSortOrder });
         if (!string.Equals(field.Config.GetRawText(), newConfig.GetRawText(), StringComparison.Ordinal))
-            changes.Add(new { attribute = "config", before = field.Config, after = newConfig });
+            changes.Add(new { key = "config", displayName = "Config", before = (object)field.Config, after = (object)newConfig });
 
         var confirmed = args.TryGetProperty("confirmed", out var c) && c.ValueKind == JsonValueKind.True;
 

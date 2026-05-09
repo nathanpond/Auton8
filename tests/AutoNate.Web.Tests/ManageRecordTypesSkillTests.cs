@@ -679,7 +679,7 @@ public sealed class ManageRecordTypesSkillTests
 
         Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
         var changes = result.GetProperty("data").GetProperty("fieldChanges");
-        var changeKeys = changes.EnumerateArray().Select(e => e.GetProperty("attribute").GetString()).ToArray();
+        var changeKeys = changes.EnumerateArray().Select(e => e.GetProperty("key").GetString()).ToArray();
         Assert.Contains("displayName", changeKeys);
         Assert.Contains("isRequired", changeKeys);
         Assert.Empty(typeStore.UpdateFieldCalls);
