@@ -1,24 +1,33 @@
 ---
 name: add-page-context-provider
-description: Use when wiring up a new SPA page so the chatbot can see its live, in-memory state — the unsaved record being edited, the executions list currently filtered, the form being filled. Covers the SPA-side provider hook, the snapshot shape, the optional round-trip query handler, and what to verify on the server side.
+description: Use when wiring up a new SPA page so the chatbot can see its live state and (optionally) mutate it on the user's behalf — the unsaved record being edited, the executions list currently filtered, the form being filled, the workflow draft being authored. Covers the SPA-side provider hook, the snapshot shape, the optional round-trip query handler, the optional mutation handler with confirmation flow, and the per-field opt-out for the auto-magic form-fill default.
 ---
 
 # Adding chatbot page-awareness for a new page
 
-The chatbot's page-awareness framework gives any SPA route a way to expose its live state to the assistant. The contract has two channels — both are page-agnostic on the server; only the page-specific data shape is yours to design.
+The chatbot's page-awareness framework gives any SPA route a way to expose its live state to the assistant — and, optionally, let the assistant mutate that state on the user's behalf. The contract has three channels — all page-agnostic on the server; only the page-specific data and action shapes are yours to design.
 
-1. **Per-message snapshot (push).** Bundled with each user message. Lands in `AgentSessionContext.PageContext` and exposed to the model via the `inspect_page` tool. Best for state that's compact and that the model needs to see by default.
+1. **Per-message snapshot (push).** Bundled with each user message. Lands in `AgentSessionContext.PageContext` and exposed to the model via the `inspect_page` tool. Best for state that's compact and that the model needs to see by default. The snapshot also carries `data.actions` (the action catalog) and `data.forms` (auto-discovered) so the model knows what it can do.
 2. **On-demand query (pull).** A round-trip the model can issue mid-turn via `query_page`. Best for fresh data (selection may have moved since the user sent the message), heavy data the snapshot omits to stay under the 64KB cap, or data that's expensive to compute.
+3. **Mutation (apply).** A round-trip via `apply_page_action`, with explicit user confirmation. The agent narrates the change to the user, the user agrees in chat, then the agent calls again with `confirmed=true` to actually apply it. Mutations only change in-memory state; the user must still save manually.
 
-The framework lives in `src/AutoNate.Spa/src/agent/pageContext/` (provider + hook) and `src/AutoNate.Web/Services/Agent/PageQuery/` + `Skills/InspectPageSkill.cs` (server). You only touch page-specific files.
+Two capabilities come for free without any per-page code:
+
+- **Form-fill** (`set_form_field` / `get_form_value` / `submit_form`) is auto-magic on every page. The framework scans the DOM for `<form>` elements, serializes their fields, and exposes them in the snapshot. Pages opt fields out via `data-agent-exclude` (see step 4 below) — password, hidden, submit, reset, button, image, and file fields are always excluded.
+- A **forms-only snapshot** is produced even on pages with no registered provider, so the chatbot can fill forms anywhere without setup.
+
+The framework lives in `src/AutoNate.Spa/src/agent/pageContext/` (provider + hook + form-fill helpers) and `src/AutoNate.Web/Services/Agent/PageQuery/` + `Skills/InspectPageSkill.cs` (server). You only touch page-specific files.
 
 The canonical example is the workflow studio: `src/AutoNate.Spa/src/pages/workflow/useWorkflowStudioPageContext.ts`. Read it first — every step below maps to something it does.
 
 ## When to invoke this
 
 - The user wants the chatbot to answer "what am I looking at" or "what's selected" or "what's in this form" for a page.
+- The user wants the chatbot to *change* the page on their behalf — fill a form, edit a draft, apply a bulk update, scaffold a new model.
 - A skill needs to act on what the user is currently editing without making the user re-state it.
 - A page has imperative state the chatbot can't reach via normal API calls (in-memory drafts, third-party widget selection, transient filters).
+
+You almost never need this skill *just* for form-fill — that works on every page automatically. Use it when (a) you want to expose page-specific data the framework can't see, (b) you want to opt some form fields out of agent control, or (c) you want page-specific mutating actions beyond the form-fill defaults.
 
 Do **not** use this skill for state that's already saved and reachable via an authenticated read API — the chatbot can use the existing skills (`lookup_records`, `explain_workflow`, etc.) for that.
 
@@ -39,6 +48,9 @@ Mirror `useWorkflowStudioPageContext.ts`:
 ```ts
 import { useRegisterPageContext } from "@/agent/pageContext/PageContextRegistry";
 import {
+  PageActionDefinition,
+  PageActionRequest,
+  PageActionResult,
   PageContextProviderEntry,
   PageQueryRequest,
   PageQueryResult,
@@ -58,17 +70,24 @@ export function useMyPagePageContext(args: { /* live state */ }): void {
     /* switch on req.topic, return { ok, data } | { ok: false, error, message } */
   }, []);
 
+  const onPageAction = useCallback(async (req: PageActionRequest): Promise<PageActionResult> => {
+    /* switch on req.action; mutate via your page's APIs;
+       return { ok: true, summary, changes? } | { ok: false, error, message? } */
+  }, []);
+
   const entry = useMemo<PageContextProviderEntry>(() => ({
     pageKey: "my-page",
     getSnapshot,
-    onPageQuery
-  }), [getSnapshot, onPageQuery]);
+    onPageQuery,
+    actions: MY_PAGE_ACTIONS,    // omit if no custom actions
+    onPageAction                  // omit if no custom actions
+  }), [getSnapshot, onPageQuery, onPageAction]);
 
   useRegisterPageContext(entry);
 }
 ```
 
-Then call it once from the page component, near the top with the other hooks.
+Then call it once from the page component, near the top with the other hooks. Form-fill works without registering at all — only register when you need page-specific data, custom actions, or to opt fields out of form-fill.
 
 ### 3. Design the snapshot shape (`data`)
 
@@ -119,7 +138,73 @@ Return shape on success: `{ ok: true, data: <whatever> }`. On failure: `{ ok: fa
 
 The handler runs on the SPA, so it has direct access to imperative widget APIs — that's the whole point of the round-trip channel. Don't try to call backend APIs from here unless you have a reason; the model can call the relevant skill itself.
 
-### 7. Verify in the running app
+### 7. Declare mutating actions (optional)
+
+If the agent should be able to *change* the page beyond the form-fill defaults, declare actions on your provider entry:
+
+```ts
+const MY_PAGE_ACTIONS: PageActionDefinition[] = [
+  {
+    name: "update_node",
+    description:
+      "Update properties of one node. args: { id, properties }. ScriptTask supports { script, name }; UserTask supports { name, assignee, dueDate, ... }. Only properties present in args are changed."
+  },
+  // ...
+];
+```
+
+The `description` is the model's contract — it tells the model what args to pass. Be precise: list every supported arg, give an example for each non-obvious one, and call out preconditions ("refuses if id is unknown", "only works on draft workflows", etc.).
+
+In `onPageAction`, dispatch by `req.action`:
+
+```ts
+const onPageAction = useCallback(async (req: PageActionRequest): Promise<PageActionResult> => {
+  switch (req.action) {
+    case "update_node": return updateNode(req.args);
+    case "update_nodes_matching": return updateNodesMatching(req.args);
+    // ...
+    default:
+      return { ok: false, error: "unknown_action", message: `'${req.action}' is not supported by this page.` };
+  }
+}, []);
+```
+
+**Confirmation flow** (handled by the framework, but understand it). The `apply_page_action` tool has a `confirmed: bool` arg. The model:
+
+1. Calls with `confirmed=false` first. The tool returns a structured "needs confirmation" envelope without invoking your handler. The model is expected to summarise the change in chat from the snapshot it already has (the snapshot is rich enough that the model rarely needs to round-trip just to compose a preview).
+2. The user agrees in chat.
+3. The model calls again with `confirmed=true`. Only this call reaches your `onPageAction` handler.
+
+Your handler is therefore always confirmed. But the snapshot the model used for the preview may be stale (the user may have clicked a different node in the meantime), so **validate preconditions in the handler and fail fast with a helpful error code**. The model can then re-narrate and re-ask.
+
+Standard error codes for action handlers (matches the read-side conventions):
+- `unknown_action` — action name isn't one this page handles.
+- `bad_args` — args missing or malformed.
+- `not_found` — args reference something that no longer exists.
+- `unsupported_type` — the action makes sense generally but not for this specific element.
+- `action_failed` — anything else; include `message` with the underlying error.
+
+Every successful return must include a human-readable `summary` the model relays to the user ("Updated 7 of 7 user tasks; set dueDate to PT3D"). Optional `changes` is structured detail the model can reference if pressed for specifics.
+
+**Don't persist anything**. Mutations only change the page's in-memory state; the user must save manually. If your action does anything beyond DOM/state mutation (e.g. an API call), reconsider — that probably belongs in a server-side skill, not here.
+
+### 8. Form-fill is automatic — opt fields out, don't opt them in
+
+Every page automatically gets `set_form_field`, `get_form_value`, and `submit_form` for any `<form>` mounted in the DOM. Fields are auto-discovered; password / hidden / submit / reset / button / image / file fields are always excluded.
+
+To exclude a sensitive field (a credential, an SSN, an internal-only knob), add `data-agent-exclude` to the input:
+
+```jsx
+<input type="text" name="apiKey" data-agent-exclude />
+```
+
+The framework hides excluded fields from the snapshot AND refuses to set them, so the model can neither read nor write the field. To exclude a whole form (e.g. a login form), put the attribute on the `<form>` element instead.
+
+`submit_form` exists in the default catalog because the model can imagine using it for "fill this in and submit". Treat it as conservative — the action description tells the model to always confirm with the user first, and the model will get user confirmation before calling with `confirmed=true`.
+
+If your page has a custom widget that renders an input but does NOT update React state via the standard `change` event (some date pickers, rich-text editors), form-fill won't work cleanly. In that case, declare a custom action (`set_due_date(args)` etc.) that mutates the widget's API directly and add `data-agent-exclude` to the underlying input so the framework doesn't offer a broken default.
+
+### 9. Verify in the running app
 
 There is no automated SPA test for this — run it manually:
 
@@ -128,7 +213,9 @@ There is no automated SPA test for this — run it manually:
 3. The header should show `page: <key> · <truncated summary>`. If it shows just the page key, your snapshot is null — check that `getSnapshot` returns non-null once the page is ready.
 4. Send a message like "what am I looking at?". Expect an `inspect_page` tool-call card with `{ "topic": ... }` (or no args), then a reply that names what you'd expect from your summary + data.
 5. If you implemented `onPageQuery`, ask a question that requires fresh data ("what does this script do" with an unsaved edit). Expect a `query_page` tool-call card with your topic, then a reply that uses the live value.
-6. Open browser DevTools → Network → filter by `/messages`. Expand the request body and confirm `pageContext.data` matches your snapshot shape and the size is well under 64KB.
+6. If you implemented mutating actions, ask the agent to make a change ("rename UserTask_3 to 'Approval'"). Expect: an `apply_page_action` card with `confirmed: false`, the agent narrates the change in chat and asks. After you reply "yes", expect a second `apply_page_action` card with `confirmed: true` and the page mutates. The dirty/unsaved indicator on the page should activate; the user must still save manually.
+7. For form-fill, open a page with a form and ask "fill in name with 'Test'". Confirm the input updates and the field's React state (form validation, dependent fields) reacts as if a user typed. For any sensitive fields, verify `data-agent-exclude` keeps them out of the snapshot AND blocks `set_form_field` with `excluded` error.
+8. Open browser DevTools → Network → filter by `/messages`. Expand the request body and confirm `pageContext.data` matches your snapshot shape (incl. `actions` and `forms` arrays) and the size is well under 64KB.
 
 ## Common slip-ups
 
@@ -139,13 +226,17 @@ There is no automated SPA test for this — run it manually:
 - **Forgetting size cap.** Pages with rich state (lots of nodes, big text bodies) will silently get truncated by the server's 64KB cap and the model will see only `safetyHints.truncated`. Implement explicit degradation in `getSnapshot` so you control which fields get dropped first.
 - **Multiple registrations on the same page.** Only one provider per pageKey is active at a time (last-mounted wins). If two components both call `useRegisterPageContext({ pageKey: "x" })`, mounting order decides — that's brittle. Compose state into a single hook called from the page-level component.
 - **Topics that say what you want, not what the model needs.** `bpmn.xml` is fine because it's a noun the model already understands. `getCurrentSnapshot` is bad because it sounds like it should be the default action. Pick topics that read like data fields, not RPCs.
+- **Trusting the snapshot the model used to compose its preview.** By the time `confirmed=true` reaches your handler, the user may have clicked elsewhere or edited something. Validate preconditions (id still exists, type still matches, dirty state still allows the change) and fail with a precise error code so the model can re-narrate. Don't blindly mutate.
+- **Persisting in an action handler.** Mutations are in-memory only. Do not call save / publish / post APIs from inside `onPageAction`. The user must click Save themselves — that's the trust contract this whole system rests on.
+- **Forgetting `data-agent-exclude` on credential fields.** Password fields are excluded by default, but `type=text` API-key inputs, secret-question answers, OTP codes, etc. need the attribute explicitly. If a sensitive field uses a custom widget that renders something other than a `<password>` input, opt it out.
 
 ## What you do NOT need to touch
 
-- `src/AutoNate.Web/Services/Agent/PageQuery/` — singleton router and per-request channel are already wired.
-- `src/AutoNate.Web/Services/Agent/Skills/InspectPageSkill.cs` — the `inspect_page` and `query_page` tools are page-agnostic. They walk dotted paths through whatever you put in `data`, and they round-trip whatever topic the model asks for.
-- `src/AutoNate.Spa/src/agent/AgentSidebar.tsx` — already reads the active provider's snapshot at submit time and dispatches page-query events to the registered provider.
-- `src/AutoNate.Spa/src/agent/useAgentStream.ts` — already attaches `pageContext` to the POST body and handles `page_query_request` SSE events.
-- `src/AutoNate.Web/Services/Agent/Loop/SystemPromptBuilder.cs` — already includes the summary string and the `inspect_page` / `query_page` hint when a snapshot is present.
+- `src/AutoNate.Web/Services/Agent/PageQuery/` — singleton routers and per-request channels (query + action) are already wired.
+- `src/AutoNate.Web/Services/Agent/Skills/InspectPageSkill.cs` — `inspect_page`, `query_page`, and `apply_page_action` are page-agnostic. They walk dotted paths through whatever you put in `data`, round-trip whatever topic the model asks for, and gate every mutation on the `confirmed: true` flag.
+- `src/AutoNate.Spa/src/agent/pageContext/forms.ts` — DOM-based form discovery and the React-tracker setter. The framework calls into this from the registry; pages don't import it directly.
+- `src/AutoNate.Spa/src/agent/AgentSidebar.tsx` — already reads the active provider's snapshot at submit time and dispatches page-query and page-action events to the registry.
+- `src/AutoNate.Spa/src/agent/useAgentStream.ts` — already attaches `pageContext` to the POST body and handles `page_query_request` and `page_action_request` SSE events.
+- `src/AutoNate.Web/Services/Agent/Loop/SystemPromptBuilder.cs` — already includes the summary string and the tool hint when a snapshot is present.
 
 If you find yourself editing any of those files, you're either fixing the framework (different change) or you've taken a wrong turn.

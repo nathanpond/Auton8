@@ -300,6 +300,13 @@ builder.Services.AddSingleton<IPageQueryRouter, PageQueryRouter>();
 builder.Services.AddScoped<PageQueryChannel>();
 builder.Services.AddScoped<IPageQueryChannel>(sp => sp.GetRequiredService<PageQueryChannel>());
 
+// Page-action bridge: identical pattern to page-query, but for mutations.
+// Skills resolve IPageActionChannel and call ApplyAsync; the singleton router
+// resolves the awaiting TCS when the SPA POSTs the action result.
+builder.Services.AddSingleton<IPageActionRouter, PageActionRouter>();
+builder.Services.AddScoped<PageActionChannel>();
+builder.Services.AddScoped<IPageActionChannel>(sp => sp.GetRequiredService<PageActionChannel>());
+
 // Conversation persistence + the orchestrator that runs the tool-using loop.
 builder.Services.AddOptions<AgentOptions>().BindConfiguration(AgentOptions.SectionName);
 builder.Services.AddScoped<IAgentConversationStore, EfCoreAgentConversationStore>();

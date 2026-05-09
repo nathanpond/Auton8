@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterPageContext } from "@/agent/pageContext/PageContextRegistry";
 import {
+  PageActionDefinition,
+  PageActionRequest,
+  PageActionResult,
   PageContextProviderEntry,
   PageQueryRequest,
   PageQueryResult,
@@ -177,6 +180,28 @@ export function useWorkflowStudioPageContext({
     };
   }, [version]);
 
+  const onPageAction = useCallback(async (request: PageActionRequest): Promise<PageActionResult> => {
+    const handle = handleRef.current;
+    if (!handle) return { ok: false, error: "page_unreachable", message: "Modeler is not loaded." };
+    try {
+      switch (request.action) {
+        case "update_node":
+          return updateNodeAction(handle, request.args);
+        case "update_nodes_matching":
+          return updateNodesMatchingAction(handle, request.args);
+        case "set_node_name":
+          return setNodeNameAction(handle, request.args);
+        case "replace_diagram_xml":
+          return await replaceDiagramXmlAction(handle, request.args);
+        default:
+          return { ok: false, error: "unknown_action", message: `Workflow studio does not support action '${request.action}'.` };
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: "action_failed", message };
+    }
+  }, []);
+
   const onPageQuery = useCallback(async (request: PageQueryRequest): Promise<PageQueryResult> => {
     const handle = handleRef.current;
     if (!handle) {
@@ -213,10 +238,201 @@ export function useWorkflowStudioPageContext({
   const entry = useMemo<PageContextProviderEntry>(() => ({
     pageKey: PAGE_KEY,
     getSnapshot,
-    onPageQuery
-  }), [getSnapshot, onPageQuery]);
+    onPageQuery,
+    actions: WORKFLOW_ACTIONS,
+    onPageAction
+  }), [getSnapshot, onPageQuery, onPageAction]);
 
   useRegisterPageContext(entry);
+}
+
+// Action catalog the agent reads from the snapshot. Descriptions are the
+// model's contract — keep them precise and example-laden so the model
+// passes the right args. The actions only mutate the in-memory diagram;
+// the user must still click Save.
+const WORKFLOW_ACTIONS: PageActionDefinition[] = [
+  {
+    name: "update_node",
+    description:
+      "Update properties of one node in the current diagram. args: { id: string, properties: object }. Properties depend on node type (e.g. ScriptTask: { script, resultVariable, name }; UserTask: { name, assignee, candidateUsers, candidateGroups, dueDate, userFormMode, userFormShortCode }; ServiceTask: { name, behaviorKey }; SequenceFlow: { name, conditionExpression }; Gateway/Event/etc.: { name }). Only properties present in args are changed; omitted ones are preserved. Refuses if id is unknown."
+  },
+  {
+    name: "update_nodes_matching",
+    description:
+      "Apply the same property update to every node matching a filter. args: { filter: { type?: string, behaviorKey?: string, idStartsWith?: string }, properties: object }. type is the BPMN $type (e.g. 'bpmn:UserTask'). The properties shape follows update_node and only the fields you set are changed. Returns a summary listing how many nodes were updated and the affected ids."
+  },
+  {
+    name: "set_node_name",
+    description:
+      "Rename one node. args: { id: string, name: string }. Convenience over update_node when only the name changes; works for any node type including gateways and events."
+  },
+  {
+    name: "replace_diagram_xml",
+    description:
+      "Replace the entire diagram with new BPMN XML. args: { xml: string }. The XML must be a complete, valid Flowable BPMN 2.0 document (a `<bpmn:definitions>` root with one `<bpmn:process>`, `<bpmn:sequenceFlow>` connections, and a matching `<bpmndi:BPMNDiagram>` for layout). All current unsaved edits are discarded. Use for whole-workflow rewrites or 'create me a new model' scenarios. The user still has to save afterward — nothing is persisted."
+  }
+];
+
+type AnyArgs = Record<string, unknown> | undefined;
+
+function updateNodeAction(handle: unknown, rawArgs: unknown): PageActionResult {
+  const args = rawArgs as AnyArgs;
+  const id = typeof args?.id === "string" ? args.id : null;
+  const properties = (args?.properties && typeof args.properties === "object")
+    ? (args.properties as Record<string, unknown>)
+    : null;
+  if (!id || !properties) {
+    return { ok: false, error: "bad_args", message: "args.id and args.properties are required." };
+  }
+  const before = workflow.describeElementById(handle, id);
+  if (!before) return { ok: false, error: "not_found", message: `No element '${id}' in the diagram.` };
+  return applyNodeUpdate(handle, id, before, properties);
+}
+
+function updateNodesMatchingAction(handle: unknown, rawArgs: unknown): PageActionResult {
+  const args = rawArgs as AnyArgs;
+  const filter = (args?.filter && typeof args.filter === "object")
+    ? (args.filter as { type?: string; behaviorKey?: string; idStartsWith?: string })
+    : null;
+  const properties = (args?.properties && typeof args.properties === "object")
+    ? (args.properties as Record<string, unknown>)
+    : null;
+  if (!filter || !properties) {
+    return { ok: false, error: "bad_args", message: "args.filter and args.properties are required." };
+  }
+
+  const all = (workflow.getElementSnapshots(handle) ?? []) as Array<Record<string, unknown>>;
+  const matches = all.filter((node) => {
+    if (filter.type && node.type !== filter.type) return false;
+    if (filter.behaviorKey && node.behaviorKey !== filter.behaviorKey) return false;
+    const id = typeof node.id === "string" ? node.id : "";
+    if (filter.idStartsWith && !id.startsWith(filter.idStartsWith)) return false;
+    return true;
+  });
+
+  if (matches.length === 0) {
+    return { ok: true, summary: "0 nodes matched the filter; nothing to update.", changes: { updated: [] } };
+  }
+
+  const updated: string[] = [];
+  const skipped: Array<{ id: string; reason: string }> = [];
+  for (const match of matches) {
+    const id = match.id as string;
+    const result = applyNodeUpdate(handle, id, match, properties);
+    if (result.ok) {
+      updated.push(id);
+    } else if (!result.ok) {
+      skipped.push({ id, reason: result.message ?? result.error });
+    }
+  }
+
+  const summary =
+    `Updated ${updated.length} of ${matches.length} matching nodes.` +
+    (skipped.length > 0 ? ` ${skipped.length} skipped.` : "");
+  return { ok: true, summary, changes: { updated, skipped } };
+}
+
+function setNodeNameAction(handle: unknown, rawArgs: unknown): PageActionResult {
+  const args = rawArgs as AnyArgs;
+  const id = typeof args?.id === "string" ? args.id : null;
+  const name = typeof args?.name === "string" ? args.name : null;
+  if (!id || name === null) {
+    return { ok: false, error: "bad_args", message: "args.id and args.name are required." };
+  }
+  const before = workflow.describeElementById(handle, id);
+  if (!before) return { ok: false, error: "not_found", message: `No element '${id}' in the diagram.` };
+  workflow.updateGenericElementName(handle, { id, name });
+  return {
+    ok: true,
+    summary: `Renamed '${id}' from '${(before as { name?: string }).name ?? "(unnamed)"}' to '${name}'.`,
+    changes: { id, name }
+  };
+}
+
+async function replaceDiagramXmlAction(handle: unknown, rawArgs: unknown): Promise<PageActionResult> {
+  const args = rawArgs as AnyArgs;
+  const xml = typeof args?.xml === "string" ? args.xml : null;
+  if (!xml || xml.trim().length === 0) {
+    return { ok: false, error: "bad_args", message: "args.xml is required and must be a complete BPMN document." };
+  }
+  // Lightweight sanity check before handing to bpmn-js so the error
+  // message is friendlier than an XML parser blow-up.
+  if (!xml.includes("<bpmn:definitions") && !xml.includes("<definitions")) {
+    return { ok: false, error: "bad_args", message: "xml does not look like a BPMN definitions document." };
+  }
+  await workflow.createNewDiagram(handle, xml);
+  return {
+    ok: true,
+    summary: "Replaced diagram with new BPMN XML. The model has unsaved changes; remind the user to save.",
+    changes: { xmlBytes: xml.length }
+  };
+}
+
+// Routes a property update to the right type-specific helper. The agent
+// can omit fields it doesn't want to change; we fill those from the
+// existing describe so we don't accidentally clear properties.
+function applyNodeUpdate(
+  handle: unknown,
+  id: string,
+  before: Record<string, unknown>,
+  properties: Record<string, unknown>
+): PageActionResult {
+  const type = before.type as string | undefined;
+  const merged: Record<string, unknown> = { ...before, ...properties, id };
+
+  switch (type) {
+    case "bpmn:ScriptTask":
+      workflow.updateScriptTaskProperties(handle, merged);
+      break;
+    case "bpmn:UserTask":
+      workflow.updateUserTaskProperties(handle, merged);
+      break;
+    case "bpmn:ServiceTask":
+      workflow.updateServiceTaskProperties(handle, merged);
+      break;
+    case "bpmn:SequenceFlow":
+      workflow.updateSequenceFlowProperties(handle, merged);
+      break;
+    case "bpmn:StartEvent":
+      // Signal-start vs timer-start vs none — pick the right helper based
+      // on which sub-fields were already populated in the describe. If
+      // unsure, fall back to a name-only rename.
+      if (typeof before.signalName === "string") {
+        workflow.updateSignalStartEventProperties(handle, merged);
+      } else if (
+        typeof before.timerCycleCron === "string" ||
+        typeof before.timerEndDate === "string" ||
+        typeof before.timerDuration === "string" ||
+        typeof before.timerDate === "string"
+      ) {
+        workflow.updateTimerStartEventProperties(handle, merged);
+      } else {
+        workflow.updateGenericElementName(handle, { id, name: (merged.name as string) ?? "" } as never);
+      }
+      break;
+    case "bpmn:IntermediateCatchEvent":
+      workflow.updateTimerIntermediateCatchEventProperties(handle, merged);
+      break;
+    default:
+      // Generic fallback: at least the name can usually be set on any
+      // element via updateGenericElementName.
+      if (typeof properties.name === "string") {
+        workflow.updateGenericElementName(handle, { id, name: properties.name });
+      } else {
+        return {
+          ok: false,
+          error: "unsupported_type",
+          message: `update_node does not support property updates on '${type ?? "unknown"}' beyond renaming.`
+        };
+      }
+  }
+
+  const after = workflow.describeElementById(handle, id);
+  return {
+    ok: true,
+    summary: `Updated ${type ?? "element"} '${id}'.`,
+    changes: { id, before, after }
+  };
 }
 
 // Short, model-friendly summary string for the system prompt. Capped at

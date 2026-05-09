@@ -116,7 +116,8 @@ export function AgentSidebar() {
       const pageContext = pageContextRegistry.getActiveSnapshot(pageKey);
       await stream.send(id, text, {
         pageContext,
-        onPageQuery: (req) => pageContextRegistry.dispatchPageQuery(pageKey, req)
+        onPageQuery: (req) => pageContextRegistry.dispatchPageQuery(pageKey, req),
+        onPageAction: (req) => pageContextRegistry.dispatchPageAction(pageKey, req)
       });
       // Refetch AFTER the stream finishes so the persisted user + assistant
       // messages appear together; await so the "clear pending" line below

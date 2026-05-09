@@ -196,6 +196,39 @@ public static class AgentEndpoints
             return resolved ? Results.NoContent() : Results.NotFound();
         }).DisableAntiforgery();
 
+        // Receives the SPA's reply to a server-issued PageActionRequested.
+        // Same shape as page-query-results but routed via the action router.
+        // The SPA sends success with a human summary the model relays to the
+        // user, or failure with a code + message the model can act on.
+        group.MapPost("/conversations/{id:guid}/page-action-results", async (
+            Guid id,
+            PageActionResultRequest request,
+            HttpContext http,
+            IAgentConversationStore store,
+            IPageActionRouter router,
+            CancellationToken ct) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.ActionId) || request.Result is null)
+            {
+                return Results.BadRequest("actionId and result are required.");
+            }
+            var userId = GetUserId(http);
+            if (userId == Guid.Empty) return Results.Unauthorized();
+            var conv = await store.GetForUserAsync(id, userId, ct);
+            if (conv is null) return Results.NotFound();
+
+            PageActionResult result = request.Result.Ok
+                ? new PageActionResult.Success(
+                    Summary: string.IsNullOrWhiteSpace(request.Result.Summary) ? "Action completed." : request.Result.Summary!,
+                    Changes: request.Result.Changes)
+                : new PageActionResult.Failure(
+                    string.IsNullOrWhiteSpace(request.Result.Error) ? "spa_error" : request.Result.Error!,
+                    request.Result.Message);
+
+            var resolved = router.TryResolve(id, request.ActionId, result);
+            return resolved ? Results.NoContent() : Results.NotFound();
+        }).DisableAntiforgery();
+
         return app;
     }
 
@@ -232,6 +265,7 @@ public static class AgentEndpoints
             }
         },
         AgentEvent.PageQueryRequested pq => new { kind = pq.Kind, queryId = pq.QueryId, topic = pq.Topic, args = pq.Args },
+        AgentEvent.PageActionRequested pa => new { kind = pa.Kind, actionId = pa.ActionId, action = pa.Action, args = pa.Args },
         AgentEvent.Error e => new { kind = e.Kind, message = e.Message },
         AgentEvent.Done d => new { kind = d.Kind },
         _ => new { kind = "unknown" }
@@ -258,3 +292,10 @@ public sealed record class PageContextDto(
 public sealed record class PageQueryResultRequest(string? QueryId, PageQueryResultDto? Result);
 
 public sealed record class PageQueryResultDto(bool Ok, JsonElement? Data, string? Error, string? Message);
+
+// The SPA's reply to a PageActionRequested SSE event. Success carries a
+// human-readable summary the model relays to the user and an optional
+// `changes` payload describing what was mutated.
+public sealed record class PageActionResultRequest(string? ActionId, PageActionResultDto? Result);
+
+public sealed record class PageActionResultDto(bool Ok, string? Summary, JsonElement? Changes, string? Error, string? Message);

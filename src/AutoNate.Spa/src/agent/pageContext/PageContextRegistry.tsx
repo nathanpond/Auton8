@@ -1,10 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useSyncExternalStore } from "react";
 import {
+  PageActionDefinition,
+  PageActionRequest,
+  PageActionResult,
   PageContextProviderEntry,
   PageQueryRequest,
   PageQueryResult,
   PageSnapshot
 } from "./types";
+import {
+  BUILTIN_FORM_ACTIONS,
+  discoverForms,
+  dispatchBuiltinFormAction,
+  isBuiltinFormAction
+} from "./forms";
 
 // Registry-internal entry: the public PageContextProviderEntry plus a
 // per-registration nonce so we can identify which one to remove during
@@ -16,14 +25,20 @@ type RegistryHandle = {
   register: (entry: PageContextProviderEntry) => () => void;
 
   // Read the active provider's snapshot for a given pageKey. Returns null
-  // when no provider is registered or its getSnapshot returned null. Safe
-  // to call from a submit handler — purely synchronous.
+  // when no provider is registered or its getSnapshot returned null;
+  // returns a forms-only snapshot when no provider is registered but the
+  // page has forms on it (so the chatbot can still fill them).
   getActiveSnapshot: (pageKey: string) => PageSnapshot | null;
 
   // Dispatch a backend-issued query to the active provider. Returns a
   // failure result if no provider is registered or the provider doesn't
   // implement onPageQuery.
   dispatchPageQuery: (pageKey: string, request: PageQueryRequest) => Promise<PageQueryResult>;
+
+  // Dispatch a backend-issued mutation. Builtin form actions are handled
+  // by the framework against the live DOM; everything else is delegated
+  // to the active provider's onPageAction handler.
+  dispatchPageAction: (pageKey: string, request: PageActionRequest) => Promise<PageActionResult>;
 
   // Subscribe to the active provider's identity changing (mount/unmount).
   // Used by useActivePageSummary to know when to recompute.
@@ -69,14 +84,44 @@ export function PageContextRegistryProvider({ children }: { children: React.Reac
 
   const getActiveSnapshot = useCallback((pageKey: string): PageSnapshot | null => {
     const stack = stacksRef.current.get(pageKey);
-    if (!stack || stack.length === 0) return null;
-    const top = stack[stack.length - 1];
-    try {
-      return top.getSnapshot();
-    } catch (err) {
-      console.warn("page-context: getSnapshot threw", err);
-      return null;
+    const top = stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
+    let providerSnapshot: PageSnapshot | null = null;
+    if (top) {
+      try {
+        providerSnapshot = top.getSnapshot();
+      } catch (err) {
+        console.warn("page-context: getSnapshot threw", err);
+      }
     }
+
+    // Always attempt to discover forms — even a page with no provider
+    // gets default form-fill capability if it has forms on it.
+    const forms = discoverForms();
+    const hasForms = forms.length > 0;
+
+    if (!providerSnapshot && !hasForms) return null;
+
+    const providerActions: PageActionDefinition[] = top?.actions ?? [];
+    const formActions: PageActionDefinition[] = hasForms ? BUILTIN_FORM_ACTIONS : [];
+    const actions: PageActionDefinition[] = [...providerActions, ...formActions];
+
+    if (providerSnapshot) {
+      // Merge into the provider's data without clobbering anything it set.
+      const baseData = (providerSnapshot.data ?? {}) as Record<string, unknown>;
+      const mergedData: Record<string, unknown> = { ...baseData };
+      if (hasForms && mergedData.forms === undefined) mergedData.forms = forms;
+      if (actions.length > 0 && mergedData.actions === undefined) mergedData.actions = actions;
+      return { ...providerSnapshot, data: mergedData };
+    }
+
+    // Forms-only snapshot for pages that haven't registered a provider.
+    return {
+      pageKey,
+      schemaVersion: 1,
+      summary: hasForms ? `${forms.length} form${forms.length === 1 ? "" : "s"} on this page available for the assistant to fill.` : "",
+      version: 0,
+      data: { forms, actions }
+    };
   }, []);
 
   const dispatchPageQuery = useCallback(async (pageKey: string, request: PageQueryRequest): Promise<PageQueryResult> => {
@@ -96,6 +141,34 @@ export function PageContextRegistryProvider({ children }: { children: React.Reac
     }
   }, []);
 
+  const dispatchPageAction = useCallback(async (pageKey: string, request: PageActionRequest): Promise<PageActionResult> => {
+    // Builtin actions (form-fill) work even without a registered provider,
+    // so they're handled before we look at the stack.
+    if (isBuiltinFormAction(request.action)) {
+      try {
+        return await dispatchBuiltinFormAction(request);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: "handler_threw", message };
+      }
+    }
+
+    const stack = stacksRef.current.get(pageKey);
+    if (!stack || stack.length === 0) {
+      return { ok: false, error: "page_unreachable", message: "No page provider is registered." };
+    }
+    const top = stack[stack.length - 1];
+    if (!top.onPageAction) {
+      return { ok: false, error: "unsupported_action", message: `Active page does not implement '${request.action}'.` };
+    }
+    try {
+      return await top.onPageAction(request);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: "handler_threw", message };
+    }
+  }, []);
+
   const subscribe = useCallback((listener: () => void) => {
     listenersRef.current.add(listener);
     return () => { listenersRef.current.delete(listener); };
@@ -105,6 +178,7 @@ export function PageContextRegistryProvider({ children }: { children: React.Reac
     register,
     getActiveSnapshot,
     dispatchPageQuery,
+    dispatchPageAction,
     subscribe
   };
 
@@ -121,14 +195,14 @@ function useRegistry(): RegistryHandle {
 
 // Pages call this once on mount to register their provider. The entry's
 // fields should be stable across re-renders (use useCallback for
-// getSnapshot / onPageQuery) — re-registering on every render would churn
-// the active-provider stack.
+// getSnapshot / onPageQuery / onPageAction) — re-registering on every
+// render would churn the active-provider stack.
 export function useRegisterPageContext(entry: PageContextProviderEntry): void {
   const registry = useRegistry();
   useEffect(() => {
     return registry.register(entry);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registry, entry.pageKey, entry.getSnapshot, entry.onPageQuery]);
+  }, [registry, entry.pageKey, entry.getSnapshot, entry.onPageQuery, entry.onPageAction, entry.actions]);
 }
 
 // Synchronous accessor for the chat send path. Returns the freshest

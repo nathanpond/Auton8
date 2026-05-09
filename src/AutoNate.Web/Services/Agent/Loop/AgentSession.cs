@@ -38,6 +38,7 @@ public sealed class AgentSession : IAgentSession
     private readonly IAuditEventPublisher _auditPublisher;
     private readonly ISiteSettingsStore _siteSettingsStore;
     private readonly PageQueryChannel _pageQueryChannel;
+    private readonly PageActionChannel _pageActionChannel;
     private readonly IServiceProvider _services;
     private readonly AgentOptions _options;
     private readonly ILogger<AgentSession> _logger;
@@ -50,6 +51,7 @@ public sealed class AgentSession : IAgentSession
         IAuditEventPublisher auditPublisher,
         ISiteSettingsStore siteSettingsStore,
         PageQueryChannel pageQueryChannel,
+        PageActionChannel pageActionChannel,
         IServiceProvider services,
         IOptions<AgentOptions> options,
         ILogger<AgentSession> logger)
@@ -61,6 +63,7 @@ public sealed class AgentSession : IAgentSession
         _auditPublisher = auditPublisher;
         _siteSettingsStore = siteSettingsStore;
         _pageQueryChannel = pageQueryChannel;
+        _pageActionChannel = pageActionChannel;
         _services = services;
         _options = options.Value;
         _logger = logger;
@@ -314,7 +317,9 @@ public sealed class AgentSession : IAgentSession
                         // We pump it concurrently with the tool's await so
                         // PageQueryRequested events reach the SPA in real time.
                         var sideEvents = Channel.CreateUnbounded<AgentEvent>();
-                        _pageQueryChannel.Activate(conversationId, ev => sideEvents.Writer.WriteAsync(ev, cancellationToken));
+                        Func<AgentEvent, ValueTask> emit = ev => sideEvents.Writer.WriteAsync(ev, cancellationToken);
+                        _pageQueryChannel.Activate(conversationId, emit);
+                        _pageActionChannel.Activate(conversationId, emit);
 
                         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                         timeoutCts.CancelAfter(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds));
@@ -337,6 +342,7 @@ public sealed class AgentSession : IAgentSession
                         while (sideEvents.Reader.TryRead(out var sideEv)) yield return sideEv;
 
                         _pageQueryChannel.Deactivate();
+                        _pageActionChannel.Deactivate();
 
                         var outcome = await invokeTask.ConfigureAwait(false);
                         resultValue = outcome.Result;

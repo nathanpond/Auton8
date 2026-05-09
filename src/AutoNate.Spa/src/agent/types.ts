@@ -67,5 +67,6 @@ export type AgentStreamEvent =
       } | null;
     }
   | { kind: "page_query_request"; queryId: string; topic: string; args?: unknown }
+  | { kind: "page_action_request"; actionId: string; action: string; args?: unknown }
   | { kind: "error"; message: string }
   | { kind: "done" };

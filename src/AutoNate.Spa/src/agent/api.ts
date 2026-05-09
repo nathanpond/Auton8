@@ -37,3 +37,7 @@ export function sendMessageUrl(conversationId: string): string {
 export function pageQueryResultsUrl(conversationId: string): string {
   return `${BASE}/conversations/${conversationId}/page-query-results`;
 }
+
+export function pageActionResultsUrl(conversationId: string): string {
+  return `${BASE}/conversations/${conversationId}/page-action-results`;
+}

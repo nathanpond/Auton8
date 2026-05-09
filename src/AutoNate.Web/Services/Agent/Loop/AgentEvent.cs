@@ -48,6 +48,15 @@ public abstract record class AgentEvent
         public override string Kind => "page_query_request";
     }
 
+    // Server → SPA request to mutate live page state. Emitted by
+    // IPageActionChannel when apply_page_action(confirmed: true) runs.
+    // The SPA's registered onPageAction handler performs the mutation and
+    // replies via POST /api/agent/conversations/{id}/page-action-results.
+    public sealed record class PageActionRequested(string ActionId, string Action, JsonElement? Args) : AgentEvent
+    {
+        public override string Kind => "page_action_request";
+    }
+
     public sealed record class Error(string Message) : AgentEvent
     {
         public override string Kind => "error";

@@ -11,7 +11,7 @@ public sealed class InspectPageSkillTests
     [Fact]
     public async Task Inspect_returns_no_snapshot_when_context_lacks_one()
     {
-        var skill = new InspectPageSkill(new StubChannel());
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
         var ctx = MakeContext(null);
 
         var result = await Invoke(skill, InspectPageSkill.InspectToolName, "{}", ctx);
@@ -29,7 +29,7 @@ public sealed class InspectPageSkillTests
             selection = new { ids = Array.Empty<string>() },
             nodes = new object[] { new { id = "Start_1" } }
         }, summary: "Editing draft workflow 'Test'.", version: 7);
-        var skill = new InspectPageSkill(new StubChannel());
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
         var ctx = MakeContext(snapshot);
 
         var result = await Invoke(skill, InspectPageSkill.InspectToolName, "{}", ctx);
@@ -56,7 +56,7 @@ public sealed class InspectPageSkillTests
                 elements = new[] { new { id = "UserTask_3", type = "bpmn:UserTask", name = "Manager Approval" } }
             }
         });
-        var skill = new InspectPageSkill(new StubChannel());
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
         var ctx = MakeContext(snapshot);
 
         var result = await Invoke(skill, InspectPageSkill.InspectToolName,
@@ -79,7 +79,7 @@ public sealed class InspectPageSkillTests
                 new { id = "n2", name = "second" }
             }
         });
-        var skill = new InspectPageSkill(new StubChannel());
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
         var ctx = MakeContext(snapshot);
 
         var result = await Invoke(skill, InspectPageSkill.InspectToolName,
@@ -92,7 +92,7 @@ public sealed class InspectPageSkillTests
     public async Task Inspect_returns_topic_not_found_for_missing_path()
     {
         var snapshot = MakeSnapshot("workflow", new { workflow = new { id = "abc" } });
-        var skill = new InspectPageSkill(new StubChannel());
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
         var ctx = MakeContext(snapshot);
 
         var result = await Invoke(skill, InspectPageSkill.InspectToolName,
@@ -109,7 +109,7 @@ public sealed class InspectPageSkillTests
         var freshNode = JsonSerializer.SerializeToElement(new { id = "X", name = "Fresh" });
         stub.NextResult = new PageQueryResult.Success(freshNode);
 
-        var skill = new InspectPageSkill(stub);
+        var skill = new InspectPageSkill(stub, new StubActionChannel());
         var ctx = MakeContext(MakeSnapshot("workflow", new { workflow = new { id = "abc" } }));
 
         var result = await Invoke(skill, InspectPageSkill.QueryToolName,
@@ -125,7 +125,7 @@ public sealed class InspectPageSkillTests
     public async Task Query_surfaces_failure_from_channel()
     {
         var stub = new StubChannel { NextResult = new PageQueryResult.Failure("page_unreachable", "User navigated away.") };
-        var skill = new InspectPageSkill(stub);
+        var skill = new InspectPageSkill(stub, new StubActionChannel());
         var ctx = MakeContext(MakeSnapshot("workflow", new { workflow = new { id = "abc" } }));
 
         var result = await Invoke(skill, InspectPageSkill.QueryToolName,
@@ -138,7 +138,7 @@ public sealed class InspectPageSkillTests
     [Fact]
     public async Task Query_rejects_missing_topic()
     {
-        var skill = new InspectPageSkill(new StubChannel());
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
         var ctx = MakeContext(MakeSnapshot("workflow", new { workflow = new { id = "abc" } }));
 
         var result = await Invoke(skill, InspectPageSkill.QueryToolName, "{}", ctx);
@@ -150,7 +150,7 @@ public sealed class InspectPageSkillTests
     [Fact]
     public async Task System_prompt_fragment_is_silent_without_snapshot()
     {
-        var skill = new InspectPageSkill(new StubChannel());
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
         var withSnapshot = new AgentSessionContext(new ClaimsPrincipal(), Guid.NewGuid(), "workflow",
             ConversationId: Guid.NewGuid(), PageContext: MakeSnapshot("workflow", new { x = 1 }));
         var withoutSnapshot = new AgentSessionContext(new ClaimsPrincipal(), Guid.NewGuid(), "workflow",
@@ -164,6 +164,72 @@ public sealed class InspectPageSkillTests
     {
         var dataElement = JsonSerializer.SerializeToElement(data);
         return new PageContextSnapshot(pageKey, SchemaVersion: 1, Summary: summary, Version: version, Data: dataElement);
+    }
+
+    [Fact]
+    public async Task Apply_action_with_confirmed_false_returns_proposal_without_round_trip()
+    {
+        var actionStub = new StubActionChannel();
+        var skill = new InspectPageSkill(new StubChannel(), actionStub);
+        var ctx = MakeContext(MakeSnapshot("workflow", new { x = 1 }));
+
+        var result = await Invoke(skill, InspectPageSkill.ApplyActionToolName,
+            JsonSerializer.Serialize(new { action = "update_node", args = new { id = "X", properties = new { name = "y" } } }),
+            ctx);
+
+        Assert.Equal("page_action_proposal", result.GetProperty("kind").GetString());
+        Assert.Equal("update_node", result.GetProperty("data").GetProperty("action").GetString());
+        Assert.False(result.GetProperty("data").GetProperty("confirmed").GetBoolean());
+        Assert.Null(actionStub.LastAction);
+    }
+
+    [Fact]
+    public async Task Apply_action_with_confirmed_true_round_trips_and_returns_applied_envelope()
+    {
+        var actionStub = new StubActionChannel
+        {
+            NextResult = new PageActionResult.Success("Renamed X to Y.", JsonSerializer.SerializeToElement(new { id = "X" }))
+        };
+        var skill = new InspectPageSkill(new StubChannel(), actionStub);
+        var ctx = MakeContext(MakeSnapshot("workflow", new { x = 1 }));
+
+        var result = await Invoke(skill, InspectPageSkill.ApplyActionToolName,
+            JsonSerializer.Serialize(new { action = "update_node", args = new { id = "X" }, confirmed = true }),
+            ctx);
+
+        Assert.Equal("page_action_applied", result.GetProperty("kind").GetString());
+        Assert.Equal("Renamed X to Y.", result.GetProperty("data").GetProperty("summary").GetString());
+        Assert.Equal("update_node", actionStub.LastAction);
+    }
+
+    [Fact]
+    public async Task Apply_action_surfaces_failure_from_channel()
+    {
+        var actionStub = new StubActionChannel
+        {
+            NextResult = new PageActionResult.Failure("not_found", "No such node.")
+        };
+        var skill = new InspectPageSkill(new StubChannel(), actionStub);
+        var ctx = MakeContext(MakeSnapshot("workflow", new { x = 1 }));
+
+        var result = await Invoke(skill, InspectPageSkill.ApplyActionToolName,
+            JsonSerializer.Serialize(new { action = "update_node", args = new { id = "Missing" }, confirmed = true }),
+            ctx);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Equal("not_found", result.GetProperty("data").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Apply_action_rejects_missing_action_name()
+    {
+        var skill = new InspectPageSkill(new StubChannel(), new StubActionChannel());
+        var ctx = MakeContext(MakeSnapshot("workflow", new { x = 1 }));
+
+        var result = await Invoke(skill, InspectPageSkill.ApplyActionToolName, "{}", ctx);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Equal("bad_request", result.GetProperty("data").GetProperty("code").GetString());
     }
 
     private static AgentSessionContext MakeContext(PageContextSnapshot? snapshot) =>
@@ -187,6 +253,20 @@ public sealed class InspectPageSkillTests
         public Task<PageQueryResult> AskAsync(string topic, JsonElement? args, CancellationToken cancellationToken)
         {
             LastTopic = topic;
+            LastArgs = args;
+            return Task.FromResult(NextResult);
+        }
+    }
+
+    private sealed class StubActionChannel : IPageActionChannel
+    {
+        public PageActionResult NextResult { get; set; } = new PageActionResult.Failure("not_set", "Test did not configure NextResult.");
+        public string? LastAction { get; private set; }
+        public JsonElement? LastArgs { get; private set; }
+
+        public Task<PageActionResult> ApplyAsync(string action, JsonElement? args, CancellationToken cancellationToken)
+        {
+            LastAction = action;
             LastArgs = args;
             return Task.FromResult(NextResult);
         }

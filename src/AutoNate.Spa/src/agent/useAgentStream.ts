@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
-import { pageQueryResultsUrl, sendMessageUrl } from "./api";
+import { pageActionResultsUrl, pageQueryResultsUrl, sendMessageUrl } from "./api";
 import { AgentStreamEvent } from "./types";
-import { PageQueryResult, PageSnapshot } from "./pageContext/types";
+import { PageActionResult, PageQueryResult, PageSnapshot } from "./pageContext/types";
 
 export type AgentStreamState = {
   streaming: boolean;
@@ -36,6 +36,10 @@ export type PageQueryDispatcher = (
   request: { queryId: string; topic: string; args?: unknown }
 ) => Promise<PageQueryResult>;
 
+export type PageActionDispatcher = (
+  request: { actionId: string; action: string; args?: unknown }
+) => Promise<PageActionResult>;
+
 export function useAgentStream() {
   const [state, setState] = useState<AgentStreamState>(initial);
   const abortRef = useRef<AbortController | null>(null);
@@ -52,6 +56,7 @@ export function useAgentStream() {
     options?: {
       pageContext?: PageSnapshot | null;
       onPageQuery?: PageQueryDispatcher;
+      onPageAction?: PageActionDispatcher;
       onComplete?: () => void;
     }
   ): Promise<void> => {
@@ -99,10 +104,15 @@ export function useAgentStream() {
           } catch {
             continue;
           }
-          // Page-query requests are NOT applied to UI state — they're
-          // routed to the page provider and replied to out-of-band.
+          // Page-query and page-action requests are NOT applied to UI
+          // state — they're routed to the page provider and replied to
+          // out-of-band.
           if (event.kind === "page_query_request") {
             void handlePageQuery(conversationId, event, options?.onPageQuery, controller.signal);
+            continue;
+          }
+          if (event.kind === "page_action_request") {
+            void handlePageAction(conversationId, event, options?.onPageAction, controller.signal);
             continue;
           }
           setState((s) => applyEvent(s, event));
@@ -125,6 +135,43 @@ export function useAgentStream() {
   }, []);
 
   return { state, send, cancel, reset };
+}
+
+async function handlePageAction(
+  conversationId: string,
+  event: Extract<AgentStreamEvent, { kind: "page_action_request" }>,
+  dispatcher: PageActionDispatcher | undefined,
+  signal: AbortSignal
+): Promise<void> {
+  let result: PageActionResult;
+  if (!dispatcher) {
+    result = { ok: false, error: "page_unreachable", message: "No page provider registered." };
+  } else {
+    try {
+      result = await dispatcher({ actionId: event.actionId, action: event.action, args: event.args });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result = { ok: false, error: "handler_threw", message };
+    }
+  }
+
+  const wireResult = result.ok
+    ? { ok: true, summary: result.summary, changes: result.changes ?? null }
+    : { ok: false, error: result.error, message: result.message ?? null };
+
+  try {
+    await fetch(pageActionResultsUrl(conversationId), {
+      method: "POST",
+      body: JSON.stringify({ actionId: event.actionId, result: wireResult }),
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      signal
+    });
+  } catch (err) {
+    if ((err as { name?: string })?.name !== "AbortError") {
+      console.warn("page-action: failed to deliver result", err);
+    }
+  }
 }
 
 async function handlePageQuery(

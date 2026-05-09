@@ -18,6 +18,7 @@ public sealed class InspectPageSkill : IAgentSkill
 {
     public const string InspectToolName = "inspect_page";
     public const string QueryToolName = "query_page";
+    public const string ApplyActionToolName = "apply_page_action";
 
     // Cap on the JSON we hand back to the model. The snapshot itself is
     // capped at 64KB on the way in, but per-topic slices are typically much
@@ -27,10 +28,12 @@ public sealed class InspectPageSkill : IAgentSkill
     private const int MaxResultBytes = 32 * 1024;
 
     private readonly IPageQueryChannel _pageQueryChannel;
+    private readonly IPageActionChannel _pageActionChannel;
 
-    public InspectPageSkill(IPageQueryChannel pageQueryChannel)
+    public InspectPageSkill(IPageQueryChannel pageQueryChannel, IPageActionChannel pageActionChannel)
     {
         _pageQueryChannel = pageQueryChannel;
+        _pageActionChannel = pageActionChannel;
         Tools = new[]
         {
             new AgentTool(
@@ -71,7 +74,34 @@ public sealed class InspectPageSkill : IAgentSkill
                       "additionalProperties": false
                     }
                     """),
-                Invoke: InvokeQueryAsync)
+                Invoke: InvokeQueryAsync),
+
+            new AgentTool(
+                Name: ApplyActionToolName,
+                Description: "Mutate the user's current page (in-memory only — the user must still save afterward). Available actions are listed in the page snapshot under data.actions; built-in 'set_form_field' and 'submit_form' work on any page with forms. ALWAYS call first with confirmed=false to acknowledge the action and outline the change in your reply, then ask the user to confirm. Only call again with confirmed=true after the user agrees in the chat. The first call performs no mutation; the second one performs the change. Returns 'page_unreachable' if the user navigated away.",
+                JsonSchema: ParseSchema("""
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "description": "Action name from the page's actions list (e.g. 'update_node', 'replace_diagram_xml', 'set_form_field')."
+                        },
+                        "args": {
+                          "type": "object",
+                          "description": "Action-specific arguments. Schema is described in the action's listing.",
+                          "additionalProperties": true
+                        },
+                        "confirmed": {
+                          "type": "boolean",
+                          "description": "Default false. Set to true only after the user has explicitly agreed in chat to the change you described."
+                        }
+                      },
+                      "required": ["action"],
+                      "additionalProperties": false
+                    }
+                    """),
+                Invoke: InvokeApplyActionAsync)
         };
     }
 
@@ -87,7 +117,7 @@ public sealed class InspectPageSkill : IAgentSkill
         // Without one, the tools self-degrade but there's no point biasing
         // the model toward calling them.
         if (context.PageContext is null) return null;
-        return "When the user asks about something visible on their current page (a selected node, the record being viewed, a list they can see), prefer inspect_page first. Fall through to query_page when you need fresh data or fields the snapshot doesn't carry.";
+        return "When the user asks about something visible on their current page (a selected node, the record being viewed, a list they can see), prefer inspect_page first. Fall through to query_page when you need fresh data or fields the snapshot doesn't carry. To mutate the page, use apply_page_action — but ALWAYS describe what you'll change and wait for the user to agree (call once with confirmed=false to acknowledge, then again with confirmed=true after they agree). Mutations only change the page's in-memory state; the user must save manually.";
     }
 
     private Task<JsonElement> InvokeInspectAsync(JsonElement args, AgentToolContext context, CancellationToken ct)
@@ -128,6 +158,62 @@ public sealed class InspectPageSkill : IAgentSkill
         }
 
         return Task.FromResult(EnvelopeWithCap(node, kind: "inspect_page_result"));
+    }
+
+    private async Task<JsonElement> InvokeApplyActionAsync(JsonElement args, AgentToolContext context, CancellationToken ct)
+    {
+        if (args.ValueKind != JsonValueKind.Object ||
+            !args.TryGetProperty("action", out var actionProp) ||
+            actionProp.ValueKind != JsonValueKind.String)
+        {
+            return Error("bad_request", "action is required.");
+        }
+        var actionName = actionProp.GetString() ?? string.Empty;
+
+        JsonElement? actionArgs = null;
+        if (args.TryGetProperty("args", out var aProp) && aProp.ValueKind != JsonValueKind.Null)
+        {
+            actionArgs = aProp;
+        }
+
+        bool confirmed = false;
+        if (args.TryGetProperty("confirmed", out var cProp) && cProp.ValueKind == JsonValueKind.True)
+        {
+            confirmed = true;
+        }
+
+        if (!confirmed)
+        {
+            // First call from the model: do nothing, just hand back a structured
+            // "needs confirmation" envelope. The model is expected to summarise
+            // the change in chat and ask the user to confirm. After the user
+            // agrees, the model calls again with confirmed=true.
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "page_action_proposal",
+                source = nameof(InspectPageSkill),
+                data = new
+                {
+                    action = actionName,
+                    args = actionArgs,
+                    confirmed = false,
+                    nextStep = "Describe the change to the user in chat (what will change, scope, any preconditions). Wait for the user to agree, then call apply_page_action again with the same action and args plus confirmed=true."
+                }
+            });
+        }
+
+        var result = await _pageActionChannel.ApplyAsync(actionName, actionArgs, ct).ConfigureAwait(false);
+        return result switch
+        {
+            PageActionResult.Success ok => JsonSerializer.SerializeToElement(new
+            {
+                kind = "page_action_applied",
+                source = nameof(InspectPageSkill),
+                data = new { action = actionName, summary = ok.Summary, changes = ok.Changes }
+            }),
+            PageActionResult.Failure fail => Error(fail.ErrorCode, fail.Message ?? fail.ErrorCode),
+            _ => Error("unknown", "Unexpected page-action result.")
+        };
     }
 
     private async Task<JsonElement> InvokeQueryAsync(JsonElement args, AgentToolContext context, CancellationToken ct)

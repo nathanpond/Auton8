@@ -38,6 +38,26 @@ export type PageQueryResult =
   | { ok: true; data: unknown }
   | { ok: false; error: string; message?: string };
 
+export type PageActionRequest = {
+  actionId: string;
+  action: string;
+  args?: unknown;
+};
+
+export type PageActionResult =
+  | { ok: true; summary: string; changes?: unknown }
+  | { ok: false; error: string; message?: string };
+
+// One declarable page action. The framework turns these into entries on the
+// snapshot's `data.actions` so the model can list them and call them via
+// the apply_page_action tool. The description is the contract the model
+// reads — describe what the action does, what each arg means, and any
+// preconditions.
+export type PageActionDefinition = {
+  name: string;
+  description: string;
+};
+
 export type PageContextProviderEntry = {
   pageKey: string;
   // Synchronous accessor. Called the moment the user clicks send. Must
@@ -50,4 +70,13 @@ export type PageContextProviderEntry = {
   // the agent emits a page_query_request SSE event. If unset (or the page
   // doesn't recognize the topic), reply with { ok: false, error: ... }.
   onPageQuery?: (request: PageQueryRequest) => Promise<PageQueryResult>;
+
+  // Optional declarations + handler for mutating actions the agent can
+  // perform on this page. `actions` is the model-facing catalog; the
+  // handler is invoked with confirmed=true semantics (the apply_page_action
+  // tool already gated on user confirmation). Page providers do NOT need
+  // to register builtin actions like set_form_field — the framework
+  // injects those automatically when forms are present.
+  actions?: PageActionDefinition[];
+  onPageAction?: (request: PageActionRequest) => Promise<PageActionResult>;
 };
