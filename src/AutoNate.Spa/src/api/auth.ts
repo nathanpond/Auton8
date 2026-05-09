@@ -37,6 +37,12 @@ export async function checkPermissions(
  * Native form submission to /account/login (existing server endpoint) so the
  * redirect-on-success flow keeps working. The SPA posts credentials through
  * the Vite proxy or same-origin in prod.
+ *
+ * The endpoint enforces antiforgery (defense against login CSRF), so the
+ * SPA fetches a token + cookie pair from /api/auth/antiforgery first and
+ * carries the token as a hidden form field whose name the server returns.
+ * Same-origin requirement means the antiforgery cookie issued by the GET
+ * is automatically included on the subsequent POST.
  */
 export type LoginFormInput = {
   username: string;
@@ -44,7 +50,15 @@ export type LoginFormInput = {
   returnUrl?: string;
 };
 
-export function submitLoginForm(values: LoginFormInput): void {
+type AntiforgeryToken = {
+  token: string;
+  formFieldName: string;
+  headerName: string;
+};
+
+export async function submitLoginForm(values: LoginFormInput): Promise<void> {
+  const { data: tokens } = await api.get<AntiforgeryToken>("/api/auth/antiforgery");
+
   const form = document.createElement("form");
   form.method = "post";
   form.action = "/account/login";
@@ -57,6 +71,7 @@ export function submitLoginForm(values: LoginFormInput): void {
     form.appendChild(input);
   };
 
+  appendField(tokens.formFieldName, tokens.token);
   appendField("username", values.username);
   appendField("password", values.password);
   if (values.returnUrl) {

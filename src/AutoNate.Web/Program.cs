@@ -41,6 +41,7 @@ using AutoNate.Web.Services.Workflow;
 using AutoNate.Web.Services.Workflow.Behaviors;
 using AutoNate.Web.Storage;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.FileProviders;
 using Dapr.Messaging.PublishSubscribe.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -87,6 +88,23 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.SlidingExpiration = true;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
 
+        // CSRF posture: Strict so a cross-site link/form/POST can't replay the
+        // auth cookie. Same-origin navigations (login redirect, SPA links,
+        // address-bar entry, bookmark clicks) still carry it. The trade-off
+        // is that a link from another site (Slack, email, internal docs)
+        // lands the user unauthenticated and bounces them through login —
+        // acceptable for an internal workflow tool, and login CSRF gets a
+        // belt-and-braces fix via the antiforgery middleware on /account/login.
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Cookie.HttpOnly = true;
+        // SameAsRequest in Development so http://localhost:5108 keeps the
+        // dev cookie flow working; Always in every other environment so the
+        // production deployment (which the README requires to sit behind
+        // TLS) refuses to leak the cookie over an accidental HTTP fallback.
+        options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
+
         // Without these overrides the cookie middleware 302-redirects every
         // unauthenticated request — including AJAX calls — to LoginPath. The
         // SPA's axios then follows the redirect and parses index.html as the
@@ -114,7 +132,18 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         };
     });
 builder.Services.AddAuthorization();
-builder.Services.AddAntiforgery();
+builder.Services.AddAntiforgery(options =>
+{
+    // Match the auth cookie's posture (see AddCookie above). The antiforgery
+    // cookie is purely same-origin (issued by GET /api/antiforgery/token,
+    // consumed by the matching POST), so Strict is correct and doesn't
+    // break any cross-context flow. Secure follows the same dev/prod split.
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? CookieSecurePolicy.SameAsRequest
+        : CookieSecurePolicy.Always;
+});
 builder.Services.AddHttpContextAccessor();
 // IRequestContext is a thin facade over IHttpContextAccessor (singleton) — no
 // per-request state of its own, so it's safe as a singleton and avoids
@@ -684,15 +713,24 @@ app.Map(
 app.MapPost(
         "/account/login",
         async Task<IResult> (
+            // [FromForm] parameters are what wires this endpoint into the
+            // antiforgery middleware: ASP.NET Core's RouteHandlerBuilder
+            // detects them and adds RequireAntiforgeryToken metadata, so the
+            // app.UseAntiforgery() middleware refuses any POST that lacks a
+            // valid antiforgery token + cookie pair. Defends against login
+            // CSRF (an attacker-controlled site silently logging the victim
+            // into the attacker's account).
+            [FromForm] string? username,
+            [FromForm] string? password,
+            [FromForm] string? returnUrl,
             HttpContext context,
             ILocalUserStore localUserStore,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var form = await context.Request.ReadFormAsync(cancellationToken);
-            var username = form["username"].ToString();
-            var password = form["password"].ToString();
-            var returnUrl = form["returnUrl"].ToString();
+            username ??= string.Empty;
+            password ??= string.Empty;
+            returnUrl ??= string.Empty;
 
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
@@ -764,8 +802,13 @@ app.MapPost(
                 cancellationToken);
 
             return Results.LocalRedirect(GetSafeReturnUrl(returnUrl));
-        })
-    .DisableAntiforgery();
+        });
+        // Antiforgery enabled (no .DisableAntiforgery()): defends against
+        // login CSRF — without this, an attacker-controlled site could
+        // top-level POST credentials here, set the auth cookie, and the
+        // victim would unknowingly act inside the attacker's account.
+        // The SPA fetches a token from GET /api/auth/antiforgery first
+        // and includes it in the form payload (see auth.ts.submitLoginForm).
 
 app.MapPost(
         "/account/logout",

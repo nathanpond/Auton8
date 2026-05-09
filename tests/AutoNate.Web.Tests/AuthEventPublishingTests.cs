@@ -30,12 +30,10 @@ public sealed class AuthEventPublishingTests
 
         async Task PostFailedLogin()
         {
-            var form = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["username"] = "admin",
-                ["password"] = "definitely-not-the-password"
-            });
-            var response = await client.PostAsync("/account/login", form);
+            var response = await PostLoginWithAntiforgeryAsync(
+                client,
+                username: "admin",
+                password: "definitely-not-the-password");
             Assert.Equal(System.Net.HttpStatusCode.Redirect, response.StatusCode);
         }
 
@@ -96,12 +94,10 @@ public sealed class AuthEventPublishingTests
         anonClient.DefaultRequestHeaders.Clear();
         for (var i = 0; i < 3; i++)
         {
-            var form = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["username"] = "lockedalice",
-                ["password"] = "wrong"
-            });
-            await anonClient.PostAsync("/account/login", form);
+            await PostLoginWithAntiforgeryAsync(
+                anonClient,
+                username: "lockedalice",
+                password: "wrong");
         }
 
         factory.RecordedAuditEvents.Clear();
@@ -271,6 +267,64 @@ public sealed class AuthEventPublishingTests
 
         Assert.Empty(recording.Events);
     }
+
+    [Fact]
+    public async Task PostLogin_without_antiforgery_token_is_rejected()
+    {
+        // Login CSRF defense: a POST to /account/login that lacks a valid
+        // antiforgery token + matching cookie must NOT reach the credential
+        // check, otherwise an attacker-controlled site could top-level-POST
+        // credentials here, set the auth cookie, and the victim would
+        // unknowingly act inside the attacker's account.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["username"] = "admin",
+            ["password"] = "definitely-not-the-password"
+        });
+        var response = await client.PostAsync("/account/login", form);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        // No login.failed event either — the antiforgery middleware
+        // short-circuits before the endpoint delegate runs.
+        Assert.DoesNotContain(
+            factory.RecordedAuditEvents.Events,
+            e => e.EventType == AuthEventTypes.LoginFailed);
+    }
+
+    // POSTs /account/login with a valid antiforgery token + cookie pair.
+    // Mirrors what the SPA's submitLoginForm does: GET the token from
+    // /api/auth/antiforgery (also stamps the cookie via HandleCookies=true
+    // on the test client), then submit the form with the token in the field
+    // whose name the server returned.
+    private static async Task<HttpResponseMessage> PostLoginWithAntiforgeryAsync(
+        HttpClient client,
+        string username,
+        string password,
+        string? returnUrl = null)
+    {
+        var tokenResponse = await client.GetAsync("/api/auth/antiforgery");
+        tokenResponse.EnsureSuccessStatusCode();
+        var tokens = await tokenResponse.Content.ReadFromJsonAsync<AntiforgeryTokenDto>()
+            ?? throw new InvalidOperationException("Antiforgery token response was empty.");
+
+        var fields = new Dictionary<string, string>
+        {
+            [tokens.FormFieldName] = tokens.Token,
+            ["username"] = username,
+            ["password"] = password
+        };
+        if (returnUrl is not null) fields["returnUrl"] = returnUrl;
+
+        return await client.PostAsync("/account/login", new FormUrlEncodedContent(fields));
+    }
+
+    private sealed record AntiforgeryTokenDto(string Token, string FormFieldName, string HeaderName);
 
     private static HttpContext BuildHttpContext(Action<IServiceCollection> configureServices)
     {

@@ -27,8 +27,16 @@ export default function Login() {
     return <Navigate to="/home" replace />;
   }
 
-  const onSubmit = (values: FormValues) => {
-    submitLoginForm({ ...values, returnUrl });
+  const onSubmit = async (values: FormValues) => {
+    try {
+      await submitLoginForm({ ...values, returnUrl });
+    } catch (err) {
+      // Token fetch failed (network glitch / server down). Redirect to
+      // /?error=invalid so the existing error banner surfaces something
+      // instead of leaving the submit button silently hung.
+      console.error("Failed to obtain antiforgery token before login submit", err);
+      window.location.href = "/?error=invalid";
+    }
   };
 
   return (

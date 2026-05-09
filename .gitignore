@@ -31,6 +31,12 @@ src/AutoNate.Web/wwwroot/
 .idea/
 Test Results/
 
+# TypeScript incremental build cache. Regenerated on every tsc/Vite build;
+# tracking it produces phantom diffs and silently masks real errors when a
+# stale cache hides a since-broken consumer (Vite catches it at runtime, but
+# tsc with cache says "fine").
+*.tsbuildinfo
+
 # Per-user Rider settings (the shared `.DotSettings` file without the .user
 # suffix is fine to commit; the .user variant is per-machine state).
 *.DotSettings.user

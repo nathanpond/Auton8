@@ -4,6 +4,7 @@ using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Events;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -155,10 +156,34 @@ public static class AuthEndpoints
             return Results.Json(new { authenticated = true, results });
         }).DisableAntiforgery();
 
+        // Issues a fresh antiforgery token + sets the matching cookie. The
+        // login form (and any other pre-auth POST that opts back into
+        // antiforgery validation) calls this first, then submits the
+        // returned token in the form field whose name we return.
+        //
+        // Anonymous-allowed because the canonical caller is the unauth login
+        // page. The token is bound to the issued cookie value, so handing
+        // tokens out to anonymous clients doesn't weaken anything — an
+        // attacker would have to also exfiltrate the cookie from the same
+        // browser, which Same-Origin and SameSite=Strict rule out.
+        group.MapGet("/antiforgery", (HttpContext http, IAntiforgery antiforgery) =>
+        {
+            var tokens = antiforgery.GetAndStoreTokens(http);
+            return Results.Json(new AntiforgeryTokenResponse(
+                Token: tokens.RequestToken ?? string.Empty,
+                FormFieldName: tokens.FormFieldName,
+                HeaderName: tokens.HeaderName ?? string.Empty));
+        });
+
         return app;
     }
 
     public sealed record CheckPermissionsRequest(IReadOnlyList<CheckPermissionItem> Checks);
 
     public sealed record CheckPermissionItem(string? Kind, string? Action, string? Id);
+
+    public sealed record AntiforgeryTokenResponse(
+        string Token,
+        string FormFieldName,
+        string HeaderName);
 }
