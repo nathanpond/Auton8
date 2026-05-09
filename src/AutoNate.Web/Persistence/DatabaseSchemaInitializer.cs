@@ -2266,7 +2266,7 @@ internal static class DatabaseSchemaInitializer
         """;
 
     // Seeds the agent_model table with the models AutoNate previously kept
-    // in the static ModelCatalog. ON CONFLICT DO NOTHING so re-running is
+    // in a static in-code lookup table. ON CONFLICT DO NOTHING so re-running is
     // safe and never overwrites an admin's edits — once a row exists the
     // admin owns it, the seed is just bootstrap. Costs are per million
     // tokens; values reflect the providers' published USD pricing as of

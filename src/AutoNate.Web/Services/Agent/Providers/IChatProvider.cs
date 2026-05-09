@@ -13,8 +13,8 @@ public interface IChatProvider
     string Kind { get; }
 
     // Concrete model id this provider was constructed for (e.g.
-    // "claude-sonnet-4-6"). Drives ModelCatalog.GetContextWindow lookups so
-    // the loop knows how aggressively to trim history.
+    // "claude-sonnet-4-6"). Drives IAgentModelCatalog.GetContextWindow lookups
+    // so the loop knows how aggressively to trim history.
     string ModelId { get; }
 
     IAsyncEnumerable<ChatStreamChunk> StreamAsync(
