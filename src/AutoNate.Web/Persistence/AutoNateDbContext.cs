@@ -88,6 +88,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<AgentToolCall> AgentToolCalls { get; set; }
 
+    public virtual DbSet<AgentModel> AgentModels { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -1037,6 +1039,8 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.CacheWriteTokens).HasColumnName("cache_write_tokens");
             entity.Property(e => e.StopReason).HasColumnName("stop_reason");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.Kind).HasColumnName("kind").HasDefaultValue("chat");
+            entity.Property(e => e.ReplacesThroughMessageId).HasColumnName("replaces_through_message_id");
         });
 
         modelBuilder.Entity<AgentToolCall>(entity =>
@@ -1069,6 +1073,30 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.StartedAtUtc).HasColumnName("started_at_utc");
             entity.Property(e => e.FinishedAtUtc).HasColumnName("finished_at_utc");
             entity.Property(e => e.DurationMs).HasColumnName("duration_ms");
+        });
+
+        modelBuilder.Entity<AgentModel>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("agent_model_pkey");
+            entity.ToTable("agent_model");
+            entity.HasIndex(e => e.ModelId, "agent_model_model_id_key").IsUnique();
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.ModelId).HasColumnName("model_id");
+            entity.Property(e => e.DisplayName).HasColumnName("display_name");
+            entity.Property(e => e.Provider).HasColumnName("provider");
+            entity.Property(e => e.ContextWindowTokens).HasColumnName("context_window_tokens");
+            entity.Property(e => e.InputCostPerMillionTokens).HasColumnName("input_cost_per_million_tokens").HasColumnType("numeric(10,4)");
+            entity.Property(e => e.OutputCostPerMillionTokens).HasColumnName("output_cost_per_million_tokens").HasColumnType("numeric(10,4)");
+            entity.Property(e => e.CostCurrency).HasColumnName("cost_currency").HasDefaultValue("USD");
+            entity.Property(e => e.CostPublishedAtUtc).HasColumnName("cost_published_at_utc");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived").HasDefaultValue(false);
+            entity.Property(e => e.IsDefault).HasColumnName("is_default").HasDefaultValue(false);
+            entity.Property(e => e.IsAvailable).HasColumnName("is_available").HasDefaultValue(true);
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
         });
 
         OnModelCreatingPartial(modelBuilder);

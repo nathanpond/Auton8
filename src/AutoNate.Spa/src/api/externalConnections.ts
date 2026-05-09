@@ -56,9 +56,15 @@ export type ListModelsRequest =
   | { connectionId: string }
   | { kind: string; baseUrl?: string | null; secret: string };
 
+export type ModelInfo = {
+  id: string;
+  contextWindowTokens: number;
+  knownContextWindow: boolean;
+};
+
 export type ListModelsResult = {
   ok: boolean;
-  models: string[];
+  models: ModelInfo[];
   error: string | null;
 };
 

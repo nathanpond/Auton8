@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using AutoNate.Web.Services.Agent.Catalog;
 
 namespace AutoNate.Web.Services.ExternalConnections;
 
@@ -14,15 +15,23 @@ public interface IConnectionModelLister
 
 public sealed record class ListModelsInput(string Kind, string? BaseUrl, string Secret);
 
-public sealed record class ListModelsResult(bool Ok, IReadOnlyList<string> Models, string? Error);
+public sealed record class ListModelsResult(bool Ok, IReadOnlyList<ModelInfo> Models, string? Error);
+
+// Context window comes from ModelCatalog (longest-prefix match against the
+// id). KnownContextWindow is false when the catalog had to fall back to the
+// conservative default — the admin UI surfaces that as a warning so the
+// admin knows to override the value.
+public sealed record class ModelInfo(string Id, int ContextWindowTokens, bool KnownContextWindow);
 
 public sealed class ConnectionModelLister : IConnectionModelLister
 {
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IAgentModelCatalog _catalog;
 
-    public ConnectionModelLister(IHttpClientFactory httpClientFactory)
+    public ConnectionModelLister(IHttpClientFactory httpClientFactory, IAgentModelCatalog catalog)
     {
         _httpClientFactory = httpClientFactory;
+        _catalog = catalog;
     }
 
     public async Task<ListModelsResult> ListModelsAsync(ListModelsInput input, CancellationToken cancellationToken = default)
@@ -33,12 +42,12 @@ public sealed class ConnectionModelLister : IConnectionModelLister
             {
                 "LlmProvider:Anthropic" => await ListAnthropicAsync(input, cancellationToken),
                 "LlmProvider:OpenAI" => await ListOpenAIAsync(input, cancellationToken),
-                _ => new ListModelsResult(false, Array.Empty<string>(), $"Listing models is not supported for kind '{input.Kind}'.")
+                _ => new ListModelsResult(false, Array.Empty<ModelInfo>(), $"Listing models is not supported for kind '{input.Kind}'.")
             };
         }
         catch (Exception ex)
         {
-            return new ListModelsResult(false, Array.Empty<string>(), ex.Message);
+            return new ListModelsResult(false, Array.Empty<ModelInfo>(), ex.Message);
         }
     }
 
@@ -63,7 +72,7 @@ public sealed class ConnectionModelLister : IConnectionModelLister
             if (!resp.IsSuccessStatusCode)
             {
                 var text = await resp.Content.ReadAsStringAsync(cancellationToken);
-                return new ListModelsResult(false, Array.Empty<string>(), $"{(int)resp.StatusCode}: {Truncate(text, 256)}");
+                return new ListModelsResult(false, Array.Empty<ModelInfo>(), $"{(int)resp.StatusCode}: {Truncate(text, 256)}");
             }
 
             await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
@@ -88,7 +97,7 @@ public sealed class ConnectionModelLister : IConnectionModelLister
             if (string.IsNullOrEmpty(afterId)) break;
         }
 
-        return new ListModelsResult(true, ids, null);
+        return new ListModelsResult(true, ToInfos(ids), null);
     }
 
     private async Task<ListModelsResult> ListOpenAIAsync(ListModelsInput input, CancellationToken cancellationToken)
@@ -103,7 +112,7 @@ public sealed class ConnectionModelLister : IConnectionModelLister
         if (!resp.IsSuccessStatusCode)
         {
             var text = await resp.Content.ReadAsStringAsync(cancellationToken);
-            return new ListModelsResult(false, Array.Empty<string>(), $"{(int)resp.StatusCode}: {Truncate(text, 256)}");
+            return new ListModelsResult(false, Array.Empty<ModelInfo>(), $"{(int)resp.StatusCode}: {Truncate(text, 256)}");
         }
 
         await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
@@ -120,7 +129,18 @@ public sealed class ConnectionModelLister : IConnectionModelLister
                 }
             }
         }
-        return new ListModelsResult(true, ids, null);
+        return new ListModelsResult(true, ToInfos(ids), null);
+    }
+
+    private IReadOnlyList<ModelInfo> ToInfos(IReadOnlyList<string> ids)
+    {
+        var infos = new ModelInfo[ids.Count];
+        for (var i = 0; i < ids.Count; i++)
+        {
+            var id = ids[i];
+            infos[i] = new ModelInfo(id, _catalog.GetContextWindow(id), _catalog.IsKnown(id));
+        }
+        return infos;
     }
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";

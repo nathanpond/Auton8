@@ -12,6 +12,11 @@ public interface IChatProvider
     // for telemetry, audit, and "switch provider mid-conversation" guardrails.
     string Kind { get; }
 
+    // Concrete model id this provider was constructed for (e.g.
+    // "claude-sonnet-4-6"). Drives ModelCatalog.GetContextWindow lookups so
+    // the loop knows how aggressively to trim history.
+    string ModelId { get; }
+
     IAsyncEnumerable<ChatStreamChunk> StreamAsync(
         ChatRequest request,
         CancellationToken cancellationToken = default);

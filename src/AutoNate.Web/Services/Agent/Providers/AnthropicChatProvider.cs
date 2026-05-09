@@ -22,6 +22,8 @@ public sealed class AnthropicChatProvider : IChatProvider
 {
     public string Kind => "Anthropic";
 
+    public string ModelId => _modelId;
+
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _modelId;

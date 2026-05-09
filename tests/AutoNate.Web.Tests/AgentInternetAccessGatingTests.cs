@@ -97,6 +97,7 @@ public sealed class AgentInternetAccessGatingTests
         public List<IReadOnlyList<ChatTool>> RequestsSeen { get; } = new();
 
         public string Kind => "Capturing";
+        public string ModelId => "test-model";
 
         public async IAsyncEnumerable<ChatStreamChunk> StreamAsync(ChatRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

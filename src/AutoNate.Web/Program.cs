@@ -318,6 +318,19 @@ builder.Services.AddOptions<AgentOptions>().BindConfiguration(AgentOptions.Secti
 builder.Services.AddScoped<IAgentConversationStore, EfCoreAgentConversationStore>();
 builder.Services.AddScoped<SystemPromptBuilder>();
 builder.Services.AddScoped<IAgentSession, AgentSession>();
+builder.Services.AddSingleton<ConversationCompactor>();
+
+// Catalogue of LLM models AutoNate is aware of. Singleton lookup service
+// keeps an in-memory snapshot so the chat hot path doesn't pay a DB round-
+// trip per turn; the store is scoped because writes go through a request-
+// scoped DbContext factory and call Invalidate() on the singleton.
+builder.Services.AddSingleton<AutoNate.Web.Services.Agent.Catalog.IAgentModelCatalog,
+    AutoNate.Web.Services.Agent.Catalog.AgentModelCatalog>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Agent.Catalog.AgentModelDefaultStreamService>();
+builder.Services.AddScoped<AutoNate.Web.Services.Agent.Catalog.IAgentModelCatalogStore,
+    AutoNate.Web.Services.Agent.Catalog.EfCoreAgentModelCatalogStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Agent.Catalog.IAgentModelCatalogRefresher,
+    AutoNate.Web.Services.Agent.Catalog.AgentModelCatalogRefresher>();
 builder.Services.AddSingleton<IFieldType, TextFieldType>();
 builder.Services.AddSingleton<IFieldType, NumberFieldType>();
 builder.Services.AddSingleton<IFieldType, DateFieldType>();
@@ -650,6 +663,24 @@ app.Map(
         await busWatcherStreamService.AcceptClientAsync(context, cancellationToken);
     });
 
+// Pushes the current default-model snapshot to every chatbot SPA. The
+// admin's "Set as default" action updates the catalog, which triggers
+// AgentModelDefaultStreamService.BroadcastAsync — connected clients
+// receive the new model id and update their in-window footer label
+// without a refresh. New clients also receive the current state on
+// connect so the label can render before any subsequent broadcasts.
+app.Map(
+    AutoNate.Web.Services.Agent.Catalog.AgentModelDefaultStreamService.WebSocketRoute,
+    async (HttpContext context, AutoNate.Web.Services.Agent.Catalog.AgentModelDefaultStreamService stream, CancellationToken cancellationToken) =>
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+        await stream.AcceptClientAsync(context, cancellationToken);
+    });
+
 app.MapPost(
         "/account/login",
         async Task<IResult> (
@@ -782,6 +813,7 @@ app.MapSiteSettingsEndpoints();
 app.MapAdminPluginsEndpoints();
 app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
+app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
 
 // Runtime-mutable public assets live under /data/wwwroot and are served at the

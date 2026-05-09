@@ -18,6 +18,7 @@ import { useAgentSidebar } from "./AgentSidebarContext";
 import { useUserPreferences } from "@/preferences/UserPreferencesContext";
 import { MarkdownView } from "./MarkdownView";
 import { useActivePageSummary, usePageContextRegistry } from "./pageContext/PageContextRegistry";
+import { useAgentModelDefault } from "@/hooks/useAgentModelDefault";
 import "./AgentSidebar.css";
 
 export function AgentSidebar() {
@@ -81,6 +82,7 @@ export function AgentSidebar() {
   });
 
   const stream = useAgentStream();
+  const modelDefault = useAgentModelDefault();
   const [composer, setComposer] = useState("");
   // The just-sent user text. Rendered as a user bubble below the persisted
   // history while the assistant streams its reply, then cleared once the
@@ -213,21 +215,67 @@ export function AgentSidebar() {
                 placeholder={conversationId ? "Send a message…" : "Ask the assistant about this page…"}
                 disabled={stream.state.streaming}
               />
-              <div className="d-flex justify-content-end gap-2 mt-2">
-                {stream.state.streaming ? (
-                  <button type="button" className="btn btn-sm btn-outline-danger" onClick={stream.cancel}>
-                    Stop
-                  </button>
-                ) : (
-                  <button type="submit" className="btn btn-sm btn-primary" disabled={composer.trim().length === 0}>
-                    Send
-                  </button>
-                )}
+              <div className="d-flex justify-content-between align-items-center gap-2 mt-2">
+                <ModelInUseLabel
+                  current={modelDefault.current}
+                  status={modelDefault.status}
+                />
+                <div className="d-flex gap-2">
+                  {stream.state.streaming ? (
+                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={stream.cancel}>
+                      Stop
+                    </button>
+                  ) : (
+                    <button type="submit" className="btn btn-sm btn-primary" disabled={composer.trim().length === 0}>
+                      Send
+                    </button>
+                  )}
+                </div>
               </div>
             </form>
         </div>
       )}
     </aside>
+  );
+}
+
+type ModelInUseLabelProps = {
+  current: { modelId: string | null; displayName: string | null; provider: string | null } | null;
+  status: string;
+};
+
+// Compact "Model: …" affordance pinned to the bottom-left of the
+// chatbot's composer footer. Updates live whenever the admin promotes a
+// new default in Site Configuration > Chatbot > Models — the websocket
+// at /ws/agent-model-default pushes the new snapshot to every open
+// chatbot tab and this component re-renders without a refresh.
+function ModelInUseLabel({ current, status }: ModelInUseLabelProps) {
+  let text: string;
+  if (current && current.displayName) {
+    text = current.displayName;
+  } else if (current && current.modelId) {
+    text = current.modelId;
+  } else if (current) {
+    text = "No default model";
+  } else if (status === "Connecting...") {
+    text = "Loading…";
+  } else {
+    text = status;
+  }
+
+  return (
+    <small
+      className="text-muted text-truncate"
+      style={{ maxWidth: "60%" }}
+      title={
+        current?.modelId
+          ? `Model in use: ${current.modelId}${current.provider ? ` (${current.provider})` : ""}`
+          : "Model in use"
+      }
+    >
+      <i className="fa fa-microchip me-1" aria-hidden="true" />
+      {text}
+    </small>
   );
 }
 

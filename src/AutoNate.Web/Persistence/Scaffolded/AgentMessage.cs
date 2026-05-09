@@ -35,4 +35,15 @@ public partial class AgentMessage
     public string? StopReason { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }
+
+    // "chat" for normal user/assistant/tool turns, "summary" for synthetic
+    // rows produced by ConversationCompactor that replace a prefix of older
+    // turns once a conversation outgrows the model's context window. Default
+    // is "chat" so existing rows backfill cleanly.
+    public string Kind { get; set; } = "chat";
+
+    // Set on summary rows: the last message id whose history was rolled up
+    // into this summary. Older rows stay in the table for audit but the
+    // chat-loop loader skips them in favour of the summary text.
+    public Guid? ReplacesThroughMessageId { get; set; }
 }

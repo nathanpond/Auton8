@@ -25,6 +25,7 @@ public static class AgentEventTypes
     public const string ConversationListViewed = "agent.conversation.list_viewed";
     public const string ConversationRenamed = "agent.conversation.renamed";
     public const string ConversationDeleted = "agent.conversation.deleted";
+    public const string ConversationCompacted = "agent.conversation.compacted";
     public const string MessageUserSent = "agent.message.user_sent";
     public const string MessageAssistantStarted = "agent.message.assistant_started";
     public const string MessageAssistantCompleted = "agent.message.assistant_completed";

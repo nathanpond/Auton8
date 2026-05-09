@@ -40,6 +40,8 @@ public sealed class AgentSession : IAgentSession
     private readonly PageQueryChannel _pageQueryChannel;
     private readonly PageActionChannel _pageActionChannel;
     private readonly IServiceProvider _services;
+    private readonly ConversationCompactor _compactor;
+    private readonly Catalog.IAgentModelCatalog _catalog;
     private readonly AgentOptions _options;
     private readonly ILogger<AgentSession> _logger;
 
@@ -53,6 +55,8 @@ public sealed class AgentSession : IAgentSession
         PageQueryChannel pageQueryChannel,
         PageActionChannel pageActionChannel,
         IServiceProvider services,
+        ConversationCompactor compactor,
+        Catalog.IAgentModelCatalog catalog,
         IOptions<AgentOptions> options,
         ILogger<AgentSession> logger)
     {
@@ -65,6 +69,8 @@ public sealed class AgentSession : IAgentSession
         _pageQueryChannel = pageQueryChannel;
         _pageActionChannel = pageActionChannel;
         _services = services;
+        _compactor = compactor;
+        _catalog = catalog;
         _options = options.Value;
         _logger = logger;
     }
@@ -179,7 +185,14 @@ public sealed class AgentSession : IAgentSession
             userDisplayName: null,
             userRoles: Array.Empty<string>());
 
-        var history = (await _conversationStore.LoadMessagesAsync(conversationId, cancellationToken)).ToList();
+        var loaded = (await _conversationStore.LoadMessagesWithIdsAsync(conversationId, cancellationToken)).ToList();
+        var history = new List<ChatMessage>(loaded.Count);
+        var historyIds = new List<Guid>(loaded.Count);
+        foreach (var lm in loaded)
+        {
+            history.Add(lm.Message);
+            historyIds.Add(lm.Id);
+        }
         var maxTokens = _options.DefaultMaxTokens;
 
         // Apply per-turn capability gates from site settings. Read once per
@@ -192,15 +205,71 @@ public sealed class AgentSession : IAgentSession
             ? allTools
             : allTools.Where(t => !InternetGatedTools.Contains(t.Name)).ToList();
 
+        var contextWindow = _catalog.GetContextWindow(provider.ModelId);
+        var compactionTriggerTokens = (int)(contextWindow * ConversationCompactor.CompactionTriggerFraction);
+
+        // Set when the previous iteration's request 400'd with a context-
+        // overflow error. Tells the next iteration to compact aggressively
+        // (TailOverride=2) before retrying. Capped to one retry per
+        // SendMessage so we never loop forever on an unrecoverable case.
+        var forceOverflowCompaction = false;
+        var overflowRetriesUsed = 0;
+
         var iteration = 0;
         while (iteration < _options.MaxIterations)
         {
             iteration++;
+
+            // Per-iteration compaction check. Tool results that arrived in
+            // the previous iteration can swell history mid-turn; checking
+            // here (not just before the loop) means we re-summarize before
+            // sending the next request. The trimmer below is still the
+            // last-resort fallback.
+            var compactCheck = ConversationHistoryTrimmer.Trim(
+                history, systemPrompt, filteredTools, contextWindow, maxTokens);
+            var shouldCompact = forceOverflowCompaction
+                || compactCheck.EstimatedInputTokens >= compactionTriggerTokens;
+            if (shouldCompact)
+            {
+                int? tailOverride = forceOverflowCompaction ? 2 : null;
+                var (compactedHistory, compactedIds, didCompact) = await TryCompactAsync(
+                    conversationId, provider, history, historyIds,
+                    systemPrompt, filteredTools,
+                    contextWindow, maxTokens,
+                    tailOverride,
+                    estimatedInputTokensBefore: compactCheck.EstimatedInputTokens,
+                    cancellationToken);
+                if (didCompact)
+                {
+                    history = compactedHistory;
+                    historyIds = compactedIds;
+                }
+                forceOverflowCompaction = false;
+            }
+
+            // Trim oldest history that doesn't fit. Persisted conversation
+            // is untouched — this is just what we send to the provider this
+            // turn. Without this the loop blows past Anthropic's 200K cap on
+            // long conversations and the request 400s.
+            var trimResult = ConversationHistoryTrimmer.Trim(
+                history,
+                systemPrompt,
+                filteredTools,
+                contextWindow,
+                maxTokens);
+            if (trimResult.DroppedCount > 0)
+            {
+                _logger.LogInformation(
+                    "Trimmed {Dropped} oldest message(s) from conversation {ConversationId} to fit context window {ContextWindow} (estimated {EstimatedTokens} of budget {Budget}).",
+                    trimResult.DroppedCount, conversationId, contextWindow,
+                    trimResult.EstimatedInputTokens, trimResult.EffectiveBudgetTokens);
+            }
+
             var request = new ChatRequest(
-                Messages: history,
+                Messages: trimResult.Messages,
                 SystemPrompt: systemPrompt,
                 Tools: filteredTools,
-                ModelId: conversation.ModelId ?? "default",
+                ModelId: provider.ModelId,
                 MaxTokens: maxTokens);
 
             var assistantBlocks = new List<ChatContentBlock>();
@@ -225,7 +294,7 @@ public sealed class AgentSession : IAgentSession
                         AgentEventTypes.MessageAssistantStarted,
                         AgentResourceKinds.Message,
                         resource: new { conversationId, messageId = assistantMessageId, iteration },
-                        details: new { providerKind = provider.Kind, modelId = conversation.ModelId },
+                        details: new { providerKind = provider.Kind, modelId = provider.ModelId, contextWindow },
                         cancellationToken);
                     yield return new AgentEvent.MessageStarted(assistantMessageId);
                 }
@@ -257,6 +326,24 @@ public sealed class AgentSession : IAgentSession
 
             if (errorText is not null)
             {
+                // Context-overflow recovery: if the provider rejected the
+                // request because the prompt was too long, run an aggressive
+                // compaction (TailOverride=2) and retry the same iteration.
+                // This is the safety net for cases where our token estimate
+                // undershot the real count (typically dense JSON in a tool
+                // result). Capped to one retry per SendMessageAsync so we
+                // never loop on an unrecoverable case.
+                if (IsContextOverflowError(errorText) && overflowRetriesUsed < 1)
+                {
+                    overflowRetriesUsed++;
+                    forceOverflowCompaction = true;
+                    _logger.LogWarning(
+                        "Provider returned context-overflow error on iteration {Iteration} for conversation {ConversationId}; force-compacting and retrying. Error: {Error}",
+                        iteration, conversationId, errorText);
+                    iteration--;
+                    continue;
+                }
+
                 if (pendingTextBuffer.Length > 0) assistantBlocks.Add(new ChatContentBlock.TextBlock(pendingTextBuffer.ToString()));
                 await _conversationStore.AppendMessageAsync(
                     conversationId, ChatRole.Assistant, assistantBlocks, provider.Kind, conversation.ModelId,
@@ -285,9 +372,10 @@ public sealed class AgentSession : IAgentSession
             // Persist the assistant turn before invoking tools so the row
             // exists when we attach tool_call children.
             var persistedAssistantId = await _conversationStore.AppendMessageAsync(
-                conversationId, ChatRole.Assistant, assistantBlocks, provider.Kind, conversation.ModelId,
+                conversationId, ChatRole.Assistant, assistantBlocks, provider.Kind, provider.ModelId,
                 usage, stopReason, cancellationToken);
             history.Add(new ChatMessage(ChatRole.Assistant, assistantBlocks));
+            historyIds.Add(persistedAssistantId);
 
             if (stopReason == ChatStopReason.ToolUse && toolStarts.Count > 0)
             {
@@ -391,10 +479,11 @@ public sealed class AgentSession : IAgentSession
 
                 // Persist a synthetic "tool" message carrying all the tool_results
                 // so the next provider call sees them.
-                await _conversationStore.AppendMessageAsync(
+                var persistedToolId = await _conversationStore.AppendMessageAsync(
                     conversationId, ChatRole.Tool, toolResults, providerKind: null, modelId: null,
                     usage: null, stopReason: null, cancellationToken);
                 history.Add(new ChatMessage(ChatRole.Tool, toolResults));
+                historyIds.Add(persistedToolId);
 
                 continue;
             }
@@ -423,6 +512,111 @@ public sealed class AgentSession : IAgentSession
     {
         using var doc = JsonDocument.Parse("{}");
         return doc.RootElement.Clone();
+    }
+
+    // Heuristic for "the provider rejected our request because it was too
+    // long". Matches Anthropic's "prompt is too long" wording and OpenAI's
+    // "context_length_exceeded" code so the retry path triggers on either.
+    // Kept lenient (substring match, lowercased) since the provider error
+    // text isn't part of the contract — the next provider release could
+    // reword it slightly.
+    private static bool IsContextOverflowError(string? errorText)
+    {
+        if (string.IsNullOrEmpty(errorText)) return false;
+        var lower = errorText.ToLowerInvariant();
+        return lower.Contains("prompt is too long")
+            || lower.Contains("context_length_exceeded")
+            || lower.Contains("maximum context length")
+            || lower.Contains("context length")
+            || lower.Contains("tokens >") && lower.Contains("maximum");
+    }
+
+    // Single shared compaction-and-replace path. Used both by the per-
+    // iteration trigger check and by the overflow-retry path (which passes
+    // tailOverride=2 to summarize aggressively). Returns the updated
+    // history and ids on success; returns the originals + didCompact=false
+    // when the compactor refuses (history too short, provider error,
+    // throw). Failures are logged but never thrown.
+    private async Task<(List<ChatMessage> History, List<Guid> Ids, bool DidCompact)> TryCompactAsync(
+        Guid conversationId,
+        Providers.IChatProvider provider,
+        List<ChatMessage> history,
+        List<Guid> historyIds,
+        string? systemPrompt,
+        IReadOnlyList<ChatTool> filteredTools,
+        int contextWindow,
+        int maxTokens,
+        int? tailOverride,
+        int estimatedInputTokensBefore,
+        CancellationToken cancellationToken)
+    {
+        var identities = new List<ConversationCompactor.MessageIdentity>(history.Count);
+        for (var i = 0; i < history.Count; i++)
+        {
+            identities.Add(new ConversationCompactor.MessageIdentity(historyIds[i], history[i]));
+        }
+        var compactInput = new ConversationCompactor.CompactInput(
+            History: history,
+            HistoryIds: identities,
+            ContextWindowTokens: contextWindow,
+            MaxOutputTokens: maxTokens,
+            SystemPrompt: systemPrompt,
+            Tools: filteredTools,
+            TailOverride: tailOverride);
+
+        ConversationCompactor.CompactOutput? compactResult = null;
+        try
+        {
+            compactResult = await _compactor.CompactAsync(provider, compactInput, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compaction threw for conversation {ConversationId}; falling back to trimmer.",
+                conversationId);
+        }
+
+        if (compactResult is null) return (history, historyIds, false);
+
+        var summaryMessageId = await _conversationStore.AppendSummaryAsync(
+            conversationId,
+            compactResult.SummaryText,
+            compactResult.ReplacesThroughMessageId,
+            provider.Kind,
+            provider.ModelId,
+            compactResult.Usage,
+            cancellationToken);
+
+        await _auditPublisher.PublishAsync(
+            AgentEventTopic.TopicName,
+            AgentEventTypes.ConversationCompacted,
+            AgentResourceKinds.Conversation,
+            resource: new { id = conversationId, summaryMessageId },
+            details: new
+            {
+                replacesThroughMessageId = compactResult.ReplacesThroughMessageId,
+                prefixCount = compactResult.PrefixCount,
+                summaryLength = compactResult.SummaryText.Length,
+                contextWindow,
+                estimatedInputTokensBefore,
+                tailOverride
+            },
+            cancellationToken);
+
+        _logger.LogInformation(
+            "Compacted {PrefixCount} oldest message(s) from conversation {ConversationId} into summary {SummaryMessageId} ({SummaryChars} chars, tailOverride={TailOverride}).",
+            compactResult.PrefixCount, conversationId, summaryMessageId, compactResult.SummaryText.Length, tailOverride);
+
+        var newHistory = new List<ChatMessage>(history.Count - compactResult.PrefixCount + 1);
+        var newHistoryIds = new List<Guid>(historyIds.Count - compactResult.PrefixCount + 1);
+        newHistory.Add(new ChatMessage(ChatRole.Assistant, new ChatContentBlock[] { new ChatContentBlock.TextBlock(compactResult.SummaryText) }));
+        newHistoryIds.Add(summaryMessageId);
+        for (var i = compactResult.PrefixCount; i < history.Count; i++)
+        {
+            newHistory.Add(history[i]);
+            newHistoryIds.Add(historyIds[i]);
+        }
+        return (newHistory, newHistoryIds, true);
     }
 
     // Wraps a tool invocation in the same exception model the loop uses to

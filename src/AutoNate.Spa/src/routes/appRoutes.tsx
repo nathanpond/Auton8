@@ -103,6 +103,7 @@ export const APP_ROUTES: AppRoute[] = [
       { path: "forms/:id", element: protect(<FormEditor />) },
       { path: "form-mappings", element: template("configFormMappings") },
       { path: "chatbot-settings", element: template("configChatbotSettings") },
+      { path: "chatbot-models", element: template("configChatbotModels") },
       // Catch-all so menu items added by plugins under /admin/config/* render
       // inside ConfigLayout's sidebar shell. The dynamic page component reads
       // the menu_item config (path/content/contentType) and renders it.

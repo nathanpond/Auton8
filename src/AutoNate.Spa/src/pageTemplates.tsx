@@ -11,6 +11,7 @@ import AdminHierarchy from "@/pages/admin/Hierarchy";
 import AdminExplain from "@/pages/admin/Explain";
 import AdminPlugins from "@/pages/admin/Plugins";
 import StatusAppearance from "@/pages/admin/config/StatusAppearance";
+import ModelCatalogPage from "@/pages/admin/config/chatbot/ModelCatalogPage";
 import SiteAppearancePage from "@/pages/admin/config/SiteAppearance";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
 import Events from "@/pages/admin/config/Events";
@@ -66,5 +67,6 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configPluginDocumentation: <PluginDocumentation />,
   configForms: <FormsList />,
   configFormMappings: <FormsFormMappings />,
-  configChatbotSettings: <SitewideChatbotSettings />
+  configChatbotSettings: <SitewideChatbotSettings />,
+  configChatbotModels: <ModelCatalogPage />
 };

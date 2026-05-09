@@ -22,6 +22,8 @@ public sealed class OpenAIChatProvider : IChatProvider
 {
     public string Kind => "OpenAI";
 
+    public string ModelId => _modelId;
+
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _modelId;

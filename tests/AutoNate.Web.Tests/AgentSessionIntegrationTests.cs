@@ -145,6 +145,94 @@ public sealed class AgentSessionIntegrationTests
     }
 
     [Fact]
+    public async Task Context_overflow_triggers_force_compact_and_retries_the_iteration()
+    {
+        // Regression: long conversations that came in just over the
+        // model's context window (Anthropic 400 "prompt is too long")
+        // used to fail the user's turn outright. AgentSession should now
+        // detect the overflow error, force-compact, and retry once.
+        // Provider script:
+        //   1. user's actual request -> overflow Error chunk
+        //   2. compactor's summarization call -> returns summary text
+        //   3. retry of the user's request -> text + EndTurn
+        var fakeProvider = new ScriptedChatProvider(new[]
+        {
+            new[]
+            {
+                (ChatStreamChunk)new ChatStreamChunk.Error(
+                    "Anthropic returned 400: prompt is too long: 201366 tokens > 200000 maximum",
+                    IsRetryable: false)
+            },
+            new[]
+            {
+                (ChatStreamChunk)new ChatStreamChunk.TextDelta("rolled-up summary of earlier turns."),
+                new ChatStreamChunk.MessageStop(ChatStopReason.EndTurn, new Usage(50, 20, null, null))
+            },
+            new[]
+            {
+                (ChatStreamChunk)new ChatStreamChunk.TextDelta("Here is the answer after compaction."),
+                new ChatStreamChunk.MessageStop(ChatStopReason.EndTurn, new Usage(80, 30, null, null))
+            }
+        });
+
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var customised = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IChatProviderResolver>();
+                services.AddSingleton<IChatProviderResolver>(_ => new FakeProviderResolver(fakeProvider));
+            });
+        });
+        _ = customised.CreateClient();
+
+        var recorder = (RecordingAuditEventPublisher)customised.Services
+            .GetRequiredService<AutoNate.Web.Services.Events.IAuditEventPublisher>();
+
+        using var scope = customised.Services.CreateScope();
+        var session = scope.ServiceProvider.GetRequiredService<IAgentSession>();
+        var store = scope.ServiceProvider.GetRequiredService<IAgentConversationStore>();
+
+        var convo = await session.StartAsync(TestUserId, pageKey: "test-overflow", connectionId: null);
+
+        // Seed prior turns so the compactor has a prefix to summarize.
+        // ConversationCompactor.MinimumPreservedTailMessages = 6, but the
+        // overflow path uses TailOverride=2 so 4 prior messages is enough.
+        for (var i = 0; i < 2; i++)
+        {
+            await store.AppendMessageAsync(convo.Id, ChatRole.User,
+                new ChatContentBlock[] { new ChatContentBlock.TextBlock($"earlier question {i}") },
+                providerKind: null, modelId: null, usage: null, stopReason: null);
+            await store.AppendMessageAsync(convo.Id, ChatRole.Assistant,
+                new ChatContentBlock[] { new ChatContentBlock.TextBlock($"earlier answer {i}") },
+                providerKind: "Scripted", modelId: "test-model", usage: null, stopReason: ChatStopReason.EndTurn);
+        }
+        recorder.Clear();
+
+        var events = new List<AgentEvent>();
+        await foreach (var ev in session.SendMessageAsync(convo.Id, TestUserId, "Tell me what we discussed earlier"))
+        {
+            events.Add(ev);
+        }
+
+        // The overflow on iteration 1 must NOT have surfaced as a terminal
+        // error — the retry recovered. Only Done events and the final text
+        // should be in the stream.
+        Assert.DoesNotContain(events, e => e is AgentEvent.Error);
+        Assert.Contains(events, e => e is AgentEvent.TextDelta td && td.Delta.Contains("after compaction"));
+        Assert.Contains(events, e => e is AgentEvent.Done);
+
+        // And compaction must have been recorded in audit so an operator
+        // can see the recovery happened.
+        Assert.Contains(recorder.Events, e => e.EventType == AgentEventTypes.ConversationCompacted);
+
+        // The summary row must exist in the persisted transcript.
+        var detail = await store.GetForUserAsync(convo.Id, TestUserId);
+        Assert.NotNull(detail);
+        Assert.Contains(detail!.Messages, m => m.Role == "assistant" && m.Content.GetRawText().Contains("rolled-up summary"));
+    }
+
+    [Fact]
     public async Task Session_principal_carries_user_id_claim_for_authorizer()
     {
         // Regression: AgentSession used to construct AgentSessionContext with
@@ -242,6 +330,7 @@ public sealed class AgentSessionIntegrationTests
         public ScriptedChatProvider(IReadOnlyList<IReadOnlyList<ChatStreamChunk>> scripts) => _scripts = scripts;
 
         public string Kind => "Scripted";
+        public string ModelId => "test-model";
 
         public async IAsyncEnumerable<ChatStreamChunk> StreamAsync(ChatRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

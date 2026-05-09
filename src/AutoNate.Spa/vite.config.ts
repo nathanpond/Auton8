@@ -30,6 +30,7 @@ export default defineConfig({
       "/dapr": { target: backendTarget, changeOrigin: false },
       "/bus-watcher": { target: backendTarget, changeOrigin: false },
       "/ws/bus-watcher": { target: wsBackendTarget, ws: true, changeOrigin: false },
+      "/ws/agent-model-default": { target: wsBackendTarget, ws: true, changeOrigin: false },
       // DataOptions.PublicUrlPrefix — runtime data folder (page-template
       // thumbnails copied out of plugin zips, etc.). Without this proxy
       // entry, Vite's SPA fallback returns index.html for /files/* requests.

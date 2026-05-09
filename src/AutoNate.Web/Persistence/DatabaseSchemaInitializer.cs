@@ -2184,6 +2184,206 @@ internal static class DatabaseSchemaInitializer
             ON agent_tool_call (message_id);
         """;
 
+    // Adds a "Models" entry under the existing Chatbot group in the
+    // site-config left-nav. Separate seed key from the Chatbot group itself
+    // so existing deployments pick up the new item on next boot without
+    // overwriting any admin reorganization of the group.
+    private const string SiteConfigChatbotModelsMenuSql =
+        """
+        DO $$
+        DECLARE
+            site_id UUID := '00000000-0000-0000-0001-000000000004';
+            chatbot_group_id UUID;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'site_config_chatbot_models_menu_v1') THEN
+                IF EXISTS (SELECT 1 FROM menus WHERE id = site_id) THEN
+                    SELECT id INTO chatbot_group_id
+                    FROM menu_items
+                    WHERE menu_id = site_id
+                      AND parent_id IS NULL
+                      AND display_name = 'Chatbot'
+                      AND item_type = 'group'
+                    LIMIT 1;
+
+                    IF chatbot_group_id IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM menu_items
+                        WHERE menu_id = site_id
+                          AND parent_id = chatbot_group_id
+                          AND config->>'templateKey' = 'configChatbotModels'
+                    ) THEN
+                        INSERT INTO menu_items (
+                            id, menu_id, parent_id, sort_order, display_name, icon,
+                            item_type, config, is_visible, is_system,
+                            created_at_utc, updated_at_utc
+                        )
+                        VALUES (
+                            gen_random_uuid(), site_id, chatbot_group_id, 1,
+                            'Models', 'fa fa-microchip',
+                            'template',
+                            '{{"templateKey":"configChatbotModels","path":"/admin/config/chatbot-models"}}'::jsonb,
+                            TRUE, TRUE, NOW(), NOW()
+                        );
+                    END IF;
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('site_config_chatbot_models_menu_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
+    // Catalogue of LLM models AutoNate is aware of: drives the External
+    // Connections model dropdown and the agent loop's per-model
+    // context-window lookup. Model id is unique (e.g. "claude-sonnet-4-6").
+    // Costs are stored per million tokens to keep precision sane (typical
+    // values run from $0.15 to $75 / Mtok); cost_published_at_utc lets the
+    // admin track how stale the snapshot is. Archive instead of delete so
+    // a connection still pointing at a retired model can resolve its
+    // context window without losing the row.
+    private const string AgentModelCatalogSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS agent_model (
+            id UUID PRIMARY KEY,
+            model_id TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            context_window_tokens INTEGER NOT NULL,
+            input_cost_per_million_tokens NUMERIC(10, 4) NULL,
+            output_cost_per_million_tokens NUMERIC(10, 4) NULL,
+            cost_currency TEXT NOT NULL DEFAULT 'USD',
+            cost_published_at_utc TIMESTAMPTZ NULL,
+            description TEXT NULL,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_agent_model_provider
+            ON agent_model (provider, sort_order, model_id)
+            WHERE is_archived = FALSE;
+        """;
+
+    // Seeds the agent_model table with the models AutoNate previously kept
+    // in the static ModelCatalog. ON CONFLICT DO NOTHING so re-running is
+    // safe and never overwrites an admin's edits — once a row exists the
+    // admin owns it, the seed is just bootstrap. Costs are per million
+    // tokens; values reflect the providers' published USD pricing as of
+    // 2026-05 and are timestamped accordingly so admins know how stale
+    // the snapshot is.
+    private const string AgentModelCatalogSeedSql =
+        """
+        INSERT INTO agent_model (
+            id, model_id, display_name, provider, context_window_tokens,
+            input_cost_per_million_tokens, output_cost_per_million_tokens,
+            cost_currency, cost_published_at_utc, description, is_archived,
+            sort_order, created_at_utc, updated_at_utc
+        ) VALUES
+            (gen_random_uuid(), 'claude-opus-4-7', 'Claude Opus 4.7', 'Anthropic', 200000, 15.00, 75.00, 'USD', '2026-05-01', 'Highest-capability Anthropic model. Best for deep reasoning, complex multi-step coding, and demanding agentic workflows. Most expensive — reserve for hard problems.', FALSE, 10, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-opus-4-7[1m]', 'Claude Opus 4.7 (1M context)', 'Anthropic', 1000000, 15.00, 75.00, 'USD', '2026-05-01', 'Opus 4.7 with the 1M-token extended-context beta. Ideal for very long documents, large codebases, and conversations that legitimately need more than 200K tokens.', FALSE, 11, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-sonnet-4-6', 'Claude Sonnet 4.6', 'Anthropic', 200000, 3.00, 15.00, 'USD', '2026-05-01', 'Balanced capability and cost — the default workhorse for most production chat and tool-use workloads. Solid coding and reasoning at a fraction of Opus pricing.', FALSE, 20, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-sonnet-4-6[1m]', 'Claude Sonnet 4.6 (1M context)', 'Anthropic', 1000000, 3.00, 15.00, 'USD', '2026-05-01', 'Sonnet 4.6 with the 1M-token extended-context beta. Great when long-context needs outweigh raw reasoning depth.', FALSE, 21, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-haiku-4-5', 'Claude Haiku 4.5', 'Anthropic', 200000, 1.00, 5.00, 'USD', '2026-05-01', 'Fastest Anthropic tier. Use for quick lookups, classification, summarization, and high-volume lightweight chat. Minimal latency.', FALSE, 30, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-3-5-sonnet-latest', 'Claude 3.5 Sonnet', 'Anthropic', 200000, 3.00, 15.00, 'USD', '2026-05-01', 'Prior-generation Anthropic flagship. Still strong at code and analysis; pin to it if you want stable behavior across releases.', FALSE, 40, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-3-5-haiku-latest', 'Claude 3.5 Haiku', 'Anthropic', 200000, 0.80, 4.00, 'USD', '2026-05-01', 'Fast prior-generation tier. Good for high-volume processing where 4.5 isn''t available.', FALSE, 50, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-3-opus-latest', 'Claude 3 Opus', 'Anthropic', 200000, 15.00, 75.00, 'USD', '2026-05-01', 'Older flagship retained for compatibility with workflows pinned to it.', FALSE, 60, NOW(), NOW()),
+            (gen_random_uuid(), 'claude-3-haiku-20240307', 'Claude 3 Haiku', 'Anthropic', 200000, 0.25, 1.25, 'USD', '2026-05-01', 'Cheapest catalogued Anthropic model. Use for the most cost-sensitive batch workloads.', FALSE, 70, NOW(), NOW()),
+            (gen_random_uuid(), 'gpt-4.1', 'GPT-4.1', 'OpenAI', 1047576, 2.00, 8.00, 'USD', '2026-05-01', 'OpenAI''s ~1M-context flagship. Best for long documents, multi-file code review, and large transcript analysis.', FALSE, 100, NOW(), NOW()),
+            (gen_random_uuid(), 'gpt-4o', 'GPT-4o', 'OpenAI', 128000, 2.50, 10.00, 'USD', '2026-05-01', 'Strong multimodal generalist (vision + audio). Solid default when you want OpenAI behavior at moderate cost.', FALSE, 110, NOW(), NOW()),
+            (gen_random_uuid(), 'gpt-4o-mini', 'GPT-4o mini', 'OpenAI', 128000, 0.15, 0.60, 'USD', '2026-05-01', 'Very cheap multimodal. Great for high-volume preprocessing, classification, and routing decisions.', FALSE, 120, NOW(), NOW()),
+            (gen_random_uuid(), 'o1', 'o1', 'OpenAI', 200000, 15.00, 60.00, 'USD', '2026-05-01', 'OpenAI reasoning-specialist. Uses internal chain-of-thought; excels at math, planning, and rigorous multi-step analysis. High latency.', FALSE, 130, NOW(), NOW()),
+            (gen_random_uuid(), 'o1-mini', 'o1-mini', 'OpenAI', 128000, 3.00, 12.00, 'USD', '2026-05-01', 'Cheaper reasoning model. Good for STEM and code reasoning when full o1 cost is hard to justify.', FALSE, 140, NOW(), NOW()),
+            (gen_random_uuid(), 'o3', 'o3', 'OpenAI', 200000, 10.00, 40.00, 'USD', '2026-05-01', 'Newer reasoning specialist. Stronger than o1 on agentic and tool-use scenarios.', FALSE, 150, NOW(), NOW()),
+            (gen_random_uuid(), 'o3-mini', 'o3-mini', 'OpenAI', 200000, 1.10, 4.40, 'USD', '2026-05-01', 'Cheap, fast reasoning model. Good first stop for analytical tasks before reaching for o3 or o1.', FALSE, 160, NOW(), NOW()),
+            (gen_random_uuid(), 'gpt-4-turbo', 'GPT-4 Turbo', 'OpenAI', 128000, 10.00, 30.00, 'USD', '2026-05-01', 'Older 128K-context flagship. Mostly superseded by gpt-4o; kept for pinned workflows.', FALSE, 170, NOW(), NOW()),
+            (gen_random_uuid(), 'gpt-3.5-turbo', 'GPT-3.5 Turbo', 'OpenAI', 16385, 0.50, 1.50, 'USD', '2026-05-01', 'Legacy budget tier. Use only for very simple chat or classification — capability is well behind the 4-series.', FALSE, 180, NOW(), NOW())
+        ON CONFLICT (model_id) DO NOTHING;
+        """;
+
+    // Adds is_default and is_available flags to the model catalog.
+    // is_default (global, single row): the model the chatbot picks by
+    // default. is_available: gates whether the agent may pick the model
+    // for autonomous task routing (UI-controlled). Idempotent ALTER:
+    // existing rows backfill with available=TRUE, default=FALSE; one
+    // row (claude-sonnet-4-6 by preference) is promoted as the seed
+    // default so chat works out of the box.
+    private const string AgentModelDefaultAvailableColumnsSql =
+        """
+        ALTER TABLE agent_model
+            ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;
+
+        ALTER TABLE agent_model
+            ADD COLUMN IF NOT EXISTS is_available BOOLEAN NOT NULL DEFAULT TRUE;
+
+        -- Bootstrap exactly one default on first run so the chatbot has a
+        -- model to use when a connection doesn't pin one. Re-runs are no-
+        -- ops once any default exists.
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM agent_model WHERE is_default = TRUE) THEN
+                UPDATE agent_model SET is_default = TRUE
+                WHERE id = (
+                    SELECT id FROM agent_model
+                    WHERE is_archived = FALSE
+                      AND model_id = 'claude-sonnet-4-6'
+                    LIMIT 1
+                );
+            END IF;
+        END $$;
+
+        -- Migration from the earlier per-provider unique index to a single
+        -- global default. Drop the per-provider index, collapse multiple
+        -- defaults down to one (preferring claude-sonnet-4-6 if present),
+        -- then add the global partial-unique index. The expression
+        -- ((1)) makes the index value a constant so partial-unique on
+        -- is_default = TRUE allows at most one row.
+        DROP INDEX IF EXISTS ux_agent_model_default_per_provider;
+
+        DO $$
+        DECLARE keep_id UUID;
+        BEGIN
+            SELECT id INTO keep_id FROM agent_model
+            WHERE is_default = TRUE
+            ORDER BY
+                CASE WHEN model_id = 'claude-sonnet-4-6' THEN 0 ELSE 1 END,
+                sort_order ASC,
+                id ASC
+            LIMIT 1;
+
+            IF keep_id IS NOT NULL THEN
+                UPDATE agent_model
+                SET is_default = FALSE,
+                    updated_at_utc = NOW()
+                WHERE is_default = TRUE
+                  AND id <> keep_id;
+            END IF;
+        END $$;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_model_default_global
+            ON agent_model ((1))
+            WHERE is_default = TRUE;
+        """;
+
+    // Adds the kind/replaces_through columns introduced when conversation
+    // compaction shipped. ConversationCompactor inserts kind='summary' rows
+    // with replaces_through_message_id pointing at the last message they
+    // subsume; LoadMessagesAsync uses these to skip rolled-up history when
+    // building the next prompt. Old conversations backfill kind='chat'.
+    private const string AgentMessageSummaryColumnsSql =
+        """
+        ALTER TABLE agent_message
+            ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat';
+
+        ALTER TABLE agent_message
+            ADD COLUMN IF NOT EXISTS replaces_through_message_id UUID NULL
+                REFERENCES agent_message (id) ON DELETE SET NULL;
+
+        CREATE INDEX IF NOT EXISTS ix_agent_message_conversation_summary
+            ON agent_message (conversation_id, created_at_utc)
+            WHERE kind = 'summary';
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -2228,6 +2428,11 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(LocalUserLockoutSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ExternalConnectionsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(AgentConversationsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(AgentMessageSummaryColumnsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(AgentModelCatalogSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(AgentModelCatalogSeedSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(AgentModelDefaultAvailableColumnsSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotModelsMenuSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

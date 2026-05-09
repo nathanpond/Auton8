@@ -107,6 +107,7 @@ public sealed class AgentEndpointsTests
         public ScriptedProvider(IReadOnlyList<IReadOnlyList<ChatStreamChunk>> scripts) => _scripts = scripts;
 
         public string Kind => "Scripted";
+        public string ModelId => "test-model";
 
         public async IAsyncEnumerable<ChatStreamChunk> StreamAsync(ChatRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

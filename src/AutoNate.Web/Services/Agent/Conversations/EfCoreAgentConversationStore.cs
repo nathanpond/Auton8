@@ -278,6 +278,16 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
         Guid conversationId,
         CancellationToken cancellationToken = default)
     {
+        var loaded = await LoadMessagesWithIdsAsync(conversationId, cancellationToken);
+        var messages = new ChatMessage[loaded.Count];
+        for (var i = 0; i < loaded.Count; i++) messages[i] = loaded[i].Message;
+        return messages;
+    }
+
+    public async Task<IReadOnlyList<LoadedMessage>> LoadMessagesWithIdsAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var rows = await dbContext.AgentMessages
             .AsNoTracking()
@@ -285,7 +295,91 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
             .OrderBy(m => m.CreatedAtUtc)
             .ToListAsync(cancellationToken);
 
-        return rows.Select(m => new ChatMessage(ParseRole(m.Role), DeserializeBlocks(m.ContentJson))).ToList();
+        // Find the most recent summary row. Everything older than (and
+        // including) the message it subsumes drops out; the summary itself
+        // becomes a synthetic assistant turn so the model sees "previously
+        // we discussed: …" before the live tail.
+        AgentMessage? latestSummary = null;
+        for (var i = rows.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(rows[i].Kind, "summary", StringComparison.OrdinalIgnoreCase))
+            {
+                latestSummary = rows[i];
+                break;
+            }
+        }
+
+        var loaded = new List<LoadedMessage>(rows.Count);
+        if (latestSummary is not null)
+        {
+            // Synthesize the assistant turn. The actual text lives inside
+            // the summary row's ContentJson (a single text block). Carry the
+            // summary row's own id so re-compaction can chain through it.
+            loaded.Add(new LoadedMessage(
+                latestSummary.Id,
+                new ChatMessage(ChatRole.Assistant, DeserializeBlocks(latestSummary.ContentJson))));
+            foreach (var row in rows)
+            {
+                if (row.CreatedAtUtc <= latestSummary.CreatedAtUtc) continue;
+                if (string.Equals(row.Kind, "summary", StringComparison.OrdinalIgnoreCase)) continue;
+                loaded.Add(new LoadedMessage(
+                    row.Id,
+                    new ChatMessage(ParseRole(row.Role), DeserializeBlocks(row.ContentJson))));
+            }
+        }
+        else
+        {
+            foreach (var row in rows)
+            {
+                loaded.Add(new LoadedMessage(
+                    row.Id,
+                    new ChatMessage(ParseRole(row.Role), DeserializeBlocks(row.ContentJson))));
+            }
+        }
+        return loaded;
+    }
+
+    public async Task<Guid> AppendSummaryAsync(
+        Guid conversationId,
+        string summaryText,
+        Guid replacesThroughMessageId,
+        string? providerKind,
+        string? modelId,
+        Usage? usage,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        var blocks = new ChatContentBlock[] { new ChatContentBlock.TextBlock(summaryText) };
+        var entity = new AgentMessage
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            ParentMessageId = null,
+            Role = "assistant",
+            Kind = "summary",
+            ReplacesThroughMessageId = replacesThroughMessageId,
+            ContentJson = JsonSerializer.Serialize(SerializeBlocks(blocks)),
+            ProviderKind = providerKind,
+            ModelId = modelId,
+            InputTokens = usage?.InputTokens,
+            OutputTokens = usage?.OutputTokens,
+            CacheReadTokens = usage?.CacheReadTokens,
+            CacheWriteTokens = usage?.CacheWriteTokens,
+            StopReason = null,
+            CreatedAtUtc = now
+        };
+        dbContext.AgentMessages.Add(entity);
+
+        var convo = await dbContext.AgentConversations
+            .FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        if (convo is not null)
+        {
+            convo.UpdatedAtUtc = now;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return entity.Id;
     }
 
     private static ChatRole ParseRole(string role) => role switch

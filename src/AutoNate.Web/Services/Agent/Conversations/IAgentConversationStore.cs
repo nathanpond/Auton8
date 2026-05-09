@@ -60,8 +60,35 @@ public interface IAgentConversationStore
         long durationMs,
         CancellationToken cancellationToken = default);
 
+    // Returns the conversation history for the chat loop. If a "summary"
+    // row exists, everything before it is replaced by a single synthetic
+    // assistant message holding the summary text — that's how compaction
+    // hands a conversation back to the model without losing thread.
     Task<IReadOnlyList<ChatMessage>> LoadMessagesAsync(
         Guid conversationId,
+        CancellationToken cancellationToken = default);
+
+    // Same as LoadMessagesAsync but pairs each message with its DB id.
+    // ConversationCompactor needs the id of the last message it's about to
+    // subsume so the persisted summary row can record a precise
+    // replaces_through_message_id pointer. The synthetic summary turn is
+    // emitted with the summary row's own id (not Guid.Empty) so future
+    // re-compactions can chain cleanly.
+    Task<IReadOnlyList<LoadedMessage>> LoadMessagesWithIdsAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
+
+    // Persists a summary row that subsumes every message older than (and
+    // including) replacesThroughMessageId. Returns the new message id.
+    // The returned id is also what subsequent loaders match against to
+    // know "this prefix was rolled up."
+    Task<Guid> AppendSummaryAsync(
+        Guid conversationId,
+        string summaryText,
+        Guid replacesThroughMessageId,
+        string? providerKind,
+        string? modelId,
+        Usage? usage,
         CancellationToken cancellationToken = default);
 }
 
@@ -92,6 +119,8 @@ public sealed record class AgentMessageDto(
     int? OutputTokens,
     string? StopReason,
     DateTime CreatedAtUtc);
+
+public sealed record class LoadedMessage(Guid Id, ChatMessage Message);
 
 public sealed record class AgentToolCallDto(
     Guid Id,

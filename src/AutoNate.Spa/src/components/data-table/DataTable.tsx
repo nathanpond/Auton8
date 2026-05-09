@@ -56,8 +56,12 @@ type DataTableProps<T> = {
 
   // Custom left-toolbar slot for callers that need richer filter chrome than
   // the single-pick `filters` tabs (e.g., RecordList's filter builder, the
-  // SystemIssues triple-faceted filter). Renders left of the search box.
+  // SystemIssues triple-faceted filter). Renders far-left, with filter tabs.
   toolbarLeft?: ReactNode;
+  // Renders inside the right group, immediately before the search input —
+  // for compact icon affordances (refresh, etc.) that belong with the
+  // search box rather than across the toolbar.
+  toolbarBeforeSearch?: ReactNode;
   toolbarRight?: ReactNode;
 
   // When this value changes (e.g. caller-driven filter/sort state changes),
@@ -100,6 +104,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     filters,
     allFilterLabel = "All",
     toolbarLeft,
+    toolbarBeforeSearch,
     toolbarRight,
     resetPaginationKey,
     onRowClick,
@@ -297,6 +302,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           {toolbarLeft}
         </div>
         <div className="d-flex align-items-center gap-2 ms-lg-auto">
+          {toolbarBeforeSearch}
           {searchEnabled && (
             <div className="data-table-search">
               <i className="fa fa-magnifying-glass data-table-search-icon" aria-hidden="true"></i>
@@ -391,10 +397,18 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   >
                     {row.getVisibleCells().map((cell) => {
                       const isActions = cell.column.id === "actions";
+                      // Columns can opt out of the default ellipsis-truncate
+                      // by setting `meta: { wrap: true }` on the column def.
+                      // Cast inline since the project hasn't augmented
+                      // TanStack's ColumnMeta type globally.
+                      const wrap = (cell.column.columnDef.meta as { wrap?: boolean } | undefined)?.wrap === true;
+                      const cls = ["data-table-td"];
+                      if (isActions) cls.push("data-table-td-actions");
+                      if (wrap) cls.push("data-table-td-wrap");
                       return (
                         <td
                           key={cell.id}
-                          className={`data-table-td${isActions ? " data-table-td-actions" : ""}`}
+                          className={cls.join(" ")}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         </td>
