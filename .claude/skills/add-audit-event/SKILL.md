@@ -21,7 +21,7 @@ If the change is to *record* events specifically, prefer `add-record-event-type`
 
 ### 1. Pick a topic
 
-Per-domain topics. Existing today: `record.events`, `record-schema.events`, `iam.events`, `site.events`, `workflow.events`, `notification.events`, `application.events`, `auth.events`. Pick the closest fit — only invent a new top-level prefix when nothing matches.
+Per-domain topics. Existing today: `record.events`, `record-schema.events`, `iam.events`, `site.events`, `workflow.events`, `notification.events`, `application.events`, `auth.events`, `system.issues.events`, `agent.events`, `external-connections.events`. Pick the closest fit — only invent a new top-level prefix when nothing matches.
 
 ### 2. Add the topic subject to the JetStream stream config (only if new)
 

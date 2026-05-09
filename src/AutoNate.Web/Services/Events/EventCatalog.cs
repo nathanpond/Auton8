@@ -1,7 +1,9 @@
+using AutoNate.Web.Services.Agent;
 using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.SiteSettings;
@@ -131,6 +133,22 @@ public static class EventCatalog
         new("auditContext", "object", "Shared audit context — actor (admin or task owner), IP, user-agent, request id, route template.")
     ];
 
+    private static readonly EventCatalogPayloadField[] AgentPayloadFields =
+    [
+        new("resourceKind", "string", "One of 'agent-conversation', 'agent-message', or 'agent-tool-call'."),
+        new("resource", "object", "Small payload identifying the conversation, message, or tool call affected. Shape varies by event type — see PayloadHighlights."),
+        new("details", "object | null", "Event-specific extras (model id, provider kind, token counts, tool name, duration, error message). Prompt/response text never appears here — auditors get lengths and ids only; the full transcript lives in agent_message."),
+        new("auditContext", "object", "Shared audit context — actor (the user driving the chatbot), IP, user-agent, request id, route template.")
+    ];
+
+    private static readonly EventCatalogPayloadField[] ExternalConnectionPayloadFields =
+    [
+        new("resourceKind", "string", "Always 'external-connection' — the bus subject already disambiguates."),
+        new("resource", "object | null", "Small payload identifying the connection: { id, kind, name, secretFingerprint }. null on external_connection.list_viewed (filter is in details)."),
+        new("details", "object | null", "Event-specific extras (e.g. { hasSecret } on created, { secretChanged } on updated, { ok, latencyMs, modelEcho, error } on tested, { kind, count } on list_viewed). Plaintext api keys never appear."),
+        new("auditContext", "object", "Shared audit context — admin actor who performed the action, IP, user-agent, request id, route template.")
+    ];
+
     private static readonly EventCatalogPayloadField[] ViewEventPayloadFields =
     [
         new("resourceKind", "string", "Domain-specific kind of the resource viewed (e.g. 'record', 'iam.user', 'workflow.model'). null/unset for cross-resource list events like list.viewed where there is no single resource."),
@@ -176,7 +194,15 @@ public static class EventCatalog
         new(
             SystemIssueEventTopic.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
-            "AutoNate.Web — published from the self-healing platform whenever a system_issues row is opened, escalated, acknowledged, resolved (manual), auto-resolved (machine), or fails remediation.")
+            "AutoNate.Web — published from the self-healing platform whenever a system_issues row is opened, escalated, acknowledged, resolved (manual), auto-resolved (machine), or fails remediation."),
+        new(
+            AgentEventTopic.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from the chatbot agent surface for the conversation lifecycle (create/list/view/rename/delete/compact), each user/assistant message turn, and every tool invocation. Prompt/response text never appears in payloads — only ids, lengths, token counts, and tool names; the full transcript lives in agent_message and the audit log links by id."),
+        new(
+            ExternalConnectionEventTopic.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from the External Connections admin surface whenever an integration credential is created, edited, deleted, viewed, tested, or set as default for its kind. Plaintext api keys are never carried — only the secret fingerprint (first/last 4 chars + sha256 prefix).")
     ];
 
     public static readonly EventCatalogCategory[] Categories =
@@ -1093,6 +1119,98 @@ public static class EventCatalog
                     "A remediator attempt failed; if MaxRemediationAttempts is reached the issue stays open for human triage.",
                     "Fires from SystemIssueRemediationDispatcher when an IIssueRemediator throws or returns Failure (Phase 4).",
                     ["resource: { id, fingerprint, detectorId }. details: { attemptCount, maxAttempts, error }."])
+            ]),
+        new(
+            "Agent",
+            "Chatbot conversation lifecycle, per-turn message events, and per-tool invocation events. An audit consumer can answer \"what did each user ask the agent, what tools did it call, and did the model finish or error?\" by reading this topic alone — no prompt/response text appears in any payload.",
+            AgentPayloadFields,
+            [
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ConversationCreated,
+                    "A new chatbot conversation row was opened for a user on a specific page.",
+                    "Fires from EfCoreAgentConversationStore.CreateAsync after the row commits. Triggered by POST /api/agent/conversations.",
+                    ["resource: { id, userId, pageKey }. details: { providerKind, modelId, connectionId }."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ConversationViewed,
+                    "A user opened a single conversation (loads the full message history).",
+                    "Fires from EfCoreAgentConversationStore.GetForUserAsync on the success path. Triggered by GET /api/agent/conversations/{id}.",
+                    ["resource: { id, userId }. details: null."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ConversationListViewed,
+                    "A user listed their conversations (sidebar / picker).",
+                    "Fires from EfCoreAgentConversationStore.ListForUserAsync. Triggered by GET /api/agent/conversations.",
+                    ["resource: { userId, pageKey }. details: { count }."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ConversationRenamed,
+                    "A user renamed a conversation.",
+                    "Fires from EfCoreAgentConversationStore.RenameAsync after the row commits. Triggered by PATCH /api/agent/conversations/{id}.",
+                    ["resource: { id, userId }. details: { title }."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ConversationDeleted,
+                    "A user deleted a conversation (cascades to messages and tool calls).",
+                    "Fires from EfCoreAgentConversationStore.DeleteAsync after the row commits. Triggered by DELETE /api/agent/conversations/{id}.",
+                    ["resource: { id, userId }. details: null."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ConversationCompacted,
+                    "The conversation was compacted: an older prefix was replaced with a synthetic assistant summary so subsequent turns stay inside the model's context window.",
+                    "Fires from AgentSession after the compactor writes a summary message and the conversation continues with the trimmed history.",
+                    ["resource: { id, summaryMessageId }. details: { replacesThroughMessageId, prefixCount, summaryLength }."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.MessageUserSent,
+                    "A user message was persisted and is about to drive an agent turn.",
+                    "Fires from AgentSession.RunAsync immediately after the user message commits.",
+                    ["resource: { conversationId, messageId }. details: { length, pageKey, pageSummary } — only the message length, never the text."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.MessageAssistantStarted,
+                    "An assistant turn began streaming for a given iteration of the agent loop.",
+                    "Fires from AgentSession the first time a chunk is yielded for the iteration's assistant message.",
+                    ["resource: { conversationId, messageId, iteration }. details: { providerKind, modelId, contextWindow }."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.MessageAssistantCompleted,
+                    "An assistant turn finished cleanly (model returned a stop reason).",
+                    "Fires from AgentSession after the assistant message and any tool results commit for the iteration.",
+                    ["resource: { conversationId, messageId }. details: { stopReason, iteration, inputTokens, outputTokens }."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.MessageAssistantFailed,
+                    "An assistant turn errored — provider raised, stream broke, or persistence failed.",
+                    "Fires from AgentSession's catch block before the loop yields Error/Done.",
+                    ["resource: { conversationId, messageId }. details: { error, iteration } — error text is the exception message."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ToolInvoked,
+                    "The agent decided to call a tool and the tool-call row was persisted.",
+                    "Fires from AgentSession when a tool_use block is materialised, before the tool runs.",
+                    ["resource: { conversationId, messageId, toolCallId, toolUseId }. details: { name } — tool args are NOT carried."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ToolCompleted,
+                    "A tool invocation returned successfully.",
+                    "Fires from AgentSession after the tool's UpdateToolCallAsync commits with a success status.",
+                    ["resource: { conversationId, toolCallId, toolUseId }. details: { durationMs, error: null }."]),
+                new EventCatalogEntry(AgentEventTopic.TopicName, AgentEventTypes.ToolFailed,
+                    "A tool invocation reported an error or threw.",
+                    "Fires from AgentSession after the tool's UpdateToolCallAsync commits with a failure status. The loop may continue if the model can recover.",
+                    ["resource: { conversationId, toolCallId, toolUseId }. details: { durationMs, error } — error text is the tool's message or exception."])
+            ]),
+        new(
+            "External connections",
+            "Outbound integration credentials registered through the External Connections admin surface (LLM provider api keys today; future SMTP/S3/IdP). Mutation events fire post-commit so consumers see only the rows that actually persisted; view events fire on the success path only. Plaintext secrets are never carried — only the fingerprint.",
+            ExternalConnectionPayloadFields,
+            [
+                new EventCatalogEntry(ExternalConnectionEventTopic.TopicName, ExternalConnectionEventTypes.Created,
+                    "A new external connection (e.g. Anthropic api key) was registered.",
+                    "Fires from EfCoreExternalConnectionStore.CreateAsync after the row commits. Triggered by POST /api/admin/external-connections.",
+                    ["resource: { id, kind, name, secretFingerprint }. details: { hasSecret }."]),
+                new EventCatalogEntry(ExternalConnectionEventTopic.TopicName, ExternalConnectionEventTypes.Updated,
+                    "An existing connection's metadata or secret was edited.",
+                    "Fires from EfCoreExternalConnectionStore.UpdateAsync after the row commits. Triggered by PATCH /api/admin/external-connections/{id}.",
+                    ["resource: { id, kind, name, secretFingerprint }. details: { secretChanged } — true when the api key was rotated or cleared."]),
+                new EventCatalogEntry(ExternalConnectionEventTopic.TopicName, ExternalConnectionEventTypes.Deleted,
+                    "A connection was deleted.",
+                    "Fires from EfCoreExternalConnectionStore.DeleteAsync after the row commits. Triggered by DELETE /api/admin/external-connections/{id}.",
+                    ["resource: { id, kind, name, secretFingerprint } — captured pre-delete so consumers can identify what was removed. details: { actorId }."]),
+                new EventCatalogEntry(ExternalConnectionEventTopic.TopicName, ExternalConnectionEventTypes.Viewed,
+                    "An admin opened a single connection's detail.",
+                    "Fires from EfCoreExternalConnectionStore.GetAsync on the success path. Triggered by GET /api/admin/external-connections/{id}.",
+                    ["resource: { id, kind, name, secretFingerprint }. details: null."]),
+                new EventCatalogEntry(ExternalConnectionEventTopic.TopicName, ExternalConnectionEventTypes.ListViewed,
+                    "An admin listed connections (optionally filtered by kind).",
+                    "Fires from EfCoreExternalConnectionStore.ListAsync. Triggered by GET /api/admin/external-connections.",
+                    ["resource: null. details: { kind, count } — kind is the filter applied (null = all kinds)."]),
+                new EventCatalogEntry(ExternalConnectionEventTopic.TopicName, ExternalConnectionEventTypes.Tested,
+                    "An admin clicked the \"Test connection\" button. Fires whether the test succeeded or failed.",
+                    "Fires from POST /api/admin/external-connections/{id}/test after ITestConnectionService.TestAsync returns.",
+                    ["resource: { id }. details: { ok, latencyMs, modelEcho, error } — error is populated only when ok is false."]),
+                new EventCatalogEntry(ExternalConnectionEventTopic.TopicName, ExternalConnectionEventTypes.SetDefault,
+                    "An admin marked a connection as the default for its kind (atomic swap inside a transaction).",
+                    "Fires from EfCoreExternalConnectionStore.SetDefaultAsync after the transaction commits. Triggered by POST /api/admin/external-connections/{id}/set-default.",
+                    ["resource: { id, kind, name, secretFingerprint }. details: null."])
             ])
     ];
 
