@@ -513,6 +513,135 @@ public sealed class ManageRecordTypesSkillTests
         Assert.Empty(typeStore.ArchiveCalls);
     }
 
+    [Fact]
+    public async Task AddField_unknown_type_returns_error()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "add_record_type_field", new
+        {
+            typeShortCode = "NOPE",
+            fieldKey = "x",
+            displayName = "X",
+            dataType = "text",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+    }
+
+    [Fact]
+    public async Task AddField_dry_run_returns_proposal_without_calling_store()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField, YearField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "add_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "vin",
+            displayName = "VIN",
+            dataType = "text",
+            isRequired = true,
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        Assert.Equal("add_field", result.GetProperty("data").GetProperty("operation").GetString());
+        Assert.Empty(typeStore.CreateFieldCalls);
+    }
+
+    [Fact]
+    public async Task AddField_dry_run_defaults_sortOrder_to_max_plus_ten()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField, YearField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "add_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "vin",
+            displayName = "VIN",
+            dataType = "text",
+            // no sortOrder
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal(20, result.GetProperty("data").GetProperty("after").GetProperty("sortOrder").GetInt32());
+    }
+
+    [Fact]
+    public async Task AddField_commit_calls_CreateFieldAsync_and_uses_DefineFields_auth()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() { ModelField } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "add_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "vin",
+            displayName = "VIN",
+            dataType = "text",
+            isRequired = true,
+            sortOrder = 30,
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_committed", result.GetProperty("kind").GetString());
+        var call = Assert.Single(typeStore.CreateFieldCalls);
+        Assert.Equal(CarTypeId, call.TypeId);
+        Assert.Equal("vin", call.Input.FieldKey);
+        Assert.Equal(30, call.Input.SortOrder);
+        Assert.True(call.Input.IsRequired);
+        Assert.Contains(authorizer.Calls, c => c.Action == Actions.DefineFields && c.Target.Id == CarTypeId.ToString());
+    }
+
+    [Fact]
+    public async Task AddField_invalid_option_config_returns_failed_envelope_in_dry_run()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType }, FieldsByType = { [CarTypeId] = new() } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "add_record_type_field", new
+        {
+            typeShortCode = "CAR",
+            fieldKey = "color",
+            displayName = "Color",
+            dataType = "option",
+            config = new { },
+            confirmed = false
+        }, typeStore, authorizer);
+
+        var validation = result.GetProperty("data").GetProperty("validation");
+        Assert.False(validation.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task AddField_system_type_is_rejected()
+    {
+        var typeStore = new FakeTypeStore { Types = { SystemType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "add_record_type_field", new
+        {
+            typeShortCode = "SYS",
+            fieldKey = "x",
+            displayName = "X",
+            dataType = "text",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.CreateFieldCalls);
+    }
+
     // --- helpers / fakes ---
 
     private static async Task<JsonElement> Invoke(
