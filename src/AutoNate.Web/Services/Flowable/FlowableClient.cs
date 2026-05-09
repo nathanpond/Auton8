@@ -740,12 +740,15 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         var assigneeUrl = $"service/runtime/tasks?assignee={encodedUserId}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}";
         var candidateUrl = $"service/runtime/tasks?candidateUser={encodedUserId}&sort=createTime&order=desc&size={WorkflowExecutionQuerySize}";
 
+        // Awaiting in declaration order is fine: HttpClient runs both
+        // requests concurrently the moment they're started above. Don't
+        // touch .Result on completed tasks — leaves a sync-over-async
+        // footgun for whoever copies this pattern next.
         var assigneeTask = _httpClient.GetAsync(assigneeUrl, cancellationToken);
         var candidateTask = _httpClient.GetAsync(candidateUrl, cancellationToken);
-        await Task.WhenAll(assigneeTask, candidateTask);
 
-        using var assigneeResponse = assigneeTask.Result;
-        using var candidateResponse = candidateTask.Result;
+        using var assigneeResponse = await assigneeTask;
+        using var candidateResponse = await candidateTask;
 
         await EnsureSuccessAsync(assigneeResponse, "query tasks assigned to user");
         await EnsureSuccessAsync(candidateResponse, "query tasks where user is a candidate");
@@ -766,10 +769,9 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
 
         var processDefinitionNamesTask = GetProcessDefinitionNamesByIdAsync(mergedById.Values, cancellationToken);
         var processInstanceNamesTask = GetProcessInstanceNamesByIdAsync(mergedById.Values, cancellationToken);
-        await Task.WhenAll(processDefinitionNamesTask, processInstanceNamesTask);
 
-        var processDefinitionNames = processDefinitionNamesTask.Result;
-        var processInstanceNames = processInstanceNamesTask.Result;
+        var processDefinitionNames = await processDefinitionNamesTask;
+        var processInstanceNames = await processInstanceNamesTask;
 
         return mergedById.Values
             .Select(task =>

@@ -155,18 +155,25 @@ public sealed class MisconfiguredMenuItemDetectorTests
     {
         // The user-facing contract: when the operator (or an installer) saves
         // a menu_item that the SPA can't render, the issue surfaces almost
-        // immediately — not after the 30-min periodic sweep. The store
-        // injects the detector and fires it after every mutation; this test
-        // exercises that wiring through the store, not by calling the
-        // detector directly.
+        // immediately — not after the 30-min periodic sweep. The store wakes
+        // the singleton detector's BackgroundService loop via
+        // RequestImmediateScan after every mutation; the loop's next tick
+        // runs the scan and writes the issue.
+        //
+        // We exercise the wiring in two slices instead of standing up the
+        // BackgroundService loop here: first verify the store bumped the
+        // wake signal, then drive a single tick directly to confirm the
+        // issue lands. Together that covers the same end-to-end contract
+        // without paying the 5s InitialStagger.
         await using var db = await PostgresTestDatabase.CreateAsync();
         await ClearMenuItemsAsync(db);
         await SeedTemplateAsync(db, "home");
 
+        var detector = BuildDetector(db);
         var store = new EfCoreMenuStore(
             db.CreateDbContextFactory(),
             db.CreateAuthorizer(enabled: false),
-            menuMisconfigurationDetector: BuildDetector(db));
+            menuMisconfigurationDetector: detector);
 
         var menuKey = await GetSeededMenuKeyAsync(db);
         var created = await store.CreateItemAsync(menuKey,
@@ -180,10 +187,13 @@ public sealed class MisconfiguredMenuItemDetectorTests
                 PermissionRequired: null,
                 IsVisible: true));
 
-        // Fire-and-forget: give the background tick time to land.
-        await WaitForIssueAsync(db,
-            MisconfiguredMenuItemDetector.FingerprintTemplateMissingPath + created.Id,
-            TimeSpan.FromSeconds(5));
+        // Slice 1: store → wake signal.
+        Assert.True(detector.IsImmediateScanRequested,
+            "EfCoreMenuStore.CreateItemAsync should wake the misconfiguration detector.");
+
+        // Slice 2: a tick (which the running BackgroundService loop would
+        // do next) finds the broken row.
+        await detector.RunOnceAsync(CancellationToken.None);
 
         await using var read = db.CreateDbContext();
         var issue = Assert.Single(await read.SystemIssues.AsNoTracking().ToListAsync());

@@ -14,32 +14,23 @@ namespace AutoNate.Web.Services.Menus;
 // `menuMisconfigurationDetector` is optional so the store stays usable in
 // unit/test contexts that don't wire the self-healing platform (e.g. the
 // PostgresTestDatabase factory used by EfCoreMenuStoreTests). When present,
-// the store fires the detector after every menu_item mutation so a save
-// that produces an invisible-in-nav row surfaces an issue within seconds
-// instead of waiting for the 30-min periodic sweep.
+// the store wakes the detector's BackgroundService loop after every menu_item
+// mutation so a save that produces an invisible-in-nav row surfaces an
+// issue within seconds instead of waiting for the 30-min periodic sweep.
 public sealed class EfCoreMenuStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
     IAuthorizer authorizer,
-    MisconfiguredMenuItemDetector? menuMisconfigurationDetector = null,
-    ILogger<EfCoreMenuStore>? logger = null) : IMenuStore
+    MisconfiguredMenuItemDetector? menuMisconfigurationDetector = null) : IMenuStore
 {
-    // Fire-and-forget so the operator's save returns immediately even if
-    // the detector is briefly slow. Exceptions are logged, never thrown.
+    // Bumps the singleton detector's wake-signal so its already-running
+    // BackgroundService loop runs the next tick immediately instead of
+    // waiting for the full Interval. Multiple bursting mutations coalesce
+    // into a single wake-up via the SemaphoreSlim's capacity=1 cap — no
+    // unbounded Task.Run per request, no extra threadpool work, no shared
+    // state on the per-request scoped store.
     private void TriggerMenuMisconfigurationScan()
     {
-        if (menuMisconfigurationDetector is null) return;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await menuMisconfigurationDetector.RunOnceAsync(CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                logger?.LogWarning(ex,
-                    "Post-mutation MisconfiguredMenuItemDetector tick failed; the periodic sweep will pick up any drift.");
-            }
-        });
+        menuMisconfigurationDetector?.RequestImmediateScan();
     }
 
     private static readonly HashSet<string> AllowedItemTypes = new(StringComparer.Ordinal)

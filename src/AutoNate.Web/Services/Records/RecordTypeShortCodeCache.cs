@@ -1,3 +1,4 @@
+using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,15 +15,11 @@ namespace AutoNate.Web.Services.Records;
 // Refresh strategy:
 //   - Initial load: RecordTypeShortCodeCacheInitializer (IHostedService)
 //     calls RefreshAsync at app start, before any signals are dispatched.
-//   - Mutations: TODO — wire RefreshAsync to the
-//     record-type.created/updated/archived/restored audit events. The most
-//     likely seam is an IActionHandler subscribed to
-//     HookPoints.AuditEventPublished (see AuditEventPublisher.cs:98-104) that
-//     filters on those EventTypes and calls RefreshAsync. Today the cache is
-//     read-mostly and stale entries only matter for newly-created record
-//     types being signalled before the next process restart, which is
-//     unlikely in practice. Will be added when a real staleness concern
-//     surfaces.
+//   - Mutations: same initializer subscribes a HookPoints.AuditEventPublished
+//     handler that watches the 4 record-type lifecycle event types
+//     (created / updated / archived / restored) and re-refreshes when one
+//     fires. RefreshAsync is internally serialized via _refreshLock, so
+//     bursts coalesce automatically.
 public sealed class RecordTypeShortCodeCache(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
     ILogger<RecordTypeShortCodeCache> logger)
@@ -74,16 +71,20 @@ public sealed class RecordTypeShortCodeCache(
     }
 }
 
-// Populates the cache once at app start. Mirrors the pattern used by
-// DaprStreamingSubscriber.StartAsync (which refreshes IWorkflowSignalRegistry
-// before subscribing) — runtime consumers can assume the cache is hot by the
-// time they take a dependency on it.
+// Populates the cache once at app start (mirroring DaprStreamingSubscriber.
+// StartAsync, which refreshes IWorkflowSignalRegistry before subscribing —
+// runtime consumers can assume the cache is hot by the time they take a
+// dependency on it) AND keeps it fresh by subscribing to record-type
+// lifecycle audit events.
 public sealed class RecordTypeShortCodeCacheInitializer(
     RecordTypeShortCodeCache cache,
+    IHookRegistrar hookRegistrar,
     ILogger<RecordTypeShortCodeCacheInitializer> logger) : IHostedService
 {
     private readonly RecordTypeShortCodeCache _cache = cache;
+    private readonly IHookRegistrar _hookRegistrar = hookRegistrar;
     private readonly ILogger<RecordTypeShortCodeCacheInitializer> _logger = logger;
+    private HookHandle? _hookHandle;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -98,7 +99,48 @@ public sealed class RecordTypeShortCodeCacheInitializer(
             // an unresolvable recordTypeId as "no filter match".
             _logger.LogError(ex, "Initial record-type short-code cache refresh failed.");
         }
+
+        // Stay fresh on schema mutations. Action handlers receive the
+        // AuditEventNotification as args[0] from AuditEventPublisher's
+        // actionHub.DoAsync call (see AuditEventPublisher.cs:98-104).
+        _hookHandle = _hookRegistrar.AddActionAsync(
+            HookPoints.AuditEventPublished,
+            priority: 100,
+            async (args, ct) =>
+            {
+                if (args.Length == 0 || args[0] is not AuditEventNotification notification) return;
+                if (!IsRecordTypeLifecycleEvent(notification.EventType)) return;
+                try
+                {
+                    await _cache.RefreshAsync(ct);
+                }
+                catch (Exception ex)
+                {
+                    // Refresh failures are not catastrophic; the next
+                    // mutation (or the next process restart) will retry.
+                    _logger.LogWarning(ex,
+                        "Record-type short-code cache refresh failed after {EventType}.",
+                        notification.EventType);
+                }
+            });
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_hookHandle is { } handle)
+        {
+            _hookRegistrar.RemoveAction(handle);
+            _hookHandle = null;
+        }
+        return Task.CompletedTask;
+    }
+
+    private static bool IsRecordTypeLifecycleEvent(string eventType) => eventType switch
+    {
+        RecordSchemaEventTypes.RecordTypeCreated => true,
+        RecordSchemaEventTypes.RecordTypeUpdated => true,
+        RecordSchemaEventTypes.RecordTypeArchived => true,
+        RecordSchemaEventTypes.RecordTypeRestored => true,
+        _ => false
+    };
 }

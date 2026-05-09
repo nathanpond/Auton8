@@ -20,6 +20,13 @@ public abstract class PeriodicIssueDetector(
 {
     private readonly SystemIssueOptions _options = systemIssueOptions.Value;
 
+    // Capacity 1 so bursts of RequestImmediateScan() calls coalesce into a
+    // single wake-up. The loop drains the signal each tick by calling
+    // WaitAsync with a timeout: returns true when a wake was requested
+    // (next tick runs immediately), false when the Interval expired
+    // (next tick on schedule).
+    private readonly SemaphoreSlim _wakeSignal = new(initialCount: 0, maxCount: 1);
+
     public abstract string DetectorId { get; }
 
     public abstract TimeSpan Interval { get; }
@@ -27,6 +34,28 @@ public abstract class PeriodicIssueDetector(
     // The detector's actual work. Implementations should be idempotent —
     // record/resolve operations on the issue store dedup by fingerprint.
     public abstract Task RunOnceAsync(CancellationToken cancellationToken);
+
+    // Wake the periodic loop early so the next tick runs ASAP instead of
+    // waiting for the full Interval. Used by mutation paths that just
+    // changed something a detector should re-scan (e.g. EfCoreMenuStore
+    // calls this after every menu_item write so MisconfiguredMenuItemDetector
+    // catches a bad row within seconds, not on the 30-min cadence).
+    //
+    // Coalesces: multiple calls between two ticks all collapse into a single
+    // wake-up. Allocation-free fast path — safe to call from any request
+    // thread without spawning Task.Run.
+    public void RequestImmediateScan()
+    {
+        try { _wakeSignal.Release(); }
+        catch (SemaphoreFullException) { /* a wake is already pending */ }
+    }
+
+    // Test-only peek. True when at least one RequestImmediateScan() call
+    // hasn't been consumed by the loop yet. Lets unit tests assert that
+    // a mutation path correctly wakes the detector without standing up the
+    // BackgroundService loop. Don't read this from production code — the
+    // loop's WaitAsync in ExecuteAsync is the canonical consumer.
+    public bool IsImmediateScanRequested => _wakeSignal.CurrentCount > 0;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -69,7 +98,11 @@ public abstract class PeriodicIssueDetector(
 
             try
             {
-                await Task.Delay(Interval, stoppingToken);
+                // WaitAsync returns true when RequestImmediateScan() bumped
+                // the semaphore (run the next tick immediately) and false
+                // when the Interval expired (next tick on schedule). Either
+                // way we proceed; the return value is irrelevant to the loop.
+                await _wakeSignal.WaitAsync(Interval, stoppingToken);
             }
             catch (OperationCanceledException) { return; }
         }
