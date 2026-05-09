@@ -558,9 +558,10 @@ public sealed class PluginRuntime
         var sourcePng = Path.Combine(sourceDir, key + ".png");
         if (!File.Exists(sourcePng)) return null;
 
+        if (!TryResolveThumbnailDir(pluginCode, out var destDir)) return null;
+
         try
         {
-            var destDir = Path.Combine(_dataPaths.PublicRoot, PageTemplateThumbnailFolder, pluginCode);
             Directory.CreateDirectory(destDir);
             var destPath = Path.Combine(destDir, key + ".png");
             File.Copy(sourcePng, destPath, overwrite: true);
@@ -581,7 +582,7 @@ public sealed class PluginRuntime
     // any IO failure here only leaves an orphaned PNG, never breaks sync.
     private void PruneStaleThumbnails(string pluginCode, HashSet<string> keepKeys)
     {
-        var dir = Path.Combine(_dataPaths.PublicRoot, PageTemplateThumbnailFolder, pluginCode);
+        if (!TryResolveThumbnailDir(pluginCode, out var dir)) return;
         if (!Directory.Exists(dir)) return;
         try
         {
@@ -603,6 +604,34 @@ public sealed class PluginRuntime
             _log.LogWarning(ex,
                 "Failed to enumerate thumbnail folder for plugin {Code}.", pluginCode);
         }
+    }
+
+    // Defense-in-depth: even though plugin codes are constrained to
+    // [a-z][a-z0-9]{7} by PluginSchemaProvisioner.GenerateCode today, refuse
+    // to read/write a thumbnail path that resolves outside
+    // <PublicRoot>/page-templates/. Mirrors the EntryAssembly boundary check
+    // in StartAsync so a future code path that sets `Code` from another
+    // source (manual SQL fix-up, restored backup, mistyped seed) can't
+    // traverse out of the public folder via "../" segments.
+    private bool TryResolveThumbnailDir(string pluginCode, out string dir)
+    {
+        dir = string.Empty;
+        if (string.IsNullOrEmpty(pluginCode)) return false;
+
+        var rootFull = Path.GetFullPath(
+            Path.Combine(_dataPaths.PublicRoot, PageTemplateThumbnailFolder)) + Path.DirectorySeparatorChar;
+        var candidateFull = Path.GetFullPath(
+            Path.Combine(_dataPaths.PublicRoot, PageTemplateThumbnailFolder, pluginCode));
+        if (!candidateFull.StartsWith(rootFull, StringComparison.Ordinal))
+        {
+            _log.LogWarning(
+                "Refusing to use plugin thumbnail dir for code '{Code}': resolved path '{Resolved}' escapes '{Root}'.",
+                pluginCode, candidateFull, rootFull);
+            return false;
+        }
+
+        dir = candidateFull;
+        return true;
     }
 
     public async Task<bool> TryDeleteFilesAsync(Guid id, CancellationToken ct)

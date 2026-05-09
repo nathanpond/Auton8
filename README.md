@@ -114,6 +114,52 @@ export AUTONATE_POSTGRES_PASSWORD='Your_strong_password_here!'
 export ConnectionStrings__Default='Host=localhost;Port=5432;Database=AutoNate;Username=autonate;Password=Your_strong_password_here!'
 ```
 
+## Deployment configuration
+
+The dev defaults under `appsettings.Development.json` are tuned for a single-machine `Development` environment with the local Docker Compose stack. Production deployments must override the keys below — most have safe-but-permissive dev defaults that are wrong for any environment that's reachable from outside the host. Override with environment variables (double-underscore syntax: `Section__Subsection__Key=value`) or an environment-specific `appsettings.<Environment>.json`.
+
+### Required overrides
+
+These either ship with insecure defaults or refuse to start in non-`Development` environments without an explicit value.
+
+- **`AllowedHosts`** — `appsettings.json` ships `"*"` so dev round-trips work. **Lock this down to the comma-separated list of hostnames the app is actually reachable on** (e.g. `"autonate.example.com;internal.autonate.example.com"`). Wildcards behind a misconfigured reverse proxy enable Host-header injection and cache poisoning.
+- **`ConnectionStrings:Default`** — points at the local `AutoNate` Postgres database with dev credentials. Replace with the production connection string. Best practice: hold the password in a secret manager and inject as `ConnectionStrings__Default`.
+- **`Flowable:BaseUrl` / `Flowable:Username` / `Flowable:Password`** — the dev defaults target `http://localhost:8080/flowable-rest` with the `rest-admin/test` credentials shipped by the local Flowable image. Production must point at a hardened Flowable instance with rotated credentials.
+- **`WorkflowBehaviors:CallbackSharedSecret`** — the shared secret the Flowable JVM presents on the workflow-behavior callback endpoint. AutoNate.Web **refuses to start** outside `Development` when this value is unset (`Program.cs` validates it via `IValidateOptions`). Generate a strong random value, populate the same value as `autonate.flowable-events.callback-shared-secret` on the Flowable side, and inject as `WorkflowBehaviors__CallbackSharedSecret`.
+- **`Authorization:Enabled`** + **`Authorization:Enforcement`** — the production code-default is `Enabled=false` / `Enforcement="off"`. **Production must set `Enabled=true` and `Enforcement="full"`**, otherwise grants are stored but ignored and every endpoint is effectively open to any authenticated user. The dev appsettings already turns enforcement on for parity.
+- **`Authorization:AssignSuperAdminToAllExistingUsers`** — defaults to `true` so a fresh install can be administered. **After the first admin user has been seeded, flip this to `false`** in production. Leaving it on means every newly-created user becomes a SuperAdmin (bypasses every grant), which is almost certainly not what you want.
+- **Dapr sidecar reachability** — the app fails fast when no Dapr sidecar is reachable. The container deployment must run a sidecar adjacent to the app and the `Dapr:HttpEndpoint` / `:GrpcEndpoint` / `:PlacementHostAddress` / `:SchedulerHostAddress` / `:StateStoreName` / `:PubSubName` keys must point at it. Setting `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true` is a development-only escape hatch — it disables event-driven features (audit outbox dispatch, Bus Watcher, workflow execution live updates) and should never appear in production manifests.
+
+### Recommended overrides
+
+These have working defaults but are typically tuned per-environment.
+
+- **`Authorization:DryRun`** — when true (and `Enforcement=full`), write-path denials are logged at WARN but the request is still allowed. Use this as a 24-hour safety window when initially flipping `Enforcement` from `off` → `full` in a busy environment, then turn it off.
+- **`Plugins:MaxUploadBytes`** — bound on the plugin upload size. Defaults to 50 MB; lower it if your operators only need small extension surfaces, raise it if you ship plugins with bundled assets.
+- **`Plugins:FailFastOnStartup`** — when true the host refuses to start if any enabled plugin fails to load, instead of logging a warning and continuing without it. Production deployments should usually set this to `true` so a broken plugin in a release surfaces immediately rather than silently degrading the app.
+- **`Logging:LogLevel:*`** — production deployments typically want `Default=Warning` with `AutoNate=Information`; lift specific namespaces to `Debug` only when investigating an incident.
+- **`Nats:Url`** — only needed when the JetStream provisioner runs against an external NATS cluster instead of the Dapr-bundled one. Leave unset (or empty) and the app skips JetStream provisioning entirely.
+
+### Runtime data and writeable paths
+
+- **`/data/`** (the runtime data root, also configurable via `AUTONATE_DATA_ROOT`) is auto-created on startup and holds user uploads, persisted plugins, public `/files` assets, and per-plugin scratch state. **The deployment must mount writeable storage here** — typically a persistent volume sized for the plugin and uploads workload. The volume is gitignored (see `.gitignore`); its content is the runtime's source of truth between restarts.
+- **`infra/mounts/postgres/data`** etc. are local-only Docker bind-mount paths and **do not exist in production deployments** — production Postgres / Redis / Flowable run as managed services or separately-orchestrated containers with their own volumes.
+
+### Reverse proxy / TLS
+
+- AutoNate.Web does not terminate TLS. Front it with a reverse proxy (nginx, Traefik, an ingress controller, etc.) that handles HTTPS and forwards `X-Forwarded-For` / `X-Forwarded-Proto`. Lock `AllowedHosts` to the proxy's external hostnames; the app trusts the `Host` header for URL generation and CORS-style guards.
+- The agent SSE streams (`/api/agent/...`) and the Bus Watcher endpoint hold long-lived connections; configure the proxy with no-buffering and a generous read timeout (≥10 minutes) for those routes.
+
+### Pre-deployment checklist
+
+1. `AllowedHosts` is set to actual hostnames (no `*`).
+2. `WorkflowBehaviors:CallbackSharedSecret` is set on AutoNate.Web AND `autonate.flowable-events.callback-shared-secret` matches on the Flowable side.
+3. `Authorization:Enabled=true`, `Authorization:Enforcement=full`, `Authorization:AssignSuperAdminToAllExistingUsers=false` (after seeding the first admin).
+4. `ConnectionStrings:Default` and `Flowable:Username`/`:Password` use rotated production credentials, not the dev defaults.
+5. The `/data/` mount is writeable and backed by persistent storage.
+6. A Dapr sidecar is reachable and `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR` is unset.
+7. The reverse proxy forwards the right hostnames and forwarded headers, and disables buffering for SSE / streaming endpoints.
+
 ## Notes
 
 - The Dapr sidecar is intentionally not part of Docker Compose. It is app-scoped and should start and stop with the app process.
