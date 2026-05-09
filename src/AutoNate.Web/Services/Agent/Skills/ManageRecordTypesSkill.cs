@@ -169,7 +169,20 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
         };
     }
 
-    public string? SystemPromptFragment(AgentSessionContext context) => null;
+    public string? SystemPromptFragment(AgentSessionContext context) =>
+        "You can author and edit record types via create_record_type / update_record_type / " +
+        "add_record_type_field / update_record_type_field / set_record_type_archived / " +
+        "set_record_type_field_archived. ALWAYS call them with confirmed=false first; " +
+        "the tool returns a structured proposal envelope. Present the summary and any " +
+        "validation errors to the user, then ASK for explicit confirmation. Only after " +
+        "plain-language approval ('yes', 'go ahead') re-call with confirmed=true and the " +
+        "SAME arguments. If you change ANY value between preview and commit, run " +
+        "confirmed=false again first. Before proposing changes to an existing type, call " +
+        "list_record_types and describe_record_type so you can show the user a clean diff. " +
+        "Be aware: archiving a field hides it from forms but does NOT remove existing " +
+        "records' values for that field — narrate this when archiving. Field data_type " +
+        "cannot be changed once a field is created; archive the old field and add a new " +
+        "one instead.";
 
     private static JsonElement ParseSchema(string raw)
     {
