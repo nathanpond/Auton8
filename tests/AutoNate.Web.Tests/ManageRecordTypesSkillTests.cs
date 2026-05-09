@@ -436,6 +436,83 @@ public sealed class ManageRecordTypesSkillTests
         Assert.Contains(authorizer.Calls, c => c.Action == Actions.Edit && c.Target.Id == CarTypeId.ToString());
     }
 
+    [Fact]
+    public async Task SetTypeArchived_archive_uses_Delete_action()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "set_record_type_archived", new
+        {
+            typeShortCode = "CAR",
+            archived = true,
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_committed", result.GetProperty("kind").GetString());
+        var call = Assert.Single(typeStore.ArchiveCalls);
+        Assert.True(call.Archived);
+        Assert.Equal(SessionUserId, call.ActorId);
+        Assert.Contains(authorizer.Calls, c => c.Action == Actions.Delete && c.Target.Id == CarTypeId.ToString());
+    }
+
+    [Fact]
+    public async Task SetTypeArchived_restore_uses_Edit_action()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType with { IsArchived = true } } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "set_record_type_archived", new
+        {
+            typeShortCode = "CAR",
+            archived = false,
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_committed", result.GetProperty("kind").GetString());
+        var call = Assert.Single(typeStore.ArchiveCalls);
+        Assert.False(call.Archived);
+        Assert.Contains(authorizer.Calls, c => c.Action == Actions.Edit && c.Target.Id == CarTypeId.ToString());
+    }
+
+    [Fact]
+    public async Task SetTypeArchived_dry_run_does_not_call_store()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "set_record_type_archived", new
+        {
+            typeShortCode = "CAR",
+            archived = true,
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.ArchiveCalls);
+    }
+
+    [Fact]
+    public async Task SetTypeArchived_system_type_is_rejected()
+    {
+        var typeStore = new FakeTypeStore { Types = { SystemType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "set_record_type_archived", new
+        {
+            typeShortCode = "SYS",
+            archived = true,
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.ArchiveCalls);
+    }
+
     // --- helpers / fakes ---
 
     private static async Task<JsonElement> Invoke(

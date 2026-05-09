@@ -92,7 +92,22 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                     }
                     """),
                 Invoke: InvokeUpdateTypeAsync),
-            new AgentTool(SetTypeArchivedToolName,   "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
+            new AgentTool(
+                Name: SetTypeArchivedToolName,
+                Description: "Archive or restore a record type. Archived types stay in the database but disappear from forms. Set archived=true to archive, archived=false to restore. ALWAYS call with confirmed=false first.",
+                JsonSchema: ParseSchema("""
+                    {
+                      "type": "object",
+                      "properties": {
+                        "typeShortCode": { "type": "string" },
+                        "archived":      { "type": "boolean" },
+                        "confirmed":     { "type": "boolean" }
+                      },
+                      "required": ["typeShortCode","archived"],
+                      "additionalProperties": false
+                    }
+                    """),
+                Invoke: InvokeSetTypeArchivedAsync),
             new AgentTool(AddFieldToolName,          "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
             new AgentTool(UpdateFieldToolName,       "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
             new AgentTool(SetFieldArchivedToolName,  "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
@@ -363,6 +378,65 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
         {
             return Failed("update_type", ex);
         }
+    }
+
+    private static async Task<JsonElement> InvokeSetTypeArchivedAsync(
+        JsonElement args,
+        AgentToolContext context,
+        CancellationToken ct)
+    {
+        var shortCode = ReadRequiredString(args, "typeShortCode");
+        if (shortCode is null) return Error(SetTypeArchivedToolName, "typeShortCode is required.");
+
+        if (!args.TryGetProperty("archived", out var arch) || (arch.ValueKind != JsonValueKind.True && arch.ValueKind != JsonValueKind.False))
+            return Error(SetTypeArchivedToolName, "archived must be a boolean.");
+        var archived = arch.ValueKind == JsonValueKind.True;
+
+        var typeStore = context.Services.GetRequiredService<IRecordTypeStore>();
+        var existing = await typeStore.GetByShortCodeAsync(shortCode, ct);
+        if (existing is null) return Error(SetTypeArchivedToolName, $"No record type with short code '{shortCode}'.");
+        if (existing.IsSystem) return Error(SetTypeArchivedToolName, $"Record type '{shortCode}' is a system type and cannot be modified by the agent.");
+
+        var authorizer = context.Services.GetRequiredService<IAuthorizer>();
+        var action = archived ? Actions.Delete : Actions.Edit;
+        var decision = await authorizer.AuthorizeAsync(
+            context.Session.User, action, new EntityRef(EntityKinds.RecordType, existing.Id.ToString()), ct);
+        if (!decision.IsAllowed)
+            return Error(SetTypeArchivedToolName, $"Not authorized to {(archived ? "archive" : "restore")} record type '{shortCode}' ({decision.Reason}).");
+
+        var op = archived ? "archive_type" : "restore_type";
+        var confirmed = args.TryGetProperty("confirmed", out var c) && c.ValueKind == JsonValueKind.True;
+
+        if (!confirmed)
+        {
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "record_type_change_proposal",
+                source = "ManageRecordTypesSkill",
+                data = new
+                {
+                    operation = op,
+                    summary = $"{(archived ? "Archive" : "Restore")} record type {shortCode}.",
+                    before = SnapshotType(existing),
+                    after = SnapshotType(existing with { IsArchived = archived }),
+                    validation = new { ok = true, errors = Array.Empty<object>() }
+                }
+            });
+        }
+
+        var updated = await typeStore.SetArchivedAsync(existing.Id, archived, context.Session.UserId, ct);
+        return JsonSerializer.SerializeToElement(new
+        {
+            kind = "record_type_change_committed",
+            source = "ManageRecordTypesSkill",
+            data = new
+            {
+                operation = op,
+                id = updated.Id,
+                shortCode = updated.ShortCode,
+                isArchived = updated.IsArchived
+            }
+        });
     }
 
     private static object SnapshotType(RecordType type) => new
