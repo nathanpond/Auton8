@@ -17,12 +17,20 @@ public static class AuthEndpoints
     {
         var group = app.MapGroup("/api/auth").AllowAnonymous();
 
+        // Hot endpoint: every authenticated SPA navigation hits /api/auth/me
+        // at least once on mount (useMe consumed by ProtectedRoute, NavMenu,
+        // useNotifications, UserProfile) plus React Query refetches on
+        // window focus. The previous implementation issued 2 + 1 + N + 1
+        // queries (groups twice, direct assignments, one per group, full
+        // role table); this one does at most 3 (groups, batched assignments,
+        // batched roles by id) and coalesces the audit event per user.
         group.MapGet("/me", async (
             HttpContext context,
             IRoleStore roleStore,
             IRoleAssignmentStore assignments,
             IGroupStore groupStore,
             IAuditEventPublisher auditPublisher,
+            ViewEventCoalescer coalescer,
             CancellationToken ct) =>
         {
             var user = context.User;
@@ -34,32 +42,33 @@ public static class AuthEndpoints
             var userIdRaw = user.FindFirstValue(ClaimTypes.NameIdentifier);
             var userId = Guid.TryParse(userIdRaw, out var parsed) ? parsed : Guid.Empty;
 
-            var groups = userId == Guid.Empty
-                ? Array.Empty<object>()
-                : (await groupStore.ListGroupsForUserAsync(userId, ct))
-                    .Select(g => (object)new { id = g.Id, name = g.Name })
-                    .ToArray();
-
-            var groupIds = userId == Guid.Empty
-                ? new List<Guid>()
-                : (await groupStore.ListGroupsForUserAsync(userId, ct)).Select(g => g.Id).ToList();
+            // Fetch the user's groups exactly once and reuse for both the
+            // response payload (display id+name) and the assignment lookup
+            // (id only).
+            var memberships = userId == Guid.Empty
+                ? Array.Empty<Models.Authorization.Group>()
+                : (await groupStore.ListGroupsForUserAsync(userId, ct)).ToArray();
+            var groups = memberships
+                .Select(g => (object)new { id = g.Id, name = g.Name })
+                .ToArray();
+            var groupPrincipalIds = memberships
+                .Select(g => g.Id.ToString())
+                .ToArray();
 
             var directAssignments = userId == Guid.Empty
                 ? Array.Empty<Models.Authorization.RoleAssignment>()
                 : (await assignments.ListForPrincipalAsync(EntityKinds.User, userId.ToString(), ct)).ToArray();
+            var groupAssignments = await assignments.ListForPrincipalsAsync(
+                EntityKinds.Group, groupPrincipalIds, ct);
 
-            var groupAssignments = new List<Models.Authorization.RoleAssignment>();
-            foreach (var gid in groupIds)
-            {
-                groupAssignments.AddRange(
-                    await assignments.ListForPrincipalAsync(EntityKinds.Group, gid.ToString(), ct));
-            }
+            var roleIds = directAssignments
+                .Concat(groupAssignments)
+                .Select(a => a.RoleId)
+                .Distinct()
+                .ToList();
 
-            var allAssignments = directAssignments.Concat(groupAssignments).ToList();
-            var roleIds = allAssignments.Select(a => a.RoleId).Distinct().ToList();
-
-            var allRoles = await roleStore.ListAsync(ct);
-            var rolesById = allRoles.ToDictionary(r => r.Id);
+            var rolesById = (await roleStore.ListByIdsAsync(roleIds, ct))
+                .ToDictionary(r => r.Id);
 
             var roleSummaries = roleIds
                 .Where(rolesById.ContainsKey)
@@ -69,13 +78,26 @@ public static class AuthEndpoints
 
             var isSuperAdmin = roleIds.Contains(SystemRoles.SuperAdminId);
 
-            await auditPublisher.PublishAsync(
-                AuthEventTopic.TopicName,
-                AuthEventTypes.MeViewed,
-                AuthEventTopic.ResourceKind,
-                resource: new { userId = userIdRaw, username = user.FindFirstValue(ClaimTypes.Name) },
-                details: new { roleCount = roleSummaries.Length, groupCount = groups.Length, isSuperAdmin },
-                ct);
+            // Coalesce per-user to a 60s sliding window. Same pattern as
+            // notifications/unread-count — without it the audit firehose
+            // gets one event per page navigation per user.
+            if (userId != Guid.Empty
+                && coalescer.ShouldPublish(userId, AuthEventTypes.MeViewed))
+            {
+                await auditPublisher.PublishAsync(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.MeViewed,
+                    AuthEventTopic.ResourceKind,
+                    resource: new { userId = userIdRaw, username = user.FindFirstValue(ClaimTypes.Name) },
+                    details: new
+                    {
+                        roleCount = roleSummaries.Length,
+                        groupCount = groups.Length,
+                        isSuperAdmin,
+                        coalesceWindowSeconds = 60
+                    },
+                    ct);
+            }
 
             return Results.Json(new
             {

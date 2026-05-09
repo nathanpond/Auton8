@@ -22,6 +22,17 @@ public interface IRoleAssignmentStore
         string principalId,
         CancellationToken cancellationToken = default);
 
+    // Batch variant: returns assignments for any principal in `principalIds`
+    // sharing the same kind. Single SQL query (translates to
+    // `WHERE principal_kind = @kind AND principal_id = ANY(@ids)`), so
+    // callers like /api/auth/me can resolve all of a user's group-derived
+    // assignments in one round trip instead of N. Returns empty when
+    // `principalIds` is empty (avoids issuing a useless query).
+    Task<IReadOnlyList<RoleAssignment>> ListForPrincipalsAsync(
+        string principalKind,
+        IReadOnlyCollection<string> principalIds,
+        CancellationToken cancellationToken = default);
+
     Task<RoleAssignment> AssignAsync(
         CreateRoleAssignmentInput input,
         Guid actorId,

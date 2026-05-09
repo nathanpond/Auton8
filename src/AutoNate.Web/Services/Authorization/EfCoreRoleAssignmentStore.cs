@@ -39,6 +39,25 @@ public sealed class EfCoreRoleAssignmentStore(
         return rows.Select(ToModel).ToList();
     }
 
+    public async Task<IReadOnlyList<RoleAssignment>> ListForPrincipalsAsync(
+        string principalKind,
+        IReadOnlyCollection<string> principalIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (principalIds.Count == 0) return Array.Empty<RoleAssignment>();
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        // Postgres translates Contains(...) to `principal_id = ANY(@p)` —
+        // single round trip, server-side dedup is not needed because the
+        // (principal_kind, principal_id, role_id) shape is already a unique
+        // assignment row.
+        var rows = await db.RoleAssignments.AsNoTracking()
+            .Where(a => a.PrincipalKind == principalKind && principalIds.Contains(a.PrincipalId))
+            .OrderBy(a => a.PrincipalId).ThenBy(a => a.RoleId)
+            .ToListAsync(cancellationToken);
+        return rows.Select(ToModel).ToList();
+    }
+
     public async Task<RoleAssignment> AssignAsync(
         CreateRoleAssignmentInput input,
         Guid actorId,

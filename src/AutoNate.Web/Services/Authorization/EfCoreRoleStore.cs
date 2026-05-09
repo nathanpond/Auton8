@@ -22,6 +22,20 @@ public sealed class EfCoreRoleStore(
         return rows.Select(ToModel).ToList();
     }
 
+    public async Task<IReadOnlyList<Role>> ListByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        if (ids.Count == 0) return Array.Empty<Role>();
+
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.Roles.AsNoTracking()
+            .Where(r => ids.Contains(r.Id))
+            .OrderBy(r => r.Name)
+            .ToListAsync(cancellationToken);
+        return rows.Select(ToModel).ToList();
+    }
+
     public async Task<IReadOnlyList<Role>> ListAuthorizedAsync(ClaimsPrincipal actor, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);

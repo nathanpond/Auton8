@@ -459,11 +459,11 @@ public static class EventCatalog
                 new EventCatalogEntry(
                     AuthEventTopic.TopicName,
                     AuthEventTypes.MeViewed,
-                    "An authenticated user fetched their own profile (/api/auth/me) — the SPA does this on every page load.",
-                    "Fires from AuthEndpoints /me on the authenticated branch only; anonymous probes that return { authenticated: false } don't publish.",
+                    "An authenticated user fetched their own profile (/api/auth/me) — the SPA does this on every page load. **Coalesced**: at most one event per user per 60-second sliding window so the audit firehose isn't dominated by SPA navigations.",
+                    "Fires from AuthEndpoints /me on the authenticated branch only; anonymous probes that return { authenticated: false } don't publish. Suppressed by ViewEventCoalescer when the per-user 60s window is still open.",
                     [
                         "resource: { userId, username }.",
-                        "details: { roleCount, groupCount, isSuperAdmin }."
+                        "details: { roleCount, groupCount, isSuperAdmin, coalesceWindowSeconds }."
                     ]),
                 new EventCatalogEntry(
                     AuthEventTopic.TopicName,
