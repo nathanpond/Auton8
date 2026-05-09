@@ -73,7 +73,25 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
                     }
                     """),
                 Invoke: InvokeCreateTypeAsync),
-            new AgentTool(UpdateTypeToolName,        "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
+            new AgentTool(
+                Name: UpdateTypeToolName,
+                Description: "Update a record type's metadata (name, description, icon, color). Identified by typeShortCode. ALWAYS call with confirmed=false first. Use null on a nullable property to clear it; omit a property to keep its current value.",
+                JsonSchema: ParseSchema("""
+                    {
+                      "type": "object",
+                      "properties": {
+                        "typeShortCode": { "type": "string" },
+                        "name":          { "type": "string" },
+                        "description":   { "type": ["string", "null"] },
+                        "icon":          { "type": ["string", "null"] },
+                        "color":         { "type": ["string", "null"] },
+                        "confirmed":     { "type": "boolean" }
+                      },
+                      "required": ["typeShortCode"],
+                      "additionalProperties": false
+                    }
+                    """),
+                Invoke: InvokeUpdateTypeAsync),
             new AgentTool(SetTypeArchivedToolName,   "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
             new AgentTool(AddFieldToolName,          "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
             new AgentTool(UpdateFieldToolName,       "placeholder", ParseSchema("""{"type":"object"}"""), NotImplementedAsync),
@@ -265,6 +283,97 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
             }
         });
     }
+
+    private static async Task<JsonElement> InvokeUpdateTypeAsync(
+        JsonElement args,
+        AgentToolContext context,
+        CancellationToken ct)
+    {
+        var shortCode = ReadRequiredString(args, "typeShortCode");
+        if (shortCode is null) return Error(UpdateTypeToolName, "typeShortCode is required.");
+
+        var typeStore = context.Services.GetRequiredService<IRecordTypeStore>();
+        var existing = await typeStore.GetByShortCodeAsync(shortCode, ct);
+        if (existing is null) return Error(UpdateTypeToolName, $"No record type with short code '{shortCode}'.");
+        if (existing.IsSystem) return Error(UpdateTypeToolName, $"Record type '{shortCode}' is a system type and cannot be modified by the agent.");
+
+        var authorizer = context.Services.GetRequiredService<IAuthorizer>();
+        var decision = await authorizer.AuthorizeAsync(
+            context.Session.User, Actions.Edit, new EntityRef(EntityKinds.RecordType, existing.Id.ToString()), ct);
+        if (!decision.IsAllowed)
+            return Error(UpdateTypeToolName, $"Not authorized to edit record type '{shortCode}' ({decision.Reason}).");
+
+        // Layer the patch on top of the current type.
+        var newName = args.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString())
+            ? n.GetString()!
+            : existing.Name;
+
+        string? newDescription = existing.Description;
+        if (args.TryGetProperty("description", out var d))
+            newDescription = d.ValueKind == JsonValueKind.Null ? null : d.ValueKind == JsonValueKind.String ? d.GetString() : existing.Description;
+
+        string? newIcon = existing.Icon;
+        if (args.TryGetProperty("icon", out var iconProp))
+            newIcon = iconProp.ValueKind == JsonValueKind.Null ? null : iconProp.ValueKind == JsonValueKind.String ? iconProp.GetString() : existing.Icon;
+
+        string? newColor = existing.Color;
+        if (args.TryGetProperty("color", out var colorProp))
+            newColor = colorProp.ValueKind == JsonValueKind.Null ? null : colorProp.ValueKind == JsonValueKind.String ? colorProp.GetString() : existing.Color;
+
+        var confirmed = args.TryGetProperty("confirmed", out var c) && c.ValueKind == JsonValueKind.True;
+
+        if (!confirmed)
+        {
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "record_type_change_proposal",
+                source = "ManageRecordTypesSkill",
+                data = new
+                {
+                    operation = "update_type",
+                    summary = $"Update record type {shortCode}.",
+                    before = SnapshotType(existing),
+                    after = new { shortCode = existing.ShortCode, name = newName, description = newDescription, icon = newIcon, color = newColor, isArchived = existing.IsArchived },
+                    validation = new { ok = true, errors = Array.Empty<object>() }
+                }
+            });
+        }
+
+        try
+        {
+            var updated = await typeStore.UpdateAsync(
+                existing.Id,
+                new UpdateRecordTypeInput(newName, newDescription, newIcon, newColor),
+                context.Session.UserId,
+                ct);
+
+            return JsonSerializer.SerializeToElement(new
+            {
+                kind = "record_type_change_committed",
+                source = "ManageRecordTypesSkill",
+                data = new
+                {
+                    operation = "update_type",
+                    id = updated.Id,
+                    shortCode = updated.ShortCode
+                }
+            });
+        }
+        catch (RecordTypeValidationException ex)
+        {
+            return Failed("update_type", ex);
+        }
+    }
+
+    private static object SnapshotType(RecordType type) => new
+    {
+        shortCode = type.ShortCode,
+        name = type.Name,
+        description = type.Description,
+        icon = type.Icon,
+        color = type.Color,
+        isArchived = type.IsArchived
+    };
 
     // --- helpers ---
 

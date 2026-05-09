@@ -318,6 +318,124 @@ public sealed class ManageRecordTypesSkillTests
         Assert.Empty(typeStore.CreateCalls);
     }
 
+    [Fact]
+    public async Task UpdateType_unknown_shortCode_returns_error()
+    {
+        var typeStore = new FakeTypeStore();
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "update_record_type", new
+        {
+            typeShortCode = "NOPE",
+            name = "X",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.UpdateCalls);
+    }
+
+    [Fact]
+    public async Task UpdateType_system_type_is_rejected()
+    {
+        var typeStore = new FakeTypeStore { Types = { SystemType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "update_record_type", new
+        {
+            typeShortCode = "SYS",
+            name = "Renamed",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Contains("system type", result.GetProperty("data").GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(typeStore.UpdateCalls);
+    }
+
+    [Fact]
+    public async Task UpdateType_dry_run_returns_before_after_diff()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "update_record_type", new
+        {
+            typeShortCode = "CAR",
+            description = "Vehicles in inventory (updated)",
+            confirmed = false
+        }, typeStore, authorizer);
+
+        Assert.Equal("record_type_change_proposal", result.GetProperty("kind").GetString());
+        var data = result.GetProperty("data");
+        Assert.Equal("update_type", data.GetProperty("operation").GetString());
+        Assert.Equal("Vehicles in inventory", data.GetProperty("before").GetProperty("description").GetString());
+        Assert.Equal("Vehicles in inventory (updated)", data.GetProperty("after").GetProperty("description").GetString());
+        Assert.Empty(typeStore.UpdateCalls);
+    }
+
+    [Fact]
+    public async Task UpdateType_commit_layers_patch_onto_current_value()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        // Only patching `description` — name should stay "Car".
+        await Invoke(skill, "update_record_type", new
+        {
+            typeShortCode = "CAR",
+            description = "Updated",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        var call = Assert.Single(typeStore.UpdateCalls);
+        Assert.Equal(CarTypeId, call.Id);
+        Assert.Equal(SessionUserId, call.ActorId);
+        Assert.Equal("Car", call.Input.Name); // preserved
+        Assert.Equal("Updated", call.Input.Description);
+    }
+
+    [Fact]
+    public async Task UpdateType_explicit_null_clears_nullable_field()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType } };
+        var authorizer = new FakeAuthorizer();
+        var skill = new ManageRecordTypesSkill();
+
+        var argsJson = """{"typeShortCode":"CAR","description":null,"confirmed":true}""";
+        await InvokeRaw(skill, "update_record_type", argsJson, typeStore, authorizer);
+
+        var call = Assert.Single(typeStore.UpdateCalls);
+        Assert.Null(call.Input.Description);
+    }
+
+    [Fact]
+    public async Task UpdateType_authorizer_denial_returns_error_against_type_instance_id()
+    {
+        var typeStore = new FakeTypeStore { Types = { CarType } };
+        var authorizer = new FakeAuthorizer
+        {
+            Default = AuthEffect.Allow,
+            Decisions = { [(Actions.Edit, EntityKinds.RecordType, CarTypeId.ToString())] = AuthEffect.Deny }
+        };
+        var skill = new ManageRecordTypesSkill();
+
+        var result = await Invoke(skill, "update_record_type", new
+        {
+            typeShortCode = "CAR",
+            description = "Updated",
+            confirmed = true
+        }, typeStore, authorizer);
+
+        Assert.Equal("error", result.GetProperty("kind").GetString());
+        Assert.Empty(typeStore.UpdateCalls);
+        Assert.Contains(authorizer.Calls, c => c.Action == Actions.Edit && c.Target.Id == CarTypeId.ToString());
+    }
+
     // --- helpers / fakes ---
 
     private static async Task<JsonElement> Invoke(
