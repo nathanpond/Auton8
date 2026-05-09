@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Authorization;
@@ -54,7 +53,7 @@ public static class RoleEndpoints
             {
                 var role = await store.CreateAsync(
                     new CreateRoleInput(request.Name, request.Description),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.RoleCreated,
@@ -83,7 +82,7 @@ public static class RoleEndpoints
             {
                 var role = await store.UpdateAsync(
                     id, new UpdateRoleInput(request.Name, request.Description),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.RoleUpdated,
@@ -164,7 +163,7 @@ public static class RoleEndpoints
                 var assignment = await store.AssignAsync(
                     new CreateRoleAssignmentInput(
                         id, request.PrincipalKind, request.PrincipalId, request.ScopeString),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.RoleAssignmentGranted,
@@ -189,13 +188,6 @@ public static class RoleEndpoints
 
         return app;
     }
-
-    private static Guid ActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     public sealed record CreateRoleRequest(string Name, string? Description);
     public sealed record UpdateRoleRequest(string? Name, string? Description);
     public sealed record CreateAssignmentRequest(

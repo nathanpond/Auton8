@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -87,7 +86,7 @@ public static class SiteSettingsEndpoints
                 }
             }
 
-            await store.ApplyUpdatesAsync(validated, GetActorId(http), ct);
+            await store.ApplyUpdatesAsync(validated, http.GetActorId(), ct);
             await auditPublisher.PublishAsync(
                 SiteEventTopic.TopicName,
                 SiteEventTypes.SettingsUpdated,
@@ -130,10 +129,4 @@ public static class SiteSettingsEndpoints
         SettingGroup.Chatbot => "chatbot",
         _ => throw new InvalidOperationException($"Unknown setting group: {group}")
     };
-
-    private static Guid GetActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
 }

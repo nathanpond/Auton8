@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.SystemIssues;
@@ -82,7 +81,7 @@ public static class SystemIssueEndpoints
             ISystemIssueStore store,
             CancellationToken ct) =>
         {
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var updated = await recorder.AcknowledgeAsync(id, actorId, ct);
             if (updated is not null) return Results.Ok(ToDto(updated));
@@ -103,7 +102,7 @@ public static class SystemIssueEndpoints
             ISystemIssueStore store,
             CancellationToken ct) =>
         {
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var notes = body?.Notes;
             var updated = await recorder.ResolveAsync(id, actorId, notes, ct);
@@ -195,13 +194,6 @@ public static class SystemIssueEndpoints
 
         return app;
     }
-
-    private static Guid GetUserId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
-
     private static SystemIssueListQuery NormalizeQuery(SystemIssueListQuery query)
     {
         // Treat state="" as "no filter" so the SPA can request full history.

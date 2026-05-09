@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -133,7 +132,7 @@ public static class RecordEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var actorId = GetActorId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty)
             {
                 return Results.Unauthorized();
@@ -225,7 +224,7 @@ public static class RecordEndpoints
                         request.DueDate,
                         request.Values,
                         request.AssigneeIds),
-                    GetActorId(http),
+                    http.GetActorId(),
                     cancellationToken);
                 return Results.Created($"/api/records/{created.Id}", ToDto(created));
             }
@@ -246,7 +245,7 @@ public static class RecordEndpoints
             try
             {
                 var input = ParseUpdateInput(body);
-                var updated = await store.UpdateAsync(id, input, GetActorId(http), cancellationToken);
+                var updated = await store.UpdateAsync(id, input, http.GetActorId(), cancellationToken);
                 return Results.Ok(ToDto(updated));
             }
             catch (RecordNotFoundException)
@@ -268,7 +267,7 @@ public static class RecordEndpoints
         {
             try
             {
-                var archived = await store.SetArchivedAsync(id, archived: true, GetActorId(http), cancellationToken);
+                var archived = await store.SetArchivedAsync(id, archived: true, http.GetActorId(), cancellationToken);
                 return Results.Ok(ToDto(archived));
             }
             catch (RecordNotFoundException)
@@ -286,7 +285,7 @@ public static class RecordEndpoints
         {
             try
             {
-                var restored = await store.SetArchivedAsync(id, archived: false, GetActorId(http), cancellationToken);
+                var restored = await store.SetArchivedAsync(id, archived: false, http.GetActorId(), cancellationToken);
                 return Results.Ok(ToDto(restored));
             }
             catch (RecordNotFoundException)
@@ -313,7 +312,7 @@ public static class RecordEndpoints
                         DueDate: Optional<DateOnly?>.None,
                         Values: null,
                         AssigneeIds: assigneeIds),
-                    GetActorId(http),
+                    http.GetActorId(),
                     cancellationToken);
                 return Results.Ok(ToDto(updated));
             }
@@ -417,13 +416,6 @@ public static class RecordEndpoints
         "in" or "In" => FilterOperator.In,
         _ => throw new RecordValidationException($"Unsupported filter operator '{op}'.")
     };
-
-    private static Guid GetActorId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
-
     private static RecordDto ToDto(Models.Records.Record model) => new(
         model.Id,
         model.RecordTypeId,

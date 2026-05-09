@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
@@ -61,7 +60,7 @@ public static class RecordCommentEndpoints
         {
             try
             {
-                var created = await store.CreateAsync(recordId, request.Body, GetActorId(http), ct);
+                var created = await store.CreateAsync(recordId, request.Body, http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
                     RecordSchemaEventTypes.RecordCommentCreated,
@@ -90,7 +89,7 @@ public static class RecordCommentEndpoints
         {
             try
             {
-                var updated = await store.EditAsync(commentId, request.Body, GetActorId(http), ct);
+                var updated = await store.EditAsync(commentId, request.Body, http.GetActorId(), ct);
                 if (updated.RecordId != recordId) return Results.NotFound();
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
@@ -121,7 +120,7 @@ public static class RecordCommentEndpoints
         {
             try
             {
-                var deleted = await store.SoftDeleteAsync(commentId, GetActorId(http), ct);
+                var deleted = await store.SoftDeleteAsync(commentId, http.GetActorId(), ct);
                 if (deleted.RecordId != recordId) return Results.NotFound();
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
@@ -163,13 +162,6 @@ public static class RecordCommentEndpoints
 
         return app;
     }
-
-    private static Guid GetActorId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
-
     private static CommentDto ToDto(RecordComment model) => new(
         model.Id,
         model.RecordId,

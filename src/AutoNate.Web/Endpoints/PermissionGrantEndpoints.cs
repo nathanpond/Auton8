@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Authorization;
@@ -102,7 +101,7 @@ public static class PermissionGrantEndpoints
                         request.SelectorString,
                         request.Effect,
                         request.Priority),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.PermissionGrantCreated,
@@ -145,13 +144,6 @@ public static class PermissionGrantEndpoints
 
         return app;
     }
-
-    private static Guid ActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     public sealed record CreateGrantRequest(
         string PrincipalKind,
         string PrincipalId,

@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Authorization;
@@ -71,7 +70,7 @@ public static class AdminPluginsEndpoints
                     return Results.BadRequest(new { error = "file is required" });
                 }
                 await using var stream = file.OpenReadStream();
-                var outcome = await svc.UploadAsync(stream, ActorId(http), ct);
+                var outcome = await svc.UploadAsync(stream, http.GetActorId(), ct);
                 if (!outcome.Success)
                 {
                     return outcome.ErrorCode switch
@@ -91,7 +90,7 @@ public static class AdminPluginsEndpoints
                 IPluginManagementService svc,
                 CancellationToken ct) =>
             {
-                var outcome = await svc.EnableAsync(id, ActorId(http), ct);
+                var outcome = await svc.EnableAsync(id, http.GetActorId(), ct);
                 if (outcome.ErrorCode == "not_found") return Results.NotFound();
                 if (!outcome.Success)
                 {
@@ -108,7 +107,7 @@ public static class AdminPluginsEndpoints
                 IPluginManagementService svc,
                 CancellationToken ct) =>
             {
-                var outcome = await svc.DisableAsync(id, ActorId(http), ct);
+                var outcome = await svc.DisableAsync(id, http.GetActorId(), ct);
                 if (outcome.ErrorCode == "not_found") return Results.NotFound();
                 return Results.Ok(outcome.Plugin);
             })
@@ -121,7 +120,7 @@ public static class AdminPluginsEndpoints
                 IPluginManagementService svc,
                 CancellationToken ct) =>
             {
-                var outcome = await svc.DeleteAsync(id, ActorId(http), ct);
+                var outcome = await svc.DeleteAsync(id, http.GetActorId(), ct);
                 if (outcome.ErrorCode == "not_found") return Results.NotFound();
                 return Results.NoContent();
             })
@@ -358,11 +357,5 @@ public static class AdminPluginsEndpoints
             if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return false;
         }
         return true;
-    }
-
-    private static Guid ActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
     }
 }

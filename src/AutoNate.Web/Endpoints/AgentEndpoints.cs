@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Services.Agent.Conversations;
 using AutoNate.Web.Services.Agent.Loop;
@@ -19,7 +18,7 @@ public static class AgentEndpoints
             IAgentConversationStore store,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var rows = await store.ListForUserAsync(userId, pageKey, take: 50, ct);
             return Results.Ok(rows);
@@ -32,7 +31,7 @@ public static class AgentEndpoints
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var convo = await session.StartAsync(userId, request.PageKey ?? "default", request.ConnectionId, ct);
             return Results.Created($"/api/agent/conversations/{convo.Id}", convo);
@@ -44,7 +43,7 @@ public static class AgentEndpoints
             IAgentConversationStore store,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var detail = await store.GetForUserAsync(id, userId, ct);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
@@ -58,7 +57,7 @@ public static class AgentEndpoints
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var updated = await store.RenameAsync(id, userId, request.Title ?? string.Empty, ct);
             return updated is null ? Results.NotFound() : Results.Ok(updated);
@@ -70,7 +69,7 @@ public static class AgentEndpoints
             IAgentConversationStore store,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var deleted = await store.DeleteAsync(id, userId, ct);
             return deleted ? Results.NoContent() : Results.NotFound();
@@ -93,7 +92,7 @@ public static class AgentEndpoints
                 http.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty)
             {
                 http.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -181,7 +180,7 @@ public static class AgentEndpoints
             {
                 return Results.BadRequest("queryId and result are required.");
             }
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var conv = await store.GetForUserAsync(id, userId, ct);
             if (conv is null) return Results.NotFound();
@@ -212,7 +211,7 @@ public static class AgentEndpoints
             {
                 return Results.BadRequest("actionId and result are required.");
             }
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var conv = await store.GetForUserAsync(id, userId, ct);
             if (conv is null) return Results.NotFound();
@@ -237,13 +236,6 @@ public static class AgentEndpoints
         using var doc = JsonDocument.Parse("{}");
         return doc.RootElement.Clone();
     }
-
-    private static Guid GetUserId(HttpContext context)
-    {
-        var raw = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     private static object ToWireEvent(AgentEvent ev) => ev switch
     {
         AgentEvent.MessageStarted m => new { kind = m.Kind, messageId = m.MessageId },

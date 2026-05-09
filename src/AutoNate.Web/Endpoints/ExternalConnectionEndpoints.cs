@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -38,7 +37,7 @@ public static class ExternalConnectionEndpoints
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
 
             try
@@ -70,7 +69,7 @@ public static class ExternalConnectionEndpoints
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
 
             try
@@ -100,7 +99,7 @@ public static class ExternalConnectionEndpoints
             IExternalConnectionStore store,
             CancellationToken ct) =>
         {
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var deleted = await store.DeleteAsync(id, actorId, ct);
             return deleted ? Results.NoContent() : Results.NotFound();
@@ -174,7 +173,7 @@ public static class ExternalConnectionEndpoints
             IExternalConnectionStore store,
             CancellationToken ct) =>
         {
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var row = await store.SetDefaultAsync(id, actorId, ct);
             return row is null ? Results.NotFound() : Results.Ok(row);
@@ -183,13 +182,6 @@ public static class ExternalConnectionEndpoints
 
         return app;
     }
-
-    private static Guid GetUserId(HttpContext context)
-    {
-        var raw = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     private static JsonElement EmptyObject()
     {
         using var doc = JsonDocument.Parse("{}");

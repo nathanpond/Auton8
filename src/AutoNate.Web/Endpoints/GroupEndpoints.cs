@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Authorization;
@@ -57,7 +56,7 @@ public static class GroupEndpoints
             {
                 var grp = await store.CreateAsync(
                     new CreateGroupInput(request.Name, request.Description),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.GroupCreated,
@@ -86,7 +85,7 @@ public static class GroupEndpoints
             {
                 var grp = await store.UpdateAsync(id,
                     new UpdateGroupInput(request.Name, request.Description),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.GroupUpdated,
@@ -113,7 +112,7 @@ public static class GroupEndpoints
         {
             try
             {
-                var grp = await store.SetArchivedAsync(id, archived: true, ActorId(http), ct);
+                var grp = await store.SetArchivedAsync(id, archived: true, http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.GroupArchived,
@@ -136,7 +135,7 @@ public static class GroupEndpoints
         {
             try
             {
-                var grp = await store.SetArchivedAsync(id, archived: false, ActorId(http), ct);
+                var grp = await store.SetArchivedAsync(id, archived: false, http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
                     IamEventTypes.GroupRestored,
@@ -200,7 +199,7 @@ public static class GroupEndpoints
         {
             try
             {
-                var added = await store.AddMemberAsync(id, request.UserId, ActorId(http), ct);
+                var added = await store.AddMemberAsync(id, request.UserId, http.GetActorId(), ct);
                 if (!added) return Results.Conflict(new { error = "already a member" });
                 await auditPublisher.PublishAsync(
                     IamEventTopic.TopicName,
@@ -237,13 +236,6 @@ public static class GroupEndpoints
 
         return app;
     }
-
-    private static Guid ActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     public sealed record CreateGroupRequest(string Name, string? Description);
     public sealed record UpdateGroupRequest(string? Name, string? Description);
     public sealed record AddMemberRequest(Guid UserId);

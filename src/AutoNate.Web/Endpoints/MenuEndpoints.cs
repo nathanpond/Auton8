@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -80,7 +79,7 @@ public static class MenuEndpoints
             {
                 var menu = await store.CreateMenuAsync(
                     new CreateMenuInput(request.Key, request.Name, request.Description),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     SiteEventTopic.TopicName,
                     SiteEventTypes.MenuCreated,
@@ -109,7 +108,7 @@ public static class MenuEndpoints
             {
                 var menu = await store.UpdateMenuAsync(
                     id, new UpdateMenuInput(request.Name, request.Description),
-                    ActorId(http), ct);
+                    http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     SiteEventTopic.TopicName,
                     SiteEventTypes.MenuUpdated,
@@ -268,13 +267,6 @@ public static class MenuEndpoints
 
         return app;
     }
-
-    private static Guid ActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     public sealed record CreateMenuRequest(string Key, string Name, string? Description);
     public sealed record UpdateMenuRequest(string? Name, string? Description);
     public sealed record CreateMenuItemRequest(

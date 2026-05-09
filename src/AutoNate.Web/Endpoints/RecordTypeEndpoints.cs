@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -132,7 +131,7 @@ public static class RecordTypeEndpoints
             {
                 var created = await store.CreateAsync(
                     new CreateRecordTypeInput(request.ShortCode, request.Name, request.Description, request.Icon, request.Color),
-                    GetActorId(http),
+                    http.GetActorId(),
                     cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
@@ -163,7 +162,7 @@ public static class RecordTypeEndpoints
                 var updated = await store.UpdateAsync(
                     id,
                     new UpdateRecordTypeInput(request.Name, request.Description, request.Icon, request.Color),
-                    GetActorId(http),
+                    http.GetActorId(),
                     cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
@@ -194,7 +193,7 @@ public static class RecordTypeEndpoints
         {
             try
             {
-                var archived = await store.SetArchivedAsync(id, archived: true, GetActorId(http), cancellationToken);
+                var archived = await store.SetArchivedAsync(id, archived: true, http.GetActorId(), cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
                     RecordSchemaEventTypes.RecordTypeArchived,
@@ -220,7 +219,7 @@ public static class RecordTypeEndpoints
         {
             try
             {
-                var restored = await store.SetArchivedAsync(id, archived: false, GetActorId(http), cancellationToken);
+                var restored = await store.SetArchivedAsync(id, archived: false, http.GetActorId(), cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
                     RecordSchemaEventTypes.RecordTypeRestored,
@@ -293,7 +292,7 @@ public static class RecordTypeEndpoints
                         request.Config,
                         request.IsRequired,
                         request.SortOrder),
-                    GetActorId(http),
+                    http.GetActorId(),
                     cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
@@ -334,7 +333,7 @@ public static class RecordTypeEndpoints
                         request.Config,
                         request.IsRequired,
                         request.SortOrder),
-                    GetActorId(http),
+                    http.GetActorId(),
                     cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
@@ -370,7 +369,7 @@ public static class RecordTypeEndpoints
         {
             try
             {
-                var archived = await store.SetFieldArchivedAsync(id, fieldId, archived: true, GetActorId(http), cancellationToken);
+                var archived = await store.SetFieldArchivedAsync(id, fieldId, archived: true, http.GetActorId(), cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
                     RecordSchemaEventTypes.RecordTypeFieldArchived,
@@ -401,7 +400,7 @@ public static class RecordTypeEndpoints
         {
             try
             {
-                var restored = await store.SetFieldArchivedAsync(id, fieldId, archived: false, GetActorId(http), cancellationToken);
+                var restored = await store.SetFieldArchivedAsync(id, fieldId, archived: false, http.GetActorId(), cancellationToken);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
                     RecordSchemaEventTypes.RecordTypeFieldRestored,
@@ -442,13 +441,6 @@ public static class RecordTypeEndpoints
 
         return app;
     }
-
-    private static Guid GetActorId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
-
     private static RecordTypeDto ToDto(RecordType model) => new(
         model.Id,
         model.ShortCode,

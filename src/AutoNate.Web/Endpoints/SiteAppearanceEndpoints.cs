@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.RegularExpressions;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -61,7 +60,7 @@ public static partial class SiteAppearanceEndpoints
                 db.SiteAppearanceSettings.Add(entity);
             }
 
-            Apply(entity, request, GetActorId(http));
+            Apply(entity, request, http.GetActorId());
             await db.SaveChangesAsync(ct);
             await auditPublisher.PublishAsync(
                 SiteEventTopic.TopicName,
@@ -267,13 +266,6 @@ public static partial class SiteAppearanceEndpoints
         var trimmed = value?.Trim();
         return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
-
-    private static Guid GetActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     [GeneratedRegex("^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")]
     private static partial Regex HexRegex();
 }

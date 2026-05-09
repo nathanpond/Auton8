@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Authorization.Evaluator;
@@ -50,7 +49,7 @@ public static class RecordWatchEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var actorId = GetActorId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
 
             var resolvedPage = Math.Max(0, page ?? 0);
@@ -110,7 +109,7 @@ public static class RecordWatchEndpoints
             IDbContextFactory<AutoNateDbContext> dbContextFactory,
             CancellationToken cancellationToken) =>
         {
-            var actorId = GetActorId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
 
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -128,7 +127,7 @@ public static class RecordWatchEndpoints
             IRecordStore store,
             CancellationToken cancellationToken) =>
         {
-            var actorId = GetActorId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
 
             var record = await store.GetAsync(id, cancellationToken);
@@ -160,7 +159,7 @@ public static class RecordWatchEndpoints
             IDbContextFactory<AutoNateDbContext> dbContextFactory,
             CancellationToken cancellationToken) =>
         {
-            var actorId = GetActorId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
 
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -178,13 +177,6 @@ public static class RecordWatchEndpoints
 
         return app;
     }
-
-    private static Guid GetActorId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
-
     private static WatchedRecordDto ToDto(RecordEntity record, DateTime watchedAtUtc)
     {
         return new WatchedRecordDto(

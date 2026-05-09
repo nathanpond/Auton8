@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Models.Notifications;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Notifications;
@@ -46,7 +45,7 @@ public static class NotificationEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
 
             var effectiveLimit = limit is > 0 ? limit : null;
@@ -78,7 +77,7 @@ public static class NotificationEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
 
             var request = new ListNotificationsRequest(
@@ -120,7 +119,7 @@ public static class NotificationEndpoints
             ViewEventCoalescer coalescer,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var count = await store.GetUnreadCountAsync(userId, ct);
             if (coalescer.ShouldPublish(userId, NotificationEventTypes.UnreadCountViewed))
@@ -143,7 +142,7 @@ public static class NotificationEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var updated = await store.MarkReadAsync(id, userId, ct);
             if (updated is null) return Results.NotFound();
@@ -163,7 +162,7 @@ public static class NotificationEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
-            var userId = GetUserId(http);
+            var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
             var count = await store.MarkAllReadAsync(userId, ct);
             await auditPublisher.PublishAsync(
@@ -178,13 +177,6 @@ public static class NotificationEndpoints
 
         return app;
     }
-
-    private static Guid GetUserId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
-
     private static NotificationDto ToDto(Notification model) => new(
         model.Id,
         model.UserId,

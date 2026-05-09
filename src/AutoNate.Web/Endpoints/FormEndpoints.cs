@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Forms;
@@ -36,7 +35,7 @@ public static class FormEndpoints
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             try
             {
@@ -58,7 +57,7 @@ public static class FormEndpoints
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             try
             {
@@ -91,7 +90,7 @@ public static class FormEndpoints
             IFormStore store,
             CancellationToken ct) =>
         {
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             try
             {
@@ -131,7 +130,7 @@ public static class FormEndpoints
             IFormStore store,
             CancellationToken ct) =>
         {
-            var actorId = GetUserId(http);
+            var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var form = await store.RestoreAsync(id, versionNumber, actorId, ct);
             return form is null ? Results.NotFound() : Results.Ok(form);
@@ -164,11 +163,5 @@ public static class FormEndpoints
         });
 
         return app;
-    }
-
-    private static Guid GetUserId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
     }
 }

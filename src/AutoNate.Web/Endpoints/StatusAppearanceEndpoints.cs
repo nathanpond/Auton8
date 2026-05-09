@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
@@ -65,7 +64,7 @@ public static class StatusAppearanceEndpoints
                 return Results.BadRequest(new { error = "That status already exists." });
             }
 
-            var actorId = ActorId(http);
+            var actorId = http.GetActorId();
             var now = DateTime.UtcNow;
             var entry = new StatusAppearanceEntry
             {
@@ -131,7 +130,7 @@ public static class StatusAppearanceEndpoints
             entry.Status = nextStatus;
             entry.Color = nextColor;
             entry.UpdatedAtUtc = DateTime.UtcNow;
-            entry.UpdatedBy = ActorId(http);
+            entry.UpdatedBy = http.GetActorId();
             await db.SaveChangesAsync(ct);
             await auditPublisher.PublishAsync(
                 SiteEventTopic.TopicName,
@@ -172,13 +171,6 @@ public static class StatusAppearanceEndpoints
 
         return app;
     }
-
-    private static Guid ActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     public sealed record StatusAppearanceDto(
         Guid Id,
         string Status,

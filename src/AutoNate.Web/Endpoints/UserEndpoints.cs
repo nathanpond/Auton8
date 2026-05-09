@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -272,7 +271,7 @@ public static class UserEndpoints
                 return Results.BadRequest(new { error = "A user cannot supervise themselves." });
             }
 
-            var actorId = ActorId(http);
+            var actorId = http.GetActorId();
             await using var db = await dbFactory.CreateDbContextAsync(ct);
 
             // Clear any existing supervisor edge so each user has at most one
@@ -316,13 +315,6 @@ public static class UserEndpoints
 
         return app;
     }
-
-    private static Guid ActorId(HttpContext http)
-    {
-        var raw = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : Guid.Empty;
-    }
-
     public sealed record CreateUserRequest(
         string Username,
         string FirstName,

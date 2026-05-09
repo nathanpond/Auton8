@@ -9,12 +9,12 @@ import {
 import {
   DEFAULT_SITE_APPEARANCE,
   areSiteAppearancesEqual,
-  badgeTextColor,
   coerceSiteAppearance,
   normalizeHex,
   toUpdateSiteAppearanceRequest,
   validateSiteAppearance
 } from "@/lib/siteAppearance";
+import { badgeTextColor } from "@/lib/statusAppearance";
 import { useSiteAppearance } from "@/providers/SiteAppearanceProvider";
 import { SiteAppearance } from "@/types/siteAppearance";
 import "./SiteAppearance.css";

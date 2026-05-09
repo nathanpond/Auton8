@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -345,7 +344,7 @@ public static class RecordEdgeEndpoints
                     request.EdgeTypeId,
                     request.FromRecordId,
                     request.ToRecordId,
-                    request.Data), GetActorId(http), ct);
+                    request.Data), http.GetActorId(), ct);
                 await auditPublisher.PublishAsync(
                     RecordSchemaEventTopic.TopicName,
                     RecordSchemaEventTypes.RecordEdgeCreated,
@@ -446,13 +445,6 @@ public static class RecordEdgeEndpoints
         "incoming" or "in" => EdgeDirection.Incoming,
         _ => EdgeDirection.Both
     };
-
-    private static Guid GetActorId(HttpContext http)
-    {
-        var claim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(claim, out var id) ? id : Guid.Empty;
-    }
-
     private static EdgeTypeDto ToDto(RecordEdgeType model) => new(
         model.Id,
         model.ShortCode,

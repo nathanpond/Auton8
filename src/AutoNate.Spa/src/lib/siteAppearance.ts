@@ -1,4 +1,5 @@
 import { SiteAppearance, SiteAppearanceLogoMode } from "@/types/siteAppearance";
+import { badgeTextColor } from "@/lib/statusAppearance";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -59,13 +60,6 @@ export function normalizeHex(value: string): string | null {
   }
 
   return trimmed.toLowerCase();
-}
-
-export function badgeTextColor(color: string): string {
-  const rgb = parseHex(color);
-  if (!rgb) return "#111111";
-  const luminance = (0.299 * rgb.r) + (0.587 * rgb.g) + (0.114 * rgb.b);
-  return luminance > 160 ? "#111111" : "#ffffff";
 }
 
 export function coerceSiteAppearance(source: PartialSiteAppearance): SiteAppearance {
