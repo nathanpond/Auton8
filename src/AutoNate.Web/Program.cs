@@ -255,6 +255,11 @@ builder.Services.AddScoped<IAgentSkill, AnalyzeSystemIssueSkill>();
 // agent narrates the proposal and asks the user; only confirmed=true issues
 // the actual IRecordStore mutation under the calling user's principal.
 builder.Services.AddScoped<IAgentSkill, ManageRecordsSkill>();
+// Mutating record-type schema skill. Same confirmed-gate contract as
+// ManageRecordsSkill, plus skill-level IAuthorizer checks (the type store
+// is unauthorized — endpoints enforce permissions today) and an IsSystem
+// refusal that no other layer guards.
+builder.Services.AddScoped<IAgentSkill, ManageRecordTypesSkill>();
 // WebFetchSkill is always registered; AgentSession filters its tool out of
 // the per-turn ChatRequest when chatbot.internetAccessEnabled is off.
 builder.Services.AddScoped<IAgentSkill, WebFetchSkill>();
