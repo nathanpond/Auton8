@@ -23,10 +23,10 @@ public sealed class AgentConversationSummaryStoreTests
         var conversation = await store.CreateAsync(TestUserId, pageKey: "test", connectionId: null, providerKind: null, modelId: null);
 
         // Three early turns — these should be subsumed by the summary.
-        var u1 = await store.AppendMessageAsync(conversation.Id, ChatRole.User,
+        await store.AppendMessageAsync(conversation.Id, ChatRole.User,
             new ChatContentBlock[] { new ChatContentBlock.TextBlock("first question") },
             providerKind: null, modelId: null, usage: null, stopReason: null);
-        var a1 = await store.AppendMessageAsync(conversation.Id, ChatRole.Assistant,
+        await store.AppendMessageAsync(conversation.Id, ChatRole.Assistant,
             new ChatContentBlock[] { new ChatContentBlock.TextBlock("first answer") },
             providerKind: "Anthropic", modelId: "claude-sonnet-4-6", usage: null, stopReason: null);
         var u2 = await store.AppendMessageAsync(conversation.Id, ChatRole.User,

@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NATS.Client.Core;
 using NATS.Client.JetStream;
+using System.Globalization;
 
 namespace AutoNate.Web.Services.SystemHealth;
 
@@ -366,9 +367,9 @@ public sealed class SystemHealthService(
             try
             {
                 var stream = await js.GetStreamAsync("workflow-execution", cancellationToken: cancellationToken);
-                details["streamMessages"] = stream.Info.State.Messages.ToString();
-                details["streamConsumers"] = stream.Info.State.ConsumerCount.ToString();
-                details["streamLastSeq"] = stream.Info.State.LastSeq.ToString();
+                details["streamMessages"] = stream.Info.State.Messages.ToString(CultureInfo.InvariantCulture);
+                details["streamConsumers"] = stream.Info.State.ConsumerCount.ToString(CultureInfo.InvariantCulture);
+                details["streamLastSeq"] = stream.Info.State.LastSeq.ToString(CultureInfo.InvariantCulture);
             }
             catch (NatsJSApiException jsEx) when (jsEx.Error.Code == 404)
             {

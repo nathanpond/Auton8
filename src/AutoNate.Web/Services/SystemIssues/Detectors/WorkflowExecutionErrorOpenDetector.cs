@@ -141,13 +141,19 @@ public sealed class WorkflowExecutionErrorOpenDetector(
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
+            // Hoist the IsDBNull checks into locals so the awaits don't sit
+            // inside the record constructor's argument list. Same wire calls,
+            // tidier shape.
+            var activityNameNull = await reader.IsDBNullAsync(2, cancellationToken);
+            var errorMessageNull = await reader.IsDBNullAsync(3, cancellationToken);
+            var rawTypeNull = await reader.IsDBNullAsync(4, cancellationToken);
             results.Add(new ProcessErrorGroup(
                 ProcessInstanceId: reader.GetString(0),
                 MostRecent: new ProcessErrorRow(
                     ActivityId: reader.GetString(1),
-                    ActivityName: reader.IsDBNull(2) ? null : reader.GetString(2),
-                    ErrorMessage: reader.IsDBNull(3) ? null : reader.GetString(3),
-                    RawFlowableEventType: reader.IsDBNull(4) ? null : reader.GetString(4),
+                    ActivityName: activityNameNull ? null : reader.GetString(2),
+                    ErrorMessage: errorMessageNull ? null : reader.GetString(3),
+                    RawFlowableEventType: rawTypeNull ? null : reader.GetString(4),
                     OccurredAtUtc: reader.GetDateTime(5)),
                 ErrorCount: (int)reader.GetInt64(6)));
         }

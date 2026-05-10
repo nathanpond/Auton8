@@ -1426,7 +1426,7 @@ public static partial class WorkflowBpmnXml
 
     private static bool LooksLikeFlowableExpression(string value)
     {
-        return value.StartsWith("${", StringComparison.Ordinal) && value.EndsWith("}", StringComparison.Ordinal);
+        return value.StartsWith("${", StringComparison.Ordinal) && value.EndsWith('}');
     }
 
     private static bool LooksLikeIso8601Duration(string value)

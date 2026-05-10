@@ -120,7 +120,7 @@ public sealed class ConversationCompactor
                     case ChatStreamChunk.MessageStop ms:
                         usage = ms.Usage;
                         break;
-                    case ChatStreamChunk.Error err:
+                    case ChatStreamChunk.Error:
                         // Refuse to persist an empty / partial summary on
                         // provider error — caller falls back to trimming.
                         return null;

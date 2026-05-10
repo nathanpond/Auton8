@@ -913,7 +913,7 @@ static string GetSafeReturnUrl(string? returnUrl)
         return "/home";
     }
 
-    return returnUrl.StartsWith("/", StringComparison.Ordinal) &&
+    return returnUrl.StartsWith('/') &&
            !returnUrl.StartsWith("//", StringComparison.Ordinal) &&
            !returnUrl.StartsWith("/\\", StringComparison.Ordinal)
         ? returnUrl

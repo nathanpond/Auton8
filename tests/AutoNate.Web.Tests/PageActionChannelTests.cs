@@ -61,7 +61,7 @@ public sealed class PageActionChannelTests
 
         using var cts = new CancellationTokenSource();
         var ask = channel.ApplyAsync("noop", null, cts.Token);
-        cts.Cancel();
+        await cts.CancelAsync();
 
         var result = await ask;
         var fail = Assert.IsType<PageActionResult.Failure>(result);

@@ -39,7 +39,7 @@ public sealed class OrphanedNotificationCleanupService(
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _cts?.Cancel();
+        if (_cts is not null) await _cts.CancelAsync();
         if (_runner is not null)
         {
             try { await _runner.WaitAsync(cancellationToken); }

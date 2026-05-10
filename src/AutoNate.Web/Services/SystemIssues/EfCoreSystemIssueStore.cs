@@ -98,7 +98,7 @@ public sealed class EfCoreSystemIssueStore(
             }
             id = reader.GetGuid(0);
             occurrenceCount = reader.GetInt32(1);
-            previousSeverity = reader.IsDBNull(2) ? null : reader.GetString(2);
+            previousSeverity = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
         }
 
         var wasCreated = occurrenceCount == 1;

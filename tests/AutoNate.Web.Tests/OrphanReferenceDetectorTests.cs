@@ -30,7 +30,7 @@ public sealed class OrphanReferenceDetectorTests
                         'record', {Guid.NewGuid().ToString()}, NULL, FALSE, NOW())");
         }
 
-        var (detector, store) = CreateDetectorAndStore(db);
+        var (detector, _) = CreateDetectorAndStore(db);
         await detector.RunOnceAsync(CancellationToken.None);
 
         await using var read = db.CreateDbContext();
@@ -64,7 +64,7 @@ public sealed class OrphanReferenceDetectorTests
                 VALUES ({grantId}, 'user', {Guid.NewGuid().ToString()}, 'view', '/record/*', '{{}}'::jsonb, 'allow', 0, NOW(), {Guid.Empty}, NOW(), {Guid.Empty})");
         }
 
-        var (detector, store) = CreateDetectorAndStore(db);
+        var (detector, _) = CreateDetectorAndStore(db);
         await detector.RunOnceAsync(CancellationToken.None);
 
         await using var read = db.CreateDbContext();
@@ -99,7 +99,7 @@ public sealed class OrphanReferenceDetectorTests
                         'route', '{{""path"":""/x""}}'::jsonb, TRUE, FALSE, NOW(), NOW(), {Guid.NewGuid()})");
         }
 
-        var (detector, store) = CreateDetectorAndStore(db);
+        var (detector, _) = CreateDetectorAndStore(db);
         await detector.RunOnceAsync(CancellationToken.None);
 
         await using var read = db.CreateDbContext();

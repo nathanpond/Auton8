@@ -17,8 +17,20 @@ using RecordEntity = AutoNate.Web.Persistence.Scaffolded.Record;
 using RecordFieldChangeEntity = AutoNate.Web.Persistence.Scaffolded.RecordFieldChange;
 using RecordModel = AutoNate.Web.Models.Records.Record;
 using RecordTypeFieldEntity = AutoNate.Web.Persistence.Scaffolded.RecordTypeField;
+using System.Globalization;
 
 namespace AutoNate.Web.Services.Records;
+
+// Hoisted single-element ChangedFields arrays used in record-event payloads
+// for the well-known mutation flavors (status flip, assignee swap, archive
+// toggle). Avoids allocating a fresh string[] per write — these fire on
+// every record mutation.
+file static class ChangedFieldsConstants
+{
+    public static readonly string[] Status = ["status"];
+    public static readonly string[] AssigneeIds = ["assigneeIds"];
+    public static readonly string[] IsArchived = ["isArchived"];
+}
 
 public sealed class EfCoreRecordStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
@@ -124,7 +136,7 @@ public sealed class EfCoreRecordStore(
         if (input.AssigneeId is { } assigneeId)
         {
             parameters.Add(assigneeId);
-            where.Append(" AND ").Append("{").Append(parameters.Count - 1).Append("}::uuid = ANY(assignee_ids)");
+            where.Append(" AND ").Append('{').Append(parameters.Count - 1).Append("}::uuid = ANY(assignee_ids)");
         }
 
         var filterClauses = input.Filters ?? Array.Empty<RecordFilterClause>();
@@ -529,8 +541,8 @@ public sealed class EfCoreRecordStore(
             {
                 historyRows.Add(BuildHistory(
                     entity.Id, changeSetId, RecordChangeKinds.DueDateChanged, fieldKey: null,
-                    oldValue: JsonSerializer.Serialize(entity.DueDate?.ToString("yyyy-MM-dd")),
-                    newValue: JsonSerializer.Serialize(newDueDate?.ToString("yyyy-MM-dd")),
+                    oldValue: JsonSerializer.Serialize(entity.DueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+                    newValue: JsonSerializer.Serialize(newDueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
                     actorId, now));
                 entity.DueDate = newDueDate;
                 changedFields.Add("dueDate");
@@ -622,7 +634,7 @@ public sealed class EfCoreRecordStore(
                 Name: entity.Name,
                 Status: entity.Status,
                 PreviousStatus: previousStatus,
-                ChangedFields: new[] { "status" },
+                ChangedFields: ChangedFieldsConstants.Status,
                 AssigneeIds: entity.AssigneeIds,
                 IsArchived: entity.IsArchived,
                 ActorId: actorId,
@@ -641,7 +653,7 @@ public sealed class EfCoreRecordStore(
                 Name: entity.Name,
                 Status: entity.Status,
                 PreviousStatus: null,
-                ChangedFields: new[] { "assigneeIds" },
+                ChangedFields: ChangedFieldsConstants.AssigneeIds,
                 AssigneeIds: entity.AssigneeIds,
                 IsArchived: entity.IsArchived,
                 ActorId: actorId,
@@ -721,7 +733,7 @@ public sealed class EfCoreRecordStore(
             Name: entity.Name,
             Status: entity.Status,
             PreviousStatus: null,
-            ChangedFields: new[] { "isArchived" },
+            ChangedFields: ChangedFieldsConstants.IsArchived,
             AssigneeIds: entity.AssigneeIds,
             IsArchived: entity.IsArchived,
             ActorId: actorId,
@@ -763,7 +775,7 @@ public sealed class EfCoreRecordStore(
 
         var result = await command.ExecuteScalarAsync(cancellationToken)
             ?? throw new RecordValidationException($"Record type '{recordTypeId}' was not found.");
-        return Convert.ToInt64(result);
+        return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     private static string ResolveOrderBy(string? sort) => sort switch
@@ -962,7 +974,7 @@ public sealed class EfCoreRecordStore(
             name,
             assignee_ids = assigneeIds,
             status,
-            due_date = dueDate?.ToString("yyyy-MM-dd"),
+            due_date = dueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             values = JsonSerializer.Deserialize<JsonElement>(values.GetRawText())
         });
     }

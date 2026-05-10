@@ -82,7 +82,7 @@ public sealed class RecordSelectorSqlCompiler
             var pSubject = ctx.AddParameter(subjectId);
             var sb = new StringBuilder();
             sb.Append("EXISTS (SELECT 1 FROM entity_edges ").Append(aliasOuter)
-              .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = '").Append(edgeKind).Append("'")
+              .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = '").Append(edgeKind).Append('\'')
               .Append(" AND ").Append(aliasOuter).Append(".from_kind = 'user'")
               .Append(" AND ").Append(aliasOuter).Append(".from_id = ").Append(pSubject)
               .Append(" AND ").Append(aliasOuter).Append(".to_kind = 'record'")
@@ -96,12 +96,12 @@ public sealed class RecordSelectorSqlCompiler
 
         var multi = new StringBuilder();
         multi.Append("EXISTS (SELECT 1 FROM entity_edges ").Append(aliasOuter)
-             .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = '").Append(edgeKind).Append("'")
+             .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = '").Append(edgeKind).Append('\'')
              .Append(" AND ").Append(aliasOuter).Append(".from_kind = 'user'")
              .Append(" AND ").Append(aliasOuter).Append(".to_kind = 'record'")
              .Append(" AND ").Append(aliasOuter).Append(".to_id = records.id::text")
              .Append(" AND EXISTS (SELECT 1 FROM entity_edges ").Append(aliasInner)
-             .Append(" WHERE ").Append(aliasInner).Append(".edge_kind = '").Append(innerKind).Append("'")
+             .Append(" WHERE ").Append(aliasInner).Append(".edge_kind = '").Append(innerKind).Append('\'')
              .Append(" AND ").Append(aliasInner).Append(".from_kind = 'user'")
              .Append(" AND ").Append(aliasInner).Append(".from_id = ").Append(pInner)
              .Append(" AND ").Append(aliasInner).Append(".to_kind = 'user'")

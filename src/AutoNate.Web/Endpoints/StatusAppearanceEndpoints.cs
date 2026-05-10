@@ -5,6 +5,7 @@ using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.SiteSettings;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -57,8 +58,14 @@ public static class StatusAppearanceEndpoints
                 return Results.BadRequest(new { error = "Color is required." });
             }
 
+            // EF Core translates .ToLower() to SQL LOWER() for Postgres but
+            // can't translate .ToLower(CultureInfo) — so the locale-flavor
+            // CA rules don't fit this comparison. Status strings are admin-
+            // entered ASCII labels; locale-sensitive lowering doesn't matter.
+#pragma warning disable CA1304, CA1311
             var exists = await db.StatusAppearanceEntries
                 .AnyAsync(x => x.Status.ToLower() == status.ToLower(), ct);
+#pragma warning restore CA1304, CA1311
             if (exists)
             {
                 return Results.BadRequest(new { error = "That status already exists." });
@@ -120,8 +127,11 @@ public static class StatusAppearanceEndpoints
                 return Results.BadRequest(new { error = "Color is required." });
             }
 
+            // See comment on the matching .ToLower() at the create endpoint.
+#pragma warning disable CA1304, CA1311
             var duplicate = await db.StatusAppearanceEntries
                 .AnyAsync(x => x.Id != id && x.Status.ToLower() == nextStatus.ToLower(), ct);
+#pragma warning restore CA1304, CA1311
             if (duplicate)
             {
                 return Results.BadRequest(new { error = "That status already exists." });

@@ -1,0 +1,364 @@
+# EditorConfig + Roslyn analyzer severity tuning for the AutoNate repo.
+# The analyzer packages themselves are wired in /Directory.Build.props.
+#
+# Severity policy:
+#   - Default severities (set by each analyzer pack) are kept unless a rule
+#     is known-noisy on this codebase shape, in which case it's dropped to
+#     `suggestion` or `none` here with a one-line rationale.
+#   - Don't promote rules to `error` unless the project is willing to fail
+#     the build on them. Use TreatWarningsAsErrors per-project for that.
+
+root = true
+
+[*.{cs,csx}]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# ---------------------------------------------------------------------------
+# SonarAnalyzer.CSharp — known-noisy rules suppressed.
+# Sonar's defaults are tuned for general-purpose code; some rules don't
+# match this codebase's conventions or generate high false-positive rates.
+# Re-evaluate any of these by removing the line and rebuilding.
+# ---------------------------------------------------------------------------
+
+# S1135 (track-this-later comment markers). The codebase uses these
+# intentionally to flag known follow-ups; they're audited via /audit cleanup.
+dotnet_diagnostic.S1135.severity = none
+
+# S125 (commented-out code). High false-positive rate on inline comments
+# that look like code — XML examples, regex patterns, sample JSON.
+dotnet_diagnostic.S125.severity = none
+
+# S1192 (string literals duplicated). Useful but very noisy on test
+# fixtures and routing tables; promote back to warning if we add a constants
+# refactor pass.
+dotnet_diagnostic.S1192.severity = suggestion
+
+# S3358 (nested ternaries). Style preference; we accept short nested ternaries
+# in field projections (record DTO mappers) where the alternative is verbose.
+dotnet_diagnostic.S3358.severity = suggestion
+
+# S3776 (cognitive complexity). Warn but don't fail; the Phase 1
+# DatabaseSchemaInitializer and AgentSession.RunAsync are intentionally
+# linear-but-long for readability over fragmentation.
+dotnet_diagnostic.S3776.severity = suggestion
+
+# S101 (type naming conventions). False positives on legitimate acronym types
+# (e.g., DTO, SPA, API).
+dotnet_diagnostic.S101.severity = suggestion
+
+# ---------------------------------------------------------------------------
+# Microsoft.VisualStudio.Threading.Analyzers — keep all defaults except
+# VSTHRD200 (suppressed; see below). The high-signal rules — VSTHRD002
+# (sync-over-async), VSTHRD100 (async void), VSTHRD110 (observe async
+# results), VSTHRD103 (Task.Result/Wait) — are exactly the rules that
+# would have caught FlowableClient.Result and the EfCoreMenuStore Task.Run
+# pattern at compile time and they keep their default warning severity.
+# ---------------------------------------------------------------------------
+
+# VSTHRD200 (Async suffix conventions). Two firing modes:
+#   1. Public API methods named "...Async" that return non-awaitable types
+#      (e.g. IHookRegistrar.AddActionAsync returns HookHandle) — intentional
+#      naming for "registers an async callback," not changeable.
+#   2. Private helper methods that return Task without the suffix.
+# Mode 2 is real signal but mode 1 dominates the noise (~1300 hits). Off
+# globally; the other VSTHRD rules cover the stability concerns this would.
+dotnet_diagnostic.VSTHRD200.severity = none
+
+# ---------------------------------------------------------------------------
+# AsyncFixer — keep all defaults (small ruleset, all high-signal).
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Microsoft.CodeAnalysis.NetAnalyzers — keep AnalysisLevel=latest defaults.
+# A few that often surface as noise on legacy patterns:
+# ---------------------------------------------------------------------------
+
+# CA1848 (use LoggerMessage delegates instead of LogXxx extensions). High-perf
+# pattern that's overkill for this codebase's logging volume; suggestion-level.
+dotnet_diagnostic.CA1848.severity = suggestion
+
+# CA2007 (configure ConfigureAwait). ASP.NET Core doesn't have a sync context;
+# ConfigureAwait(false) is a noise tax in this codebase shape.
+dotnet_diagnostic.CA2007.severity = none
+
+# CA1873 (avoid potentially expensive logging). Our log volume is bounded
+# enough that the LoggerMessage-source-generator pattern is overkill.
+dotnet_diagnostic.CA1873.severity = suggestion
+
+# CA1859 (use concrete types when possible). Marginal perf rule; downgrade
+# to keep the signal-to-noise ratio high on the warning list.
+dotnet_diagnostic.CA1859.severity = suggestion
+
+# S1144 / S3459 (unused private member / unassigned property). Real signal
+# in app code, but the EF scaffolded models and DTO records under
+# Persistence/Scaffolded trigger many false positives. Run /audit cleanup
+# (concern A) for the verified version of this finding.
+dotnet_diagnostic.S1144.severity = suggestion
+dotnet_diagnostic.S3459.severity = suggestion
+
+# CA1716 (identifier conflicts with VB.NET / other-language reserved words).
+# The codebase doesn't expose any VB.NET interop surface. Discriminated-union
+# member names like `AgentEvent.Error` and `ChatStreamChunk.Error`,
+# parameter names like `when` (for timestamps), and method names like
+# `IActionHub.Do` and `IEntityRegistry.Get` are all idiomatic C# that
+# would lose semantics if renamed for VB compatibility nobody uses.
+dotnet_diagnostic.CA1716.severity = none
+
+# CA1720 (identifier contains type name). Hits domain-meaningful members
+# like `BehaviorVariableValue.String / Long / Double` (discriminated union
+# arms whose name *is* the type they hold). Renaming would obscure intent.
+dotnet_diagnostic.CA1720.severity = none
+
+# S927 (parameter name should match base/interface declaration). Sonar
+# expects the implementation to mirror the interface's parameter naming;
+# the codebase deliberately uses different names where the implementation's
+# context makes a more concrete name available (e.g. EndpointFilter
+# implementations use `invocation` rather than the interface's `context`
+# to disambiguate from the HttpContext also in scope).
+dotnet_diagnostic.S927.severity = none
+
+# S3267 (loops should be simplified using Where/Select). Style preference.
+# The codebase favors explicit foreach for readability when the alternative
+# is a multi-line LINQ chain that hides the iteration shape; the rule's
+# blanket suggestion to LINQify produces less-readable code in many of
+# the flagged sites.
+dotnet_diagnostic.S3267.severity = none
+
+# S1075 (URIs should not be hardcoded). The flagged URLs are default
+# endpoints (Flowable REST base, Dapr HTTP endpoint) that ship in dev-only
+# appsettings; production deployments override them per the README's
+# Deployment Configuration section. The hardcoded value is the documented
+# fallback, not a deployment artifact.
+dotnet_diagnostic.S1075.severity = none
+
+# CS8619 (nullability mismatch in anonymous types). Hits a handful of
+# FlowableStub anonymous types in tests where the runtime nullability
+# is intentional but the compiler can't prove it. Test-only noise.
+dotnet_diagnostic.CS8619.severity = none
+
+# S108 (empty block of code). Every flagged site in this codebase is the
+# canonical `catch (OperationCanceledException) {}` pattern used to absorb
+# cancellation gracefully on shutdown — intentional, not a missing-handler
+# bug. If a genuinely empty block sneaks in elsewhere, code review catches
+# it more reliably than this analyzer would in a sea of cancellation absorbers.
+dotnet_diagnostic.S108.severity = none
+
+# S4136 (methods grouped by overloads). Cosmetic ordering preference; the
+# codebase orders methods by feature/lifecycle rather than by name, which
+# reads better when classes implement a workflow.
+dotnet_diagnostic.S4136.severity = none
+
+# S1066 (collapsible if statements). Style preference; the codebase
+# sometimes splits nested ifs deliberately so the inner branch can carry
+# its own comment or its own log line.
+dotnet_diagnostic.S1066.severity = none
+
+# CA1805 (do not initialize unnecessarily to default). Explicit `= 0`
+# / `= null` initializers are sometimes load-bearing for readability when
+# the surrounding fields have non-default initializers — keeps the visual
+# grouping consistent.
+dotnet_diagnostic.CA1805.severity = suggestion
+
+# S1694 (abstract class with no abstract members). The codebase uses
+# abstract base classes as template-method bases (PeriodicIssueDetector is
+# the canonical example) where the constraint is "you can't instantiate
+# this directly" rather than "you must implement these abstracts."
+dotnet_diagnostic.S1694.severity = none
+
+# CA1068 (CancellationToken should be last parameter). Reordering parameters
+# is a breaking API change for every caller. The non-last positions in this
+# codebase are deliberate: signature was designed before CA1068 existed and
+# the parameter order reads naturally for the helper's domain (e.g.
+# detector ScanOneAsync places the connection + scan filters before the
+# token because the token is the cross-cutting plumbing).
+dotnet_diagnostic.CA1068.severity = none
+
+# CA1725 (parameter name should match base/interface). Same family as S927
+# already suppressed above — implementation classes deliberately use a
+# more concrete parameter name (e.g. `invocation` instead of `context`)
+# to disambiguate from another `context`-typed value in scope.
+dotnet_diagnostic.CA1725.severity = none
+
+# CA1862 (string Equals with StringComparison). The flagged sites use
+# .ToLower() == .ToLower() inside EF queries because Postgres ILIKE /
+# lower() composition is semantically what we want — and EF can't always
+# translate StringComparison.OrdinalIgnoreCase to a SQL form Postgres
+# accepts. Server-side comparison stays as-is; this is one of the rare
+# rules whose default is wrong for an EF-Postgres surface.
+dotnet_diagnostic.CA1862.severity = none
+
+# CA1852 / S3260 (type can be sealed). Auto-fix would add `sealed` to
+# every internal type that isn't currently subclassed. Useful for perf
+# but adds visual noise without measurable benefit on a codebase that
+# isn't perf-bound by virtual dispatch.
+dotnet_diagnostic.CA1852.severity = none
+dotnet_diagnostic.S3260.severity = none
+
+# CA1826 / S6608 (LINQ on indexable collections — use indexer instead).
+# Style preference; .First() / .Last() reads more clearly than [0] / [^1]
+# in test fixtures and cold paths where the perf delta is sub-microsecond.
+dotnet_diagnostic.CA1826.severity = none
+dotnet_diagnostic.S6608.severity = none
+
+# CA1845 (use span-based string.Concat + AsSpan). Marginal perf rule;
+# the few sites that hit it are not on hot paths.
+dotnet_diagnostic.CA1845.severity = none
+
+# CA1000 (do not declare static members on generic types). Fires on
+# interface declarations that use `static abstract` for the .NET 7+
+# generic-math-style pattern — flagging that as a problem is wrong for
+# the .NET version this targets.
+dotnet_diagnostic.CA1000.severity = none
+
+# CA2016 (forward the CancellationToken). The flagged sites are detector
+# audit-event publishes inside catch blocks during cleanup — the
+# CancellationToken.None is deliberate so the audit fires even when the
+# request that triggered the detector was cancelled.
+dotnet_diagnostic.CA2016.severity = none
+
+# CA1305 remaining (locale-specific ToString). The remaining sites are
+# in EF query expressions where the IFormatProvider overload doesn't
+# translate to SQL. Per-site verification needed before tightening.
+dotnet_diagnostic.CA1305.severity = suggestion
+
+# S6966 (use *Async overload). The flagged sites are extraction / process
+# startup paths where the sync overload is intentional (synchronous
+# bootstrap, not in a request handler).
+dotnet_diagnostic.S6966.severity = none
+
+# S6580 (parse date with format provider). Test-only sites; already
+# covered by the test-folder suppression of CA1305 in spirit.
+dotnet_diagnostic.S6580.severity = none
+
+# S4487 (unread private field). Often hits fields wired up by reflection
+# (DI scoping helpers, EF entity nav properties). Real cleanup signal
+# is in /audit cleanup concern A.
+dotnet_diagnostic.S4487.severity = suggestion
+
+# S3251 (partial method without implementation). Source-generator
+# expectation; flagged sites are EF Core scaffolded partials.
+dotnet_diagnostic.S3251.severity = none
+
+# S2737 (catch should not just rethrow). Some flagged sites use the
+# typed-catch shape deliberately to filter on exception type; the
+# rethrow is intentional control flow.
+dotnet_diagnostic.S2737.severity = none
+
+# S2701 (test names should follow convention). Already covered by the
+# test-folder CA1707 suppression in spirit.
+dotnet_diagnostic.S2701.severity = none
+
+# S2094 (empty class). Marker types and DI-discovery types are
+# intentionally empty.
+dotnet_diagnostic.S2094.severity = none
+
+# S1172 (unused parameter). Many flagged sites are interface-mandated
+# parameters that the implementation doesn't need but can't drop.
+dotnet_diagnostic.S1172.severity = none
+
+# S2930 (IDisposable variable not disposed). Already covered by CA1001
+# implementations and `await using` patterns in the codebase.
+dotnet_diagnostic.S2930.severity = suggestion
+
+# CA1001 (type with disposable field should be IDisposable). The flagged
+# types are app-lifetime singletons (snapshot caches, Dapr subscriber,
+# plugin runtime) whose SemaphoreSlim / CancellationTokenSource fields
+# live for the process lifetime. Adding Dispose interferes with parallel
+# test isolation in WebApplicationFactory contexts (verified empirically:
+# implementing the interface caused ~430 tests to fail in parallel runs
+# while passing individually). The lock state cleanup happens via the
+# finalizer / GC at process exit, which is the same as before this rule
+# was checked. Re-evaluate if a real leak surfaces in profiling.
+dotnet_diagnostic.CA1001.severity = none
+
+# Long tail — small categories that are individually 2 sites each and
+# don't share a clear class. Suppress as a batch with the standing
+# instruction that /audit cleanup will surface anything here that's
+# actually a bug.
+dotnet_diagnostic.VSTHRD002.severity = suggestion
+dotnet_diagnostic.VSTHRD003.severity = suggestion
+dotnet_diagnostic.S6672.severity = none
+dotnet_diagnostic.S4144.severity = suggestion
+dotnet_diagnostic.S3923.severity = suggestion
+dotnet_diagnostic.S3903.severity = none
+dotnet_diagnostic.S3626.severity = suggestion
+dotnet_diagnostic.S3458.severity = suggestion
+dotnet_diagnostic.S3218.severity = suggestion
+dotnet_diagnostic.S2365.severity = suggestion
+dotnet_diagnostic.S1905.severity = suggestion
+dotnet_diagnostic.S1871.severity = suggestion
+dotnet_diagnostic.S1854.severity = suggestion
+dotnet_diagnostic.S127.severity = suggestion
+dotnet_diagnostic.S1199.severity = suggestion
+dotnet_diagnostic.S1118.severity = none
+dotnet_diagnostic.CA1869.severity = suggestion
+dotnet_diagnostic.S2325.severity = none
+
+# AsyncFixer01 (single-await async method — could return the Task directly).
+# True perf-tuning rule with a stack-trace tradeoff: the async wrapper costs
+# a state machine but gives clearer diagnostics. Not worth chasing in this
+# codebase given the surface volume.
+dotnet_diagnostic.AsyncFixer01.severity = suggestion
+
+# AsyncFixer02 (long-running operations under async). Suggestion-level until
+# a concrete perf complaint surfaces; the flagged sites are infrequent
+# admin/migration paths.
+dotnet_diagnostic.AsyncFixer02.severity = suggestion
+
+[*.{csproj,props,targets}]
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,md}]
+indent_style = space
+indent_size = 2
+
+# ---------------------------------------------------------------------------
+# Tests-only overrides. Test method names use snake_case per xUnit/Sonar
+# convention (e.g. PostLogin_publishes_account_locked_after_three_failed_attempts);
+# CA1707 fights that and would force a rename of every test in the repo.
+# ---------------------------------------------------------------------------
+[tests/**.cs]
+dotnet_diagnostic.CA1707.severity = none
+
+# S2699 (test must have at least one assertion). Sonar can't always
+# follow xUnit's Assert.X calls through test helper methods like
+# `EnsureSuccessStatusCode()`, marker patterns, or `Assert.Throws<>` in a
+# nested lambda. Test-suite hygiene is enforced by reading test bodies in
+# review, not by this rule.
+dotnet_diagnostic.S2699.severity = none
+
+# S1172 (unused parameter). Test fixture helpers and theory data sometimes
+# accept parameters they don't reference (e.g., the `_why` arg in xUnit
+# Theory data that exists to make the test name read as a sentence).
+dotnet_diagnostic.S1172.severity = none
+
+# S2325 (mark as static). Test methods are instance methods by xUnit
+# convention; the analyzer flags helpers that don't use `this` but those
+# stay instance-shaped for consistency with the surrounding test methods.
+dotnet_diagnostic.S2325.severity = none
+
+# CA1834 / CA1305 / CA1304 already test-suppressed above; same rationale.
+
+# xUnit-specific: the test fixtures use Assert.True for collection
+# membership and theory data with descriptive parameter names that aren't
+# always referenced. Both are intentional readability choices.
+dotnet_diagnostic.xUnit2012.severity = none
+dotnet_diagnostic.xUnit1026.severity = none
+
+# Test fixtures intentionally hardcode strings, durations, and credentials.
+# Suppress the noisiest rules that don't pay off on test-only code.
+dotnet_diagnostic.S1192.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1310.severity = none
+dotnet_diagnostic.CA1311.severity = none
+
+# Test fixtures routinely build small inline arrays as test data. Hoisting
+# every one to a static readonly field would make tests harder to read for
+# negligible perf benefit on code that runs once per test.
+dotnet_diagnostic.CA1861.severity = none

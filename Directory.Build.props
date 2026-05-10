@@ -1,0 +1,62 @@
+<Project>
+
+    <!-- Repo-root build defaults inherited by every csproj under /src and
+         /tests. The /plugins folder has its own Directory.Build.props that
+         inherits from this one (MSBuild walks up to the nearest props file
+         per directory; we don't have to do anything special to chain them).
+
+         Analyzer policy:
+         - All four analyzer packages run on every build today. The user
+           opted to start with build-time analysis everywhere; if it turns
+           out to slow inner loops too much, the standard mitigation is
+           wrapping <RunAnalyzersDuringBuild> in a Condition="'$(CI)' != 'true'"
+           switch so devs opt out locally while CI keeps them.
+         - Warnings stay warnings (TreatWarningsAsErrors NOT set). The intent
+           is signal, not failing the build on day one — we have a clean
+           historical baseline so anything new will be an obvious diff.
+         - Per-rule tuning lives in the repo-root .editorconfig. Rules with
+           known false-positive density on this codebase shape are turned
+           down there; the rest run at default severity. -->
+
+    <PropertyGroup>
+        <!-- Built-in .NET analyzers. The SDK auto-includes NetAnalyzers
+             since .NET 5; pinning AnalysisLevel makes the rule selection
+             explicit and stable across SDK upgrades. EnforceCodeStyleInBuild
+             surfaces dotnet-format-style issues during compilation. -->
+        <AnalysisLevel>latest</AnalysisLevel>
+        <AnalysisMode>Recommended</AnalysisMode>
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Threading + async correctness. VSTHRD002 (sync-over-async),
+             VSTHRD100 (async void), VSTHRD110 (observe async results) are
+             the high-signal rules; would have caught FlowableClient.Result
+             at compile time. -->
+        <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="17.14.15">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+
+        <!-- Narrow async-pattern fixer. Catches missing await, the wrong
+             async-void overload, sync-over-async patterns NetAnalyzers
+             doesn't cover. Small ruleset, low overhead. -->
+        <PackageReference Include="AsyncFixer" Version="2.1.0">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+
+        <!-- Broad ruleset (~400 rules) covering security, correctness,
+             reliability, maintainability. The expensive analyzer in the
+             pack — most build-time cost is here. Per-rule tuning in
+             .editorconfig dampens the known-noisy rules.
+             SonarAnalyzer ships frequent four-segment versions (Sonar's
+             internal build numbers); pin to a real published one rather
+             than a placeholder so NuGet doesn't emit NU1603 substitutions. -->
+        <PackageReference Include="SonarAnalyzer.CSharp" Version="10.25.0.139117">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+</Project>

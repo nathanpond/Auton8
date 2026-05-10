@@ -127,7 +127,7 @@ public sealed class EntityEdgeWriterTests
     public async Task SyncUserEdges_NoChange_DoesNothing()
     {
         await using var database = await PostgresTestDatabase.CreateAsync();
-        var writer = database.CreateEdgeWriter();
+        var writer = PostgresTestDatabase.CreateEdgeWriter();
         var typeStore = database.CreateRecordTypeStore();
         var recordStore = database.CreateRecordStore();
 

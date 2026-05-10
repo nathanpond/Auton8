@@ -232,7 +232,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
     public EntityEdgeReconciler CreateEdgeReconciler() => new(CreateDbContextFactory());
 
-    public IEntityEdgeWriter CreateEdgeWriter() => new EntityEdgeWriter();
+    public static IEntityEdgeWriter CreateEdgeWriter() => new EntityEdgeWriter();
 
     private AuthCacheBumper CreateBumper() => new(CreateDbContextFactory());
 

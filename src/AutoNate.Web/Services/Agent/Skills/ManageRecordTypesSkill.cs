@@ -905,7 +905,7 @@ public sealed class ManageRecordTypesSkill : IAgentSkill
     private static string BuildCreateTypeSummary(string shortCode, string name, IReadOnlyList<FieldInput> fields)
     {
         var sb = new StringBuilder();
-        sb.Append("Create record type ").Append(shortCode).Append(": '").Append(name).Append("'");
+        sb.Append("Create record type ").Append(shortCode).Append(": '").Append(name).Append('\'');
         if (fields.Count > 0)
         {
             sb.Append(" with ").Append(fields.Count).Append(" field").Append(fields.Count == 1 ? "" : "s");

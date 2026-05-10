@@ -3,6 +3,7 @@ using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Events;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace AutoNate.Web.Services.SystemIssues.Detectors;
 
@@ -79,7 +80,7 @@ public sealed class AuditOutboxDeadLetterDetector(
                     ? $"Row {row.Id} reached MaxAttempts ({maxAttempts}) without dispatching."
                     : $"Row {row.Id} reached MaxAttempts ({maxAttempts}). Last error: {row.LastError}",
                 RelatedEntityKind: "audit_outbox",
-                RelatedEntityId: row.Id.ToString(),
+                RelatedEntityId: row.Id.ToString(CultureInfo.InvariantCulture),
                 FactsJson: facts,
                 // Opt this issue into auto-remediation immediately. The
                 // dispatcher's next tick will pick it up and route to

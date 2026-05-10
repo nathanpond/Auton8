@@ -3,6 +3,7 @@ using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Globalization;
 
 namespace AutoNate.Web.Plugins;
 
@@ -313,7 +314,7 @@ internal sealed class PluginMenus : IPluginMenus
         cmd.Parameters.AddWithValue("@menu_id", menuId);
         cmd.Parameters.AddWithValue("@parent_id", (object?)parentId ?? DBNull.Value);
         var result = cmd.ExecuteScalar();
-        return Convert.ToInt32(result);
+        return Convert.ToInt32(result, CultureInfo.InvariantCulture);
     }
 
     // Bulk-removal hook for the lifecycle code. Lives here so the SQL stays in

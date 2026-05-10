@@ -80,7 +80,7 @@ public sealed class DaprStreamingSubscriber(
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _lifetimeCts?.Cancel();
+        if (_lifetimeCts is not null) await _lifetimeCts.CancelAsync();
 
         if (_watchdogTask is not null)
         {

@@ -134,7 +134,6 @@ public static class SelectorParser
     private static string ParseQuoted(ref Cursor c)
     {
         c.Expect('"');
-        var start = c.Position;
         var builder = new System.Text.StringBuilder();
         while (true)
         {

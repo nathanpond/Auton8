@@ -1222,7 +1222,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             .ToArray();
     }
 
-    private async Task<string> ReadDeploymentIdAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<string> ReadDeploymentIdAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var payload = await DeserializeAsync<FlowableDeploymentResponse>(response, cancellationToken);
         return payload.Id ?? string.Empty;
@@ -1348,7 +1348,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         }
     }
 
-    private async Task EnsureSuccessAsync(HttpResponseMessage response, string operation)
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response, string operation)
     {
         if (response.IsSuccessStatusCode)
         {

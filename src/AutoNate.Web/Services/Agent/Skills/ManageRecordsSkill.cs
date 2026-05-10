@@ -151,7 +151,7 @@ public sealed class ManageRecordsSkill : IAgentSkill
                     metadata = new
                     {
                         status,
-                        dueDate = dueDate?.ToString("yyyy-MM-dd"),
+                        dueDate = dueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                         assigneeIds = assigneeIds?.Select(g => g.ToString()).ToArray()
                     },
                     validation = new
@@ -292,8 +292,8 @@ public sealed class ManageRecordsSkill : IAgentSkill
                 {
                     key = "(dueDate)",
                     displayName = "Due date",
-                    before = record.DueDate?.ToString("yyyy-MM-dd"),
-                    after = dueOpt.Value?.ToString("yyyy-MM-dd")
+                    before = record.DueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    after = dueOpt.Value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
                 });
             }
             if (assigneeIds is not null && !record.AssigneeIds.SequenceEqual(assigneeIds))
@@ -465,8 +465,8 @@ public sealed class ManageRecordsSkill : IAgentSkill
     private static string BuildCreateSummary(RecordType type, string name, JsonElement values, string? status)
     {
         var sb = new StringBuilder();
-        sb.Append("Create ").Append(type.ShortCode).Append(": '").Append(name).Append("'");
-        if (!string.IsNullOrEmpty(status)) sb.Append(" [status=").Append(status).Append("]");
+        sb.Append("Create ").Append(type.ShortCode).Append(": '").Append(name).Append('\'');
+        if (!string.IsNullOrEmpty(status)) sb.Append(" [status=").Append(status).Append(']');
 
         if (values.ValueKind == JsonValueKind.Object)
         {

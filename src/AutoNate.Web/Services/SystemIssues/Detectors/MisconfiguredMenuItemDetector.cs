@@ -212,7 +212,7 @@ public sealed class MisconfiguredMenuItemDetector(
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return 0;
         var id = reader.GetGuid(0);
-        var displayName = reader.IsDBNull(1) ? "(unnamed)" : reader.GetString(1);
+        var displayName = await reader.IsDBNullAsync(1, cancellationToken) ? "(unnamed)" : reader.GetString(1);
         await reader.CloseAsync();
         await recorder.RecordAsync(buildIssue(id, displayName), cancellationToken);
         problems.Add(problemTag);
@@ -233,8 +233,8 @@ public sealed class MisconfiguredMenuItemDetector(
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return 0;
         var id = reader.GetGuid(0);
-        var displayName = reader.IsDBNull(1) ? "(unnamed)" : reader.GetString(1);
-        var extra = reader.IsDBNull(2) ? "" : reader.GetString(2);
+        var displayName = await reader.IsDBNullAsync(1, cancellationToken) ? "(unnamed)" : reader.GetString(1);
+        var extra = await reader.IsDBNullAsync(2, cancellationToken) ? "" : reader.GetString(2);
         await reader.CloseAsync();
         await recorder.RecordAsync(buildIssue(id, displayName, extra), cancellationToken);
         problems.Add(problemTag);
@@ -348,7 +348,7 @@ public sealed class MisconfiguredMenuItemDetector(
         while (await reader.ReadAsync(cancellationToken))
         {
             var id = reader.GetGuid(0);
-            var displayName = reader.IsDBNull(1) ? "(unnamed)" : reader.GetString(1);
+            var displayName = await reader.IsDBNullAsync(1, cancellationToken) ? "(unnamed)" : reader.GetString(1);
             var fingerprint = fingerprintPrefix + id;
             seenThisTick.Add(fingerprint);
             await recorder.RecordAsync(buildIssue(id, displayName), cancellationToken);
@@ -371,8 +371,8 @@ public sealed class MisconfiguredMenuItemDetector(
         while (await reader.ReadAsync(cancellationToken))
         {
             var id = reader.GetGuid(0);
-            var displayName = reader.IsDBNull(1) ? "(unnamed)" : reader.GetString(1);
-            var extra = reader.IsDBNull(2) ? "" : reader.GetString(2);
+            var displayName = await reader.IsDBNullAsync(1, cancellationToken) ? "(unnamed)" : reader.GetString(1);
+            var extra = await reader.IsDBNullAsync(2, cancellationToken) ? "" : reader.GetString(2);
             var fingerprint = fingerprintPrefix + id;
             seenThisTick.Add(fingerprint);
             await recorder.RecordAsync(buildIssue(id, displayName, extra), cancellationToken);

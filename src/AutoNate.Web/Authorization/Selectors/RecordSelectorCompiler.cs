@@ -31,7 +31,7 @@ public sealed class RecordSelectorCompiler : SelectorCompilerBase<RecordEntity>
         }
     }
 
-    private Expression<Func<RecordEntity, bool>> CompileTag(TagExpr tag, CompilationContext context)
+    private static Expression<Func<RecordEntity, bool>> CompileTag(TagExpr tag, CompilationContext context)
     {
         return tag.Tag.ToLowerInvariant() switch
         {

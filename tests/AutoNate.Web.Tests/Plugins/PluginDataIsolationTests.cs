@@ -37,7 +37,6 @@ public sealed class PluginDataIsolationTests
             // Use the registry to build a real per-plugin NpgsqlDataSource so
             // we exercise the same code path the runtime uses.
             var schemaA = PluginSchemaProvisioner.SchemaNameFor(pluginA.Code);
-            var schemaB = PluginSchemaProvisioner.SchemaNameFor(pluginB.Code);
 
             // Plugin A: create a table in its own schema as its role.
             var dataA = registry.GetDataSource(pluginA.Code, pluginA.EncryptedPassword);

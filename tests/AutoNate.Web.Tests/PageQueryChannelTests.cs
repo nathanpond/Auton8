@@ -61,7 +61,7 @@ public sealed class PageQueryChannelTests
 
         using var cts = new CancellationTokenSource();
         var ask = channel.AskAsync("topic", null, cts.Token);
-        cts.Cancel();
+        await cts.CancelAsync();
 
         var result = await ask;
         var fail = Assert.IsType<PageQueryResult.Failure>(result);

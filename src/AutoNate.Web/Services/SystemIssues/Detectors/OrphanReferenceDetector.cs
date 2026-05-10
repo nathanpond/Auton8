@@ -83,7 +83,7 @@ public sealed class OrphanReferenceDetector(
         {
             var notificationId = reader.GetGuid(0);
             var userId = reader.GetGuid(1);
-            var recordId = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var recordId = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
             await OpenIssueAsync(
                 fingerprint: FingerprintNotification + notificationId,
                 title: "Orphaned record-assignment notification",
