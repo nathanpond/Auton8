@@ -97,6 +97,11 @@ public sealed class EfCoreRecordCommentStore(IDbContextFactory<AutoNateDbContext
         var entity = await dbContext.RecordComments.SingleOrDefaultAsync(c => c.Id == commentId, cancellationToken)
             ?? throw new RecordCommentNotFoundException(commentId);
 
+        if (entity.AuthorId != actorId)
+        {
+            throw new RecordCommentForbiddenException(commentId);
+        }
+
         if (entity.IsDeleted)
         {
             throw new RecordCommentValidationException("Cannot edit a deleted comment.");
@@ -138,6 +143,11 @@ public sealed class EfCoreRecordCommentStore(IDbContextFactory<AutoNateDbContext
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await dbContext.RecordComments.SingleOrDefaultAsync(c => c.Id == commentId, cancellationToken)
             ?? throw new RecordCommentNotFoundException(commentId);
+
+        if (entity.AuthorId != actorId)
+        {
+            throw new RecordCommentForbiddenException(commentId);
+        }
 
         if (entity.IsDeleted)
         {

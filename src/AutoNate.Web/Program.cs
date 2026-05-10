@@ -205,10 +205,23 @@ builder.Services.AddSingleton<IDaprStreamingSubscriber>(sp => sp.GetRequiredServ
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DaprStreamingSubscriber>());
 builder.Services.AddHostedService<AutoNate.Web.Services.Workflow.WorkflowExecutionErrorRecorder>();
 builder.Services.AddSingleton<AutoNate.Web.Services.Workflow.WorkflowTaskCompletionRecorder>();
-builder.Services.AddDbContextFactory<AutoNateDbContext>(options =>
+builder.Services.AddSingleton<AutoNate.Web.Persistence.DbConnectionFailureLoggingInterceptor>();
+builder.Services.AddDbContextFactory<AutoNateDbContext>((sp, options) =>
+{
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("Default")
-        ?? throw new InvalidOperationException("Connection string 'Default' is required.")));
+        ?? throw new InvalidOperationException("Connection string 'Default' is required."));
+    options.AddInterceptors(
+        sp.GetRequiredService<AutoNate.Web.Persistence.DbConnectionFailureLoggingInterceptor>());
+    // EF Core's RelationalEventId.ConnectionError fires for any exception
+    // during connection-open, including TaskCanceledException when a SPA
+    // request is aborted mid-handshake (tab close / navigation / refetch
+    // bursts). Those produce the bulk of the `fail: 20004` noise but aren't
+    // real faults. Silence the diagnostic event entirely; our interceptor
+    // logs real (non-cancelled) failures at Warning with full detail.
+    options.ConfigureWarnings(w =>
+        w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.ConnectionError));
+});
 builder.Services.AddOptions<AutoNate.Web.Authorization.AuthorizationOptions>()
     .BindConfiguration(AutoNate.Web.Authorization.AuthorizationOptions.SectionName);
 foreach (var entityType in CoreEntityTypes.All)
@@ -219,18 +232,10 @@ builder.Services.AddSingleton<IEntityRegistry, EntityRegistry>();
 builder.Services.AddSingleton<IEntityEdgeWriter, EntityEdgeWriter>();
 
 builder.Services.AddSingleton<ISelectorCompiler, RecordSelectorCompiler>();
-builder.Services.AddSingleton<ISelectorCompiler>(_ =>
-    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Role>(
-        EntityKinds.Role, x => x.Id));
-builder.Services.AddSingleton<ISelectorCompiler>(_ =>
-    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Group>(
-        EntityKinds.Group, x => x.Id));
-builder.Services.AddSingleton<ISelectorCompiler>(_ =>
-    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.RecordType>(
-        EntityKinds.RecordType, x => x.Id));
-builder.Services.AddSingleton<ISelectorCompiler>(_ =>
-    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.WorkflowModel>(
-        EntityKinds.WorkflowModel, x => x.Id));
+builder.Services.AddSingleton<ISelectorCompiler, RoleSelectorCompiler>();
+builder.Services.AddSingleton<ISelectorCompiler, GroupSelectorCompiler>();
+builder.Services.AddSingleton<ISelectorCompiler, RecordTypeSelectorCompiler>();
+builder.Services.AddSingleton<ISelectorCompiler, WorkflowModelSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -876,12 +881,23 @@ app.MapAgentEndpoints();
     });
 }
 
-app.MapStaticAssets();
+// MapStaticAssets and MapFallbackToFile both depend on WebRootPath (wwwroot/),
+// which only exists when the Vite build has run. In Debug the .csproj sets
+// BuildSpa=false (devs run Vite separately and serve the SPA from its own dev
+// port, with /api proxied here), so the directory is absent — wiring the
+// middleware would just log a startup warning and a 404 on every fallback.
+// In Release/publish the SPA bundle lands in wwwroot/, so the directory
+// exists and both calls do their job. If the directory is missing in Release
+// that's a real packaging bug; falling through to a clear 404 surfaces it.
+if (Directory.Exists(app.Environment.WebRootPath))
+{
+    app.MapStaticAssets();
 
-// React SPA is the only UI now and is mounted at the site root. Any URL that isn't a
-// physical file or an explicitly-mapped endpoint falls back to the SPA index so
-// react-router can pick it up client-side.
-app.MapFallbackToFile("{*path:nonfile}", "index.html");
+    // React SPA is the only UI now and is mounted at the site root. Any URL that isn't a
+    // physical file or an explicitly-mapped endpoint falls back to the SPA index so
+    // react-router can pick it up client-side.
+    app.MapFallbackToFile("{*path:nonfile}", "index.html");
+}
 
 app.Run();
 

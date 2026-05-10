@@ -1,4 +1,6 @@
 using AutoNate.Plugins.Abstractions;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Workflow.Behaviors;
 
 namespace AutoNate.Web.Endpoints;
@@ -46,10 +48,11 @@ public static class WorkflowBehaviorEndpoints
         .DisableAntiforgery()
         .AddEndpointFilter<SharedSecretEndpointFilter>();
 
-        // /catalog (GET) is for the workflow studio: authenticated workflow
-        // authors enumerating available behaviors. Reuse the same auth gate
-        // as the workflow listing endpoint — anyone who can edit workflow
-        // models can see the behavior catalog.
+        // /catalog (GET) is for the workflow studio: authors enumerating
+        // available behaviors when wiring them into a BPMN node. The studio
+        // is an authoring surface, so we gate on WorkflowModel:Edit to match
+        // the create/upsert endpoints — view-only callers don't need the
+        // behavior list.
         var catalogGroup = app.MapGroup("/api/workflow-behaviors")
             .RequireAuthorization();
 
@@ -60,7 +63,7 @@ public static class WorkflowBehaviorEndpoints
                 .OrderBy(entry => entry.DisplayName, StringComparer.Ordinal)
                 .ToArray();
             return Results.Ok(entries);
-        });
+        }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.Edit);
 
         return app;
     }

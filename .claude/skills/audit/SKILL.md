@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run a focused codebase audit. Sub-audits today are `security`, `performance`, `stability`, `cleanup`. Type `/audit` with no argument (or `/audit --help`) to see the current menu. Designed as a dispatcher so adding a new audit type only requires creating a sibling `audit-<name>` skill and a one-line entry below.
+description: Run a focused codebase audit. Sub-audits today are `security`, `authorization`, `performance`, `stability`, `cleanup`. Type `/audit` with no argument (or `/audit --help`) to see the current menu. Designed as a dispatcher so adding a new audit type only requires creating a sibling `audit-<name>` skill and a one-line entry below.
 ---
 
 # /audit dispatcher
@@ -12,6 +12,7 @@ description: Run a focused codebase audit. Sub-audits today are `security`, `per
 | Name | What it checks |
 |---|---|
 | `security` | OWASP-shaped checklist tailored to AutoNate: CSRF posture (especially pre-auth endpoints), missing/incorrect endpoint authorization, hardcoded secrets, SQL/path/command injection, unsafe deserialization, open redirect, mass assignment, plugin-load isolation, cookie + TLS posture. |
+| `authorization` | Deep dive on the authorization layer: gate-presence on every endpoint, comment/code mismatches near auth filters, EntityKind action vocabulary vs. enforcement, selector-compiler coverage vs. declared tags, AuthorizedInHandler/OpenToAuthenticated rationale review, DisableAntiforgery without permission filter, AllowAnonymous justifications, per-kind enforcement test coverage. |
 | `performance` | Hot-path scaling: N+1 queries, load-all-then-filter, missing/unused indexes, per-request DB calls that should be cached, sync-over-async, unbounded materialization, threadpool starvation. |
 | `stability` | Crash/hang/leak/silent-failure surface: async void, BackgroundService loops without try/catch, swallowed exceptions, fire-and-forget Task.Run, IDisposable misuse, race conditions on singleton state, missing timeouts/cancellation, cancellation-token propagation. |
 | `cleanup` | Maintenance debt: dead code (C# + TS, with mandatory verification protocol), files that don't belong in source control, stale comments referencing renamed/removed APIs, duplicated helpers, TODO/FIXME markers in shipped paths, skill/code drift, broken file references, stale auto-memory entries. |
@@ -25,15 +26,16 @@ The user invoked this skill with the trailing argument string captured by the ha
 2. **A known sub-audit** — invoke the matching skill via the `Skill` tool:
 
    ```
-   Skill(skill="audit-security")     # for /audit security
-   Skill(skill="audit-performance")  # for /audit performance
-   Skill(skill="audit-stability")    # for /audit stability
-   Skill(skill="audit-cleanup")      # for /audit cleanup
+   Skill(skill="audit-security")        # for /audit security
+   Skill(skill="audit-authorization")   # for /audit authorization
+   Skill(skill="audit-performance")     # for /audit performance
+   Skill(skill="audit-stability")       # for /audit stability
+   Skill(skill="audit-cleanup")         # for /audit cleanup
    ```
 
    The sub-skill's instructions take over from there. Pass any remaining arguments through if the sub-audit accepts them (e.g. `/audit security --since=v1.4` would forward `--since=v1.4`).
 
-3. **An unknown sub-audit** — don't guess. Print the available list, suggest the closest match if one is obvious (Levenshtein-ish judgment is fine; `secur` → `security`, `perf` → `performance`, `clean` → `cleanup`), and stop.
+3. **An unknown sub-audit** — don't guess. Print the available list, suggest the closest match if one is obvious (Levenshtein-ish judgment is fine; `secur` → `security`, `auth` → `authorization`, `perf` → `performance`, `clean` → `cleanup`), and stop.
 
 ## Adding a new sub-audit
 

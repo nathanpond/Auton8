@@ -64,9 +64,11 @@ export const APP_ROUTES: AppRoute[] = [
   // Notifications inbox (per-user; not a configurable page template)
   { path: "notifications", element: protect(<Notifications />) },
 
-  // Forms feature: dev preview (draft) and public render (published).
-  // Both require an authenticated user; the public render is also gated
-  // server-side by `site_available`.
+  // Forms feature: dev preview (draft) and runtime render (published).
+  // Both require an authenticated user; the runtime render is additionally
+  // gated server-side by `site_available`. The "public" naming on the
+  // FormPublicView component / `/api/forms/public/...` endpoint is legacy
+  // and does NOT mean anonymous — see FormEndpoints.cs.
   { path: "formdev/:shortCode", element: protect(<FormDevView />) },
   { path: "form/:shortCode", element: protect(<FormPublicView />) },
 

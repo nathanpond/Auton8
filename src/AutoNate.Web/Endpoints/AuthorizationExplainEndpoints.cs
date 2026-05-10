@@ -1,4 +1,5 @@
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Events;
@@ -63,7 +64,8 @@ public static class AuthorizationExplainEndpoints
                     g.Effect.ToString().ToLowerInvariant(),
                     g.Matched,
                     g.Error)).ToList()));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequireKindPermission(EntityKinds.SiteConfig, Actions.View);
 
         return app;
     }

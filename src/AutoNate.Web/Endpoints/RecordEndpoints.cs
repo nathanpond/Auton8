@@ -120,7 +120,7 @@ public static class RecordEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message, errors = ex.Errors });
             }
-        });
+        }).AuthorizedInHandler("filters via store.SearchAsync(actor) which applies Record:View grants");
 
         group.MapGet("/assigned-to-me", async (
             int? page,
@@ -165,7 +165,7 @@ public static class RecordEndpoints
                 },
                 cancellationToken);
             return Results.Ok(ToPageDto(result));
-        });
+        }).AuthorizedInHandler("returns records assigned to the current actor only; store filter is actor-scoped");
 
         group.MapGet("/{id:guid}", async (
             Guid id, IRecordStore store,
@@ -206,7 +206,7 @@ public static class RecordEndpoints
                 details: new { lookupBy = "key" },
                 cancellationToken);
             return Results.Ok(ToDto(record));
-        });
+        }).AuthorizedInHandler("inline AuthorizeAsync(Record, View) on the looked-up record's id; 404 on deny so existence isn't probed by key");
 
         group.MapPost("/", async (
             CreateRecordRequest request,
@@ -340,7 +340,7 @@ public static class RecordEndpoints
                 details: new { fieldKey, take = take ?? 100, resultCount = rows.Count },
                 cancellationToken);
             return Results.Ok(rows.Select(ToDto).ToArray());
-        });
+        }).RequirePermission(EntityKinds.Record, Actions.View);
 
         group.MapPost("/search", async (
             SearchRecordsRequest request,
@@ -399,7 +399,8 @@ public static class RecordEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message, errors = ex.Errors });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler("filters via store.SearchAsync(actor) which applies Record:View grants");
 
         return app;
     }

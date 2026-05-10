@@ -97,6 +97,8 @@ public interface IRecordEdgeStore
 {
     Task<RecordEdge> CreateAsync(CreateRecordEdgeInput input, Guid actorId, CancellationToken cancellationToken = default);
 
+    Task<RecordEdge?> GetAsync(Guid edgeId, CancellationToken cancellationToken = default);
+
     Task DeleteAsync(Guid edgeId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<RecordEdge>> ListForRecordAsync(

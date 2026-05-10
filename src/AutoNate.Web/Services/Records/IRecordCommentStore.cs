@@ -12,6 +12,12 @@ public sealed class RecordCommentValidationException : Exception
     public RecordCommentValidationException(string message) : base(message) { }
 }
 
+public sealed class RecordCommentForbiddenException : Exception
+{
+    public RecordCommentForbiddenException(Guid commentId)
+        : base($"Actor is not permitted to mutate comment '{commentId}'.") { }
+}
+
 public interface IRecordCommentStore
 {
     Task<IReadOnlyList<RecordComment>> ListForRecordAsync(

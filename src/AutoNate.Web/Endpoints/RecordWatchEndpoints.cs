@@ -100,7 +100,7 @@ public static class RecordWatchEndpoints
                 cancellationToken);
 
             return Results.Ok(new WatchedRecordsPageDto(items, totalCount, resolvedPage, resolvedPageSize));
-        });
+        }).AuthorizedInHandler("returns the current actor's watched records, additionally filtered via FilterQueryAsync(Record, View)");
 
         // Whether the current user is watching the given record.
         group.MapGet("/{id:guid}/watch", async (

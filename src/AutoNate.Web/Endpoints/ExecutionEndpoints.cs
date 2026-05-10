@@ -4,6 +4,8 @@ using System.Xml.Linq;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Models;
 using AutoNate.Web.Models.Forms;
 using AutoNate.Web.Persistence;
@@ -24,12 +26,16 @@ public static class ExecutionEndpoints
             .RequireAuthorization();
 
         executions.MapGet("/", async (
+            HttpContext http,
             IFlowableClient flowable,
+            IAuthorizer authorizer,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var list = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
+            var rawList = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
+            var list = await FilterVisibleExecutionsAsync(
+                rawList, http.User, authorizer, dbFactory, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionListViewed,
@@ -69,7 +75,7 @@ public static class ExecutionEndpoints
                     : execution with { Status = "Errored" })
                 .ToArray();
             return Results.Ok(projected);
-        });
+        }).AuthorizedInHandler("filters via FilterVisibleExecutionsAsync(WorkflowExecution, View)");
 
         // Paged variant — same { items, totalCount } shape the SPA's
         // DataTable expects. The flowable client returns the full list per
@@ -83,12 +89,16 @@ public static class ExecutionEndpoints
             string? sortDir,
             string? status,
             string? workflowModelId,
+            HttpContext http,
             IFlowableClient flowable,
+            IAuthorizer authorizer,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            var rawList = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
+            var unfiltered = await flowable.GetWorkflowExecutionsAsync(cancellationToken);
+            var rawList = await FilterVisibleExecutionsAsync(
+                unfiltered, http.User, authorizer, dbFactory, cancellationToken);
 
             // Compute Errored overlay the same way the unpaged endpoint does.
             IReadOnlyList<WorkflowExecutionSummary> withStatus;
@@ -185,7 +195,7 @@ public static class ExecutionEndpoints
                 cancellationToken);
 
             return Results.Ok(new { items, totalCount });
-        });
+        }).AuthorizedInHandler("filters via FilterVisibleExecutionsAsync(WorkflowExecution, View)");
 
         executions.MapGet("/{processInstanceId}/diagram", async (
             string processInstanceId,
@@ -728,7 +738,7 @@ public static class ExecutionEndpoints
                 details: new { resultCount = list.Count },
                 cancellationToken);
             return Results.Ok(list);
-        });
+        }).AuthorizedInHandler("returns Flowable tasks assigned to the current actor only");
 
         // Tasks assigned to anyone the actor supervises (entity_edges,
         // edge_kind='supervisor', from = actor). Excludes the actor's own
@@ -768,7 +778,7 @@ public static class ExecutionEndpoints
                 details: new { resultCount = list.Count, superviseeCount = supervisees.Count },
                 cancellationToken);
             return Results.Ok(list);
-        });
+        }).AuthorizedInHandler("returns tasks assigned to the actor's supervisees (entity_edges supervisor walk) only");
 
         // Drives the SPA's task-action UI: pulls together everything needed to
         // render a task — the BPMN-encoded userForm config (mode + optional
@@ -911,6 +921,61 @@ public static class ExecutionEndpoints
         IReadOnlyList<GatewayChoiceDto>? GatewayChoices);
 
     public sealed record GatewayChoiceDto(string FlowId, string Label, string? Description);
+
+    // Filters the raw Flowable execution list down to the rows the actor can
+    // View. We evaluate each row's facts in-memory against the actor's grants,
+    // mirroring the WorkflowExecutionInstanceAuthorizer logic but driven by
+    // the facts already on the summary so we don't pay N Flowable round-trips.
+    private static async Task<IReadOnlyList<WorkflowExecutionSummary>> FilterVisibleExecutionsAsync(
+        IReadOnlyList<WorkflowExecutionSummary> executions,
+        ClaimsPrincipal actor,
+        IAuthorizer authorizer,
+        IDbContextFactory<AutoNateDbContext> dbFactory,
+        CancellationToken cancellationToken)
+    {
+        if (executions.Count == 0) return executions;
+
+        var actorIdRaw = actor.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(actorIdRaw, out var actorId))
+        {
+            return Array.Empty<WorkflowExecutionSummary>();
+        }
+
+        var outboundEdges = await ActorOutboundUserEdges.LoadAsync(dbFactory, actorId, cancellationToken);
+        var evaluator = new InMemorySelectorEvaluator(actorId, outboundEdges);
+
+        var visible = new List<WorkflowExecutionSummary>(executions.Count);
+        foreach (var execution in executions)
+        {
+            var facts = BuildFacts(execution);
+            var allowed = await authorizer.IsAuthorizedAsync(
+                actor,
+                EntityKinds.WorkflowExecution,
+                Actions.View,
+                ast => evaluator.Matches(ast, execution.Id, facts),
+                cancellationToken);
+            if (allowed)
+            {
+                visible.Add(execution);
+            }
+        }
+        return visible;
+    }
+
+    private static IReadOnlyDictionary<string, string?> BuildFacts(WorkflowExecutionSummary execution) =>
+        new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["processkey"] = ExtractProcessKey(execution.ProcessDefinitionId),
+            ["definitionkey"] = execution.ProcessDefinitionId,
+            ["startedby"] = execution.StartUserId
+        };
+
+    private static string? ExtractProcessKey(string? processDefinitionId)
+    {
+        if (string.IsNullOrEmpty(processDefinitionId)) return null;
+        var sep = processDefinitionId.IndexOf(':');
+        return sep > 0 ? processDefinitionId[..sep] : processDefinitionId;
+    }
 
     private static async Task<string?> ResolveBpmnXmlForProcessDefinitionAsync(
         IDbContextFactory<AutoNateDbContext> dbFactory,

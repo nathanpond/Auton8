@@ -15,10 +15,12 @@ public static class RequirePermissionExtensions
         string action,
         string routeName = "id")
     {
-        return builder.AddEndpointFilter(new RequirePermissionFilter(
-            kind,
-            action,
-            ctx => ctx.HttpContext.GetRouteValue(routeName)?.ToString()));
+        return builder
+            .AddEndpointFilter(new RequirePermissionFilter(
+                kind,
+                action,
+                ctx => ctx.HttpContext.GetRouteValue(routeName)?.ToString()))
+            .WithMetadata(new RequirePermissionMetadata(kind, action, isKindLevel: false));
     }
 
     public static RouteHandlerBuilder RequirePermission(
@@ -27,7 +29,9 @@ public static class RequirePermissionExtensions
         string action,
         Func<EndpointFilterInvocationContext, string?> idFrom)
     {
-        return builder.AddEndpointFilter(new RequirePermissionFilter(kind, action, idFrom));
+        return builder
+            .AddEndpointFilter(new RequirePermissionFilter(kind, action, idFrom))
+            .WithMetadata(new RequirePermissionMetadata(kind, action, isKindLevel: false));
     }
 
     public static RouteHandlerBuilder RequireKindPermission(
@@ -35,6 +39,8 @@ public static class RequirePermissionExtensions
         string kind,
         string action)
     {
-        return builder.AddEndpointFilter(new RequireKindPermissionFilter(kind, action));
+        return builder
+            .AddEndpointFilter(new RequireKindPermissionFilter(kind, action))
+            .WithMetadata(new RequirePermissionMetadata(kind, action, isKindLevel: true));
     }
 }

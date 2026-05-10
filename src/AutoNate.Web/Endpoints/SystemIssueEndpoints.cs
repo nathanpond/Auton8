@@ -190,7 +190,8 @@ public static class SystemIssueEndpoints
             }
             var result = await detector.ScanItemAsync(report.MenuItemId, ct);
             return Results.Ok(new MenuRenderFailureResponse(result.Matched, result.Problems));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .OpenToAuthenticated("any signed-in user hitting a broken menu item should be able to report it; the detector re-validates the menu item server-side so the report can't be used to fabricate issues");
 
         return app;
     }

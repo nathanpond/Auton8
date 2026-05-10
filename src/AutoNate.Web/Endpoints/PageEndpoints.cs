@@ -1,3 +1,4 @@
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Menus;
 using AutoNate.Web.Services.SiteSettings;
@@ -8,7 +9,9 @@ public static class PageEndpoints
 {
     public static IEndpointRouteBuilder MapPageEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/pages").RequireAuthorization();
+        var group = app.MapGroup("/api/pages")
+            .RequireAuthorization()
+            .AuthorizedInHandler("store.ListPagesAsync / GetPageByPathAsync filter pages by per-page permission_required against the actor's grants");
 
         group.MapGet("/", async (
             HttpContext http,

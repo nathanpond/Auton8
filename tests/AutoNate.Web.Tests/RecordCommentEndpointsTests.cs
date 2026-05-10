@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AutoNate.Web.Endpoints;
+using RecordCommentEntity = AutoNate.Web.Persistence.Scaffolded.RecordComment;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -118,6 +119,31 @@ public sealed class RecordCommentEndpointsTests
     }
 
     [Fact]
+    public async Task PatchComment_AsNonAuthor_Returns403()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var commentId = await fixture.SeedCommentAsAsync(Guid.NewGuid(), "not yours");
+
+        var response = await fixture.Client.PatchAsJsonAsync(
+            $"/api/records/{fixture.RecordId}/comments/{commentId}",
+            new UpdateCommentRequest("changed"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteComment_AsNonAuthor_Returns403()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var commentId = await fixture.SeedCommentAsAsync(Guid.NewGuid(), "not yours");
+
+        var response = await fixture.Client.DeleteAsync(
+            $"/api/records/{fixture.RecordId}/comments/{commentId}");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetRevisions_OnUnknownComment_Returns404()
     {
         await using var fixture = await TestFixture.CreateAsync();
@@ -181,6 +207,24 @@ public sealed class RecordCommentEndpointsTests
             var comment = await response.Content.ReadFromJsonAsync<CommentDto>();
             Assert.NotNull(comment);
             return comment;
+        }
+
+        public async Task<Guid> SeedCommentAsAsync(Guid authorId, string body)
+        {
+            await using var db = _factory.Database.CreateDbContext();
+            var entity = new RecordCommentEntity
+            {
+                Id = Guid.NewGuid(),
+                RecordId = RecordId,
+                AuthorId = authorId,
+                Body = body,
+                CreatedAtUtc = DateTime.UtcNow,
+                BodyUpdatedAtUtc = DateTime.UtcNow,
+                IsDeleted = false
+            };
+            db.RecordComments.Add(entity);
+            await db.SaveChangesAsync();
+            return entity.Id;
         }
 
         public async ValueTask DisposeAsync()

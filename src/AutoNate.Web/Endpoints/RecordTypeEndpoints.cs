@@ -1,10 +1,14 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models.Records;
+using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
+using Microsoft.EntityFrameworkCore;
+using RecordTypeEntity = AutoNate.Web.Persistence.Scaffolded.RecordType;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -87,13 +91,37 @@ public static class RecordTypeEndpoints
                 .OrderBy(m => m.DataType, StringComparer.Ordinal)
                 .ToList();
             return Results.Ok(items);
-        });
+        }).OpenToAuthenticated("system data-type catalog (string/number/date/etc.); not record-type or tenant data");
 
+        // List filters via FilterQueryAsync(RecordType, View) — users with no
+        // grants get an empty list, users with scoped grants (e.g.
+        // `[shortcode=lead]`) get only the types they can see. Intentionally
+        // does NOT 403 on no-grant: SPA flows hit this endpoint broadly.
         group.MapGet("/", async (
-            bool? includeArchived, IRecordTypeStore store,
-            IAuditEventPublisher auditPublisher, CancellationToken cancellationToken) =>
+            bool? includeArchived,
+            HttpContext http,
+            IAuthorizer authorizer,
+            IDbContextFactory<AutoNateDbContext> dbContextFactory,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
         {
-            var types = await store.ListAsync(includeArchived ?? false, cancellationToken);
+            await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            IQueryable<RecordTypeEntity> query = db.RecordTypes.AsNoTracking();
+            if (!(includeArchived ?? false))
+            {
+                query = query.Where(t => !t.IsArchived);
+            }
+
+            var visible = await authorizer.FilterQueryAsync(
+                db, http.User, EntityKinds.RecordType, Actions.View, query, cancellationToken);
+
+            var entities = await visible
+                .OrderByDescending(t => t.UpdatedAtUtc)
+                .ThenBy(t => t.Name)
+                .ToListAsync(cancellationToken);
+
+            var types = entities.Select(t => t.ToModel()).ToList();
+
             await auditPublisher.PublishAsync(
                 RecordSchemaEventTopic.TopicName,
                 RecordSchemaEventTypes.RecordTypeListViewed,
@@ -102,7 +130,7 @@ public static class RecordTypeEndpoints
                 details: new { resultCount = types.Count, includeArchived = includeArchived ?? false },
                 cancellationToken);
             return Results.Ok(types.Select(ToDto).ToList());
-        });
+        }).AuthorizedInHandler("filters via FilterQueryAsync(RecordType, View); empty grants -> empty list");
 
         group.MapGet("/{id:guid}", async (
             Guid id, IRecordTypeStore store,
@@ -118,7 +146,7 @@ public static class RecordTypeEndpoints
                 details: null,
                 cancellationToken);
             return Results.Ok(ToDto(model));
-        });
+        }).RequirePermission(EntityKinds.RecordType, Actions.View);
 
         group.MapPost("/", async (
             CreateRecordTypeRequest request,
@@ -252,7 +280,7 @@ public static class RecordTypeEndpoints
                 details: new { resultCount = fields.Count, includeArchived = includeArchived ?? false },
                 cancellationToken);
             return Results.Ok(fields.Select(ToDto).ToList());
-        });
+        }).RequirePermission(EntityKinds.RecordType, Actions.View);
 
         group.MapGet("/{id:guid}/fields/{fieldId:guid}", async (
             Guid id,
@@ -271,7 +299,7 @@ public static class RecordTypeEndpoints
                 details: null,
                 cancellationToken);
             return Results.Ok(ToDto(field));
-        });
+        }).RequirePermission(EntityKinds.RecordType, Actions.View);
 
         group.MapPost("/{id:guid}/fields", async (
             Guid id,
@@ -437,7 +465,7 @@ public static class RecordTypeEndpoints
                 details: new { take = take ?? 100, resultCount = audit.Count },
                 cancellationToken);
             return Results.Ok(audit.Select(ToDto).ToList());
-        });
+        }).RequirePermission(EntityKinds.RecordType, Actions.View);
 
         return app;
     }

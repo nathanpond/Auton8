@@ -1,3 +1,4 @@
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Menus;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Menus;
@@ -28,7 +29,7 @@ public static class PageTemplateEndpoints
                 details: new { resultCount = dto.Count },
                 ct);
             return Results.Ok(dto);
-        });
+        }).OpenToAuthenticated("system catalog of registered SPA page templates (key/name/category only); no tenant or per-actor data");
 
         return app;
     }

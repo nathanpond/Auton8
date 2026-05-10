@@ -149,10 +149,12 @@ public static class FormEndpoints
             return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
         }).RequireKindPermission(EntityKinds.Form, Actions.View);
 
-        // Public render endpoint for `/form/{shortCode}` — returns the
+        // Render endpoint for `/form/{shortCode}` — returns the
         // currently-published version, or 404 when not published or
-        // site_available=false. Auth handled by the parent group's
-        // RequireAuthorization (any signed-in user).
+        // site_available=false. Available to any authenticated user; no
+        // per-form Form.View permission is required (path inherits the
+        // parent group's RequireAuthorization). The `/public/` segment in
+        // the route is a legacy name and does NOT mean anonymous access.
         group.MapGet("/public/{shortCode}", async (
             string shortCode,
             IFormStore store,
@@ -160,7 +162,7 @@ public static class FormEndpoints
         {
             var snapshot = await store.GetPublishedSnapshotByShortCodeAsync(shortCode, ct);
             return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
-        });
+        }).OpenToAuthenticated("runtime form render for any signed-in user; site_available=false yields 404. The store filters drafts and unpublished forms.");
 
         return app;
     }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Agent.Conversations;
 using AutoNate.Web.Services.Agent.Loop;
 using AutoNate.Web.Services.Agent.PageQuery;
@@ -10,7 +11,9 @@ public static class AgentEndpoints
 {
     public static IEndpointRouteBuilder MapAgentEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/agent").RequireAuthorization();
+        var group = app.MapGroup("/api/agent")
+            .RequireAuthorization()
+            .AuthorizedInHandler("every conversation handler scopes to the actor's userId from claims; cross-actor reads/writes are blocked at the store layer (*ForUserAsync methods)");
 
         group.MapGet("/conversations", async (
             string? pageKey,

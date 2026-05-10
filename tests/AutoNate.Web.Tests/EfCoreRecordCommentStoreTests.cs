@@ -71,13 +71,13 @@ public sealed class EfCoreRecordCommentStoreTests
 
         var initial = await store.CreateAsync(record.Id, "original", Alice);
         await Task.Delay(10);
-        var edited1 = await store.EditAsync(initial.Id, "edited once", Bob);
+        var edited1 = await store.EditAsync(initial.Id, "edited once", Alice);
 
         Assert.Equal("edited once", edited1.Body);
         Assert.True(edited1.BodyUpdatedAtUtc > edited1.CreatedAtUtc);
 
         await Task.Delay(10);
-        await store.EditAsync(initial.Id, "edited twice", Bob);
+        await store.EditAsync(initial.Id, "edited twice", Alice);
 
         var revisions = await store.ListRevisionsAsync(initial.Id);
         Assert.Equal(2, revisions.Count);
@@ -85,7 +85,7 @@ public sealed class EfCoreRecordCommentStoreTests
         // Newest first.
         Assert.Equal("edited once", revisions[0].Body);
         Assert.Equal("original", revisions[1].Body);
-        Assert.All(revisions, r => Assert.Equal(Bob, r.ReplacedBy));
+        Assert.All(revisions, r => Assert.Equal(Alice, r.ReplacedBy));
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class EfCoreRecordCommentStoreTests
 
         var alive = await store.CreateAsync(record.Id, "alive", Alice);
         var dead = await store.CreateAsync(record.Id, "dead", Alice);
-        await store.SoftDeleteAsync(dead.Id, Bob);
+        await store.SoftDeleteAsync(dead.Id, Alice);
 
         var visible = await store.ListForRecordAsync(record.Id, includeDeleted: false);
         Assert.Single(visible);
@@ -134,9 +134,9 @@ public sealed class EfCoreRecordCommentStoreTests
         await store.EditAsync(c.Id, "v2", Alice);
         await store.EditAsync(c.Id, "v3", Alice);
 
-        var deleted = await store.SoftDeleteAsync(c.Id, Bob);
+        var deleted = await store.SoftDeleteAsync(c.Id, Alice);
         Assert.True(deleted.IsDeleted);
-        Assert.Equal(Bob, deleted.DeletedBy);
+        Assert.Equal(Alice, deleted.DeletedBy);
         Assert.NotNull(deleted.DeletedAtUtc);
 
         // Revisions still queryable post-delete.
@@ -167,9 +167,35 @@ public sealed class EfCoreRecordCommentStoreTests
 
         var c = await store.CreateAsync(record.Id, "x", Alice);
         var first = await store.SoftDeleteAsync(c.Id, Alice);
-        var second = await store.SoftDeleteAsync(c.Id, Bob);
+        var second = await store.SoftDeleteAsync(c.Id, Alice);
 
         Assert.Equal(first.DeletedAtUtc, second.DeletedAtUtc);
         Assert.Equal(Alice, second.DeletedBy);
+    }
+
+    [Fact]
+    public async Task EditAsync_RejectsNonAuthor()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var record = await SeedRecordAsync(database);
+        var store = database.CreateRecordCommentStore();
+
+        var c = await store.CreateAsync(record.Id, "alice's comment", Alice);
+
+        await Assert.ThrowsAsync<RecordCommentForbiddenException>(() =>
+            store.EditAsync(c.Id, "bob trying to edit", Bob));
+    }
+
+    [Fact]
+    public async Task SoftDeleteAsync_RejectsNonAuthor()
+    {
+        await using var database = await PostgresTestDatabase.CreateAsync();
+        var record = await SeedRecordAsync(database);
+        var store = database.CreateRecordCommentStore();
+
+        var c = await store.CreateAsync(record.Id, "alice's comment", Alice);
+
+        await Assert.ThrowsAsync<RecordCommentForbiddenException>(() =>
+            store.SoftDeleteAsync(c.Id, Bob));
     }
 }

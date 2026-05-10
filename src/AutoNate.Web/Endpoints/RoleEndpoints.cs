@@ -24,7 +24,7 @@ public static class RoleEndpoints
                 details: new { resultCount = roles.Count },
                 ct);
             return Results.Ok(roles);
-        });
+        }).AuthorizedInHandler("store.ListAuthorizedAsync filters via FilterQueryAsync(Role, View) against the actor's grants");
 
         group.MapGet("/{id:guid}", async (
             Guid id, IRoleStore store,

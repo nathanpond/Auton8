@@ -298,7 +298,13 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
                     StartedAtUtc = instance.StartTime,
                     LastActivityAtUtc = lastActivityAt,
                     Status = status,
-                    CurrentStep = currentStep
+                    CurrentStep = currentStep,
+                    ProcessDefinitionId = string.IsNullOrWhiteSpace(instance.ProcessDefinitionId)
+                        ? null
+                        : instance.ProcessDefinitionId,
+                    StartUserId = string.IsNullOrWhiteSpace(instance.StartUserId)
+                        ? null
+                        : instance.StartUserId
                 };
             })
             .OrderByDescending(execution => execution.StartedAtUtc ?? DateTimeOffset.MinValue)
@@ -1453,6 +1459,10 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
         // Set by Flowable when the instance was ended via runtime DELETE with
         // a reason — used to distinguish a cancelled run from a normal finish.
         public string? DeleteReason { get; init; }
+
+        // Needed by the list-endpoint visibility filter so a `[startedby=user]`
+        // selector can be evaluated without re-fetching the instance.
+        public string? StartUserId { get; init; }
     }
 
     private sealed class FlowableHistoricActivityInstanceResponse

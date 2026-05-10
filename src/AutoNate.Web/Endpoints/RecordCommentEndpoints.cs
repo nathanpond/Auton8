@@ -1,3 +1,5 @@
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Records;
@@ -48,7 +50,7 @@ public static class RecordCommentEndpoints
                 details: new { resultCount = comments.Count, includeDeleted = includeDeleted ?? false },
                 ct);
             return Results.Ok(comments.Select(ToDto).ToArray());
-        });
+        }).RequirePermission(EntityKinds.Record, Actions.View, "recordId");
 
         group.MapPost("/", async (
             Guid recordId,
@@ -76,7 +78,8 @@ public static class RecordCommentEndpoints
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Comment, "recordId");
 
         group.MapPatch("/{commentId:guid}", async (
             Guid recordId,
@@ -104,11 +107,16 @@ public static class RecordCommentEndpoints
             {
                 return Results.NotFound();
             }
+            catch (RecordCommentForbiddenException)
+            {
+                return Results.Forbid();
+            }
             catch (RecordCommentValidationException ex)
             {
                 return Results.BadRequest(new { message = ex.Message });
             }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Comment, "recordId");
 
         group.MapDelete("/{commentId:guid}", async (
             Guid recordId,
@@ -135,7 +143,12 @@ public static class RecordCommentEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+            catch (RecordCommentForbiddenException)
+            {
+                return Results.Forbid();
+            }
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Comment, "recordId");
 
         group.MapGet("/{commentId:guid}/revisions", async (
             Guid recordId,
@@ -158,7 +171,7 @@ public static class RecordCommentEndpoints
                 details: new { resultCount = revisions.Count },
                 ct);
             return Results.Ok(revisions.Select(ToDto).ToArray());
-        });
+        }).RequirePermission(EntityKinds.Record, Actions.View, "recordId");
 
         return app;
     }

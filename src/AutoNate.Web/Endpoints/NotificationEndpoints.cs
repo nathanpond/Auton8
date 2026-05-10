@@ -1,3 +1,4 @@
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Notifications;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Notifications;
@@ -34,7 +35,9 @@ public static class NotificationEndpoints
 {
     public static IEndpointRouteBuilder MapNotificationEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/notifications").RequireAuthorization();
+        var group = app.MapGroup("/api/notifications")
+            .RequireAuthorization()
+            .AuthorizedInHandler("every handler scopes to the current actor's userId from claims; cross-actor reads/writes are not reachable");
 
         // Recent for dropdown (default 10) and full feed for /notifications page
         // both go through here; the SPA passes ?limit=10 or omits it.

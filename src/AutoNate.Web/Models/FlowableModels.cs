@@ -88,6 +88,13 @@ public sealed record class WorkflowExecutionSummary
     public string Status { get; set; } = string.Empty;
 
     public string? CurrentStep { get; set; }
+
+    // Carried so list-endpoint visibility filters can evaluate predicate
+    // selectors (`processkey`, `definitionkey`, `startedby`) without a
+    // per-row Flowable round-trip.
+    public string? ProcessDefinitionId { get; set; }
+
+    public string? StartUserId { get; set; }
 }
 
 public sealed record class WorkflowExecutionDiagramDetail

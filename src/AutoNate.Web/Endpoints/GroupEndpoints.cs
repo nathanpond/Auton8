@@ -27,7 +27,7 @@ public static class GroupEndpoints
                 details: new { resultCount = groups.Count, includeArchived = includeArchived ?? false },
                 ct);
             return Results.Ok(groups);
-        });
+        }).AuthorizedInHandler("store.ListAuthorizedAsync filters via FilterQueryAsync(Group, View) against the actor's grants");
 
         group.MapGet("/{id:guid}", async (
             Guid id, IGroupStore store,

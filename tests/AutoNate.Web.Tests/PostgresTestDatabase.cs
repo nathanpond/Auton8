@@ -261,10 +261,10 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         var compilers = new SelectorCompilerRegistry(new ISelectorCompiler[]
         {
             new RecordSelectorCompiler(),
-            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Role>(EntityKinds.Role, x => x.Id),
-            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Group>(EntityKinds.Group, x => x.Id),
-            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.RecordType>(EntityKinds.RecordType, x => x.Id),
-            new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.WorkflowModel>(EntityKinds.WorkflowModel, x => x.Id)
+            new RoleSelectorCompiler(),
+            new GroupSelectorCompiler(),
+            new RecordTypeSelectorCompiler(),
+            new WorkflowModelSelectorCompiler()
         });
         var dbFactory = CreateDbContextFactory();
         var instanceAuthorizers = new IInstanceAuthorizer[]

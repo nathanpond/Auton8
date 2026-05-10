@@ -74,4 +74,37 @@ public abstract class SelectorCompilerBase<T> : ISelectorCompiler<T> where T : c
 
         return list;
     }
+
+    // Shared helper for tag predicates over boolean columns
+    // (e.g. `[draft=true]`, `[archived=false]`). Subclasses pull the parsed
+    // bool out of a TagExpr's literal value; non-bool literals throw a clear
+    // SelectorCompilationException so the grant is logged and skipped rather
+    // than silently misbehaving.
+    protected static bool ParseBoolLiteral(TagExpr tag)
+    {
+        if (tag.Value is not LiteralValue literal)
+        {
+            throw new SelectorCompilationException(
+                $"Tag '{tag.Tag}' requires a literal true/false value.");
+        }
+
+        var raw = literal.Text.Trim().ToLowerInvariant();
+        return raw switch
+        {
+            "true" => true,
+            "false" => false,
+            _ => throw new SelectorCompilationException(
+                $"Tag '{tag.Tag}' must be true or false, got '{literal.Text}'.")
+        };
+    }
+
+    protected static string RequireLiteral(TagExpr tag)
+    {
+        if (tag.Value is not LiteralValue literal)
+        {
+            throw new SelectorCompilationException(
+                $"Tag '{tag.Tag}' requires a literal value, e.g. {tag.Tag}=foo.");
+        }
+        return literal.Text;
+    }
 }

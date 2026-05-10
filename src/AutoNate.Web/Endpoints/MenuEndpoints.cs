@@ -32,7 +32,7 @@ public static class MenuEndpoints
                 details: new { scope = "actor" },
                 ct);
             return Results.Ok(menu);
-        });
+        }).AuthorizedInHandler("store.GetMenuTreeForActorAsync filters items by per-item permission_required against the actor's grants");
 
         // Admin write group: only users with site-config edit permissions.
         var adminGroup = app.MapGroup("/api/admin/menus").RequireAuthorization();

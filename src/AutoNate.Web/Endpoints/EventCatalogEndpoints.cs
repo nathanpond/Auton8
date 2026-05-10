@@ -1,3 +1,4 @@
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.SiteSettings;
 using AutoNate.Web.Services.Workflow;
@@ -54,7 +55,7 @@ public static class EventCatalogEndpoints
                 EventCatalog.PayloadFields,
                 EventCatalog.Categories,
                 registrations));
-        });
+        }).OpenToAuthenticated("static event-type metadata + (topic, eventType) pairs of subscribed workflows; no payloads or per-tenant data. Tighten to WorkflowModel:Edit if authoring-only access is desired.");
 
         return app;
     }

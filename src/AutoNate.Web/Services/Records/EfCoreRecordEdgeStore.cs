@@ -131,6 +131,14 @@ public sealed class EfCoreRecordEdgeStore(
         return entity.ToModel();
     }
 
+    public async Task<RecordEdge?> GetAsync(Guid edgeId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.RecordEdges.AsNoTracking()
+            .SingleOrDefaultAsync(e => e.Id == edgeId, cancellationToken);
+        return entity?.ToModel();
+    }
+
     public async Task DeleteAsync(Guid edgeId, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);

@@ -130,10 +130,18 @@ public sealed class WorkflowModelInstanceAuthorizer : IInstanceAuthorizer
         string targetId,
         CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(targetId, out var id)) return false;
+        if (string.IsNullOrEmpty(targetId)) return false;
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var query = db.WorkflowModels.AsNoTracking().Where(m => m.Id == id);
+
+        // Endpoints route this kind on either the workflow_models GUID id
+        // (publish/edit) or the process key (start/pause). Resolve both so
+        // selectors with `[processkey=...]` can be evaluated against the
+        // matching row regardless of which token the route exposes.
+        var query = Guid.TryParse(targetId, out var id)
+            ? db.WorkflowModels.AsNoTracking().Where(m => m.Id == id)
+            : db.WorkflowModels.AsNoTracking().Where(m => m.ProcessKey == targetId);
+
         var visible = await authorizer.FilterQueryAsync(db, actor, Kind, action, query, cancellationToken);
         return await visible.AnyAsync(cancellationToken);
     }
