@@ -75,6 +75,10 @@ public sealed class WorkflowTaskInstanceAuthorizer : IInstanceAuthorizer
         return assigned.FirstOrDefault(t => string.Equals(t.Id, taskId, StringComparison.Ordinal));
     }
 
+    // Tag set mirrors CoreEntityTypes.WorkflowTask.tags. `candidategroup` was
+    // dropped from the registry because Flowable's task summary endpoint
+    // doesn't return identity links; reintroduce only after IFlowableClient
+    // exposes them, otherwise grants like `[candidategroup=...]` silently miss.
     private static IReadOnlyDictionary<string, string?> BuildFacts(Models.FlowableTaskSummary task) =>
         new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -151,6 +155,10 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
             cancellationToken);
     }
 
+    // Tag set mirrors CoreEntityTypes.WorkflowExecution.tags. `assignee` was
+    // dropped from the registry — Flowable's process-instance summary has no
+    // assignee field (assignees live on tasks). Reintroduce only if IFlowableClient
+    // gains a way to enumerate the instance's task assignees up front.
     private static IReadOnlyDictionary<string, string?> BuildFacts(Models.FlowableProcessInstanceSummary instance) =>
         new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {

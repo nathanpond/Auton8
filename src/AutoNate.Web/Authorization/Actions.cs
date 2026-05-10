@@ -18,11 +18,8 @@ public static class Actions
     public const string RemoveMember = "removemember";
 
     public const string DefineFields = "definefields";
-    public const string CreateRecord = "createrecord";
 
     public const string Comment = "comment";
-
-    public const string Deactivate = "deactivate";
 
     public const string Unlock = "unlock";
 
@@ -31,12 +28,8 @@ public static class Actions
     public const string Pause = "pause";
 
     public const string Cancel = "cancel";
-    public const string Signal = "signal";
-    public const string Terminate = "terminate";
     public const string DeleteAll = "deleteall";
 
-    public const string Claim = "claim";
-    public const string Unclaim = "unclaim";
     public const string Complete = "complete";
 
     public const string Override = "override";

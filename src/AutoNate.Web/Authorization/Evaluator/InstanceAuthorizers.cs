@@ -173,3 +173,61 @@ public sealed class FormInstanceAuthorizer : IInstanceAuthorizer
         return await visible.AnyAsync(cancellationToken);
     }
 }
+
+// EntityKinds.User instance gating. The scaffolded LocalUser row has both a
+// long surrogate `Id` and the Guid identity used everywhere else in the
+// authorization layer (UserId column). Filter on UserId so the predicate
+// matches the GUID coming off the route.
+public sealed class UserInstanceAuthorizer : IInstanceAuthorizer
+{
+    private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
+
+    public UserInstanceAuthorizer(IDbContextFactory<AutoNateDbContext> dbFactory)
+    {
+        _dbFactory = dbFactory;
+    }
+
+    public string Kind => EntityKinds.User;
+
+    public async Task<bool> ExistsAndAuthorizedAsync(
+        IAuthorizer authorizer,
+        ClaimsPrincipal actor,
+        string action,
+        string targetId,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(targetId, out var id)) return false;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.LocalUsers.AsNoTracking().Where(u => u.UserId == id);
+        var visible = await authorizer.FilterQueryAsync(db, actor, Kind, action, query, cancellationToken);
+        return await visible.AnyAsync(cancellationToken);
+    }
+}
+
+public sealed class ExternalConnectionInstanceAuthorizer : IInstanceAuthorizer
+{
+    private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
+
+    public ExternalConnectionInstanceAuthorizer(IDbContextFactory<AutoNateDbContext> dbFactory)
+    {
+        _dbFactory = dbFactory;
+    }
+
+    public string Kind => EntityKinds.ExternalConnection;
+
+    public async Task<bool> ExistsAndAuthorizedAsync(
+        IAuthorizer authorizer,
+        ClaimsPrincipal actor,
+        string action,
+        string targetId,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(targetId, out var id)) return false;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.ExternalConnections.AsNoTracking().Where(c => c.Id == id);
+        var visible = await authorizer.FilterQueryAsync(db, actor, Kind, action, query, cancellationToken);
+        return await visible.AnyAsync(cancellationToken);
+    }
+}

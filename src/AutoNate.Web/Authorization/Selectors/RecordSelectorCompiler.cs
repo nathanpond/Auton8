@@ -38,9 +38,16 @@ public sealed class RecordSelectorCompiler : SelectorCompilerBase<RecordEntity>
             "assignee" => CompileEdgeTag(tag, EdgeKinds.Assignee, context),
             "creator"  => CompileEdgeTag(tag, EdgeKinds.Creator, context),
             "recordtype" => CompileRecordTypeTag(tag, context),
+            "status" => CompileStatusTag(tag),
             _ => throw new SelectorCompilationException(
                 $"Unknown record tag '{tag.Tag}'.")
         };
+    }
+
+    private static Expression<Func<RecordEntity, bool>> CompileStatusTag(TagExpr tag)
+    {
+        var status = RequireLiteral(tag);
+        return r => r.Status == status;
     }
 
     // Compiles tag expressions of the form `<edgeKind>=user[…]?` against

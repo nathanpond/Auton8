@@ -21,15 +21,15 @@ public static class CoreEntityTypes
         {
             User!, Group!, Role!, RecordType!, Record!,
             WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
-            Form!, ExternalConnection!, SystemIssue!
+            Form!, ExternalConnection!, SystemIssue!, SiteConfig!
         });
 
     public static EntityTypeDefinition User { get; } = new(
         kind: EntityKinds.User,
         clrType: typeof(LocalUserModel),
         idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.Edit, Actions.Deactivate, Actions.Unlock },
-        tags: new[] { "username", "email", "supervisor", "manager" });
+        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Unlock },
+        tags: Array.Empty<string>());
 
     // The Group CLR model arrives in Phase 3. The kind is registered now so
     // selectors and grants can already reference `/group/...` without changing
@@ -40,7 +40,7 @@ public static class CoreEntityTypes
         idClrType: typeof(Guid),
         actions: new[]
         {
-            Actions.View, Actions.Edit, Actions.Delete,
+            Actions.View, Actions.Create, Actions.Edit, Actions.Delete,
             Actions.AddMember, Actions.RemoveMember
         },
         tags: new[] { "name", "member" });
@@ -49,7 +49,7 @@ public static class CoreEntityTypes
         kind: EntityKinds.Role,
         clrType: typeof(RoleModel),
         idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.Edit, Actions.Delete, Actions.Assign },
+        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Assign },
         tags: new[] { "name" });
 
     public static EntityTypeDefinition RecordType { get; } = new(
@@ -58,8 +58,8 @@ public static class CoreEntityTypes
         idClrType: typeof(Guid),
         actions: new[]
         {
-            Actions.View, Actions.Edit, Actions.Delete,
-            Actions.CreateRecord, Actions.DefineFields
+            Actions.View, Actions.Create, Actions.Edit, Actions.Delete,
+            Actions.DefineFields
         },
         tags: new[] { "shortcode", "archived" });
 
@@ -69,10 +69,10 @@ public static class CoreEntityTypes
         idClrType: typeof(Guid),
         actions: new[]
         {
-            Actions.View, Actions.Edit, Actions.Delete,
+            Actions.View, Actions.Create, Actions.Edit,
             Actions.Assign, Actions.Comment, Actions.Archive
         },
-        tags: new[] { "recordtype", "status", "assignee", "creator", "duedate" });
+        tags: new[] { "recordtype", "status", "assignee", "creator" });
 
     // Actions.Start uses the processKey route token for instance gating (see
     // WorkflowEndpoints.cs); Pause/Resume both use the Pause action so a
@@ -99,20 +99,16 @@ public static class CoreEntityTypes
         idClrType: typeof(string),
         actions: new[]
         {
-            Actions.View, Actions.Cancel, Actions.Delete, Actions.Signal, Actions.Terminate, Actions.Override, Actions.MoveState, Actions.DeleteAll
+            Actions.View, Actions.Cancel, Actions.Delete, Actions.Override, Actions.MoveState, Actions.DeleteAll
         },
-        tags: new[] { "processkey", "definitionkey", "startedby", "assignee" });
+        tags: new[] { "processkey", "definitionkey", "startedby" });
 
     public static EntityTypeDefinition WorkflowTask { get; } = new(
         kind: EntityKinds.WorkflowTask,
         clrType: typeof(object),
         idClrType: typeof(string),
-        actions: new[]
-        {
-            Actions.View, Actions.Claim, Actions.Assign,
-            Actions.Complete, Actions.Unclaim
-        },
-        tags: new[] { "processkey", "definitionkey", "assignee", "candidategroup" });
+        actions: new[] { Actions.View, Actions.Complete },
+        tags: new[] { "processkey", "definitionkey", "assignee" });
 
     // Single coarse Manage action gates list/view/upload/enable/disable/delete
     // for plugins. Granular split is a v2 conversation if it ever comes up.
@@ -121,7 +117,7 @@ public static class CoreEntityTypes
         clrType: typeof(object),
         idClrType: typeof(Guid),
         actions: new[] { Actions.Manage },
-        tags: new[] { "name", "version", "status" });
+        tags: Array.Empty<string>());
 
     // Admin-authored JSX forms. Drafts live in `forms`, every save snapshots
     // into `form_versions`. Publish flips `is_draft=false` and points
@@ -146,7 +142,7 @@ public static class CoreEntityTypes
         clrType: typeof(ExternalConnectionModel),
         idClrType: typeof(Guid),
         actions: new[] { Actions.View, Actions.Manage },
-        tags: new[] { "kind", "name", "default" });
+        tags: Array.Empty<string>());
 
     // Self-healing platform: rows in system_issues. View gates list+detail,
     // Acknowledge/Resolve gate the operator-action endpoints, Remediate gates
@@ -161,5 +157,16 @@ public static class CoreEntityTypes
         {
             Actions.View, Actions.Acknowledge, Actions.Resolve, Actions.Remediate
         },
-        tags: new[] { "category", "severity", "state", "detector" });
+        tags: Array.Empty<string>());
+
+    // Platform configuration (menus, site settings, appearance, role/grant
+    // admin, debug surfaces). Kind-only enforcement throughout; a single
+    // SiteConfig:Edit grant unlocks every authoring screen, View unlocks
+    // read-only debug + admin reads.
+    public static EntityTypeDefinition SiteConfig { get; } = new(
+        kind: EntityKinds.SiteConfig,
+        clrType: typeof(object),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
+        tags: Array.Empty<string>());
 }

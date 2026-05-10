@@ -63,8 +63,21 @@ public sealed class RecordSelectorSqlCompiler
             "assignee" => CompileEdgeTag(tag, EdgeKinds.Assignee, ctx),
             "creator" => CompileEdgeTag(tag, EdgeKinds.Creator, ctx),
             "recordtype" => CompileRecordTypeTag(tag, ctx),
+            "status" => CompileStatusTag(tag, ctx),
             _ => throw new SelectorCompilationException($"Unknown record tag '{tag.Tag}'.")
         };
+
+    private static string CompileStatusTag(TagExpr tag, RecordSqlBuildContext ctx)
+    {
+        if (tag.Value is not LiteralValue literal)
+        {
+            throw new SelectorCompilationException(
+                "Tag 'status' requires a literal value, e.g. status=open.");
+        }
+
+        var p = ctx.AddParameter(literal.Text);
+        return $"(records.status = {p})";
+    }
 
     private static string CompileEdgeTag(TagExpr tag, string edgeKind, RecordSqlBuildContext ctx)
     {

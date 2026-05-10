@@ -6,11 +6,16 @@ using AutoNate.Web.Services.Events;
 
 namespace AutoNate.Web.Endpoints;
 
-// Admin-only inspection endpoint backing the effective-permissions debugger
-// page. Given a user, action, kind, and target id, returns the final
-// allow/deny decision along with the per-grant trace that produced it. The
-// payload is shaped for the SPA to render directly — principals carry their
-// display names so admins don't have to cross-reference roles/groups by id.
+// Inspection endpoint backing the effective-permissions debugger page. Given
+// a user, action, kind, and target id, returns the final allow/deny decision
+// along with the per-grant trace that produced it. The payload is shaped for
+// the SPA to render directly — principals carry their display names so
+// admins don't have to cross-reference roles/groups by id.
+//
+// Gate: SiteConfig:View (the same gate used across the platform debug
+// surfaces in /api/admin/grants and the menu/health/settings reads). That's
+// typically admin in practice, but the kind-level grant is what's enforced
+// here, not a hardcoded admin role.
 public static class AuthorizationExplainEndpoints
 {
     public static IEndpointRouteBuilder MapAuthorizationExplainEndpoints(this IEndpointRouteBuilder app)

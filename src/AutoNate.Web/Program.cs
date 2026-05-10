@@ -236,6 +236,16 @@ builder.Services.AddSingleton<ISelectorCompiler, RoleSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompiler, GroupSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompiler, RecordTypeSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompiler, WorkflowModelSelectorCompiler>();
+builder.Services.AddSingleton<ISelectorCompiler, FormSelectorCompiler>();
+// User and ExternalConnection don't expose tag predicates today; a path-only
+// compiler keeps `/<kind>/<id>` and `/<kind>/*` grants working without
+// silently denying instance gates per Authorizer.FilterQueryAsync.
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.LocalUser>(
+        EntityKinds.User, u => u.UserId));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.ExternalConnection>(
+        EntityKinds.ExternalConnection, c => c.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -246,6 +256,8 @@ builder.Services.AddScoped<IInstanceAuthorizer, WorkflowModelInstanceAuthorizer>
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowTaskInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, WorkflowExecutionInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, FormInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, UserInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, ExternalConnectionInstanceAuthorizer>();
 
 builder.Services.AddScoped<IAuthorizer, Authorizer>();
 builder.Services.AddScoped<AuthCacheBumper>();

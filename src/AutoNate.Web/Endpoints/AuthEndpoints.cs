@@ -119,6 +119,15 @@ public static class AuthEndpoints
             HttpContext context,
             IAuditEventPublisher auditPublisher) =>
         {
+            // The auth cookie is SameSite=Strict, so a cross-site POST won't
+            // present it and the principal here is anonymous — short-circuit so
+            // we don't emit a useless audit event for what amounts to a CSRF
+            // probe. Defense-in-depth alongside the cookie's own SameSite gate.
+            if (context.User.Identity?.IsAuthenticated != true)
+            {
+                return Results.Ok();
+            }
+
             var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
             var username = context.User.FindFirstValue(ClaimTypes.Name);
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);

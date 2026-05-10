@@ -7,12 +7,12 @@ namespace AutoNate.Web.Tests.Authorization;
 public sealed class EntityRegistryTests
 {
     [Fact]
-    public void All_RegistersTwelveCoreKinds()
+    public void All_RegistersThirteenCoreKinds()
     {
         var registry = new EntityRegistry(CoreEntityTypes.All);
         var kinds = registry.All.Select(t => t.Kind).ToHashSet();
 
-        Assert.Equal(12, kinds.Count);
+        Assert.Equal(13, kinds.Count);
         Assert.Contains(EntityKinds.User, kinds);
         Assert.Contains(EntityKinds.Group, kinds);
         Assert.Contains(EntityKinds.Role, kinds);
@@ -25,6 +25,7 @@ public sealed class EntityRegistryTests
         Assert.Contains(EntityKinds.Form, kinds);
         Assert.Contains(EntityKinds.ExternalConnection, kinds);
         Assert.Contains(EntityKinds.SystemIssue, kinds);
+        Assert.Contains(EntityKinds.SiteConfig, kinds);
     }
 
     [Fact]
@@ -61,14 +62,19 @@ public sealed class EntityRegistryTests
     [InlineData(EntityKinds.Record, "view")]
     [InlineData(EntityKinds.Record, "edit")]
     [InlineData(EntityKinds.Record, "assign")]
+    [InlineData(EntityKinds.Record, "create")]
     [InlineData(EntityKinds.WorkflowModel, "publish")]
     [InlineData(EntityKinds.WorkflowTask, "complete")]
     [InlineData(EntityKinds.WorkflowExecution, "override")]
-    [InlineData(EntityKinds.User, "deactivate")]
+    [InlineData(EntityKinds.User, "unlock")]
+    [InlineData(EntityKinds.User, "create")]
+    [InlineData(EntityKinds.User, "delete")]
     [InlineData(EntityKinds.SystemIssue, "view")]
     [InlineData(EntityKinds.SystemIssue, "acknowledge")]
     [InlineData(EntityKinds.SystemIssue, "resolve")]
     [InlineData(EntityKinds.SystemIssue, "remediate")]
+    [InlineData(EntityKinds.SiteConfig, "view")]
+    [InlineData(EntityKinds.SiteConfig, "edit")]
     public void Actions_PerKind_AreDocumented(string kind, string action)
     {
         var registry = new EntityRegistry(CoreEntityTypes.All);
@@ -80,8 +86,10 @@ public sealed class EntityRegistryTests
     [InlineData(EntityKinds.Record, "recordtype")]
     [InlineData(EntityKinds.Record, "assignee")]
     [InlineData(EntityKinds.Record, "creator")]
-    [InlineData(EntityKinds.User, "supervisor")]
+    [InlineData(EntityKinds.Record, "status")]
     [InlineData(EntityKinds.WorkflowExecution, "startedby")]
+    [InlineData(EntityKinds.Form, "shortcode")]
+    [InlineData(EntityKinds.Form, "published")]
     public void Tags_PerKind_AreDocumented(string kind, string tag)
     {
         var registry = new EntityRegistry(CoreEntityTypes.All);
