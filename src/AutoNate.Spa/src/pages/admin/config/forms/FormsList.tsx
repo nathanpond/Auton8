@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   ActionIcon,
   Alert,
@@ -39,7 +39,7 @@ export default function FormsList() {
     }
   };
 
-  const columns = useMemo<ColumnDef<FormSummary>[]>(
+  const columns = useMemo<DataTableColumn<FormSummary>[]>(
     () => [
       {
         id: "shortCode",

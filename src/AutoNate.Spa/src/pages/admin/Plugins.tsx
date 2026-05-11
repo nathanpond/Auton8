@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { Alert, Badge, Button, Code, Group, Text } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import {
@@ -33,7 +33,7 @@ export default function Plugins() {
     }
   };
 
-  const columns = useMemo<ColumnDef<Plugin>[]>(
+  const columns = useMemo<DataTableColumn<Plugin>[]>(
     () => [
       {
         id: "name",

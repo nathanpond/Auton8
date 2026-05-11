@@ -1,13 +1,11 @@
 import { z } from "zod";
 import { ComponentType } from "react";
-import { Control } from "react-hook-form";
+import type { UseFormReturnType } from "@mantine/form";
 import { FieldDataType, OptionChoice, RecordTypeField } from "@/types/records";
 
 export type FieldFormProps = {
   field: RecordTypeField;
-  control: Control<Record<string, unknown>>;
-  // react-hook-form's Controller renders this as the input. Each renderer
-  // accepts the field definition + the form control and emits its own input.
+  form: UseFormReturnType<Record<string, unknown>>;
 };
 
 export type FieldDisplayProps = {

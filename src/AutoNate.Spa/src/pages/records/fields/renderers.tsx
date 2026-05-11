@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { Controller } from "react-hook-form";
 import { Checkbox, Group, NativeSelect, Switch, Textarea, TextInput } from "@mantine/core";
 import { FieldFormProps, FieldRenderer, getOptionChoices, registerRenderer } from "./registry";
 import { OptionChoice } from "@/types/records";
@@ -7,32 +6,14 @@ import { OptionChoice } from "@/types/records";
 // ---- Text ----
 const textRenderer: FieldRenderer = {
   dataType: "text",
-  Form: ({ field, control }: FieldFormProps) => {
+  Form: ({ field, form }: FieldFormProps) => {
     const isMulti = (field.config as { variant?: string }).variant === "multi";
-    return (
-      <Controller
-        name={field.fieldKey}
-        control={control}
-        render={({ field: f, fieldState }) =>
-          isMulti ? (
-            <Textarea
-              rows={4}
-              value={(f.value as string | null) ?? ""}
-              onChange={(e) => f.onChange(e.currentTarget.value)}
-              onBlur={f.onBlur}
-              error={fieldState.error?.message}
-            />
-          ) : (
-            <TextInput
-              type="text"
-              value={(f.value as string | null) ?? ""}
-              onChange={(e) => f.onChange(e.currentTarget.value)}
-              onBlur={f.onBlur}
-              error={fieldState.error?.message}
-            />
-          )
-        }
-      />
+    const { value, onChange, onBlur, error } = form.getInputProps(field.fieldKey);
+    const normalized = (value as string | null) ?? "";
+    return isMulti ? (
+      <Textarea rows={4} value={normalized} onChange={onChange} onBlur={onBlur} error={error} />
+    ) : (
+      <TextInput type="text" value={normalized} onChange={onChange} onBlur={onBlur} error={error} />
     );
   },
   Display: ({ value }) => <span>{(value as string | null) ?? ""}</span>,
@@ -50,26 +31,28 @@ const textRenderer: FieldRenderer = {
 // ---- Number ----
 const numberRenderer: FieldRenderer = {
   dataType: "number",
-  Form: ({ field, control }: FieldFormProps) => (
-    <Controller
-      name={field.fieldKey}
-      control={control}
-      render={({ field: f, fieldState }) => (
-        <TextInput
-          type="number"
-          step={
-            (field.config as { variant?: string }).variant === "integer"
-              ? 1
-              : 1 / Math.pow(10, Number((field.config as { precision?: number }).precision ?? 2))
-          }
-          value={f.value === null || f.value === undefined ? "" : String(f.value)}
-          onChange={(e) => f.onChange(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))}
-          onBlur={f.onBlur}
-          error={fieldState.error?.message}
-        />
-      )}
-    />
-  ),
+  Form: ({ field, form }: FieldFormProps) => {
+    const { value, onBlur, error } = form.getInputProps(field.fieldKey);
+    return (
+      <TextInput
+        type="number"
+        step={
+          (field.config as { variant?: string }).variant === "integer"
+            ? 1
+            : 1 / Math.pow(10, Number((field.config as { precision?: number }).precision ?? 2))
+        }
+        value={value === null || value === undefined ? "" : String(value)}
+        onChange={(e) =>
+          form.setFieldValue(
+            field.fieldKey,
+            e.currentTarget.value === "" ? null : Number(e.currentTarget.value)
+          )
+        }
+        onBlur={onBlur}
+        error={error}
+      />
+    );
+  },
   Display: ({ value }) => <span>{value === null || value === undefined ? "" : String(value)}</span>,
   zodSchema: (field) => {
     const cfg = field.config as { variant?: string; min?: number | null; max?: number | null };
@@ -86,49 +69,48 @@ const numberRenderer: FieldRenderer = {
 // ---- Date ----
 const dateRenderer: FieldRenderer = {
   dataType: "date",
-  Form: ({ field, control }: FieldFormProps) => {
+  Form: ({ field, form }: FieldFormProps) => {
     const variant = (field.config as { variant?: string }).variant ?? "date";
-    return (
-      <Controller
-        name={field.fieldKey}
-        control={control}
-        render={({ field: f, fieldState }) => {
-          if (variant === "range") {
-            const range = (f.value as { start: string; end: string } | null) ?? { start: "", end: "" };
-            return (
-              <div>
-                <Group grow gap="xs">
-                  <TextInput
-                    type="date"
-                    value={range.start ?? ""}
-                    onChange={(e) => f.onChange({ ...range, start: e.currentTarget.value })}
-                    error={!!fieldState.error}
-                  />
-                  <TextInput
-                    type="date"
-                    value={range.end ?? ""}
-                    onChange={(e) => f.onChange({ ...range, end: e.currentTarget.value })}
-                    error={!!fieldState.error}
-                  />
-                </Group>
-                {fieldState.error && (
-                  <div style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}>
-                    {fieldState.error.message}
-                  </div>
-                )}
-              </div>
-            );
-          }
-          return (
+    const { value, onBlur, error } = form.getInputProps(field.fieldKey);
+
+    if (variant === "range") {
+      const range = (value as { start: string; end: string } | null) ?? { start: "", end: "" };
+      return (
+        <div>
+          <Group grow gap="xs">
             <TextInput
-              type={variant === "datetime" ? "datetime-local" : "date"}
-              value={(f.value as string | null) ?? ""}
-              onChange={(e) => f.onChange(e.currentTarget.value || null)}
-              onBlur={f.onBlur}
-              error={fieldState.error?.message}
+              type="date"
+              value={range.start ?? ""}
+              onChange={(e) =>
+                form.setFieldValue(field.fieldKey, { ...range, start: e.currentTarget.value })
+              }
+              error={!!error}
             />
-          );
-        }}
+            <TextInput
+              type="date"
+              value={range.end ?? ""}
+              onChange={(e) =>
+                form.setFieldValue(field.fieldKey, { ...range, end: e.currentTarget.value })
+              }
+              error={!!error}
+            />
+          </Group>
+          {error && (
+            <div style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}>
+              {error}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <TextInput
+        type={variant === "datetime" ? "datetime-local" : "date"}
+        value={(value as string | null) ?? ""}
+        onChange={(e) => form.setFieldValue(field.fieldKey, e.currentTarget.value || null)}
+        onBlur={onBlur}
+        error={error}
       />
     );
   },
@@ -168,22 +150,19 @@ const dateRenderer: FieldRenderer = {
 // ---- Phone ----
 const phoneRenderer: FieldRenderer = {
   dataType: "phone",
-  Form: ({ field, control }: FieldFormProps) => (
-    <Controller
-      name={field.fieldKey}
-      control={control}
-      render={({ field: f, fieldState }) => (
-        <TextInput
-          type="tel"
-          placeholder="+1 415 555 2671"
-          value={(f.value as string | null) ?? ""}
-          onChange={(e) => f.onChange(e.currentTarget.value)}
-          onBlur={f.onBlur}
-          error={fieldState.error?.message}
-        />
-      )}
-    />
-  ),
+  Form: ({ field, form }: FieldFormProps) => {
+    const { value, onChange, onBlur, error } = form.getInputProps(field.fieldKey);
+    return (
+      <TextInput
+        type="tel"
+        placeholder="+1 415 555 2671"
+        value={(value as string | null) ?? ""}
+        onChange={onChange}
+        onBlur={onBlur}
+        error={error}
+      />
+    );
+  },
   Display: ({ value }) => <span>{(value as string | null) ?? ""}</span>,
   zodSchema: (field) => {
     let s: z.ZodTypeAny = z.string();
@@ -198,21 +177,18 @@ const phoneRenderer: FieldRenderer = {
 // ---- Email ----
 const emailRenderer: FieldRenderer = {
   dataType: "email",
-  Form: ({ field, control }: FieldFormProps) => (
-    <Controller
-      name={field.fieldKey}
-      control={control}
-      render={({ field: f, fieldState }) => (
-        <TextInput
-          type="email"
-          value={(f.value as string | null) ?? ""}
-          onChange={(e) => f.onChange(e.currentTarget.value)}
-          onBlur={f.onBlur}
-          error={fieldState.error?.message}
-        />
-      )}
-    />
-  ),
+  Form: ({ field, form }: FieldFormProps) => {
+    const { value, onChange, onBlur, error } = form.getInputProps(field.fieldKey);
+    return (
+      <TextInput
+        type="email"
+        value={(value as string | null) ?? ""}
+        onChange={onChange}
+        onBlur={onBlur}
+        error={error}
+      />
+    );
+  },
   Display: ({ value }) => <span>{(value as string | null) ?? ""}</span>,
   zodSchema: (field) => {
     let s: z.ZodTypeAny = z.email("Invalid email").or(z.literal(""));
@@ -226,57 +202,55 @@ const emailRenderer: FieldRenderer = {
 // ---- Option ----
 const optionRenderer: FieldRenderer = {
   dataType: "option",
-  Form: ({ field, control }: FieldFormProps) => {
+  Form: ({ field, form }: FieldFormProps) => {
     const isMulti = Boolean((field.config as { multi?: boolean }).multi);
     const choices = getOptionChoices(field);
+    const { value, onBlur, error } = form.getInputProps(field.fieldKey);
+
+    if (isMulti) {
+      const arr = Array.isArray(value) ? (value as string[]) : [];
+      return (
+        <>
+          <Group gap="xs" wrap="wrap">
+            {choices.map((c) => {
+              const checked = arr.includes(c.value);
+              return (
+                <Checkbox
+                  key={c.value}
+                  id={`${field.fieldKey}-${c.value}`}
+                  label={c.label}
+                  checked={checked}
+                  onChange={(e) => {
+                    const next = e.currentTarget.checked
+                      ? [...arr, c.value]
+                      : arr.filter((v) => v !== c.value);
+                    form.setFieldValue(field.fieldKey, next);
+                  }}
+                />
+              );
+            })}
+          </Group>
+          {error && (
+            <div
+              style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}
+            >
+              {error}
+            </div>
+          )}
+        </>
+      );
+    }
+
     return (
-      <Controller
-        name={field.fieldKey}
-        control={control}
-        render={({ field: f, fieldState }) =>
-          isMulti ? (
-            <>
-              <Group gap="xs" wrap="wrap">
-                {choices.map((c) => {
-                  const arr = Array.isArray(f.value) ? (f.value as string[]) : [];
-                  const checked = arr.includes(c.value);
-                  return (
-                    <Checkbox
-                      key={c.value}
-                      id={`${field.fieldKey}-${c.value}`}
-                      label={c.label}
-                      checked={checked}
-                      onChange={(e) => {
-                        const next = e.currentTarget.checked
-                          ? [...arr, c.value]
-                          : arr.filter((v) => v !== c.value);
-                        f.onChange(next);
-                      }}
-                    />
-                  );
-                })}
-              </Group>
-              {fieldState.error && (
-                <div
-                  style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}
-                >
-                  {fieldState.error.message}
-                </div>
-              )}
-            </>
-          ) : (
-            <NativeSelect
-              value={(f.value as string | null) ?? ""}
-              onChange={(e) => f.onChange(e.currentTarget.value || null)}
-              onBlur={f.onBlur}
-              error={fieldState.error?.message}
-              data={[
-                { value: "", label: field.isRequired ? "Select..." : "(none)" },
-                ...choices.map((c) => ({ value: c.value, label: c.label }))
-              ]}
-            />
-          )
-        }
+      <NativeSelect
+        value={(value as string | null) ?? ""}
+        onChange={(e) => form.setFieldValue(field.fieldKey, e.currentTarget.value || null)}
+        onBlur={onBlur}
+        error={error}
+        data={[
+          { value: "", label: field.isRequired ? "Select..." : "(none)" },
+          ...choices.map((c) => ({ value: c.value, label: c.label }))
+        ]}
       />
     );
   },
@@ -314,18 +288,11 @@ const optionRenderer: FieldRenderer = {
 // ---- Boolean ----
 const booleanRenderer: FieldRenderer = {
   dataType: "boolean",
-  Form: ({ field, control }: FieldFormProps) => (
-    <Controller
-      name={field.fieldKey}
-      control={control}
-      render={({ field: f }) => (
-        <Switch
-          id={`bool-${field.fieldKey}`}
-          checked={Boolean(f.value)}
-          onChange={(e) => f.onChange(e.currentTarget.checked)}
-          label={field.displayName}
-        />
-      )}
+  Form: ({ field, form }: FieldFormProps) => (
+    <Switch
+      id={`bool-${field.fieldKey}`}
+      label={field.displayName}
+      {...form.getInputProps(field.fieldKey, { type: "checkbox" })}
     />
   ),
   Display: ({ value }) => <span>{value === true ? "Yes" : value === false ? "No" : ""}</span>,

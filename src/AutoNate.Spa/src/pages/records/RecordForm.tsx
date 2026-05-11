@@ -1,6 +1,6 @@
-import { useMemo } from "react";
-import { Controller, useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect, useMemo, useState } from "react";
+import { useForm } from "@mantine/form";
+import { zod4Resolver as zodResolver } from "mantine-form-zod-resolver";
 import { z } from "zod";
 import {
   Alert,
@@ -84,26 +84,44 @@ export default function RecordForm({
     [visibleFields, initialName, initialStatus, initialDueDate, initialValues, initialAssigneeIds]
   );
 
-  const {
-    control,
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting }
-  } = useForm<FormShape>({
-    resolver: zodResolver(fullSchema as never),
-    defaultValues: defaults
+  // controlled mode is required: field renderers destructure `value` from
+  // getInputProps and pass it to Mantine inputs, which won't pick up updates
+  // in uncontrolled mode.
+  const form = useForm<FormShape>({
+    mode: "controlled",
+    initialValues: defaults,
+    validate: zodResolver(fullSchema as never)
   });
 
-  const submit = handleSubmit(async (values) => {
+  // Re-seed when defaults change. The parent mounts us with fields=[] and
+  // populates them async; @mantine/form only reads initialValues at mount,
+  // so without this re-seed the dynamic field keys never land in state and
+  // zod reports them as undefined on submit. Skip if the user has typed.
+  useEffect(() => {
+    if (form.isDirty()) return;
+    form.setInitialValues(defaults);
+    form.setValues(defaults);
+    // form ref is stable from useForm; intentionally not in deps to avoid
+    // the setValues → re-render → re-run loop.
+  }, [defaults]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const submit = form.onSubmit(async (values) => {
     const { __name, __status, __dueDate, __assigneeIds, ...rest } = values;
     const trimmedStatus = __status.trim();
-    await onSubmit({
-      name: __name,
-      status: trimmedStatus.length === 0 ? null : trimmedStatus,
-      dueDate: __dueDate.length === 0 ? null : __dueDate,
-      values: rest,
-      assigneeIds: __assigneeIds
-    });
+    setIsSubmitting(true);
+    try {
+      await onSubmit({
+        name: __name,
+        status: trimmedStatus.length === 0 ? null : trimmedStatus,
+        dueDate: __dueDate.length === 0 ? null : __dueDate,
+        values: rest,
+        assigneeIds: __assigneeIds
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   });
 
   return (
@@ -115,38 +133,26 @@ export default function RecordForm({
           </Alert>
         )}
 
-        <TextInput
-          label="Name"
-          error={(errors.__name as { message?: string } | undefined)?.message}
-          {...register("__name")}
-        />
+        <TextInput label="Name" {...form.getInputProps("__name")} />
 
         <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
           <TextInput
             label="Status"
             placeholder="e.g. Open, In progress"
-            error={(errors.__status as { message?: string } | undefined)?.message}
-            {...register("__status")}
+            {...form.getInputProps("__status")}
           />
           <TextInput
             label="Due Date"
             type="date"
-            error={(errors.__dueDate as { message?: string } | undefined)?.message}
-            {...register("__dueDate")}
+            {...form.getInputProps("__dueDate")}
           />
         </SimpleGrid>
 
         <Input.Wrapper label="Assignees">
-          <Controller
-            name="__assigneeIds"
-            control={control}
-            render={({ field: f }) => (
-              <AssigneePicker
-                value={(f.value as string[] | undefined) ?? []}
-                onChange={f.onChange}
-                disabled={busy}
-              />
-            )}
+          <AssigneePicker
+            value={(form.getValues().__assigneeIds as string[] | undefined) ?? []}
+            onChange={(next) => form.setFieldValue("__assigneeIds", next)}
+            disabled={busy}
           />
         </Input.Wrapper>
 
@@ -181,7 +187,7 @@ export default function RecordForm({
                   </>
                 }
               >
-                <FormImpl field={field} control={control as never} />
+                <FormImpl field={field} form={form as never} />
               </Input.Wrapper>
             );
           })}

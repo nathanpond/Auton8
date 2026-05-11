@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { Alert, NativeSelect, Text } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import { fetchSupervisorHierarchy, listUsers, listUsersPage } from "@/api/users";
@@ -69,7 +69,7 @@ export default function Hierarchy() {
     return { items: result.items, totalCount: result.totalCount };
   };
 
-  const columns = useMemo<ColumnDef<LocalUser>[]>(
+  const columns = useMemo<DataTableColumn<LocalUser>[]>(
     () => [
       {
         id: "username",

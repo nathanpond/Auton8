@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
@@ -39,7 +39,7 @@ export default function TeamTasksPanel() {
   // in-memory.
   const loadAll = useCallback(() => listTeamAssignedTasks(), []);
 
-  const columns = useMemo<ColumnDef<FlowableTaskSummary>[]>(
+  const columns = useMemo<DataTableColumn<FlowableTaskSummary>[]>(
     () => [
       {
         id: "name",

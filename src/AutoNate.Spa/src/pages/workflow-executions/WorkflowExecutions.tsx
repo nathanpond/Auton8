@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   Alert,
   Badge,
@@ -193,7 +193,7 @@ export default function WorkflowExecutions() {
     return { items: r.items, totalCount: r.totalCount };
   }, []);
 
-  const columns = useMemo<ColumnDef<WorkflowExecutionSummary>[]>(
+  const columns = useMemo<DataTableColumn<WorkflowExecutionSummary>[]>(
     () => [
       {
         id: "name",

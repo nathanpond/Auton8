@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { ColumnDef } from "@tanstack/react-table";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
+import { useForm } from "@mantine/form";
+import { zod4Resolver as zodResolver } from "mantine-form-zod-resolver";
 import {
   ActionIcon,
   Alert,
@@ -91,7 +91,7 @@ export default function ManageUsers() {
     [adminAssignments]
   );
 
-  const columns = useMemo<ColumnDef<LocalUser>[]>(
+  const columns = useMemo<DataTableColumn<LocalUser>[]>(
     () => [
       {
         id: "username",
@@ -143,7 +143,6 @@ export default function ManageUsers() {
         id: "actions",
         header: "Actions",
         enableSorting: false,
-        enableGlobalFilter: false,
         cell: ({ row }) => (
           <Group gap="xs">
             <ActionIcon
@@ -326,17 +325,16 @@ type AddProps = {
 };
 
 function AddUserModal({ onClose, onSuccess, onError }: AddProps) {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting }
-  } = useForm<CreateUserForm>({
-    resolver: zodResolver(createUserSchema),
-    defaultValues: { username: "", firstName: "", lastName: "", password: "", email: "" }
+  const form = useForm<CreateUserForm>({
+    mode: "controlled",
+    initialValues: { username: "", firstName: "", lastName: "", password: "", email: "" },
+    validate: zodResolver(createUserSchema)
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const create = useCreateUser();
 
-  const onSubmit = async (values: CreateUserForm) => {
+  const onSubmit = form.onSubmit(async (values) => {
+    setIsSubmitting(true);
     try {
       const user = await create.mutateAsync({
         username: values.username,
@@ -348,28 +346,20 @@ function AddUserModal({ onClose, onSuccess, onError }: AddProps) {
       onSuccess(user);
     } catch (err) {
       onError(describeError(err));
+    } finally {
+      setIsSubmitting(false);
     }
-  };
+  });
 
   return (
     <Modal opened onClose={onClose} title="Add User">
-      <Box component="form" onSubmit={handleSubmit(onSubmit)}>
+      <Box component="form" onSubmit={onSubmit}>
         <Stack gap="md">
-          <TextInput label="Username" error={errors.username?.message} {...register("username")} />
-          <TextInput label="First Name" error={errors.firstName?.message} {...register("firstName")} />
-          <TextInput label="Last Name" error={errors.lastName?.message} {...register("lastName")} />
-          <TextInput
-            label="Email"
-            type="email"
-            error={errors.email?.message}
-            {...register("email")}
-          />
-          <TextInput
-            label="Password"
-            type="password"
-            error={errors.password?.message}
-            {...register("password")}
-          />
+          <TextInput label="Username" {...form.getInputProps("username")} />
+          <TextInput label="First Name" {...form.getInputProps("firstName")} />
+          <TextInput label="Last Name" {...form.getInputProps("lastName")} />
+          <TextInput label="Email" type="email" {...form.getInputProps("email")} />
+          <TextInput label="Password" type="password" {...form.getInputProps("password")} />
         </Stack>
         <Group justify="flex-end" mt="md" gap="xs">
           <Button variant="default" onClick={onClose}>
@@ -391,31 +381,32 @@ type EditProps = AddProps & {
 };
 
 function EditUserModal({ user, canUnlock, onClose, onSuccess, onUnlocked, onError }: EditProps) {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting }
-  } = useForm<EditUserForm>({
-    resolver: zodResolver(editUserSchema),
-    defaultValues: {
+  const form = useForm<EditUserForm>({
+    mode: "controlled",
+    initialValues: {
       username: user.username,
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email ?? ""
-    }
+    },
+    validate: zodResolver(editUserSchema)
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const update = useUpdateUser();
   const unlock = useUnlockUser();
   const [isLocked, setIsLocked] = useState(user.isLocked);
 
-  const onSubmit = async (values: EditUserForm) => {
+  const onSubmit = form.onSubmit(async (values) => {
+    setIsSubmitting(true);
     try {
       const updated = await update.mutateAsync({ id: user.id, request: values });
       onSuccess(updated);
     } catch (err) {
       onError(describeError(err));
+    } finally {
+      setIsSubmitting(false);
     }
-  };
+  });
 
   const onToggleLocked = async () => {
     if (!isLocked) return;
@@ -430,17 +421,12 @@ function EditUserModal({ user, canUnlock, onClose, onSuccess, onUnlocked, onErro
 
   return (
     <Modal opened onClose={onClose} title={`Edit ${user.username}`}>
-      <Box component="form" onSubmit={handleSubmit(onSubmit)}>
+      <Box component="form" onSubmit={onSubmit}>
         <Stack gap="md">
-          <TextInput label="Username" error={errors.username?.message} {...register("username")} />
-          <TextInput label="First Name" error={errors.firstName?.message} {...register("firstName")} />
-          <TextInput label="Last Name" error={errors.lastName?.message} {...register("lastName")} />
-          <TextInput
-            label="Email"
-            type="email"
-            error={errors.email?.message}
-            {...register("email")}
-          />
+          <TextInput label="Username" {...form.getInputProps("username")} />
+          <TextInput label="First Name" {...form.getInputProps("firstName")} />
+          <TextInput label="Last Name" {...form.getInputProps("lastName")} />
+          <TextInput label="Email" type="email" {...form.getInputProps("email")} />
           <Box>
             <Text size="sm" fw={500} mb={4}>
               Account locked
@@ -486,34 +472,30 @@ type ResetProps = {
 };
 
 function ResetPasswordModal({ user, onClose, onSuccess, onError }: ResetProps) {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting }
-  } = useForm<ResetPasswordForm>({
-    resolver: zodResolver(resetPasswordSchema),
-    defaultValues: { password: "" }
+  const form = useForm<ResetPasswordForm>({
+    mode: "controlled",
+    initialValues: { password: "" },
+    validate: zodResolver(resetPasswordSchema)
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const reset = useResetUserPassword();
 
-  const onSubmit = async (values: ResetPasswordForm) => {
+  const onSubmit = form.onSubmit(async (values) => {
+    setIsSubmitting(true);
     try {
       await reset.mutateAsync({ id: user.id, password: values.password });
       onSuccess();
     } catch (err) {
       onError(describeError(err));
+    } finally {
+      setIsSubmitting(false);
     }
-  };
+  });
 
   return (
     <Modal opened onClose={onClose} title={`Reset password for ${user.username}`}>
-      <Box component="form" onSubmit={handleSubmit(onSubmit)}>
-        <TextInput
-          label="New password"
-          type="password"
-          error={errors.password?.message}
-          {...register("password")}
-        />
+      <Box component="form" onSubmit={onSubmit}>
+        <TextInput label="New password" type="password" {...form.getInputProps("password")} />
         <Group justify="flex-end" mt="md" gap="xs">
           <Button variant="default" onClick={onClose}>
             Cancel

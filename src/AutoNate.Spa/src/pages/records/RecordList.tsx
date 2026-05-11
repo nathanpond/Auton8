@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { Badge, Box, Button, Group, NativeSelect, Switch } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import { useRecordTypeFields, useRecordTypes } from "@/hooks/useRecordTypes";
@@ -60,13 +60,12 @@ export default function RecordList() {
   // caveat is sort state may reference a stale column id when types switch.
   // We avoid that by surfacing sort through the page-level dropdown rather
   // than DataTable's clickable-header sort.
-  const columns = useMemo<ColumnDef<RecordModel>[]>(() => {
-    const base: ColumnDef<RecordModel>[] = [
+  const columns = useMemo<DataTableColumn<RecordModel>[]>(() => {
+    const base: DataTableColumn<RecordModel>[] = [
       {
         id: "key",
         header: "Key",
         enableSorting: false,
-        enableGlobalFilter: false,
         cell: ({ row }) => (
           <Link to={`/record/${row.original.key}`} onClick={(e) => e.stopPropagation()}>
             <code>{row.original.key}</code>
@@ -98,11 +97,10 @@ export default function RecordList() {
             <span className="text-body text-opacity-50">—</span>
           )
       },
-      ...visibleFields.map((f): ColumnDef<RecordModel> => ({
+      ...visibleFields.map((f): DataTableColumn<RecordModel> => ({
         id: `field-${f.fieldKey}`,
         header: f.displayName,
         enableSorting: false,
-        enableGlobalFilter: false,
         cell: ({ row }) => {
           const renderer = getRenderer(f.dataType);
           return renderer
@@ -120,7 +118,6 @@ export default function RecordList() {
         id: "archive",
         header: "Archive",
         enableSorting: false,
-        enableGlobalFilter: false,
         cell: ({ row }) =>
           row.original.isArchived ? (
             <Badge color="gray" variant="filled">

@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
@@ -119,7 +119,7 @@ export default function ModelCatalogPage() {
     });
   };
 
-  const columns = useMemo<ColumnDef<AgentModel>[]>(() => [
+  const columns = useMemo<DataTableColumn<AgentModel>[]>(() => [
     {
       id: "displayName",
       accessorKey: "displayName",

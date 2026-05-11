@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge, Code, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
@@ -46,7 +46,7 @@ export default function WatchedRecordsPanel() {
     []
   );
 
-  const columns = useMemo<ColumnDef<WatchedRecord>[]>(
+  const columns = useMemo<DataTableColumn<WatchedRecord>[]>(
     () => [
       {
         id: "name",

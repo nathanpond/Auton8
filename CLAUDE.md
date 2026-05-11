@@ -12,12 +12,11 @@ The SPA was migrated from ColorAdmin v5 (Bootstrap 5 admin theme, paid license) 
 - **Full reference (large)**: https://mantine.dev/llms-full.txt
 - Pull `llms.txt` first; fall back to `llms-full.txt` only for components missing from the short list.
 - The `mantine` MCP server (configured in `.mcp.json` at repo root) exposes `list_items`, `get_item_doc`, `get_item_props`, `search_docs`. Prefer it over guessing component props.
-- Migration playbook for any remaining migration work (e.g. swapping `react-hook-form` for `@mantine/form` on a per-page basis): invoke skill `mantine-page-migration`.
+- Forms use `@mantine/form` with `mantine-form-zod-resolver` for Zod-backed validation. Tables go through `src/components/data-table/DataTable.tsx`, a thin wrapper around `mantine-datatable` that re-exports a `DataTableColumn<T>` type modeled on the subset of `ColumnDef` that consumers used.
 
 ### What is still in the dep graph (and why)
 
 - `@fortawesome/fontawesome-free` — every interactive `<i className="fa fa-*">` glyph the SPA renders. There is no `bootstrap-icons` — any `bi-*` class is dead, replace with the equivalent FA name (e.g. `bi-play-fill` → `fa-play`, `bi-info-circle` → `fa-circle-info`).
-- `react-hook-form`, `@hookform/resolvers`, `@tanstack/react-table` — still load-bearing for ~20 forms / tables (`RecordForm`, `ManageUsers` modals, the `DataTable` wrapper's tanstack-table column shim, etc.). Removing them is a port-to-`@mantine/form` job, not a delete; deferred.
 
 ### Theming bridge
 

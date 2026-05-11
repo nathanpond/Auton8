@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   Alert,
   Anchor,
@@ -40,7 +40,7 @@ export default function EdgeTypeList() {
     }
   };
 
-  const columns = useMemo<ColumnDef<EdgeType>[]>(
+  const columns = useMemo<DataTableColumn<EdgeType>[]>(
     () => [
       {
         id: "shortCode",

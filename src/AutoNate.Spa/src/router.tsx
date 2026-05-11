@@ -5,7 +5,6 @@ import AuthShell from "./shell/AuthShell";
 import ProtectedRoute from "./shell/ProtectedRoute";
 import Login from "./pages/login/Login";
 import DynamicPageRoute from "./pages/dynamic-page/DynamicPageRoute";
-import MantineSmokePage from "./pages/_mantineSmoke/MantineSmokePage";
 import { renderAppRoutes } from "./routes/appRoutes";
 
 export default function Router() {
@@ -14,8 +13,6 @@ export default function Router() {
       <Route element={<AuthShell />}>
         <Route index element={<Login />} />
       </Route>
-
-      <Route path="__mantine_test" element={<MantineSmokePage />} />
 
       <Route element={<AppShell />}>
         {renderAppRoutes()}

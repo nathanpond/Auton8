@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { Button, Text } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import {
@@ -33,7 +33,7 @@ export default function Notifications() {
     if (n.linkPath) navigate(n.linkPath);
   };
 
-  const columns = useMemo<ColumnDef<NotificationModel>[]>(
+  const columns = useMemo<DataTableColumn<NotificationModel>[]>(
     () => [
       {
         id: "unread-dot",

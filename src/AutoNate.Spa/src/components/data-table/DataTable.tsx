@@ -1,8 +1,31 @@
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
 import { useQuery } from "@tanstack/react-query";
 import { Badge, Box, Group, Select, Stack, TextInput, UnstyledButton } from "@mantine/core";
 import { DataTable as MantineDataTable, type DataTableSortStatus } from "mantine-datatable";
+
+// Column shape consumed by the wrapper. Modeled on the subset of
+// @tanstack/react-table's ColumnDef that this codebase actually used, so
+// existing column definitions keep working with only an import change.
+export type DataTableCellContext<T> = {
+  row: { original: T; getValue: (k: string) => unknown };
+  getValue: () => unknown;
+  column: { id: string; columnDef: DataTableColumn<T> };
+  table: Record<string, never>;
+};
+
+export type DataTableHeaderContext<T> = {
+  column: { id: string; columnDef: DataTableColumn<T> };
+};
+
+export type DataTableColumn<T> = {
+  id?: string;
+  accessorKey?: keyof T & string;
+  accessorFn?: (row: T) => unknown;
+  header?: ReactNode | ((ctx: DataTableHeaderContext<T>) => ReactNode);
+  cell?: (ctx: DataTableCellContext<T>) => ReactNode;
+  enableSorting?: boolean;
+  meta?: { wrap?: boolean };
+};
 
 // Module-level defaults so destructuring `pageSizeOptions = [...]` doesn't
 // allocate a fresh array per render — mantine-datatable feeds the prop into
@@ -39,7 +62,7 @@ type DataTableProps<T> = {
   loadPage?: (req: DataTablePageRequest) => Promise<DataTablePageResult<T>>;
   queryKey: ReadonlyArray<unknown>;
 
-  columns: ColumnDef<T>[];
+  columns: DataTableColumn<T>[];
   rowKey: (row: T) => string;
   columnWidths: string[];
 
@@ -87,10 +110,9 @@ type ResolvedColumn<T> = {
   render: (row: T) => ReactNode;
 };
 
-function resolveColumn<T>(col: ColumnDef<T>, width: string | undefined): ResolvedColumn<T> {
-  const accessorKey = (col as { accessorKey?: keyof T & string }).accessorKey;
-  const accessorFn = (col as { accessorFn?: (row: T) => unknown }).accessorFn;
-  const id = (col.id ?? accessorKey ?? "") as string;
+function resolveColumn<T>(col: DataTableColumn<T>, width: string | undefined): ResolvedColumn<T> {
+  const { accessorKey, accessorFn } = col;
+  const id = col.id ?? accessorKey ?? "";
   const isActions = id === "actions";
 
   const resolve = (row: T): unknown => {
@@ -101,17 +123,12 @@ function resolveColumn<T>(col: ColumnDef<T>, width: string | undefined): Resolve
 
   const headerNode: ReactNode =
     typeof col.header === "function"
-      ? // Most consumers use a string here; the rare function form is given a
-        // very minimal context. If a consumer needs full tanstack header
-        // context, this is the place to extend.
-        (col.header as (ctx: unknown) => ReactNode)({ column: { id, columnDef: col } } as unknown)
-      : ((col.header as ReactNode) ?? id);
+      ? col.header({ column: { id, columnDef: col } })
+      : (col.header ?? id);
 
-  const customRender = (col as { cell?: (ctx: unknown) => ReactNode }).cell;
+  const customRender = col.cell;
   const render = (row: T): ReactNode => {
     if (customRender) {
-      // Shim the tanstack cell context. Most consumer code uses `row.original`
-      // and (rarely) `getValue()`; everything else is provided as a no-op.
       return customRender({
         row: {
           original: row,

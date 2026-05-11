@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   Alert,
   Anchor,
@@ -42,7 +42,7 @@ export default function RecordTypeList() {
     }
   };
 
-  const columns = useMemo<ColumnDef<RecordType>[]>(
+  const columns = useMemo<DataTableColumn<RecordType>[]>(
     () => [
       {
         id: "shortCode",

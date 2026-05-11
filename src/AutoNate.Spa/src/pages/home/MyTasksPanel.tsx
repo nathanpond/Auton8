@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { useQueryClient } from "@tanstack/react-query";
 import { Alert, Badge, Button, Code, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
@@ -142,7 +142,7 @@ export default function MyTasksPanel() {
     [completeTask]
   );
 
-  const columns = useMemo<ColumnDef<TaskRow>[]>(
+  const columns = useMemo<DataTableColumn<TaskRow>[]>(
     () => [
       {
         id: "name",

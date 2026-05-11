@@ -4,10 +4,9 @@
 // present. Per-form and per-field opt-out via the data-agent-exclude
 // attribute (any truthy value works; we just check for the attribute).
 //
-// Why DOM-based? It's the only mechanism that works regardless of which
-// form library a page uses (react-hook-form, plain controlled state,
-// Formik, etc.). We use the React-tracker hack to set values so RHF and
-// other libraries pick up the change as if a user typed it.
+// Why DOM-based? It works regardless of which form library a page uses
+// (@mantine/form, plain controlled state, etc.). We use the React-tracker
+// hack to set values so React picks up the change as if a user typed it.
 
 import { PageActionDefinition, PageActionRequest, PageActionResult } from "./types";
 
@@ -202,9 +201,9 @@ function findFormById(formId: string): HTMLFormElement | null {
 }
 
 function findFieldByName(form: HTMLFormElement, fieldName: string): { element: FormFieldElement } | null {
-  // Prefer name attribute (the canonical case for react-hook-form), then
-  // id, then a labelled input. Element collection lookup hits all three
-  // for free for name/id but we keep it explicit for clarity.
+  // Prefer name attribute, then id, then a labelled input. Element
+  // collection lookup hits all three for free for name/id but we keep
+  // it explicit for clarity.
   const byName = form.querySelector<FormFieldElement>(
     `[name="${cssEscape(fieldName)}"]`
   );
@@ -301,7 +300,7 @@ function readFieldValue(el: FormFieldElement): unknown {
 // Cross-library value setter. React installs its own value setter on the
 // input prototype that tracks the previous value; bypassing it via the
 // native setter and dispatching an input event is the documented pattern
-// for getting React/RHF to pick up a programmatic change.
+// for getting React to pick up a programmatic change.
 function writeFieldValue(el: FormFieldElement, value: unknown): void {
   if (el instanceof HTMLInputElement && el.type === "checkbox") {
     setNativeChecked(el, Boolean(value));

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   Alert,
   Badge,
@@ -68,7 +68,7 @@ export default function SystemIssues() {
 
   const detail = useSystemIssue(selectedId);
 
-  const columns = useMemo<ColumnDef<SystemIssueModel>[]>(
+  const columns = useMemo<DataTableColumn<SystemIssueModel>[]>(
     () => [
       {
         id: "severity",

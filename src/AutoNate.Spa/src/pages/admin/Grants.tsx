@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ColumnDef } from "@tanstack/react-table";
+import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   ActionIcon,
   Alert,
@@ -96,7 +96,7 @@ export default function Grants() {
     }
   };
 
-  const columns = useMemo<ColumnDef<PermissionGrant>[]>(
+  const columns = useMemo<DataTableColumn<PermissionGrant>[]>(
     () => [
       {
         id: "principalKind",
