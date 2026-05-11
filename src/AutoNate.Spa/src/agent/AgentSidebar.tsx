@@ -429,12 +429,20 @@ function ModelInUseLabel({ current, status }: ModelInUseLabelProps) {
   }
 
   return (
-    <Group gap={6} wrap="nowrap" style={{ minWidth: 0, maxWidth: "60%" }}>
-      <i className="fa fa-microchip" aria-hidden style={{ opacity: 0.6 }} />
+    <Group
+      gap={6}
+      wrap="nowrap"
+      style={{
+        minWidth: 0,
+        maxWidth: "60%",
+        color: "var(--mantine-color-brand-light-color)"
+      }}
+    >
+      <i className="fa fa-microchip" aria-hidden />
       <Text
         size="xs"
-        c="dimmed"
         truncate
+        style={{ color: "var(--mantine-color-brand-light-color)" }}
         title={
           current?.modelId
             ? `Model in use: ${current.modelId}${current.provider ? ` (${current.provider})` : ""}`
