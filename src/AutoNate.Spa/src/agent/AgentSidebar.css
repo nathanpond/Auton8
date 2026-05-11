@@ -1,4 +1,11 @@
 .agent-sidebar {
+  /* User-resizable width: AgentSidebar.tsx writes --agent-sidebar-width onto
+     <body> from a localStorage-persisted value, and the left-edge resize
+     handle updates it during drag. Body-level inheritance means the same var
+     drives both the aside's width and the fill-mode paddings on #app /
+     #content below. Don't redeclare the default here — a local declaration
+     on the same element would shadow the body-level override and the aside
+     would visually stay at the fallback width while padding-right grows. */
   position: fixed;
   top: 0;
   right: 0;
@@ -18,7 +25,7 @@
 }
 
 .agent-sidebar--open {
-  width: 380px;
+  width: var(--agent-sidebar-width, 380px);
 }
 
 /* When the user picks "Show Chatbot Over Header" the sidebar covers the top
@@ -45,12 +52,46 @@
       leaving the header full-width so the body bg doesn't show through above
       the chatbot in the y=0..header-height strip. */
 body.agent-sidebar-fill-app #app {
-  padding-right: 380px;
+  padding-right: var(--agent-sidebar-width, 380px);
   transition: padding-right 160ms ease;
 }
 body.agent-sidebar-fill-content #content {
-  padding-right: 380px;
+  padding-right: var(--agent-sidebar-width, 380px);
   transition: padding-right 160ms ease;
+}
+
+/* While the user is dragging the resize handle, kill width / padding
+   transitions so the sidebar tracks the pointer 1:1 instead of easing
+   behind it. Also block text selection and pin the cursor across the whole
+   document so the cursor doesn't flip back to text when the pointer drifts
+   off the 6px handle during a drag. */
+body.agent-sidebar-resizing {
+  user-select: none;
+  cursor: ew-resize;
+}
+body.agent-sidebar-resizing .agent-sidebar,
+body.agent-sidebar-resizing.agent-sidebar-fill-app #app,
+body.agent-sidebar-resizing.agent-sidebar-fill-content #content {
+  transition: none;
+}
+
+.agent-sidebar__resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 2;
+  /* Prevent the browser from interpreting drag gestures as scroll on touch
+     devices. */
+  touch-action: none;
+}
+
+.agent-sidebar__resize-handle:hover,
+body.agent-sidebar-resizing .agent-sidebar__resize-handle {
+  background: var(--mantine-color-default-border, #dee2e6);
 }
 
 .agent-sidebar__inner {

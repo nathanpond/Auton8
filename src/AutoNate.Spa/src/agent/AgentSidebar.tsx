@@ -1,4 +1,14 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
@@ -34,6 +44,28 @@ import { useActivePageSummary, usePageContextRegistry } from "./pageContext/Page
 import { useAgentModelDefault } from "@/hooks/useAgentModelDefault";
 import "./AgentSidebar.css";
 
+// Smallest usable sidebar width — the original hardcoded value. Anything
+// narrower starts truncating the composer affordances and the chat bubbles.
+const AGENT_SIDEBAR_MIN_WIDTH = 380;
+const AGENT_SIDEBAR_WIDTH_STORAGE_KEY = "autonate.agent.width";
+// Keep at least this much of the page visible to the left of the chatbot so
+// the user can't accidentally drag the sidebar across the whole viewport and
+// lose the page underneath.
+const AGENT_SIDEBAR_VIEWPORT_RESERVE = 200;
+
+function clampAgentSidebarWidth(value: number, viewportWidth: number): number {
+  const max = Math.max(AGENT_SIDEBAR_MIN_WIDTH, viewportWidth - AGENT_SIDEBAR_VIEWPORT_RESERVE);
+  if (!Number.isFinite(value)) return AGENT_SIDEBAR_MIN_WIDTH;
+  return Math.min(max, Math.max(AGENT_SIDEBAR_MIN_WIDTH, value));
+}
+
+function readStoredAgentSidebarWidth(): number {
+  if (typeof window === "undefined") return AGENT_SIDEBAR_MIN_WIDTH;
+  const raw = window.localStorage.getItem(AGENT_SIDEBAR_WIDTH_STORAGE_KEY);
+  const parsed = raw == null ? NaN : Number(raw);
+  return clampAgentSidebarWidth(parsed, window.innerWidth);
+}
+
 export function AgentSidebar() {
   const pageKey = usePageKey();
   const { isOpen, close } = useAgentSidebar();
@@ -63,6 +95,70 @@ export function AgentSidebar() {
       body.classList.remove("agent-sidebar-fill-content");
     };
   }, [isOpen, chatbotWindowMode, chatbotOverHeader]);
+
+  // User-resizable width. Read once from localStorage so the saved size is
+  // applied on first paint, push it to the body's --agent-sidebar-width CSS
+  // var so both the aside's own width and the fill-mode #app / #content
+  // paddings track it, and clamp on window resize so a previously-wide
+  // sidebar doesn't end up swallowing a now-narrower viewport.
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredAgentSidebarWidth);
+  const [isResizing, setIsResizing] = useState(false);
+
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.style.setProperty("--agent-sidebar-width", `${sidebarWidth}px`);
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(AGENT_SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onWindowResize = () => {
+      setSidebarWidth((w) => clampAgentSidebarWidth(w, window.innerWidth));
+    };
+    window.addEventListener("resize", onWindowResize);
+    return () => window.removeEventListener("resize", onWindowResize);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.toggle("agent-sidebar-resizing", isResizing);
+    return () => document.body.classList.remove("agent-sidebar-resizing");
+  }, [isResizing]);
+
+  const onResizePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsResizing(true);
+  }, []);
+
+  const onResizePointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const next = clampAgentSidebarWidth(window.innerWidth - e.clientX, window.innerWidth);
+    setSidebarWidth(next);
+  }, []);
+
+  const onResizePointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    setIsResizing(false);
+  }, []);
+
+  const onResizeKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const step = e.shiftKey ? 64 : 16;
+    setSidebarWidth((w) =>
+      clampAgentSidebarWidth(
+        e.key === "ArrowLeft" ? w + step : w - step,
+        typeof window === "undefined" ? w : window.innerWidth
+      )
+    );
+  }, []);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
@@ -175,6 +271,22 @@ export function AgentSidebar() {
         .join(" ")}
       aria-hidden={!isOpen}
     >
+      {isOpen && (
+        <div
+          className="agent-sidebar__resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chatbot"
+          aria-valuenow={sidebarWidth}
+          aria-valuemin={AGENT_SIDEBAR_MIN_WIDTH}
+          tabIndex={0}
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          onPointerCancel={onResizePointerUp}
+          onKeyDown={onResizeKeyDown}
+        />
+      )}
       {isOpen && (
         <div className="agent-sidebar__inner">
           <Box
