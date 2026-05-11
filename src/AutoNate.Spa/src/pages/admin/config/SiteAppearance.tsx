@@ -42,10 +42,12 @@ type BrandingFieldKey =
   | "loginTagline"
   | "loginCoverImageUrl";
 
-// Only the keys that drive the live Mantine theme are surfaced. ColorAdmin-era
-// fields (header above the top bar, sidebar, secondaryButton, dropdownBg,
-// modalBg) keep their saved values in the database but aren't editable here —
-// they have no effect on the current UI.
+// Keys that drive live UI tokens are surfaced. The `sidebar*` fields paint
+// the Site Configuration left sidenav (ConfigLayout.css) via the --app-sidebar-*
+// bridge vars. The remaining ColorAdmin-era fields (headerBg/headerColor,
+// secondaryButton*, dropdownBg, modalBg, sidebarSubmenuBg) keep their saved
+// values in the database but aren't editable here — they don't paint anything
+// in the current Mantine shell.
 type ColorFieldKey =
   | "primaryAccentColor"
   | "topMenuBg"
@@ -54,6 +56,13 @@ type ColorFieldKey =
   | "topMenuLinkHoverColor"
   | "topMenuLinkActiveBg"
   | "topMenuLinkActiveColor"
+  | "sidebarBg"
+  | "sidebarLinkColor"
+  | "sidebarLinkHoverColor"
+  | "sidebarActiveBg"
+  | "sidebarActiveColor"
+  | "sidebarSectionColor"
+  | "sidebarIconColor"
   | "surfaceBg"
   | "surfaceSecondaryBg"
   | "surfaceTextColor"
@@ -109,6 +118,16 @@ const SURFACE_FIELDS: ColorFieldConfig[] = [
   { key: "surfaceSecondaryBg", label: "Secondary surface" },
   { key: "surfaceTextColor", label: "Body text" },
   { key: "borderColor", label: "Border color" }
+];
+
+const SIDEBAR_FIELDS: ColorFieldConfig[] = [
+  { key: "sidebarBg", label: "Background" },
+  { key: "sidebarLinkColor", label: "Item text" },
+  { key: "sidebarLinkHoverColor", label: "Item hover text" },
+  { key: "sidebarActiveBg", label: "Active item background" },
+  { key: "sidebarActiveColor", label: "Active item text" },
+  { key: "sidebarSectionColor", label: "Group label" },
+  { key: "sidebarIconColor", label: "Group icon" }
 ];
 
 const SAVED_MESSAGE = "Appearance settings saved.";
@@ -303,10 +322,20 @@ export default function SiteAppearancePage() {
           onChange={updateField}
         />
 
+        <ColorSection
+          title="Site Configuration Sidebar"
+          description="Paints the left navigation panel inside Site Configuration pages."
+          fields={SIDEBAR_FIELDS}
+          values={currentDraft}
+          errors={errors}
+          onChange={updateField}
+        />
+
         <Section title="Live Preview">
           <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
             <TopMenuPreview appearance={currentDraft} />
             <SurfacePreview appearance={currentDraft} />
+            <SidebarPreview appearance={currentDraft} />
             <LoginPreview appearance={currentDraft} />
           </SimpleGrid>
         </Section>
@@ -495,6 +524,89 @@ function SurfaceSwatch({
     >
       {label}
     </Box>
+  );
+}
+
+function SidebarPreview({ appearance }: { appearance: SiteAppearance }) {
+  const itemStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 12px 6px 28px",
+    color: appearance.sidebarLinkColor,
+    fontSize: 13,
+    borderLeft: "3px solid transparent"
+  };
+  const activeItemStyle: React.CSSProperties = {
+    ...itemStyle,
+    background: appearance.sidebarActiveBg,
+    color: appearance.sidebarActiveColor,
+    borderLeftColor: appearance.primaryAccentColor
+  };
+  const groupHeaderStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 14px",
+    color: appearance.sidebarSectionColor,
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em"
+  };
+  return (
+    <PreviewCard>
+      <Box
+        style={{
+          background: appearance.sidebarBg,
+          color: appearance.sidebarLinkColor,
+          minHeight: 220,
+          paddingBottom: 8
+        }}
+      >
+        <Box
+          style={{
+            padding: "12px 14px",
+            fontWeight: 600,
+            fontSize: 13,
+            color: appearance.sidebarActiveColor,
+            borderBottom: "1px solid rgba(255,255,255,0.06)"
+          }}
+        >
+          <i className="fa fa-sliders" aria-hidden style={{ marginRight: 8 }} />
+          Site Configuration
+        </Box>
+        <Box style={groupHeaderStyle}>
+          <i
+            className="fa fa-palette"
+            aria-hidden
+            style={{ color: appearance.sidebarIconColor }}
+          />
+          <span style={{ flex: 1 }}>Appearance</span>
+          <i
+            className="fa fa-chevron-down"
+            aria-hidden
+            style={{ color: appearance.sidebarIconColor, fontSize: 10 }}
+          />
+        </Box>
+        <Box style={activeItemStyle}>
+          <i className="fa fa-paintbrush" aria-hidden />
+          <span>Appearance</span>
+        </Box>
+        <Box style={itemStyle}>
+          <i className="fa fa-circle-half-stroke" aria-hidden />
+          <span>Status colors</span>
+        </Box>
+        <Box style={groupHeaderStyle}>
+          <i
+            className="fa fa-screwdriver-wrench"
+            aria-hidden
+            style={{ color: appearance.sidebarIconColor }}
+          />
+          <span style={{ flex: 1 }}>System</span>
+        </Box>
+      </Box>
+    </PreviewCard>
   );
 }
 

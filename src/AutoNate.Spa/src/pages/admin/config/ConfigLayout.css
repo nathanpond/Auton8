@@ -6,8 +6,8 @@
 
 .config-sidenav {
     flex: 0 0 260px;
-    background: #1c2127;
-    color: #d3d8de;
+    background: var(--app-sidebar-bg, #1c2127);
+    color: var(--app-sidebar-text-color, #d3d8de);
     border-right: 1px solid rgba(255, 255, 255, 0.06);
     display: flex;
     flex-direction: column;
@@ -17,7 +17,7 @@
     padding: 1rem 1.25rem;
     font-size: 0.95rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--app-sidebar-component-active-color, #fff);
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     letter-spacing: 0.02em;
 }
@@ -40,7 +40,7 @@
     padding: 0.55rem 1.1rem;
     background: transparent;
     border: 0;
-    color: #c9d1d9;
+    color: var(--app-sidebar-section-color, #c9d1d9);
     font-weight: 600;
     font-size: 0.78rem;
     letter-spacing: 0.06em;
@@ -52,13 +52,13 @@
 
 .config-nav-group-header:hover {
     background: rgba(255, 255, 255, 0.04);
-    color: #fff;
+    color: var(--app-sidebar-link-hover-color, #fff);
 }
 
 .config-nav-group-icon {
     width: 1rem;
     text-align: center;
-    color: #8a93a0;
+    color: var(--app-sidebar-icon-color, #8a93a0);
 }
 
 .config-nav-group-label {
@@ -67,7 +67,7 @@
 
 .config-nav-group-caret {
     font-size: 0.7rem;
-    color: #6a7280;
+    color: var(--app-sidebar-icon-color, #6a7280);
 }
 
 .config-nav-items {
@@ -81,7 +81,7 @@
     align-items: center;
     gap: 0.6rem;
     padding: 0.45rem 1.1rem 0.45rem 2.1rem;
-    color: #b7bec8;
+    color: var(--app-sidebar-menu-link-color, #b7bec8);
     font-size: 0.875rem;
     text-decoration: none;
     border-left: 3px solid transparent;
@@ -90,13 +90,13 @@
 
 .config-nav-item:hover {
     background: rgba(255, 255, 255, 0.04);
-    color: #fff;
+    color: var(--app-sidebar-link-hover-color, #fff);
 }
 
 .config-nav-item.active {
-    background: rgba(13, 110, 253, 0.18);
-    color: #fff;
-    border-left-color: #0d6efd;
+    background: var(--app-sidebar-component-active-bg, rgba(13, 110, 253, 0.18));
+    color: var(--app-sidebar-component-active-color, #fff);
+    border-left-color: var(--mantine-color-brand-filled, #0d6efd);
 }
 
 .config-nav-item-icon {

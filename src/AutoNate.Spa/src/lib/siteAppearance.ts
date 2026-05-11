@@ -289,10 +289,18 @@ export function applySiteAppearanceToDocument(
   setColorVar(rootStyle, "--app-top-menu-link-hover-color", normalized.topMenuLinkHoverColor);
   setColorVar(rootStyle, "--app-top-menu-link-active-bg", normalized.topMenuLinkActiveBg);
   setColorVar(rootStyle, "--app-top-menu-link-active-color", normalized.topMenuLinkActiveColor);
+  // Site Configuration left sidenav (ConfigLayout.css) reads these. The
+  // chatbot AgentSidebar deliberately does NOT — it tracks the surface
+  // theme via --mantine-color-body / --mantine-color-text instead, so the
+  // two sidebars can be themed independently.
   setColorVar(rootStyle, "--app-sidebar-bg", normalized.sidebarBg);
+  setColorVar(rootStyle, "--app-sidebar-text-color", normalized.sidebarLinkColor);
   setColorVar(rootStyle, "--app-sidebar-menu-link-color", normalized.sidebarLinkColor);
+  setColorVar(rootStyle, "--app-sidebar-link-hover-color", normalized.sidebarLinkHoverColor);
   setColorVar(rootStyle, "--app-sidebar-component-active-bg", normalized.sidebarActiveBg);
   setColorVar(rootStyle, "--app-sidebar-component-active-color", normalized.sidebarActiveColor);
+  setColorVar(rootStyle, "--app-sidebar-icon-color", normalized.sidebarIconColor);
+  setColorVar(rootStyle, "--app-sidebar-section-color", normalized.sidebarSectionColor);
 
   // Mantine bridge: mirror SiteAppearance into Mantine's root CSS vars so
   // migrated pages and Mantine components share one theme source.
