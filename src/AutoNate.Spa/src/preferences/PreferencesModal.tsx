@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Button, Group, Modal, Switch as MantineSwitch, TextInput } from "@mantine/core";
 import {
   ChatbotWindowMode,
   useUserPreferences
@@ -139,124 +140,103 @@ export default function PreferencesModal() {
   };
 
   return (
-    <>
-      <div
-        className="modal show d-block"
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="prefs-modal-title"
-        style={{ zIndex: 1065 }}
-      >
-        <div
-          className="modal-dialog modal-dialog-centered pref-modal-dialog"
-          style={{
-            maxWidth: "min(1120px, calc(100vw - 32px))",
-            width: "100%"
-          }}
-        >
-          <div
-            className="modal-content pref-modal-content"
-            style={{ height: "min(720px, calc(100vh - 32px))" }}
-          >
-            <div className="modal-header pref-header">
-              <h5 className="modal-title" id="prefs-modal-title">
-                Preferences
-              </h5>
-              <div className="pref-search">
-                <i
-                  className="fa fa-search pref-search-icon"
-                  aria-hidden="true"
-                />
-                <input
-                  type="text"
-                  className="form-control form-control-sm"
-                  placeholder="Search settings…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  aria-label="Search settings"
-                />
-                {query && (
-                  <button
-                    type="button"
-                    className="pref-search-clear"
-                    onClick={() => setQuery("")}
-                    aria-label="Clear search"
-                  >
-                    <i className="fa fa-times" aria-hidden="true" />
-                  </button>
-                )}
-              </div>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={closeModal}
-                aria-label="Close"
-              />
-            </div>
-
-            <div className="modal-body pref-body">
-              <aside className="pref-cats">
-                {CATEGORIES.map((cat) => (
-                  <CategoryRow
-                    key={cat.id}
-                    cat={cat}
-                    active={!searching && activeCat === cat.id}
-                    expanded={!!expanded[cat.id]}
-                    onSelect={() => {
-                      setActiveCat(cat.id);
-                      setQuery("");
-                    }}
-                    onToggleExpand={() =>
-                      setExpanded((e) => ({ ...e, [cat.id]: !e[cat.id] }))
-                    }
-                  />
-                ))}
-              </aside>
-
-              <main className="pref-pane">
-                {searching ? (
-                  <SearchResults
-                    query={query}
-                    matches={matches}
-                    onPick={(s) => {
-                      setActiveCat(s.categoryId);
-                      setQuery("");
-                    }}
-                  />
-                ) : (
-                  <CategoryContent
-                    cat={currentCat}
-                    windowMode={draftMode}
-                    onChangeWindowMode={setDraftMode}
-                    overHeader={draftOverHeader}
-                    onChangeOverHeader={setDraftOverHeader}
-                  />
-                )}
-              </main>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-outline-secondary"
-                onClick={closeModal}
-              >
-                Cancel
-              </button>
-              <button type="button" className="btn btn-theme" onClick={onSave}>
-                Save changes
-              </button>
-            </div>
-          </div>
+    <Modal
+      opened={isModalOpen}
+      onClose={closeModal}
+      size="auto"
+      withCloseButton={false}
+      padding={0}
+      zIndex={1065}
+      styles={{
+        content: { width: "min(1120px, calc(100vw - 32px))", height: "min(720px, calc(100vh - 32px))" },
+        body: { display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }
+      }}
+    >
+      <div className="pref-header">
+        <h5 id="prefs-modal-title" style={{ margin: 0 }}>
+          Preferences
+        </h5>
+        <div className="pref-search">
+          <i className="fa fa-search pref-search-icon" aria-hidden="true" />
+          <TextInput
+            size="xs"
+            type="text"
+            placeholder="Search settings…"
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            aria-label="Search settings"
+            style={{ width: "100%" }}
+          />
+          {query && (
+            <button
+              type="button"
+              className="pref-search-clear"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+            >
+              <i className="fa fa-times" aria-hidden="true" />
+            </button>
+          )}
         </div>
+        <Button
+          variant="subtle"
+          color="gray"
+          size="xs"
+          onClick={closeModal}
+          aria-label="Close"
+        >
+          <i className="fa fa-times" />
+        </Button>
       </div>
-      <div
-        className="modal-backdrop fade show"
-        onClick={closeModal}
-        style={{ zIndex: 1060 }}
-      />
-    </>
+
+      <div className="pref-body">
+        <aside className="pref-cats">
+          {CATEGORIES.map((cat) => (
+            <CategoryRow
+              key={cat.id}
+              cat={cat}
+              active={!searching && activeCat === cat.id}
+              expanded={!!expanded[cat.id]}
+              onSelect={() => {
+                setActiveCat(cat.id);
+                setQuery("");
+              }}
+              onToggleExpand={() =>
+                setExpanded((e) => ({ ...e, [cat.id]: !e[cat.id] }))
+              }
+            />
+          ))}
+        </aside>
+
+        <main className="pref-pane">
+          {searching ? (
+            <SearchResults
+              query={query}
+              matches={matches}
+              onPick={(s) => {
+                setActiveCat(s.categoryId);
+                setQuery("");
+              }}
+            />
+          ) : (
+            <CategoryContent
+              cat={currentCat}
+              windowMode={draftMode}
+              onChangeWindowMode={setDraftMode}
+              overHeader={draftOverHeader}
+              onChangeOverHeader={setDraftOverHeader}
+            />
+          )}
+        </main>
+      </div>
+
+      <Group justify="flex-end" gap="xs" p="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+        <Button variant="default" onClick={closeModal}>
+          Cancel
+        </Button>
+        <Button onClick={onSave}>Save changes</Button>
+      </Group>
+    </Modal>
   );
 }
 
@@ -524,16 +504,11 @@ function Switch({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <div className="form-check form-switch mb-0">
-      <input
-        id={id}
-        className="form-check-input"
-        type="checkbox"
-        role="switch"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-    </div>
+    <MantineSwitch
+      id={id}
+      checked={checked}
+      onChange={(e) => onChange(e.currentTarget.checked)}
+    />
   );
 }
 

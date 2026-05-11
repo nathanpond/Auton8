@@ -1,5 +1,17 @@
-import { useForm } from "react-hook-form";
 import { useSearchParams, Navigate } from "react-router-dom";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  Group,
+  PasswordInput,
+  Stack,
+  Text,
+  TextInput,
+  ThemeIcon
+} from "@mantine/core";
+import { useForm } from "@mantine/form";
 import { submitLoginForm } from "@/api/auth";
 import { useMe } from "@/hooks/useMe";
 import SiteBrand from "@/components/SiteBrand";
@@ -19,8 +31,12 @@ export default function Login() {
   const prefilledUsername = searchParams.get("username") ?? "";
   const returnUrl = searchParams.get("returnUrl") ?? "/home";
 
-  const { register, handleSubmit, formState: { isSubmitting } } = useForm<FormValues>({
-    defaultValues: { username: prefilledUsername, password: "" }
+  const form = useForm<FormValues>({
+    initialValues: { username: prefilledUsername, password: "" },
+    validate: {
+      username: (v) => (v.trim().length === 0 ? "Username is required" : null),
+      password: (v) => (v.length === 0 ? "Password is required" : null)
+    }
   });
 
   if (!meLoading && me?.authenticated) {
@@ -39,95 +55,122 @@ export default function Login() {
     }
   };
 
+  // The saved SiteAppearance currently stores the old ColorAdmin demo path
+  // (`/spa/assets/...`) which 404s in dev. Until the admin re-saves the cover
+  // image via Site Configuration, fall through to the new default image when
+  // the stored URL looks like that broken legacy path.
+  const storedCover = effectiveAppearance.loginCoverImageUrl;
+  const coverUrl =
+    storedCover && !storedCover.startsWith("/spa/")
+      ? storedCover
+      : "/assets/img/login-bg/space.jpg";
+
   return (
-    <>
+    <Box
+      style={{
+        position: "fixed",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        overflow: "auto"
+      }}
+    >
+      {/* Cover image + dark overlay. Pinned behind the card. */}
+      <Box
+        aria-hidden
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: coverUrl ? `url("${coverUrl}")` : undefined,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundColor: "#0d1117"
+        }}
+      />
+      <Box
+        aria-hidden
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(0,0,0,0.35)"
+        }}
+      />
+
       {(error === "invalid" || error === "locked") && (
-        <div
-          className="position-fixed top-0 start-50 translate-middle-x mt-4 z-3"
-          style={{ width: "min(100%, 420px)" }}
+        <Box
+          style={{
+            position: "fixed",
+            top: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "min(100%, 420px)",
+            zIndex: 3
+          }}
         >
-          <div className="alert alert-danger mb-0" role="alert">
+          <Alert color="red" variant="filled" radius="md">
             {error === "locked"
               ? "This account is locked after too many failed sign-in attempts. Contact an administrator to unlock it."
               : "Invalid username or password."}
-          </div>
-        </div>
+          </Alert>
+        </Box>
       )}
 
-      <div className="login login-v2 fw-bold">
-        <div className="login-cover">
-          <div
-            className="login-cover-img"
-            style={{
-              backgroundImage: effectiveAppearance.loginCoverImageUrl
-                ? `url("${effectiveAppearance.loginCoverImageUrl}")`
-                : undefined
-            }}
-            data-id="login-cover-image"
-          ></div>
-          <div className="login-cover-bg"></div>
-        </div>
+      <Card
+        shadow="xl"
+        radius="md"
+        padding="xl"
+        withBorder={false}
+        style={{ position: "relative", width: "min(100%, 420px)", zIndex: 1 }}
+      >
+        <Group justify="space-between" align="flex-start" wrap="nowrap" mb="lg">
+          <Stack gap={4}>
+            <SiteBrand
+              appearance={effectiveAppearance}
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              iconClassName=""
+              textClassName=""
+              imageClassName=""
+            />
+            <Text size="xs" c="dimmed">
+              {effectiveAppearance.loginTagline ||
+                "Sign in to continue to the automation dashboard"}
+            </Text>
+          </Stack>
+          <ThemeIcon variant="light" color="gray" size="lg" radius="md">
+            <i className="fa fa-lock" />
+          </ThemeIcon>
+        </Group>
 
-        <div className="login-container">
-          <div className="login-header">
-            <div className="brand">
-              <div className="d-flex align-items-center">
-                <SiteBrand
-                  appearance={effectiveAppearance}
-                  className="d-inline-flex align-items-center gap-2"
-                  iconClassName="logo"
-                  textClassName="d-inline-flex align-items-center"
-                  imageClassName="site-appearance-brand-image"
-                />
-              </div>
-              <small>
-                {effectiveAppearance.loginTagline || "Sign in to continue to the automation dashboard"}
-              </small>
-            </div>
-            <div className="icon">
-              <i className="fa fa-lock"></i>
-            </div>
-          </div>
-
-          <div className="login-content">
-            <form onSubmit={handleSubmit(onSubmit)}>
-              <div className="form-floating mb-20px">
-                <input
-                  type="text"
-                  className="form-control fs-13px h-45px border-0"
-                  placeholder="Username"
-                  id="username"
-                  {...register("username", { required: true })}
-                />
-                <label htmlFor="username" className="d-flex align-items-center text-gray-600 fs-13px">
-                  Username
-                </label>
-              </div>
-              <div className="form-floating mb-20px">
-                <input
-                  type="password"
-                  className="form-control fs-13px h-45px border-0"
-                  placeholder="Password"
-                  id="password"
-                  {...register("password", { required: true })}
-                />
-                <label htmlFor="password" className="d-flex align-items-center text-gray-600 fs-13px">
-                  Password
-                </label>
-              </div>
-              <div className="mb-20px">
-                <button
-                  type="submit"
-                  className="btn btn-theme d-block w-100 h-45px btn-lg"
-                  disabled={isSubmitting}
-                >
-                  Sign me in
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-    </>
+        <form onSubmit={form.onSubmit(onSubmit)}>
+          <Stack gap="sm">
+            <TextInput
+              label="Username"
+              placeholder="Username"
+              autoComplete="username"
+              autoFocus={prefilledUsername.length === 0}
+              {...form.getInputProps("username")}
+            />
+            <PasswordInput
+              label="Password"
+              placeholder="Password"
+              autoComplete="current-password"
+              autoFocus={prefilledUsername.length > 0}
+              {...form.getInputProps("password")}
+            />
+            <Button
+              type="submit"
+              fullWidth
+              size="md"
+              loading={form.submitting}
+              mt="xs"
+            >
+              Sign me in
+            </Button>
+          </Stack>
+        </form>
+      </Card>
+    </Box>
   );
 }

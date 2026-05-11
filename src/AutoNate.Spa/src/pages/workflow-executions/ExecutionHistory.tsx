@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Alert, Badge, Button, Text } from "@mantine/core";
 import { useExecutionHistory } from "@/hooks/useExecutions";
 import { useUserDirectory, userFullDisplay } from "@/hooks/useUserDirectory";
 import { describeError, formatTimestamp } from "./utils";
@@ -13,54 +14,62 @@ export default function ExecutionHistory({ processInstanceId }: Props) {
 
   if (error) {
     return (
-      <div className="alert alert-danger" role="alert">
+      <Alert color="red" variant="light" role="alert">
         {describeError(error)}
-      </div>
+      </Alert>
     );
   }
 
   if (isLoading) {
-    return <p className="workflow-executions-loading">Loading history...</p>;
+    return (
+      <Text size="sm" c="dimmed">
+        Loading history...
+      </Text>
+    );
   }
 
   if (events.length === 0) {
-    return <p className="text-body text-opacity-50 mb-0">No history yet.</p>;
+    return (
+      <Text size="sm" c="dimmed">
+        No history yet.
+      </Text>
+    );
   }
 
   return (
-    <ol className="list-unstyled mb-0 workflow-execution-history-list">
+    <ol className="workflow-execution-history-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {events.map((event, index) => (
         <li
           key={`${event.activityId}-${event.startedAtUtc ?? index}`}
-          className="mb-3 pb-3 border-bottom workflow-execution-history-item"
+          className="workflow-execution-history-item"
+          style={{ marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid var(--mantine-color-default-border)" }}
         >
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <strong>{event.activityName ?? event.activityId}</strong>
             {event.activityType && (
-              <span className={activityTypeBadgeClass(event.activityType)}>
+              <Badge color={activityTypeBadgeColor(event.activityType)} variant="filled">
                 {event.activityType}
-              </span>
+              </Badge>
             )}
             {event.deleteReason && (
-              <span className="badge text-bg-warning">{event.deleteReason}</span>
+              <Badge color="yellow" variant="filled">
+                {event.deleteReason}
+              </Badge>
             )}
             {event.isOverride && (
-              <span className="badge text-bg-warning" title="Completed via admin override">
+              <Badge color="yellow" variant="filled" title="Completed via admin override">
                 override
-              </span>
+              </Badge>
             )}
             {event.isErrored && (
-              <span
-                className="badge text-bg-danger"
-                title={event.errorMessage ?? "Activity failed"}
-              >
+              <Badge color="red" variant="filled" title={event.errorMessage ?? "Activity failed"}>
                 {event.errorCount && event.errorCount > 1
                   ? `errored × ${event.errorCount}`
                   : "errored"}
-              </span>
+              </Badge>
             )}
           </div>
-          <div className="small text-body text-opacity-75">
+          <div style={{ fontSize: "0.875rem", color: "var(--mantine-color-dimmed)" }}>
             <span>{formatTimestamp(event.startedAtUtc)}</span>
             <span className="mx-2">→</span>
             <span>{event.endedAtUtc ? formatTimestamp(event.endedAtUtc) : "in progress"}</span>
@@ -97,19 +106,19 @@ export default function ExecutionHistory({ processInstanceId }: Props) {
   );
 }
 
-function activityTypeBadgeClass(activityType: string): string {
+function activityTypeBadgeColor(activityType: string): string {
   switch (activityType) {
     case "userTask":
-      return "badge text-bg-primary";
+      return "blue";
     case "serviceTask":
     case "scriptTask":
-      return "badge text-bg-info";
+      return "cyan";
     case "startEvent":
-      return "badge text-bg-success";
+      return "green";
     case "endEvent":
-      return "badge text-bg-dark";
+      return "dark";
     default:
-      return "badge text-bg-secondary";
+      return "gray";
   }
 }
 
@@ -138,32 +147,34 @@ function ErrorDetails({ message, stackTrace }: ErrorDetailsProps) {
   const hasStack = typeof stackTrace === "string" && stackTrace.length > 0;
 
   return (
-    <div className="small text-danger mt-1">
-      <code className="text-danger">{message}</code>
+    <Text size="xs" c="red" mt={4}>
+      <code style={{ color: "var(--mantine-color-red-7)" }}>{message}</code>
       {hasStack && (
         <>
           {" "}
-          <button
-            type="button"
-            className="btn btn-link btn-sm p-0 align-baseline text-danger"
+          <Button
+            variant="subtle"
+            color="red"
+            size="compact-xs"
             aria-expanded={expanded}
             aria-controls={stackId}
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? "Hide stack trace" : "Show stack trace"}
-          </button>
+          </Button>
           {expanded && (
             <pre
               id={stackId}
               tabIndex={0}
-              className="workflow-execution-history-stack mt-1 mb-0 small"
+              className="workflow-execution-history-stack"
+              style={{ marginTop: 4, marginBottom: 0, fontSize: 12 }}
             >
               {stackTrace}
             </pre>
           )}
         </>
       )}
-    </div>
+    </Text>
   );
 }
 

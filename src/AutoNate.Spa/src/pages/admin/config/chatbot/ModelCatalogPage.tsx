@@ -2,6 +2,22 @@ import { FormEvent, useMemo, useState } from "react";
 import { ColumnDef } from "@tanstack/react-table";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Box,
+  Button,
+  Code,
+  Grid,
+  Group,
+  Modal,
+  Text,
+  TextInput,
+  Textarea,
+  Title
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
+import {
   AgentModel,
   RefreshResult,
   listAgentModels,
@@ -229,30 +245,38 @@ export default function ModelCatalogPage() {
         // toggling moved to the Agent Use column's switch.
         const canActivate = m.providerHasConnection;
         return (
-          <div className="data-table-row-actions">
-            <button
-              type="button"
-              className="btn btn-icon"
+          <Group gap="xs">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="sm"
               title="Edit model"
               aria-label={`Edit ${m.displayName}`}
               disabled={busy}
-              onClick={(e) => { e.stopPropagation(); setEditing(fromRow(m)); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditing(fromRow(m));
+              }}
             >
-              <i className="fa fa-pen"></i>
-            </button>
+              <i className="fa fa-pen" />
+            </ActionIcon>
             {canActivate && !m.isDefault && (
-              <button
-                type="button"
-                className="btn btn-icon btn-icon-success"
+              <ActionIcon
+                variant="subtle"
+                color="green"
+                size="sm"
                 title="Set as default model"
                 aria-label={`Set ${m.displayName} as default`}
                 disabled={busy}
-                onClick={(e) => { e.stopPropagation(); void runAction(m.id, () => setDefaultAgentModel(m.id)); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void runAction(m.id, () => setDefaultAgentModel(m.id));
+                }}
               >
-                <i className="fa fa-star"></i>
-              </button>
+                <i className="fa fa-star" />
+              </ActionIcon>
             )}
-          </div>
+          </Group>
         );
       }
     }
@@ -260,47 +284,64 @@ export default function ModelCatalogPage() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Models</h1>
-        <p className="page-head-copy">
-          The catalogue of LLM models AutoNate can use. The agent loop reads
-          context windows from this table to size history-trimming and
-          summarization. The "default" model (per provider) is what chatbot
-          conversations use when no explicit model is pinned. The "available"
-          flag controls whether the agent can pick a model for autonomous
-          task routing — routing parameters themselves are not yet exposed.
-        </p>
-      </div>
+      <PageHeader
+        title="Models"
+        description={
+          <>
+            The catalogue of LLM models AutoNate can use. The agent loop reads context windows from
+            this table to size history-trimming and summarization. The &quot;default&quot; model
+            (per provider) is what chatbot conversations use when no explicit model is pinned. The
+            &quot;available&quot; flag controls whether the agent can pick a model for autonomous
+            task routing — routing parameters themselves are not yet exposed.
+          </>
+        }
+      />
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
 
       {refreshSummary && (
-        <div className="alert alert-info">
-          <div className="fw-semibold mb-1">Refresh complete</div>
+        <Alert color="blue" variant="light" mb="md">
+          <Text fw={600} mb={4}>
+            Refresh complete
+          </Text>
           {refreshSummary.providers.length === 0 && refreshSummary.skippedReasons.length === 0 && (
-            <div>No providers polled.</div>
+            <Text size="sm">No providers polled.</Text>
           )}
           {refreshSummary.providers.map((p) => (
-            <div key={p.connectionId} className="small">
+            <Text key={p.connectionId} size="sm">
               <strong>{p.provider}</strong>:{" "}
-              {p.error
-                ? <span className="text-danger">{p.error}</span>
-                : p.addedModelIds.length === 0
-                  ? <>No new models ({p.providerModelCount} total upstream).</>
-                  : <>Added {p.addedModelIds.length}: <code>{p.addedModelIds.join(", ")}</code></>}
-            </div>
+              {p.error ? (
+                <Text component="span" c="red">
+                  {p.error}
+                </Text>
+              ) : p.addedModelIds.length === 0 ? (
+                <>No new models ({p.providerModelCount} total upstream).</>
+              ) : (
+                <>
+                  Added {p.addedModelIds.length}: <Code>{p.addedModelIds.join(", ")}</Code>
+                </>
+              )}
+            </Text>
           ))}
           {refreshSummary.skippedReasons.map((reason, i) => (
-            <div key={i} className="small text-muted">{reason}</div>
+            <Text key={i} size="sm" c="dimmed">
+              {reason}
+            </Text>
           ))}
-          <button
+          <Anchor
+            component="button"
             type="button"
-            className="btn btn-sm btn-link p-0 mt-1"
+            size="sm"
+            mt={4}
             onClick={() => setRefreshSummary(null)}
           >
             Dismiss
-          </button>
-        </div>
+          </Anchor>
+        </Alert>
       )}
 
       <DataTable<AgentModel>
@@ -319,9 +360,10 @@ export default function ModelCatalogPage() {
           return `${m.displayName} ${m.modelId} ${m.provider} ${m.description ?? ""}`.toLowerCase().includes(needle);
         }}
         toolbarBeforeSearch={
-          <button
-            type="button"
-            className="btn btn-icon"
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
             onClick={() => refreshMutation.mutate()}
             disabled={refreshMutation.isPending}
             title={refreshMutation.isPending
@@ -330,7 +372,7 @@ export default function ModelCatalogPage() {
             aria-label="Refresh from providers"
           >
             <i className={`fa fa-arrows-rotate${refreshMutation.isPending ? " fa-spin" : ""}`} />
-          </button>
+          </ActionIcon>
         }
       />
 
@@ -360,88 +402,95 @@ type ModelEditModalProps = {
 function ModelEditModal({ form, onChange, onSubmit, onCancel, submitting, submitError }: ModelEditModalProps) {
   const update = (patch: Partial<FormState>) => onChange({ ...form, ...patch });
 
+  const readOnlyStyles = { input: { background: "transparent", border: 0, padding: 0 } } as const;
   return (
-    <>
-      <div className="modal show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog modal-dialog-centered modal-lg">
-          <div className="modal-content">
-            <form onSubmit={onSubmit}>
-              <div className="modal-header">
-                <h5 className="modal-title">Edit model</h5>
-                <button type="button" className="btn-close" onClick={onCancel} aria-label="Close" />
-              </div>
-              <div className="modal-body">
-                <div className="row g-3">
-                  <div className="col-md-6">
-                    <label className="form-label">Model id</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.modelId} />
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Display name</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.displayName} />
-                  </div>
-                  <div className="col-md-4">
-                    <label className="form-label">Provider</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.provider} />
-                  </div>
-                  <div className="col-md-4">
-                    <label className="form-label">Context window (tokens)</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.contextWindowTokens} />
-                  </div>
-                  <div className="col-md-4">
-                    <label className="form-label">Sort order</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.sortOrder} />
-                  </div>
-                  <div className="col-md-4">
-                    <label className="form-label">Input cost / Mtok</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.inputCost || "—"} />
-                  </div>
-                  <div className="col-md-4">
-                    <label className="form-label">Output cost / Mtok</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.outputCost || "—"} />
-                  </div>
-                  <div className="col-md-4">
-                    <label className="form-label">Cost currency</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.costCurrency} />
-                  </div>
-                  <div className="col-md-4">
-                    <label className="form-label">Cost published</label>
-                    <input type="text" readOnly className="form-control-plaintext" value={form.costPublishedAtUtc || "—"} />
-                  </div>
-                  <div className="col-12">
-                    <label className="form-label">Description / what it's good for</label>
-                    <textarea
-                      className="form-control"
-                      rows={3}
-                      value={form.description}
-                      onChange={(e) => update({ description: e.target.value })}
-                      placeholder="Describe what this model is good for…"
-                    />
-                    <small className="text-muted">
-                      Description is the only admin-editable field — every other value is curated by the provider and refreshed via the toolbar.
-                    </small>
-                  </div>
-                </div>
+    <Modal opened onClose={onCancel} title="Edit model" size="lg" centered>
+      <Box component="form" onSubmit={onSubmit}>
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput label="Model id" readOnly value={form.modelId} styles={readOnlyStyles} />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Display name"
+              readOnly
+              value={form.displayName}
+              styles={readOnlyStyles}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <TextInput label="Provider" readOnly value={form.provider} styles={readOnlyStyles} />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <TextInput
+              label="Context window (tokens)"
+              readOnly
+              value={form.contextWindowTokens}
+              styles={readOnlyStyles}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <TextInput label="Sort order" readOnly value={form.sortOrder} styles={readOnlyStyles} />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <TextInput
+              label="Input cost / Mtok"
+              readOnly
+              value={form.inputCost || "—"}
+              styles={readOnlyStyles}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <TextInput
+              label="Output cost / Mtok"
+              readOnly
+              value={form.outputCost || "—"}
+              styles={readOnlyStyles}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <TextInput
+              label="Cost currency"
+              readOnly
+              value={form.costCurrency}
+              styles={readOnlyStyles}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 4 }}>
+            <TextInput
+              label="Cost published"
+              readOnly
+              value={form.costPublishedAtUtc || "—"}
+              styles={readOnlyStyles}
+            />
+          </Grid.Col>
+          <Grid.Col span={12}>
+            <Textarea
+              label="Description / what it's good for"
+              rows={3}
+              value={form.description}
+              onChange={(e) => update({ description: e.currentTarget.value })}
+              placeholder="Describe what this model is good for…"
+              description="Description is the only admin-editable field — every other value is curated by the provider and refreshed via the toolbar."
+            />
+          </Grid.Col>
+        </Grid>
 
-                {submitError && (
-                  <div className="alert alert-danger mt-3">
-                    {submitError.message ?? "Save failed."}
-                  </div>
-                )}
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={submitting}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={submitting}>
-                  {submitting ? "Saving…" : "Save changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop show" />
-    </>
+        {submitError && (
+          <Alert color="red" variant="light" mt="md">
+            {submitError.message ?? "Save failed."}
+          </Alert>
+        )}
+
+        <Group justify="flex-end" mt="md" gap="xs">
+          <Button variant="default" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={submitting}>
+            Save changes
+          </Button>
+        </Group>
+      </Box>
+    </Modal>
   );
 }

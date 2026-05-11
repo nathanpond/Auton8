@@ -2,6 +2,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import {
+  ActionIcon,
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  Code,
+  Group,
+  List,
+  Modal,
+  MultiSelect,
+  NumberInput,
+  Paper,
+  Radio,
+  ScrollArea,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Textarea,
+  Title,
+  UnstyledButton
+} from "@mantine/core";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
 import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
 import {
@@ -1026,92 +1049,93 @@ export default function WorkflowStudio() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Workflow Studio</h1>
-          <p className="page-head-copy workflow-copy">
+      <Group justify="space-between" align="flex-start" wrap="wrap" gap="md" mb="md">
+        <Stack gap={4}>
+          <Title order={1}>Workflow Studio</Title>
+          <Text size="sm" c="dimmed" maw={720}>
             Select a saved workflow model, edit it in the browser, save drafts to AutoNate, publish
             to Flowable, and start new executions from the current model.
-          </p>
-        </div>
-        <button
-          type="button"
+          </Text>
+        </Stack>
+        <UnstyledButton
           className="workflow-bpmn-support-badge"
           onClick={() => setShowBpmnTypesModal(true)}
           title="View supported BPMN node types"
         >
-          <i className="bi bi-diagram-3-fill" aria-hidden="true"></i>
+          <i className="fa fa-sitemap" aria-hidden="true"></i>
           <span>Supported BPMN Types</span>
-          <i className="bi bi-arrow-right-short" aria-hidden="true"></i>
-        </button>
-      </div>
+          <i className="fa fa-arrow-right" aria-hidden="true"></i>
+        </UnstyledButton>
+      </Group>
 
-      {error && <div className="alert alert-danger">{error}</div>}
-      {status && <div className="alert alert-success">{status}</div>}
+      {error && (
+        <Alert color="red" variant="light" mb="sm">
+          {error}
+        </Alert>
+      )}
+      {status && (
+        <Alert color="green" variant="light" mb="sm">
+          {status}
+        </Alert>
+      )}
       {warnings.length > 0 && (
-        <div className="alert alert-warning" role="alert">
-          <strong>Compatibility warnings</strong>
-          <ul className="workflow-warning-list">
+        <Alert color="yellow" variant="light" title="Compatibility warnings" mb="sm">
+          <List size="sm">
             {warnings.map((w, i) => (
-              <li key={i}>{w}</li>
+              <List.Item key={i}>{w}</List.Item>
             ))}
-          </ul>
-        </div>
+          </List>
+        </Alert>
       )}
 
-      <div className="workflow-toolbar">
+      <Box className="workflow-toolbar">
         <div className="workflow-selector-panel">
-          <label className="workflow-field">
-            <span>Workflow Model</span>
-            <div className="workflow-selector-inputs">
-              <select
-                className="form-select"
-                value={currentModel?.id ?? ""}
-                onChange={(e) => onSelectionChange(e.target.value)}
-                disabled={!!busy}
-              >
-                <option value="">
-                  {workflows.length === 0 ? "No workflow models yet" : "Select a workflow model"}
-                </option>
-                {sortedWorkflows.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="btn btn-outline-secondary workflow-add-button"
-                onClick={() => setShowCreateModal(true)}
-                disabled={!!busy}
-                aria-label="Create workflow model"
-                title="Create workflow model"
-              >
-                <i className="bi bi-plus-lg" aria-hidden="true"></i>
-              </button>
-            </div>
-          </label>
+          <Group gap="xs" wrap="nowrap" align="flex-end">
+            <Select
+              label="Workflow Model"
+              placeholder={
+                workflows.length === 0 ? "No workflow models yet" : "Select a workflow model"
+              }
+              value={currentModel?.id ?? null}
+              onChange={(v) => onSelectionChange(v ?? "")}
+              disabled={!!busy}
+              data={sortedWorkflows.map((w) => ({ value: w.id, label: w.name }))}
+              searchable
+              clearable={false}
+              style={{ flex: 1, minWidth: 240 }}
+            />
+            <ActionIcon
+              variant="default"
+              size="lg"
+              onClick={() => setShowCreateModal(true)}
+              disabled={!!busy}
+              aria-label="Create workflow model"
+              title="Create workflow model"
+            >
+              <i className="fa fa-plus" aria-hidden="true"></i>
+            </ActionIcon>
+          </Group>
         </div>
 
-        <div className="workflow-actions">
-          <button
-            className="btn btn-primary"
+        <Group className="workflow-actions" gap="xs" wrap="wrap">
+          <Button
             onClick={onSave}
             disabled={!handle || !!busy || !currentModel}
             title="Save"
           >
             Save
-          </button>
-          <button
-            className="btn btn-outline-primary"
+          </Button>
+          <Button
+            variant="outline"
             onClick={onPublish}
             disabled={!canPublish}
             title="Publish"
           >
             Publish
-          </button>
-          <button
-            className="btn btn-outline-success"
+          </Button>
+          <Button
+            variant="outline"
+            color="green"
             onClick={onStartInstance}
             disabled={!canStart}
             title={
@@ -1119,32 +1143,41 @@ export default function WorkflowStudio() {
                 ? "Workflow is paused — resume to start a new instance"
                 : "Start instance"
             }
+            leftSection={<i className="fa fa-play" aria-hidden="true" />}
           >
             Start Instance
-          </button>
+          </Button>
           {isPaused ? (
-            <button
-              className="btn btn-outline-success"
+            <Button
+              variant="outline"
+              color="green"
               onClick={onResume}
               disabled={!canTogglePause}
               title="Resume — allow new instances to start"
+              leftSection={<i className="fa fa-play" aria-hidden="true" />}
             >
-              <i className="bi bi-play-fill" aria-hidden="true"></i> Resume
-            </button>
+              Resume
+            </Button>
           ) : (
-            <button
-              className="btn btn-outline-warning"
+            <Button
+              variant="outline"
+              color="yellow"
               onClick={onPause}
               disabled={!canTogglePause}
               title="Pause — block new instances; existing runs continue"
+              leftSection={<i className="fa fa-pause" aria-hidden="true" />}
             >
-              <i className="bi bi-pause-fill" aria-hidden="true"></i> Pause
-            </button>
+              Pause
+            </Button>
           )}
-        </div>
-      </div>
+        </Group>
+      </Box>
 
-      {busy && <p className="workflow-busy">Working on {busy}...</p>}
+      {busy && (
+        <Text size="sm" c="dimmed" my="xs">
+          Working on {busy}...
+        </Text>
+      )}
 
       <div
         className={`workflow-layout${activeSidebar ? " workflow-layout--sidebar-open" : ""}`}
@@ -1153,21 +1186,19 @@ export default function WorkflowStudio() {
           {!currentModel ? (
             <div className="workflow-empty-state">
               <div className="workflow-empty-icon">
-                <i className="bi bi-diagram-3" aria-hidden="true"></i>
+                <i className="fa fa-sitemap" aria-hidden="true"></i>
               </div>
               <h2>Create Your First Workflow</h2>
               <p>
                 Workflow models live in the application database and are loaded into the modeler
                 from there. Create one to start modeling.
               </p>
-              <button
-                type="button"
-                className="btn btn-primary"
+              <Button
                 onClick={() => setShowCreateModal(true)}
                 title="Create workflow model"
               >
                 Create Workflow Model
-              </button>
+              </Button>
             </div>
           ) : (
             <div className="workflow-shell">
@@ -1177,10 +1208,14 @@ export default function WorkflowStudio() {
                 aria-label="BPMN modeler"
               ></div>
               {modelerLoading && (
-                <p className="workflow-muted px-3 py-2">Loading BPMN modeler...</p>
+                <Text size="sm" c="dimmed" px="md" py="xs">
+                  Loading BPMN modeler...
+                </Text>
               )}
               {modelerError && (
-                <p className="text-danger px-3 py-2">{modelerError.message}</p>
+                <Text size="sm" c="red" px="md" py="xs">
+                  {modelerError.message}
+                </Text>
               )}
               <WorkflowSidebarRail
                 panels={sidebarPanels}
@@ -1369,7 +1404,7 @@ function useWorkflowSidebarPanels({
     () => [
       {
         id: "model-info",
-        icon: "bi-info-circle",
+        icon: "fa fa-circle-info",
         label: "Model Information",
         render: () => (
           <ModelInformationPanel
@@ -1381,7 +1416,7 @@ function useWorkflowSidebarPanels({
       },
       {
         id: "model-config",
-        icon: "bi-gear",
+        icon: "fa fa-gear",
         label: "Model Configuration",
         render: () => (
           <ModelConfigurationPanel
@@ -1419,7 +1454,7 @@ function WorkflowSidebarRail({
             data-tooltip={p.label}
             aria-label={p.label}
           >
-            <i className={`bi ${p.icon}`} aria-hidden="true"></i>
+            <i className={p.icon} aria-hidden="true"></i>
           </button>
         );
       })}
@@ -1438,7 +1473,7 @@ function WorkflowSidebarPanel({
     <aside className="workflow-rsb-panel" role="region" aria-label={panel.label}>
       <div className="workflow-rsb-panel-header">
         <h2 className="workflow-rsb-panel-title">
-          <i className={`bi ${panel.icon}`} aria-hidden="true"></i>
+          <i className={panel.icon} aria-hidden="true"></i>
           <span>{panel.label}</span>
         </h2>
         <button
@@ -1448,7 +1483,7 @@ function WorkflowSidebarPanel({
           aria-label="Collapse sidebar"
           title="Collapse"
         >
-          <i className="bi bi-chevron-double-right" aria-hidden="true"></i>
+          <i className="fa fa-angles-right" aria-hidden="true"></i>
         </button>
       </div>
       <div className="workflow-rsb-panel-body">{panel.render()}</div>
@@ -1531,7 +1566,7 @@ function ModelInformationPanel({
           <dd>
             <span className={`workflow-state-pill ${stateClassName}`}>
               {stateLabel === "Paused" && (
-                <i className="bi bi-pause-circle-fill" aria-hidden="true"></i>
+                <i className="fa fa-circle-pause" aria-hidden="true"></i>
               )}
               {stateLabel}
             </span>
@@ -1734,7 +1769,7 @@ function DefaultProcessVariablesSection({
                         aria-label={`Remove ${variable.name}`}
                         title="Remove this variable"
                       >
-                        <i className="bi bi-x-lg" aria-hidden="true"></i>
+                        <i className="fa fa-xmark" aria-hidden="true"></i>
                       </button>
                     )}
                   </div>
@@ -1829,7 +1864,7 @@ function AddCustomVariableForm({
           onClick={submit}
           disabled={name.trim() === ""}
         >
-          <i className="bi bi-plus-lg" aria-hidden="true"></i> Add
+          <i className="fa fa-plus" aria-hidden="true"></i> Add
         </button>
       </div>
       {error && (
@@ -1984,58 +2019,40 @@ function CreateWorkflowModal({
   };
 
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Create Workflow Model</h2>
-            <p className="workflow-modal-copy">
-              Name the new workflow model. AutoNate will create a blank draft in the database and
-              load it into the modeler.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
-
-        <label className="workflow-field">
-          <span>Workflow Name</span>
-          <input
-            ref={inputRef}
-            className="form-control"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                onCreate();
-              }
-            }}
-          />
-        </label>
-
-        <div className="workflow-modal-actions">
-          <button
-            type="button"
-            className="btn btn-outline-secondary"
-            onClick={onClose}
-            disabled={busy}
-          >
+    <Modal
+      opened
+      onClose={onClose}
+      title="Create Workflow Model"
+      closeOnClickOutside={!busy}
+      closeOnEscape={!busy}
+      withCloseButton={!busy}
+    >
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Name the new workflow model. AutoNate will create a blank draft in the database and load
+          it into the modeler.
+        </Text>
+        <TextInput
+          ref={inputRef}
+          label="Workflow Name"
+          value={name}
+          onChange={(e) => setName(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              onCreate();
+            }
+          }}
+        />
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose} disabled={busy}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onCreate}
-            disabled={busy || !name.trim()}
-          >
+          </Button>
+          <Button onClick={onCreate} loading={busy} disabled={!name.trim()}>
             Create
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -2053,61 +2070,49 @@ function ScriptTaskModal({
   disabled: boolean;
 }) {
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal workflow-script-task-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Script Task</h2>
-            <p className="workflow-modal-copy">
-              Edit the selected BPMN script task. AutoNate saves the JavaScript body inline in the
-              BPMN XML and validates it before save or publish.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="Script Task" size="xl">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Edit the selected BPMN script task. AutoNate saves the JavaScript body inline in the
+          BPMN XML and validates it before save or publish.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
-        <div className="workflow-script-task-row">
-          <label className="workflow-field">
-            <span>Task Name</span>
-            <input
-              className="form-control"
-              value={editor.name}
-              onChange={(e) => onChange({ ...editor, name: e.target.value })}
-            />
-          </label>
+        <Group gap="md" grow align="flex-start" wrap="wrap">
+          <TextInput
+            label="Task Name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+          />
+          <TextInput label="Script Format" value="javascript" readOnly />
+          <TextInput
+            label="Result Variable"
+            value={editor.resultVariable}
+            onChange={(e) => onChange({ ...editor, resultVariable: e.currentTarget.value })}
+          />
+        </Group>
 
-          <label className="workflow-field">
-            <span>Script Format</span>
-            <input className="form-control" value="javascript" readOnly />
-          </label>
-
-          <label className="workflow-field">
-            <span>Result Variable</span>
-            <input
-              className="form-control"
-              value={editor.resultVariable}
-              onChange={(e) => onChange({ ...editor, resultVariable: e.target.value })}
-            />
-          </label>
-        </div>
-
-        <div className="workflow-field">
-          <span>Script Body</span>
-          <div className="workflow-script-task-editor">
+        <Stack gap={4}>
+          <Text size="sm" fw={500}>
+            Script Body
+          </Text>
+          <Box
+            className="workflow-script-task-editor"
+            style={{
+              border: "1px solid var(--mantine-color-default-border)",
+              borderRadius: 4,
+              overflow: "hidden",
+              minHeight: 280
+            }}
+          >
             <CodeMirror
               value={editor.script}
               onChange={(value) => onChange({ ...editor, script: value })}
-              height="100%"
-              style={{ height: "100%" }}
+              height="280px"
               extensions={[javascript()]}
               basicSetup={{
                 lineNumbers: true,
@@ -2136,19 +2141,19 @@ function ScriptTaskModal({
                 lintKeymap: true
               }}
             />
-          </div>
-        </div>
+          </Box>
+        </Stack>
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+          </Button>
+          <Button onClick={onApply} disabled={disabled}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -2220,122 +2225,104 @@ function SignalStartEventModal({
   const missingEventType = editor.signalName.trim().length === 0;
 
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Signal Start Event</h2>
-            <p className="workflow-modal-copy">
-              Configure a Dapr pub/sub event that starts this workflow. AutoNate listens on the
-              configured Topic and starts a new instance when an incoming message's{" "}
-              <code>eventType</code> field matches the Event Type. The full payload is exposed to the
-              workflow as a process variable named <code>eventData</code> (a JSON string —
-              <code> JSON.parse(eventData)</code> in script tasks).
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="Signal Start Event" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Configure a Dapr pub/sub event that starts this workflow. AutoNate listens on the
+          configured Topic and starts a new instance when an incoming message&apos;s{" "}
+          <Code>eventType</Code> field matches the Event Type. The full payload is exposed to the
+          workflow as a process variable named <Code>eventData</Code> (a JSON string —
+          <Code> JSON.parse(eventData)</Code> in script tasks).
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
-        <label className="workflow-field">
-          <span>Event Name (optional)</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-            placeholder="Order placed"
-          />
-        </label>
+        <TextInput
+          label="Event Name (optional)"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+          placeholder="Order placed"
+        />
 
-        <label className="workflow-field">
-          <span>Topic</span>
-          <input
-            className="form-control"
-            list={topicListId}
-            value={editor.signalTopic}
-            onChange={(e) => onChange({ ...editor, signalTopic: e.target.value })}
-            placeholder={DEFAULT_SIGNAL_TOPIC}
-          />
-          <datalist id={topicListId}>
-            {knownTopics.map((topic) => (
-              <option key={topic} value={topic} />
-            ))}
-          </datalist>
-          <p className="workflow-modal-note">
-            Dapr pub/sub topic. Defaults to <code>{DEFAULT_SIGNAL_TOPIC}</code> when blank. Adding a
-            new topic requires a Dapr sidecar restart for messages to flow.
-          </p>
-        </label>
+        <TextInput
+          label="Topic"
+          list={topicListId}
+          value={editor.signalTopic}
+          onChange={(e) => onChange({ ...editor, signalTopic: e.currentTarget.value })}
+          placeholder={DEFAULT_SIGNAL_TOPIC}
+          description={
+            <>
+              Dapr pub/sub topic. Defaults to <Code>{DEFAULT_SIGNAL_TOPIC}</Code> when blank. Adding
+              a new topic requires a Dapr sidecar restart for messages to flow.
+            </>
+          }
+        />
+        <datalist id={topicListId}>
+          {knownTopics.map((topic) => (
+            <option key={topic} value={topic} />
+          ))}
+        </datalist>
 
-        <label className="workflow-field">
-          <span>Event Type</span>
-          <input
-            className="form-control"
-            list={eventTypeListId}
-            value={editor.signalName}
-            onChange={(e) => onChange({ ...editor, signalName: e.target.value })}
-            placeholder="OrderPlaced"
-          />
-          <datalist id={eventTypeListId}>
-            {eventTypeSuggestions.map((evt) => (
-              <option
-                key={`${evt.topic}:${evt.eventType}`}
-                value={evt.eventType}
-                label={evt.description}
-              />
-            ))}
-          </datalist>
-          <p className="workflow-modal-note">
-            Matched verbatim against the top-level <code>eventType</code> field of incoming
-            messages. Required.
-          </p>
-        </label>
+        <TextInput
+          label="Event Type"
+          list={eventTypeListId}
+          value={editor.signalName}
+          onChange={(e) => onChange({ ...editor, signalName: e.currentTarget.value })}
+          placeholder="OrderPlaced"
+          description={
+            <>
+              Matched verbatim against the top-level <Code>eventType</Code> field of incoming
+              messages. Required.
+            </>
+          }
+        />
+        <datalist id={eventTypeListId}>
+          {eventTypeSuggestions.map((evt) => (
+            <option
+              key={`${evt.topic}:${evt.eventType}`}
+              value={evt.eventType}
+              label={evt.description}
+            />
+          ))}
+        </datalist>
 
         {!carriesRecordType && editor.recordTypeShortCodes.length > 0 && (
-          <p className="workflow-modal-warning">
-            This event type doesn&rsquo;t carry a record type — the configured record-type
-            filter will be cleared when you apply.
-          </p>
+          <Alert color="yellow" variant="light">
+            This event type doesn&rsquo;t carry a record type — the configured record-type filter
+            will be cleared when you apply.
+          </Alert>
         )}
 
         {carriesRecordType && (
-          <label className="workflow-field">
-            <span>Record types (optional)</span>
+          <Stack gap={4}>
+            <Text size="sm" fw={500}>
+              Record types (optional)
+            </Text>
             <RecordTypeMultiSelect
               selected={editor.recordTypeShortCodes}
               options={recordTypes ?? []}
               onChange={(next) => onChange({ ...editor, recordTypeShortCodes: next })}
             />
-            <p className="workflow-modal-note">
-              Empty = all record types match. When set, only payloads whose{" "}
-              <code>recordTypeId</code> matches one of these will start this workflow.
-            </p>
-          </label>
+            <Text size="xs" c="dimmed">
+              Empty = all record types match. When set, only payloads whose <Code>recordTypeId</Code>{" "}
+              matches one of these will start this workflow.
+            </Text>
+          </Stack>
         )}
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onApply}
-            disabled={disabled || missingEventType}
-          >
+          </Button>
+          <Button onClick={onApply} disabled={disabled || missingEventType}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -2358,28 +2345,23 @@ function RecordTypeMultiSelect({
 
   if (options.length === 0) {
     return (
-      <p className="workflow-modal-note">
+      <Text size="xs" c="dimmed">
         No record types defined yet. Empty selection means &ldquo;match all record types.&rdquo;
-      </p>
+      </Text>
     );
   }
 
   return (
-    <div className="workflow-record-type-multiselect">
+    <Group gap="xs" wrap="wrap">
       {options.map((opt) => (
-        <label key={opt.shortCode} className="workflow-chip">
-          <input
-            type="checkbox"
-            checked={selected.includes(opt.shortCode)}
-            onChange={() => toggle(opt.shortCode)}
-          />
-          <span>
-            {opt.name}
-            {opt.isArchived ? " (archived)" : ""}
-          </span>
-        </label>
+        <Checkbox
+          key={opt.shortCode}
+          checked={selected.includes(opt.shortCode)}
+          onChange={() => toggle(opt.shortCode)}
+          label={opt.name + (opt.isArchived ? " (archived)" : "")}
+        />
       ))}
-    </div>
+    </Group>
   );
 }
 
@@ -2452,32 +2434,22 @@ function TimerStartEventModal({
     (editor.rawCronOverride && editor.rawCronText.trim().length === 0);
 
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Timer Start Event</h2>
-            <p className="workflow-modal-copy">
-              Schedule this workflow with an Outlook-style recurrence picker. Times use the Flowable
-              engine's timezone (UTC by default) — pick the time as it should fire on the server.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="Timer Start Event" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Schedule this workflow with an Outlook-style recurrence picker. Times use the Flowable
+          engine&apos;s timezone (UTC by default) — pick the time as it should fire on the server.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
         {editor.parseError && (
-          <div className="alert alert-warning" role="alert">
+          <Alert color="yellow" variant="light" role="alert">
             {editor.parseError}
-          </div>
+          </Alert>
         )}
 
         <label className="workflow-field">
@@ -2810,21 +2782,16 @@ function TimerStartEventModal({
           )}
         </details>
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onApply}
-            disabled={applyDisabled}
-          >
+          </Button>
+          <Button onClick={onApply} disabled={applyDisabled}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -2858,29 +2825,19 @@ function TimerIntermediateCatchEventModal({
           .length === 0;
 
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Timer Intermediate Catch Event</h2>
-            <p className="workflow-modal-copy">
-              Pause the workflow until either a fixed delay has elapsed since this node was reached
-              or a specific date/time arrives. Use a literal ISO 8601 value, or a Flowable
-              expression like <code>${"{execution.getVariable('reminderDate')}"}</code> to compute
-              it from process variables at runtime.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="Timer Intermediate Catch Event" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Pause the workflow until either a fixed delay has elapsed since this node was reached or
+          a specific date/time arrives. Use a literal ISO 8601 value, or a Flowable expression like{" "}
+          <Code>{"${execution.getVariable('reminderDate')}"}</Code> to compute it from process
+          variables at runtime.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
         <label className="workflow-field">
           <span>Event Name (optional)</span>
@@ -3045,21 +3002,16 @@ function TimerIntermediateCatchEventModal({
           </fieldset>
         )}
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onApply}
-            disabled={disabled || activeValueEmpty}
-          >
+          </Button>
+          <Button onClick={onApply} disabled={disabled || activeValueEmpty}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -3082,28 +3034,18 @@ function ServiceTaskModal({
   const selected = behaviors.find((b) => b.key === editor.behaviorKey) ?? null;
 
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Service Task</h2>
-            <p className="workflow-modal-copy">
-              Run a predefined AutoNate routine when the workflow reaches this step. The behavior
-              receives every process variable plus execution metadata, and may write process
-              variables back for downstream steps to branch on.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="Service Task" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Run a predefined AutoNate routine when the workflow reaches this step. The behavior
+          receives every process variable plus execution metadata, and may write process variables
+          back for downstream steps to branch on.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
         <label className="workflow-field">
           <span>Task Name (optional)</span>
@@ -3172,21 +3114,16 @@ function ServiceTaskModal({
           </label>
         )}
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onApply}
-            disabled={disabled || !editor.behaviorKey.trim()}
-          >
+          </Button>
+          <Button onClick={onApply} disabled={disabled || !editor.behaviorKey.trim()}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -3213,47 +3150,34 @@ function GenericElementModal({
 }) {
   const heading = humanizeBpmnType(editor.type);
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>{heading}</h2>
-            <p className="workflow-modal-copy">
-              Edit the display name of this element. Additional configuration for this node type
-              will appear here as it ships.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title={heading}>
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Edit the display name of this element. Additional configuration for this node type will
+          appear here as it ships.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
-        <label className="workflow-field">
-          <span>Name</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-          />
-        </label>
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+        />
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+          </Button>
+          <Button onClick={onApply} disabled={disabled}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -3277,73 +3201,54 @@ function SequenceFlowModal({
   disabled: boolean;
 }) {
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal workflow-sequence-flow-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Sequence Flow</h2>
-            <p className="workflow-modal-copy">
-              Edit the selected path leaving a task or gateway. Use a Flowable expression like{" "}
-              <code>${"{needsApproval}"}</code> or <code>${"{riskLevel == 'high'}"}</code> to route
-              decisions based on process variables.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="Sequence Flow" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Edit the selected path leaving a task or gateway. Use a Flowable expression like{" "}
+          <Code>{"${needsApproval}"}</Code> or <Code>{"${riskLevel == 'high'}"}</Code> to route
+          decisions based on process variables.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
-        <label className="workflow-field">
-          <span>Flow Name</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-          />
-        </label>
+        <TextInput
+          label="Flow Name"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+        />
 
         {editor.sourceType === "bpmn:ParallelGateway" ? (
-          <p className="workflow-modal-note">
+          <Text size="xs" c="dimmed">
             This flow leaves a parallel gateway. Conditions are ignored on parallel-gateway
             outflows &mdash; every outgoing path always fires, so there&apos;s nothing to gate.
-          </p>
+          </Text>
         ) : (
-          <>
-            <label className="workflow-field">
-              <span>Condition Expression</span>
-              <textarea
-                className="form-control workflow-expression-editor"
-                rows={6}
-                spellCheck={false}
-                value={editor.conditionExpression}
-                onChange={(e) => onChange({ ...editor, conditionExpression: e.target.value })}
-              />
-            </label>
-
-            <p className="workflow-modal-note">
-              Leave the condition blank for an unconditional path. For exclusive and inclusive
-              gateways, put the condition on the outgoing branch itself, not on the gateway node.
-            </p>
-          </>
+          <Textarea
+            label="Condition Expression"
+            description="Leave the condition blank for an unconditional path. For exclusive and inclusive gateways, put the condition on the outgoing branch itself, not on the gateway node."
+            minRows={6}
+            autosize
+            spellCheck={false}
+            value={editor.conditionExpression}
+            onChange={(e) =>
+              onChange({ ...editor, conditionExpression: e.currentTarget.value })
+            }
+          />
         )}
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+          </Button>
+          <Button onClick={onApply} disabled={disabled}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -3362,72 +3267,52 @@ function GatewayModal({
 }) {
   const heading = editor.type === "bpmn:InclusiveGateway" ? "Inclusive Gateway" : "Exclusive Gateway";
   return (
-    <div className="workflow-modal-backdrop">
-      <div className="workflow-modal" role="dialog" aria-modal="true">
-        <div className="workflow-modal-header">
-          <div>
-            <h2>{heading}</h2>
-            <p className="workflow-modal-copy">
-              Conditions live on the outgoing flows themselves &mdash; click an outgoing arrow to
-              edit them. The default flow runs when no other condition matches.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title={heading} size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Conditions live on the outgoing flows themselves &mdash; click an outgoing arrow to edit
+          them. The default flow runs when no other condition matches.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
-        <label className="workflow-field">
-          <span>Name</span>
-          <input
-            className="form-control"
-            value={editor.name}
-            onChange={(e) => onChange({ ...editor, name: e.target.value })}
-          />
-        </label>
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+        />
 
-        <label className="workflow-field">
-          <span>Default Outgoing Flow</span>
-          <select
-            className="form-select"
-            value={editor.defaultFlowId}
-            onChange={(e) => onChange({ ...editor, defaultFlowId: e.target.value })}
-            disabled={editor.outgoingFlows.length === 0}
-          >
-            <option value="">(none)</option>
-            {editor.outgoingFlows.map((flow) => (
-              <option key={flow.id} value={flow.id}>
-                {flow.name ? `${flow.name} (${flow.id})` : flow.id}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Select
+          label="Default Outgoing Flow"
+          value={editor.defaultFlowId || null}
+          onChange={(v) => onChange({ ...editor, defaultFlowId: v ?? "" })}
+          disabled={editor.outgoingFlows.length === 0}
+          clearable
+          placeholder="(none)"
+          data={editor.outgoingFlows.map((flow) => ({
+            value: flow.id,
+            label: flow.name ? `${flow.name} (${flow.id})` : flow.id
+          }))}
+          description={
+            editor.outgoingFlows.length === 0
+              ? "This gateway has no outgoing flows yet. Draw at least one outgoing arrow before picking a default."
+              : "The default flow fires only when none of the other outgoing flows have a matching condition. Leave it as \"(none)\" if every path is conditional."
+          }
+        />
 
-        {editor.outgoingFlows.length === 0 ? (
-          <p className="workflow-modal-note">
-            This gateway has no outgoing flows yet. Draw at least one outgoing arrow before picking
-            a default.
-          </p>
-        ) : (
-          <p className="workflow-modal-note">
-            The default flow fires only when none of the other outgoing flows have a matching
-            condition. Leave it as &quot;(none)&quot; if every path is conditional.
-          </p>
-        )}
-
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onApply} disabled={disabled}>
+          </Button>
+          <Button onClick={onApply} disabled={disabled}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -3475,27 +3360,17 @@ function UserTaskModal({
   })();
 
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal workflow-user-task-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>User Task</h2>
-            <p className="workflow-modal-copy">
-              Edit the selected user task. Pick assignees from the directory or supply a Flowable
-              expression like <code>${"{initiator}"}</code> that resolves at runtime.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="User Task" size="xl">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Edit the selected user task. Pick assignees from the directory or supply a Flowable
+          expression like <Code>{"${initiator}"}</Code> that resolves at runtime.
+        </Text>
 
-        <div className="workflow-script-task-meta">
-          <span className="workflow-script-task-pill">{editor.id}</span>
-          <span className="workflow-script-task-pill">{editor.type}</span>
-        </div>
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
 
         <label className="workflow-field">
           <span>Task Name</span>
@@ -3811,21 +3686,16 @@ function UserTaskModal({
           )}
         </fieldset>
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onApply}
-            disabled={disabled || Boolean(userFormError)}
-          >
+          </Button>
+          <Button onClick={onApply} disabled={disabled || Boolean(userFormError)}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -3951,28 +3821,18 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
   const comingSoonCount = COMING_SOON_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
 
   return (
-    <div className="workflow-modal-backdrop">
-      <div
-        className="workflow-modal workflow-bpmn-types-modal"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="workflow-modal-header">
-          <div>
-            <h2>Supported BPMN Types</h2>
-            <p className="workflow-modal-copy">
-              The full set of BPMN 2.0 node types the AutoNate workflow studio can model and execute
-              today, alongside what is on the roadmap.
-            </p>
-          </div>
-          <button type="button" className="btn-close" aria-label="Close" onClick={onClose}></button>
-        </div>
+    <Modal opened onClose={onClose} title="Supported BPMN Types" size="xl">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          The full set of BPMN 2.0 node types the AutoNate workflow studio can model and execute
+          today, alongside what is on the roadmap.
+        </Text>
 
         <div className="workflow-bpmn-types-grid">
           <section className="workflow-bpmn-types-column workflow-bpmn-types-column-supported">
             <header className="workflow-bpmn-types-column-header">
               <h3>
-                <i className="bi bi-check-circle-fill" aria-hidden="true"></i>
+                <i className="fa fa-circle-check" aria-hidden="true"></i>
                 Supported
               </h3>
               <span className="workflow-bpmn-types-count">{supportedCount}</span>
@@ -3992,7 +3852,7 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
           <section className="workflow-bpmn-types-column workflow-bpmn-types-column-coming">
             <header className="workflow-bpmn-types-column-header">
               <h3>
-                <i className="bi bi-hourglass-split" aria-hidden="true"></i>
+                <i className="fa fa-hourglass-half" aria-hidden="true"></i>
                 Coming Soon
               </h3>
               <span className="workflow-bpmn-types-count">{comingSoonCount}</span>
@@ -4010,13 +3870,11 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
           </section>
         </div>
 
-        <div className="workflow-modal-actions">
-          <button type="button" className="btn btn-primary" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+        <Group justify="flex-end">
+          <Button onClick={onClose}>Close</Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 

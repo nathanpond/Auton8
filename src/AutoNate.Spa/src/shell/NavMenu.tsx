@@ -1,5 +1,16 @@
-import { useMemo } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { ReactNode, useMemo } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { Avatar, Box, Code, Group, Menu, UnstyledButton } from "@mantine/core";
+import {
+  HEADER_ACTIVE_BG,
+  HEADER_ACTIVE_FG,
+  HEADER_BG,
+  HEADER_FG,
+  HEADER_HOVER_BG,
+  applyHeaderHover,
+  clearHeaderHover,
+  headerIconButtonStyle
+} from "@/shell/headerStyles";
 import { useMe } from "@/hooks/useMe";
 import { usePublicMenu } from "@/hooks/useMenus";
 import { usePageTemplates } from "@/hooks/usePageTemplates";
@@ -62,10 +73,6 @@ export default function NavMenu() {
     [recordTypes]
   );
 
-  const currentPath = useMemo(
-    () => location.pathname.split("?")[0].replace(/^\/+|\/+$/g, ""),
-    [location.pathname]
-  );
   const fullPath = location.pathname;
 
   const displayName = useMemo(() => {
@@ -80,222 +87,302 @@ export default function NavMenu() {
     return (item.children ?? []).some(isActiveLeaf);
   };
 
-  const renderTopItem = (item: MenuItem) => {
-    // Top main nav is horizontal and ignores separators by design.
-    if (item.itemType === "separator") return null;
-    if (item.itemType === "group") {
-      const dynamicChildren =
-        item.config?.dynamicChildren === "recordTypes" ? recordTypeChildren : [];
-      const groupActive =
-        (item.children ?? []).some(isActiveLeaf) ||
-        dynamicChildren.some((c) => fullPath === c.path);
-      return (
-        <div
-          key={item.id}
-          className={
-            groupActive ? "menu-item has-sub active expand" : "menu-item has-sub"
-          }
-        >
-          <a href="#" className="menu-link" onClick={preventDefault}>
-            {item.icon && (
-              <div className="menu-icon">
-                <i className={item.icon}></i>
-              </div>
-            )}
-            <div className="menu-text">{item.displayName}</div>
-            <div className="menu-caret"></div>
-          </a>
-          <div className="menu-submenu">
-            {(item.children ?? []).map(renderSubmenuItem)}
-            {dynamicChildren.map((c) => (
-              <div
-                key={c.key}
-                className={
-                  fullPath === c.path ? "menu-item active" : "menu-item"
-                }
-              >
-                <NavLink to={c.path} className="menu-link">
-                  <div className="menu-text">
-                    <code className="me-2">{c.shortCode}</code>
-                    {c.label}
-                  </div>
-                </NavLink>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-    // Top-level non-group items render as a single menu-item link.
-    return (
-      <div
-        key={item.id}
-        className={isActiveLeaf(item) ? "menu-item active" : "menu-item"}
-      >
-        {renderItemAnchor(item, "menu-link")}
-      </div>
-    );
-  };
-
-  const renderSubmenuItem = (item: MenuItem) => {
-    // Inside a main-menu submenu (a dropdown), separators render as a thin
-    // divider line between items.
-    if (item.itemType === "separator") {
-      return <div key={item.id} className="menu-item menu-submenu-separator" />;
-    }
-    const path = pathOf(item, pageTemplates);
-    return (
-      <div
-        key={item.id}
-        className={path && fullPath === path ? "menu-item active" : "menu-item"}
-      >
-        {renderItemAnchor(item, "menu-link")}
-      </div>
-    );
-  };
-
-  const renderItemAnchor = (item: MenuItem, className: string) => {
-    if (item.itemType === "link") {
-      const href = stringFrom(item.config?.href);
-      const newTab = Boolean(item.config?.openInNewTab);
-      if (!href) return renderUnconfigured(item, className, "missing href");
-      return (
-        <a
-          href={href}
-          className={className}
-          target={newTab ? "_blank" : undefined}
-          rel={newTab ? "noopener noreferrer" : undefined}
-        >
-          {item.icon && (
-            <div className="menu-icon">
-              <i className={item.icon}></i>
-            </div>
-          )}
-          <div className="menu-text">{item.displayName}</div>
-        </a>
-      );
-    }
-    if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
-      const linkPath = pathOf(item, pageTemplates);
-      if (!linkPath) return renderUnconfigured(item, className, "missing path");
-      return (
-        <NavLink to={linkPath} className={className}>
-          {item.icon && (
-            <div className="menu-icon">
-              <i className={item.icon}></i>
-            </div>
-          )}
-          <div className="menu-text">{item.displayName}</div>
-        </NavLink>
-      );
-    }
-    return renderUnconfigured(item, className, `unknown type '${item.itemType}'`);
-  };
-
-  const renderUnconfigured = (item: MenuItem, className: string, why: string) => {
-    // Tell the backend the SPA dropped this item. Per-tab dedup inside the
-    // helper means we POST at most once per (item, tab); the backend's
-    // fingerprint dedup handles cross-session collisions.
-    reportMenuRenderFailure(item.id);
-    return (
-      <a
-        href="#"
-        className={className}
-        title={`Misconfigured: ${why}`}
-        onClick={preventDefault}
-      >
-        {item.icon ? (
-          <div className="menu-icon">
-            <i className={item.icon}></i>
-          </div>
-        ) : (
-          <div className="menu-icon">
-            <i className="fa fa-triangle-exclamation text-warning"></i>
-          </div>
-        )}
-        <div className="menu-text">{item.displayName}</div>
-      </a>
-    );
-  };
-
   return (
-    <div id="top-menu" className="app-top-menu" data-bs-theme="dark">
-      <div className="menu">
-        <div className="menu-item menu-brand-item">
-          <NavLink to="/home" className="menu-link menu-brand-link">
+    <Box
+      id="top-menu"
+      h="100%"
+      bg={HEADER_BG}
+      c={HEADER_FG}
+      px="md"
+      style={{
+        display: "flex",
+        alignItems: "stretch",
+        borderBottom: "1px solid rgba(255,255,255,0.08)"
+      }}
+    >
+      <Box
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          overflowX: "auto",
+          // Mantine's <ScrollArea> uses a buggy useMergedRef pattern that
+          // infinite-loops on rapid parent re-renders (e.g. SiteAppearance
+          // live preview). Plain overflow-x is enough for a horizontal
+          // top bar; we don't need the styled scrollbars.
+          scrollbarWidth: "thin"
+        }}
+      >
+        <Group gap={4} wrap="nowrap" align="center" h="100%" w="100%">
+          <UnstyledButton
+            component={Link}
+            to="/home"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "0 12px",
+              height: 40,
+              color: HEADER_ACTIVE_FG,
+              fontWeight: 600,
+              textDecoration: "none"
+            }}
+          >
             <SiteBrand
               appearance={effectiveAppearance}
-              className="d-inline-flex align-items-center gap-2"
-              iconClassName="menu-icon"
-              textClassName="menu-text"
-              imageClassName="menu-brand-image"
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              iconClassName=""
+              textClassName=""
+              imageClassName=""
             />
-          </NavLink>
-        </div>
+          </UnstyledButton>
 
-        {(mainMenu?.items ?? []).map(renderTopItem)}
+          {(mainMenu?.items ?? []).map((item) => (
+            <TopItem
+              key={item.id}
+              item={item}
+              fullPath={fullPath}
+              recordTypeChildren={recordTypeChildren}
+              isActiveLeaf={isActiveLeaf}
+              templates={pageTemplates}
+            />
+          ))}
 
-        <div className="menu-item menu-control menu-control-start">
-          <a href="#" className="menu-link" data-toggle="app-top-menu-prev" onClick={preventDefault}>
-            <i className="fa fa-angle-left"></i>
-          </a>
-        </div>
+          <Box style={{ flex: 1 }} />
 
-        <div className="menu-item menu-control menu-control-end">
-          <a href="#" className="menu-link" data-toggle="app-top-menu-next" onClick={preventDefault}>
-            <i className="fa fa-angle-right"></i>
-          </a>
-        </div>
+          {(iconMenu?.items ?? []).map((item) => (
+            <IconMenuTopItem key={item.id} item={item} templates={pageTemplates} />
+          ))}
 
-        {(iconMenu?.items ?? []).map((item, idx) => (
-          <IconMenuTopItem
-            key={item.id}
-            item={item}
-            isFirst={idx === 0}
-            currentPath={currentPath}
+          {me?.authenticated === true && notificationsEnabled && <NotificationBell />}
+
+          {me?.authenticated === true && <AgentChatTrigger />}
+
+          <UserMenu
+            displayName={displayName}
+            userMenu={userMenu?.items ?? []}
             templates={pageTemplates}
+            onOpenPreferences={openPreferences}
           />
-        ))}
+        </Group>
+      </Box>
+    </Box>
+  );
+}
 
-        {me?.authenticated === true && notificationsEnabled && <NotificationBell />}
+// One main-menu top-level item. Group items become a Mantine dropdown; leaf
+// items render as a single navigation link.
+function TopItem({
+  item,
+  fullPath,
+  recordTypeChildren,
+  isActiveLeaf,
+  templates
+}: {
+  item: MenuItem;
+  fullPath: string;
+  recordTypeChildren: RecordTypeChild[];
+  isActiveLeaf: (item: MenuItem) => boolean;
+  templates: PageTemplateInfo[] | undefined;
+}) {
+  // Top main nav is horizontal and ignores separators by design.
+  if (item.itemType === "separator") return null;
 
-        {me?.authenticated === true && <AgentChatTrigger />}
-
-        <div className="menu-item dropdown">
-          <a
-            href="#"
-            className="menu-link menu-link-tight dropdown-toggle d-flex align-items-center gap-2"
-            data-bs-toggle="dropdown"
-            aria-expanded="false"
-            onClick={preventDefault}
-          >
-            <div className="image image-icon bg-gray-800 text-gray-600">
-              <i className="fa fa-user"></i>
-            </div>
-            <span>
-              <span className="d-none d-md-inline">{displayName}</span>
-              <b className="caret"></b>
-            </span>
-          </a>
-          <div className="dropdown-menu dropdown-menu-end me-1">
-            <button
-              type="button"
-              className="dropdown-item"
-              onClick={() => openPreferences()}
-            >
-              <i className="fa fa-gear me-2" />
-              User Preferences
-            </button>
-            {(userMenu?.items ?? []).length > 0 && (
-              <div className="dropdown-divider" />
+  if (item.itemType === "group") {
+    const dynamicChildren =
+      item.config?.dynamicChildren === "recordTypes" ? recordTypeChildren : [];
+    const groupActive =
+      (item.children ?? []).some(isActiveLeaf) ||
+      dynamicChildren.some((c) => fullPath === c.path);
+    return (
+      <Menu trigger="hover" position="bottom-start" openDelay={80} closeDelay={150} shadow="md">
+        <Menu.Target>
+          <NavButton active={groupActive}>
+            {item.icon && (
+              <i className={item.icon} aria-hidden style={{ marginRight: 8 }} />
             )}
-            {(userMenu?.items ?? []).map((item) => (
-              <UserDropdownEntry key={item.id} item={item} templates={pageTemplates} />
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
+            {item.displayName}
+            <i className="fa fa-angle-down" aria-hidden style={{ marginLeft: 6, fontSize: 11 }} />
+          </NavButton>
+        </Menu.Target>
+        <Menu.Dropdown>
+          {(item.children ?? []).map((child) => (
+            <SubmenuEntry
+              key={child.id}
+              item={child}
+              fullPath={fullPath}
+              templates={templates}
+            />
+          ))}
+          {dynamicChildren.length > 0 && (item.children ?? []).length > 0 && <Menu.Divider />}
+          {dynamicChildren.map((c) => (
+            <Menu.Item
+              key={c.key}
+              component={NavLink}
+              to={c.path}
+              data-active={fullPath === c.path ? "true" : undefined}
+            >
+              <Group gap="xs" wrap="nowrap">
+                <Code>{c.shortCode}</Code>
+                <span>{c.label}</span>
+              </Group>
+            </Menu.Item>
+          ))}
+        </Menu.Dropdown>
+      </Menu>
+    );
+  }
+
+  // Top-level non-group items render as a single nav link.
+  return <ItemAnchor item={item} active={isActiveLeaf(item)} templates={templates} />;
+}
+
+function SubmenuEntry({
+  item,
+  fullPath,
+  templates
+}: {
+  item: MenuItem;
+  fullPath: string;
+  templates: PageTemplateInfo[] | undefined;
+}) {
+  if (item.itemType === "separator") {
+    return <Menu.Divider />;
+  }
+  const path = pathOf(item, templates);
+  const active = path != null && fullPath === path;
+  if (item.itemType === "link") {
+    const href = stringFrom(item.config?.href);
+    const newTab = Boolean(item.config?.openInNewTab);
+    if (!href) return reportUnconfigured(item, "missing href");
+    return (
+      <Menu.Item
+        component="a"
+        href={href}
+        target={newTab ? "_blank" : undefined}
+        rel={newTab ? "noopener noreferrer" : undefined}
+        leftSection={item.icon ? <i className={item.icon} /> : undefined}
+      >
+        {item.displayName}
+      </Menu.Item>
+    );
+  }
+  if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
+    if (!path) return reportUnconfigured(item, "missing path");
+    return (
+      <Menu.Item
+        component={NavLink}
+        to={path}
+        leftSection={item.icon ? <i className={item.icon} /> : undefined}
+        data-active={active ? "true" : undefined}
+      >
+        {item.displayName}
+      </Menu.Item>
+    );
+  }
+  return reportUnconfigured(item, `unknown type '${item.itemType}'`);
+}
+
+function ItemAnchor({
+  item,
+  active,
+  templates
+}: {
+  item: MenuItem;
+  active: boolean;
+  templates: PageTemplateInfo[] | undefined;
+}) {
+  if (item.itemType === "link") {
+    const href = stringFrom(item.config?.href);
+    const newTab = Boolean(item.config?.openInNewTab);
+    if (!href) {
+      reportMenuRenderFailure(item.id);
+      return (
+        <NavButton active={false} title="Misconfigured: missing href">
+          <i className="fa fa-triangle-exclamation" style={{ marginRight: 6 }} />
+          {item.displayName}
+        </NavButton>
+      );
+    }
+    return (
+      <NavButton
+        component="a"
+        href={href}
+        target={newTab ? "_blank" : undefined}
+        rel={newTab ? "noopener noreferrer" : undefined}
+        active={false}
+      >
+        {item.icon && <i className={item.icon} style={{ marginRight: 8 }} />}
+        {item.displayName}
+      </NavButton>
+    );
+  }
+  if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
+    const path = pathOf(item, templates);
+    if (!path) {
+      reportMenuRenderFailure(item.id);
+      return (
+        <NavButton active={false} title="Misconfigured: missing path">
+          <i className="fa fa-triangle-exclamation" style={{ marginRight: 6 }} />
+          {item.displayName}
+        </NavButton>
+      );
+    }
+    return (
+      <NavButton component={NavLink} to={path} active={active}>
+        {item.icon && <i className={item.icon} style={{ marginRight: 8 }} />}
+        {item.displayName}
+      </NavButton>
+    );
+  }
+  return reportUnconfigured(item, `unknown type '${item.itemType}'`);
+}
+
+// Top-bar nav link styled like a header tab. Active state gets the
+// SiteAppearance "topMenuLinkActive*" tokens via CSS vars.
+type NavButtonProps = {
+  active: boolean;
+  children: ReactNode;
+  component?: React.ElementType;
+  title?: string;
+  href?: string;
+  to?: string;
+  target?: string;
+  rel?: string;
+};
+
+function NavButton({ active, children, component, ...rest }: NavButtonProps) {
+  const style: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    height: 40,
+    padding: "0 12px",
+    borderRadius: 4,
+    color: active ? HEADER_ACTIVE_FG : HEADER_FG,
+    background: active ? HEADER_ACTIVE_BG : "transparent",
+    fontSize: 14,
+    whiteSpace: "nowrap",
+    textDecoration: "none",
+    border: 0,
+    cursor: "pointer",
+    transition: "background 120ms ease, color 120ms ease"
+  };
+  const onMouseEnter = (e: React.MouseEvent<HTMLElement>) => {
+    if (!active) e.currentTarget.style.background = HEADER_HOVER_BG;
+  };
+  const onMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
+    if (!active) e.currentTarget.style.background = "transparent";
+  };
+  const Component = (component ?? "button") as React.ElementType;
+  return (
+    <Component
+      style={style}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      {...rest}
+    >
+      {children}
+    </Component>
   );
 }
 
@@ -305,76 +392,72 @@ export default function NavMenu() {
 // dropdowns).
 function IconMenuTopItem({
   item,
-  isFirst,
-  currentPath,
   templates
 }: {
   item: MenuItem;
-  isFirst: boolean;
-  currentPath: string;
   templates: PageTemplateInfo[] | undefined;
 }) {
   if (item.itemType === "separator") return null;
 
-  const wrapperClass = isFirst ? "menu-item ms-auto" : "menu-item";
-
   if (item.itemType === "group") {
     const icon = item.icon ?? "fa fa-circle";
     return (
-      <div className={`${wrapperClass} dropdown`}>
-        <a
-          href="#"
-          className="menu-link menu-link-tight dropdown-toggle d-flex align-items-center"
-          data-bs-toggle="dropdown"
-          aria-expanded="false"
-          title={item.displayName}
-          onClick={preventDefault}
-        >
-          <div className="menu-icon">
-            <i className={icon}></i>
-          </div>
-        </a>
-        <div className="dropdown-menu dropdown-menu-end me-1">
+      <Menu position="bottom-end" shadow="md">
+        <Menu.Target>
+          <UnstyledButton
+            title={item.displayName}
+            aria-label={item.displayName}
+            style={headerIconButtonStyle}
+            onMouseEnter={applyHeaderHover}
+            onMouseLeave={clearHeaderHover}
+          >
+            <i className={icon} />
+          </UnstyledButton>
+        </Menu.Target>
+        <Menu.Dropdown>
           {(item.children ?? []).map((child) => (
-            <DropdownEntry key={child.id} item={child} currentPath={currentPath} templates={templates} />
+            <DropdownEntry key={child.id} item={child} templates={templates} />
           ))}
-        </div>
-      </div>
+        </Menu.Dropdown>
+      </Menu>
     );
   }
 
-  // Single-icon link (no dropdown)
   if (item.itemType === "link") {
     const href = stringFrom(item.config?.href);
     const newTab = Boolean(item.config?.openInNewTab);
     if (!href) return dropAndReport(item.id);
     return (
-      <div className={wrapperClass}>
-        <a
-          href={href}
-          className="menu-link menu-link-tight"
-          title={item.displayName}
-          target={newTab ? "_blank" : undefined}
-          rel={newTab ? "noopener noreferrer" : undefined}
-        >
-          <div className="menu-icon">
-            <i className={item.icon ?? "fa fa-link"}></i>
-          </div>
-        </a>
-      </div>
+      <UnstyledButton
+        component="a"
+        href={href}
+        target={newTab ? "_blank" : undefined}
+        rel={newTab ? "noopener noreferrer" : undefined}
+        title={item.displayName}
+        aria-label={item.displayName}
+        style={headerIconButtonStyle}
+        onMouseEnter={applyHeaderHover}
+        onMouseLeave={clearHeaderHover}
+      >
+        <i className={item.icon ?? "fa fa-link"} />
+      </UnstyledButton>
     );
   }
   if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
     const path = pathOf(item, templates);
     if (!path) return dropAndReport(item.id);
     return (
-      <div className={wrapperClass}>
-        <NavLink to={path} className="menu-link menu-link-tight" title={item.displayName}>
-          <div className="menu-icon">
-            <i className={item.icon ?? "fa fa-link"}></i>
-          </div>
-        </NavLink>
-      </div>
+      <UnstyledButton
+        component={NavLink}
+        to={path}
+        title={item.displayName}
+        aria-label={item.displayName}
+        style={headerIconButtonStyle}
+        onMouseEnter={applyHeaderHover}
+        onMouseLeave={clearHeaderHover}
+      >
+        <i className={item.icon ?? "fa fa-link"} />
+      </UnstyledButton>
     );
   }
   return null;
@@ -382,43 +465,100 @@ function IconMenuTopItem({
 
 function DropdownEntry({
   item,
-  currentPath: _,
   templates
 }: {
   item: MenuItem;
-  currentPath: string;
   templates: PageTemplateInfo[] | undefined;
 }) {
-  // Inside an icon menu dropdown, separators render as a horizontal divider.
   if (item.itemType === "separator") {
-    return <div className="dropdown-divider" />;
+    return <Menu.Divider />;
   }
   if (item.itemType === "link") {
     const href = stringFrom(item.config?.href);
     const newTab = Boolean(item.config?.openInNewTab);
     return (
-      <a
+      <Menu.Item
+        component="a"
         href={href ?? "#"}
-        className="dropdown-item"
         target={newTab ? "_blank" : undefined}
         rel={newTab ? "noopener noreferrer" : undefined}
+        leftSection={item.icon ? <i className={item.icon} /> : undefined}
       >
-        {item.icon && <i className={`${item.icon} me-2`} />}
         {item.displayName}
-      </a>
+      </Menu.Item>
     );
   }
   if (item.itemType === "route" || item.itemType === "page" || item.itemType === "template") {
     const path = pathOf(item, templates);
     if (!path) return dropAndReport(item.id);
     return (
-      <NavLink className="dropdown-item" to={path}>
-        {item.icon && <i className={`${item.icon} me-2`} />}
+      <Menu.Item
+        component={NavLink}
+        to={path}
+        leftSection={item.icon ? <i className={item.icon} /> : undefined}
+      >
         {item.displayName}
-      </NavLink>
+      </Menu.Item>
     );
   }
   return null;
+}
+
+function UserMenu({
+  displayName,
+  userMenu,
+  templates,
+  onOpenPreferences
+}: {
+  displayName: string;
+  userMenu: MenuItem[];
+  templates: PageTemplateInfo[] | undefined;
+  onOpenPreferences: () => void;
+}) {
+  return (
+    <Menu position="bottom-end" shadow="md" width={220}>
+      <Menu.Target>
+        <UnstyledButton
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "0 12px",
+            height: 40,
+            color: HEADER_FG,
+            background: "transparent",
+            border: 0,
+            borderRadius: 4,
+            cursor: "pointer",
+            transition: "background 120ms ease, color 120ms ease"
+          }}
+          onMouseEnter={applyHeaderHover}
+          onMouseLeave={clearHeaderHover}
+        >
+          <Avatar size={28} radius="xl" color="gray">
+            <i className="fa fa-user" />
+          </Avatar>
+          <Box
+            component="span"
+            visibleFrom="md"
+            style={{ fontSize: 14, lineHeight: 1, color: "inherit" }}
+          >
+            {displayName}
+          </Box>
+          <i className="fa fa-angle-down" style={{ fontSize: 11, opacity: 0.7 }} />
+        </UnstyledButton>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Item leftSection={<i className="fa fa-gear" />} onClick={onOpenPreferences}>
+          User Preferences
+        </Menu.Item>
+        {userMenu.length > 0 && <Menu.Divider />}
+        {userMenu.map((item) => (
+          <UserDropdownEntry key={item.id} item={item} templates={templates} />
+        ))}
+      </Menu.Dropdown>
+    </Menu>
+  );
 }
 
 function UserDropdownEntry({
@@ -429,18 +569,26 @@ function UserDropdownEntry({
   templates: PageTemplateInfo[] | undefined;
 }) {
   if (item.itemType === "separator") {
-    return <div className="dropdown-divider" />;
+    return <Menu.Divider />;
   }
   if (item.itemType === "action") {
     const action = stringFrom(item.config?.action);
     if (action === "logout") {
       return (
-        <form action="/account/logout" method="post">
-          <button type="submit" className="dropdown-item">
-            {item.icon && <i className={`${item.icon} me-2`} />}
-            {item.displayName}
-          </button>
-        </form>
+        <Menu.Item
+          leftSection={item.icon ? <i className={item.icon} /> : undefined}
+          onClick={() => {
+            // Submit the existing form-based logout endpoint. POST is required;
+            // synthesize a hidden form, submit, and discard.
+            const form = document.createElement("form");
+            form.method = "post";
+            form.action = "/account/logout";
+            document.body.appendChild(form);
+            form.submit();
+          }}
+        >
+          {item.displayName}
+        </Menu.Item>
       );
     }
     return null;
@@ -449,22 +597,41 @@ function UserDropdownEntry({
     const path = pathOf(item, templates);
     if (!path) return dropAndReport(item.id);
     return (
-      <NavLink className="dropdown-item" to={path}>
-        {item.icon && <i className={`${item.icon} me-2`} />}
+      <Menu.Item
+        component={NavLink}
+        to={path}
+        leftSection={item.icon ? <i className={item.icon} /> : undefined}
+      >
         {item.displayName}
-      </NavLink>
+      </Menu.Item>
     );
   }
   if (item.itemType === "link") {
     const href = stringFrom(item.config?.href);
     return (
-      <a className="dropdown-item" href={href ?? "#"}>
-        {item.icon && <i className={`${item.icon} me-2`} />}
+      <Menu.Item
+        component="a"
+        href={href ?? "#"}
+        leftSection={item.icon ? <i className={item.icon} /> : undefined}
+      >
         {item.displayName}
-      </a>
+      </Menu.Item>
     );
   }
   return null;
+}
+
+function reportUnconfigured(item: MenuItem, why: string) {
+  reportMenuRenderFailure(item.id);
+  return (
+    <Menu.Item
+      disabled
+      leftSection={<i className="fa fa-triangle-exclamation" />}
+      title={`Misconfigured: ${why}`}
+    >
+      {item.displayName}
+    </Menu.Item>
+  );
 }
 
 // `templates` is no longer needed to compute a URL — kept on the signature so
@@ -476,8 +643,4 @@ function pathOf(item: MenuItem, _templates: PageTemplateInfo[] | undefined): str
 
 function stringFrom(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function preventDefault(e: React.MouseEvent<HTMLAnchorElement>) {
-  e.preventDefault();
 }

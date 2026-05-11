@@ -2,6 +2,21 @@ import { useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import { ColumnDef } from "@tanstack/react-table";
 import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Code,
+  Grid,
+  Group,
+  Modal,
+  NativeSelect,
+  Stack,
+  Text,
+  TextInput
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
+import {
   SystemIssueCategory,
   SystemIssueModel,
   SystemIssueSeverity,
@@ -67,9 +82,11 @@ export default function SystemIssues() {
         header: "Title",
         cell: ({ row }) => (
           <>
-            <div className="fw-semibold">{row.original.title}</div>
+            <Text fw={600}>{row.original.title}</Text>
             {row.original.summary && (
-              <div className="text-muted small">{row.original.summary}</div>
+              <Text size="sm" c="dimmed">
+                {row.original.summary}
+              </Text>
             )}
           </>
         )
@@ -78,13 +95,21 @@ export default function SystemIssues() {
         id: "category",
         accessorKey: "category",
         header: "Category",
-        cell: ({ row }) => <span className="small text-muted">{row.original.category}</span>
+        cell: ({ row }) => (
+          <Text size="sm" c="dimmed" component="span">
+            {row.original.category}
+          </Text>
+        )
       },
       {
         id: "detectorId",
         accessorKey: "detectorId",
         header: "Detector",
-        cell: ({ row }) => <span className="small text-muted">{row.original.detectorId}</span>
+        cell: ({ row }) => (
+          <Text size="sm" c="dimmed" component="span">
+            {row.original.detectorId}
+          </Text>
+        )
       },
       {
         id: "occurrenceCount",
@@ -96,9 +121,9 @@ export default function SystemIssues() {
         accessorKey: "lastSeenAtUtc",
         header: "Last seen",
         cell: ({ row }) => (
-          <span className="small text-muted">
+          <Text size="sm" c="dimmed" component="span">
             {new Date(row.original.lastSeenAtUtc).toLocaleString()}
-          </span>
+          </Text>
         )
       }
     ],
@@ -107,12 +132,10 @@ export default function SystemIssues() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">System Issues</h1>
-        <p className="page-head-copy">
-          Persistent log of issues detectors have surfaced. Refreshes every 15 seconds.
-        </p>
-      </div>
+      <PageHeader
+        title="System Issues"
+        description="Persistent log of issues detectors have surfaced. Refreshes every 15 seconds."
+      />
 
       <DataTable<SystemIssueModel>
         mode="client"
@@ -124,8 +147,6 @@ export default function SystemIssues() {
           });
           return r.items;
         }}
-        // Filter selections are part of the backend request, so they go in
-        // the queryKey so react-query refetches when any facet changes.
         queryKey={["system-issues", { state, severity, category }]}
         refetchInterval={15_000}
         columns={columns}
@@ -144,47 +165,32 @@ export default function SystemIssues() {
             .includes(needle);
         }}
         toolbarLeft={
-          <div className="d-flex align-items-center gap-2">
-            <select
-              className="form-select form-select-sm"
+          <Group gap="xs" align="center">
+            <NativeSelect
+              size="xs"
               style={{ width: "auto" }}
               value={state}
-              onChange={(e) => setState(e.target.value as SystemIssueState | "")}
+              onChange={(e) => setState(e.currentTarget.value as SystemIssueState | "")}
               aria-label="Filter by state"
-            >
-              {STATE_OPTIONS.map((opt) => (
-                <option key={opt.value || "all"} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <select
-              className="form-select form-select-sm"
+              data={STATE_OPTIONS}
+            />
+            <NativeSelect
+              size="xs"
               style={{ width: "auto" }}
               value={severity}
-              onChange={(e) => setSeverity(e.target.value as SystemIssueSeverity | "")}
+              onChange={(e) => setSeverity(e.currentTarget.value as SystemIssueSeverity | "")}
               aria-label="Filter by severity"
-            >
-              {SEVERITY_OPTIONS.map((opt) => (
-                <option key={opt.value || "any"} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <select
-              className="form-select form-select-sm"
+              data={SEVERITY_OPTIONS}
+            />
+            <NativeSelect
+              size="xs"
               style={{ width: "auto" }}
               value={category}
-              onChange={(e) => setCategory(e.target.value as SystemIssueCategory | "")}
+              onChange={(e) => setCategory(e.currentTarget.value as SystemIssueCategory | "")}
               aria-label="Filter by category"
-            >
-              {CATEGORY_OPTIONS.map((opt) => (
-                <option key={opt.value || "any"} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+              data={CATEGORY_OPTIONS}
+            />
+          </Group>
         }
       />
 
@@ -200,15 +206,19 @@ export default function SystemIssues() {
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
-  const cls =
+  const color =
     severity === "critical"
-      ? "bg-danger"
+      ? "red"
       : severity === "error"
-        ? "bg-danger"
+        ? "red"
         : severity === "warning"
-          ? "bg-warning text-dark"
-          : "bg-secondary";
-  return <span className={`badge ${cls}`}>{severity}</span>;
+          ? "yellow"
+          : "gray";
+  return (
+    <Badge color={color} variant="filled">
+      {severity}
+    </Badge>
+  );
 }
 
 function IssueDetailDrawer({
@@ -230,142 +240,130 @@ function IssueDetailDrawer({
   const lastError: unknown = acknowledge.error ?? resolve.error;
 
   return (
-    <div className="modal show d-block" tabIndex={-1} style={{ background: "rgba(0,0,0,0.4)" }}>
-      <div className="modal-dialog modal-lg modal-dialog-scrollable">
-        <div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title">{issue?.title ?? (isLoading ? "Loading…" : "Issue")}</h5>
-            <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
-          </div>
-          <div className="modal-body">
-            {lastError ? (
-              <div className="alert alert-danger py-2 small">{describeError(lastError)}</div>
-            ) : null}
-            {isLoading || !issue ? (
-              <p className="text-muted">Loading…</p>
-            ) : (
-              <dl className="row mb-0">
-                <dt className="col-sm-3">State</dt>
-                <dd className="col-sm-9">{issue.state}</dd>
+    <Modal
+      opened
+      onClose={onClose}
+      title={issue?.title ?? (isLoading ? "Loading…" : "Issue")}
+      size="lg"
+      scrollAreaComponent={undefined}
+    >
+      {lastError ? (
+        <Alert color="red" variant="light" mb="md">
+          {describeError(lastError)}
+        </Alert>
+      ) : null}
+      {isLoading || !issue ? (
+        <Text c="dimmed">Loading…</Text>
+      ) : (
+        <Stack gap={4}>
+          <DetailRow label="State">{issue.state}</DetailRow>
+          <DetailRow label="Severity">
+            <SeverityBadge severity={issue.severity} />
+          </DetailRow>
+          <DetailRow label="Category">{issue.category}</DetailRow>
+          <DetailRow label="Detector">
+            <Code>{issue.detectorId}</Code>
+          </DetailRow>
+          <DetailRow label="Fingerprint">
+            <Code style={{ fontSize: 13 }}>{issue.fingerprint}</Code>
+          </DetailRow>
+          {issue.summary && (
+            <DetailRow label="Summary">
+              <Text style={{ whiteSpace: "pre-wrap" }}>{issue.summary}</Text>
+            </DetailRow>
+          )}
+          {issue.relatedEntityKind && (
+            <DetailRow label="Related">
+              <Code>
+                {issue.relatedEntityKind}/{issue.relatedEntityId ?? "?"}
+              </Code>
+            </DetailRow>
+          )}
+          <DetailRow label="Occurrences">{issue.occurrenceCount}</DetailRow>
+          <DetailRow label="First seen">
+            <Text size="sm">{new Date(issue.firstSeenAtUtc).toLocaleString()}</Text>
+          </DetailRow>
+          <DetailRow label="Last seen">
+            <Text size="sm">{new Date(issue.lastSeenAtUtc).toLocaleString()}</Text>
+          </DetailRow>
+          {issue.resolvedAtUtc && (
+            <DetailRow label="Resolved">
+              <Text size="sm">
+                {new Date(issue.resolvedAtUtc).toLocaleString()} ({issue.resolutionKind})
+              </Text>
+            </DetailRow>
+          )}
+          {issue.autoRemediationLastError && (
+            <DetailRow label="Last remediation error">
+              <Text size="sm" c="red">
+                {issue.autoRemediationLastError}
+              </Text>
+            </DetailRow>
+          )}
+          <DetailRow label="Facts">
+            <Code
+              block
+              style={{ maxHeight: 300, overflow: "auto", fontSize: 13, whiteSpace: "pre-wrap" }}
+            >
+              {facts}
+            </Code>
+          </DetailRow>
+        </Stack>
+      )}
+      <Group justify="flex-end" wrap="wrap" gap="xs" mt="md">
+        {isOpenOrAcknowledged && (
+          <Box style={{ minWidth: 260, flex: "1 1 260px", marginRight: "auto" }}>
+            <TextInput
+              size="xs"
+              placeholder="Resolution notes (optional)"
+              value={resolveNotes}
+              onChange={(e) => setResolveNotes(e.currentTarget.value)}
+              disabled={resolve.isPending}
+            />
+          </Box>
+        )}
+        {isOpen && (
+          <Button
+            variant="outline"
+            disabled={!issue}
+            loading={acknowledge.isPending}
+            onClick={() => issue && acknowledge.mutate(issue.id)}
+          >
+            Acknowledge
+          </Button>
+        )}
+        {isOpenOrAcknowledged && (
+          <Button
+            color="green"
+            disabled={!issue}
+            loading={resolve.isPending}
+            onClick={() => {
+              if (!issue) return;
+              resolve.mutate(
+                { id: issue.id, notes: resolveNotes.trim() || undefined },
+                { onSuccess: () => setResolveNotes("") }
+              );
+            }}
+          >
+            Resolve
+          </Button>
+        )}
+        <Button variant="default" onClick={onClose}>
+          Close
+        </Button>
+      </Group>
+    </Modal>
+  );
+}
 
-                <dt className="col-sm-3">Severity</dt>
-                <dd className="col-sm-9">
-                  <SeverityBadge severity={issue.severity} />
-                </dd>
-
-                <dt className="col-sm-3">Category</dt>
-                <dd className="col-sm-9">{issue.category}</dd>
-
-                <dt className="col-sm-3">Detector</dt>
-                <dd className="col-sm-9">
-                  <code>{issue.detectorId}</code>
-                </dd>
-
-                <dt className="col-sm-3">Fingerprint</dt>
-                <dd className="col-sm-9">
-                  <code className="small">{issue.fingerprint}</code>
-                </dd>
-
-                {issue.summary && (
-                  <>
-                    <dt className="col-sm-3">Summary</dt>
-                    <dd className="col-sm-9" style={{ whiteSpace: "pre-wrap" }}>
-                      {issue.summary}
-                    </dd>
-                  </>
-                )}
-
-                {issue.relatedEntityKind && (
-                  <>
-                    <dt className="col-sm-3">Related</dt>
-                    <dd className="col-sm-9">
-                      <code>
-                        {issue.relatedEntityKind}/{issue.relatedEntityId ?? "?"}
-                      </code>
-                    </dd>
-                  </>
-                )}
-
-                <dt className="col-sm-3">Occurrences</dt>
-                <dd className="col-sm-9">{issue.occurrenceCount}</dd>
-
-                <dt className="col-sm-3">First seen</dt>
-                <dd className="col-sm-9 small">{new Date(issue.firstSeenAtUtc).toLocaleString()}</dd>
-
-                <dt className="col-sm-3">Last seen</dt>
-                <dd className="col-sm-9 small">{new Date(issue.lastSeenAtUtc).toLocaleString()}</dd>
-
-                {issue.resolvedAtUtc && (
-                  <>
-                    <dt className="col-sm-3">Resolved</dt>
-                    <dd className="col-sm-9 small">
-                      {new Date(issue.resolvedAtUtc).toLocaleString()} ({issue.resolutionKind})
-                    </dd>
-                  </>
-                )}
-
-                {issue.autoRemediationLastError && (
-                  <>
-                    <dt className="col-sm-3">Last remediation error</dt>
-                    <dd className="col-sm-9 small text-danger">{issue.autoRemediationLastError}</dd>
-                  </>
-                )}
-
-                <dt className="col-sm-3">Facts</dt>
-                <dd className="col-sm-9">
-                  <pre className="bg-light p-2 small mb-0" style={{ maxHeight: "300px", overflow: "auto" }}>
-                    {facts}
-                  </pre>
-                </dd>
-              </dl>
-            )}
-          </div>
-          <div className="modal-footer flex-wrap gap-2">
-            {isOpenOrAcknowledged && (
-              <div className="me-auto" style={{ minWidth: "260px", flex: "1 1 260px" }}>
-                <input
-                  type="text"
-                  className="form-control form-control-sm"
-                  placeholder="Resolution notes (optional)"
-                  value={resolveNotes}
-                  onChange={(e) => setResolveNotes(e.target.value)}
-                  disabled={resolve.isPending}
-                />
-              </div>
-            )}
-            {isOpen && (
-              <button
-                type="button"
-                className="btn btn-outline-primary"
-                disabled={!issue || acknowledge.isPending}
-                onClick={() => issue && acknowledge.mutate(issue.id)}
-              >
-                {acknowledge.isPending ? "Acknowledging…" : "Acknowledge"}
-              </button>
-            )}
-            {isOpenOrAcknowledged && (
-              <button
-                type="button"
-                className="btn btn-success"
-                disabled={!issue || resolve.isPending}
-                onClick={() => {
-                  if (!issue) return;
-                  resolve.mutate(
-                    { id: issue.id, notes: resolveNotes.trim() || undefined },
-                    { onSuccess: () => setResolveNotes("") }
-                  );
-                }}
-              >
-                {resolve.isPending ? "Resolving…" : "Resolve"}
-              </button>
-            )}
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Grid>
+      <Grid.Col span={3}>
+        <Text fw={500}>{label}</Text>
+      </Grid.Col>
+      <Grid.Col span={9}>{children}</Grid.Col>
+    </Grid>
   );
 }
 

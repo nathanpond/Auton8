@@ -1,4 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
+import { Alert, Badge, Box, Button, Group, Paper, Text } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { JsxFormHost } from "@/components/JsxFormHost";
 import { useCompleteTask, useTaskFormConfig } from "@/hooks/useExecutions";
 
@@ -13,45 +15,47 @@ export default function TaskFormPage() {
 
   if (isLoading) {
     return (
-      <div className="app-content-margin p-4 text-muted">
-        <i className="fa fa-spinner fa-spin me-2" />
-        Loading task…
-      </div>
+      <Box py="md">
+        <Text c="dimmed">
+          <i className="fa fa-spinner fa-spin" style={{ marginRight: 8 }} />
+          Loading task…
+        </Text>
+      </Box>
     );
   }
 
   if (error) {
     const status = (error as { response?: { status?: number } }).response?.status;
     return (
-      <div className="app-content-margin p-4">
-        <div className="alert alert-danger">
+      <Box py="md">
+        <Alert color="red" variant="light">
           {status === 403
             ? "You don't have permission to view this task (workflowtask/view required)."
             : `Failed to load task: ${(error as Error).message}`}
-        </div>
-      </div>
+        </Alert>
+      </Box>
     );
   }
 
   if (!config) {
     return (
-      <div className="app-content-margin p-4">
-        <div className="alert alert-warning">
+      <Box py="md">
+        <Alert color="yellow" variant="light">
           Task <code>{taskId}</code> was not found, or it has already been completed.
-        </div>
-      </div>
+        </Alert>
+      </Box>
     );
   }
 
   if (!config.form) {
     return (
-      <div className="app-content-margin p-4">
-        <div className="alert alert-warning">
+      <Box py="md">
+        <Alert color="yellow" variant="light">
           {config.formShortCode
             ? `The form "${config.formShortCode}" referenced by this task could not be loaded.`
             : "This task is configured for Form Page mode but no form is selected. Edit the user task in Workflow Studio."}
-        </div>
-      </div>
+        </Alert>
+      </Box>
     );
   }
 
@@ -61,45 +65,49 @@ export default function TaskFormPage() {
   };
 
   return (
-    <div className="app-content-margin p-3">
-      <div className="page-head d-flex flex-wrap gap-3 align-items-start justify-content-between">
-        <div>
-          <h1 className="page-header mb-1">{config.taskName || "Complete task"}</h1>
-          <p className="page-head-copy mb-0">
-            <i className="fa fa-diagram-project me-2" />
-            {config.processInstanceName ?? config.processDefinitionName ?? "Workflow"}
+    <Box py="md">
+      <PageHeader
+        title={config.taskName || "Complete task"}
+        description={
+          <Group gap={6} wrap="wrap" align="center">
+            <i className="fa fa-diagram-project" />
+            <span>
+              {config.processInstanceName ?? config.processDefinitionName ?? "Workflow"}
+            </span>
             {config.form.isDraftFallback && (
-              <span className="badge bg-warning text-dark ms-2">Draft form</span>
+              <Badge color="yellow" variant="filled">
+                Draft form
+              </Badge>
             )}
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn btn-outline-secondary"
-          onClick={() => navigate(-1)}
-        >
-          <i className="fa fa-chevron-left me-1" /> Back
-        </button>
-      </div>
+          </Group>
+        }
+        actions={
+          <Button
+            variant="default"
+            leftSection={<i className="fa fa-chevron-left" />}
+            onClick={() => navigate(-1)}
+          >
+            Back
+          </Button>
+        }
+      />
 
-      <div className="panel panel-inverse">
-        <div className="panel-body">
-          <JsxFormHost
-            source={config.form.formCode}
-            data={config.variables as Record<string, unknown>}
-            mode="edit"
-            context={{
-              taskId: config.taskId,
-              taskName: config.taskName,
-              taskDefinitionKey: config.taskDefinitionKey,
-              processInstanceId: config.processInstanceId,
-              processInstanceName: config.processInstanceName
-            }}
-            extras={{ shortCode: config.form.shortCode }}
-            onSubmit={onSubmit}
-          />
-        </div>
-      </div>
-    </div>
+      <Paper withBorder radius="md" p="md">
+        <JsxFormHost
+          source={config.form.formCode}
+          data={config.variables as Record<string, unknown>}
+          mode="edit"
+          context={{
+            taskId: config.taskId,
+            taskName: config.taskName,
+            taskDefinitionKey: config.taskDefinitionKey,
+            processInstanceId: config.processInstanceId,
+            processInstanceName: config.processInstanceName
+          }}
+          extras={{ shortCode: config.form.shortCode }}
+          onSubmit={onSubmit}
+        />
+      </Paper>
+    </Box>
   );
 }

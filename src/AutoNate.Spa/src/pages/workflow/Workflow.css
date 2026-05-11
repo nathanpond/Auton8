@@ -492,11 +492,11 @@
     box-shadow: 0 4px 12px rgba(38, 128, 194, 0.35);
 }
 
-.workflow-bpmn-support-badge i.bi-diagram-3-fill {
+.workflow-bpmn-support-badge i.fa-sitemap {
     font-size: 1rem;
 }
 
-.workflow-bpmn-support-badge i.bi-arrow-right-short {
+.workflow-bpmn-support-badge i.fa-arrow-right {
     font-size: 1.15rem;
     margin-right: -0.25rem;
 }

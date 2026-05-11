@@ -1,4 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  Box,
+  Button,
+  Code,
+  Divider,
+  Grid,
+  Group,
+  Modal,
+  Select,
+  Switch,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
 import { useCreateEdge, useEdgeTypeFields, useEdgeTypes } from "@/hooks/useRecordEdges";
 import { useRecords } from "@/hooks/useRecords";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
@@ -17,7 +31,13 @@ type Props = {
 
 type LinkDirection = "outgoing" | "incoming";
 
-export default function EdgeLinkDialog({ thisRecord, thisRecordType, onClose, onSuccess, onError }: Props) {
+export default function EdgeLinkDialog({
+  thisRecord,
+  thisRecordType,
+  onClose,
+  onSuccess,
+  onError
+}: Props) {
   const { data: edgeTypes = [] } = useEdgeTypes(false);
   const { data: recordTypes = [] } = useRecordTypes(false);
 
@@ -47,7 +67,6 @@ export default function EdgeLinkDialog({ thisRecord, thisRecordType, onClose, on
     ? !edgeType.toRecordTypeIds || edgeType.toRecordTypeIds.includes(thisRecordType.id)
     : false;
 
-  // If only one direction is valid, lock to it. Otherwise default to outgoing.
   const [direction, setDirection] = useState<LinkDirection>(
     fromAllowed ? "outgoing" : "incoming"
   );
@@ -56,7 +75,6 @@ export default function EdgeLinkDialog({ thisRecord, thisRecordType, onClose, on
     else if (fromAllowed && !toAllowed) setDirection("outgoing");
   }, [fromAllowed, toAllowed]);
 
-  // Allowed record types for the OTHER side, given the current direction.
   const otherSideAllowedTypeIds = useMemo<string[] | null>(() => {
     if (!edgeType) return null;
     return direction === "outgoing"
@@ -89,11 +107,9 @@ export default function EdgeLinkDialog({ thisRecord, thisRecordType, onClose, on
 
   const [otherRecordId, setOtherRecordId] = useState<string>("");
 
-  // Field data for the edge.
   const { data: edgeFields = [] } = useEdgeTypeFields(edgeTypeId || null);
   const [data, setData] = useState<Record<string, unknown>>({});
   useEffect(() => {
-    // Reset data shape when fields change.
     const next: Record<string, unknown> = {};
     for (const f of edgeFields) {
       next[f.fieldKey] = (defaultFieldConfig(f.dataType) as unknown) === f.config ? "" : "";
@@ -105,20 +121,17 @@ export default function EdgeLinkDialog({ thisRecord, thisRecordType, onClose, on
 
   if (candidateEdgeTypes.length === 0) {
     return (
-      <DialogShell title="Link to another record" onClose={onClose}>
-        <div className="modal-body">
-          <p className="mb-0">
-            No edge types are configured for record type{" "}
-            <code>{thisRecordType.shortCode}</code>. Define one under{" "}
-            <strong>Edge Types</strong> first.
-          </p>
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+      <Modal opened onClose={onClose} title="Link to another record" size="lg">
+        <Text>
+          No edge types are configured for record type <Code>{thisRecordType.shortCode}</Code>.
+          Define one under <strong>Edge Types</strong> first.
+        </Text>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={onClose}>
             Close
-          </button>
-        </div>
-      </DialogShell>
+          </Button>
+        </Group>
+      </Modal>
     );
   }
 
@@ -140,135 +153,130 @@ export default function EdgeLinkDialog({ thisRecord, thisRecordType, onClose, on
     }
   };
 
+  const directionData: { value: LinkDirection; label: string }[] = [
+    { value: "outgoing", label: `This record ${labelFor(edgeType, "forward")} other` },
+    { value: "incoming", label: `Other ${labelFor(edgeType, "forward")} this record` }
+  ];
+
   return (
-    <DialogShell title="Link to another record" onClose={onClose}>
-      <form onSubmit={submit}>
-        <div className="modal-body">
-          <div className="row g-3">
-            <div className="col-md-6">
-              <label className="form-label">Edge type</label>
-              <select
-                className="form-select"
-                value={edgeTypeId}
-                onChange={(e) => setEdgeTypeId(e.target.value)}
-              >
-                {candidateEdgeTypes.map((et) => (
-                  <option key={et.id} value={et.id}>
-                    {et.shortCode} - {et.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-md-6">
-              <label className="form-label">Direction</label>
-              <select
-                className="form-select"
-                value={direction}
-                onChange={(e) => setDirection(e.target.value as LinkDirection)}
-                disabled={!fromAllowed || !toAllowed || !edgeType?.isDirected}
-              >
-                <option value="outgoing">
-                  This record {labelFor(edgeType, "forward")} other
-                </option>
-                <option value="incoming">
-                  Other {labelFor(edgeType, "forward")} this record
-                </option>
-              </select>
-            </div>
-            <div className="col-md-5">
-              <label className="form-label">Other record type</label>
-              <select
-                className="form-select"
-                value={otherTypeId}
-                onChange={(e) => setOtherTypeId(e.target.value)}
-                disabled={otherTypeOptions.length === 0}
-              >
-                {otherTypeOptions.map((rt) => (
-                  <option key={rt.id} value={rt.id}>
-                    {rt.shortCode} - {rt.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-md-7">
-              <label className="form-label">Other record</label>
-              <select
-                className="form-select"
-                value={otherRecordId}
-                onChange={(e) => setOtherRecordId(e.target.value)}
-                disabled={!candidates || candidates.items.length === 0}
-              >
-                <option value="">Select...</option>
-                {(candidates?.items ?? [])
-                  .filter((r) => r.id !== thisRecord.id || edgeType?.allowSelfReference)
-                  .map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.key} — {r.name}
-                    </option>
-                  ))}
-              </select>
-              {candidates && candidates.totalCount > candidates.items.length && (
-                <div className="form-text">
-                  Showing {candidates.items.length} of {candidates.totalCount}.
-                </div>
-              )}
-            </div>
-            {edgeFields.length > 0 && (
-              <div className="col-12">
-                <hr />
-                <h6 className="mb-3">Edge data</h6>
-                <div className="row g-3">
-                  {edgeFields.map((field) => {
-                    const renderer = getRenderer(field.dataType);
-                    if (!renderer) {
-                      return (
-                        <div key={field.id} className="col-md-6">
-                          <label className="form-label">{field.displayName}</label>
-                          <input
-                            className="form-control"
-                            placeholder={`(${field.dataType})`}
-                            value={String(data[field.fieldKey] ?? "")}
-                            onChange={(e) =>
-                              setData((d) => ({ ...d, [field.fieldKey]: e.target.value }))
-                            }
-                          />
-                        </div>
-                      );
-                    }
+    <Modal opened onClose={onClose} title="Link to another record" size="lg">
+      <Box component="form" onSubmit={submit}>
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Select
+              label="Edge type"
+              value={edgeTypeId || null}
+              onChange={(v) => setEdgeTypeId(v ?? "")}
+              data={candidateEdgeTypes.map((et) => ({
+                value: et.id,
+                label: `${et.shortCode} - ${et.name}`
+              }))}
+              allowDeselect={false}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Select
+              label="Direction"
+              value={direction}
+              onChange={(v) => setDirection((v as LinkDirection) ?? "outgoing")}
+              disabled={!fromAllowed || !toAllowed || !edgeType?.isDirected}
+              data={directionData}
+              allowDeselect={false}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 5 }}>
+            <Select
+              label="Other record type"
+              value={otherTypeId || null}
+              onChange={(v) => setOtherTypeId(v ?? "")}
+              data={otherTypeOptions.map((rt) => ({
+                value: rt.id,
+                label: `${rt.shortCode} - ${rt.name}`
+              }))}
+              disabled={otherTypeOptions.length === 0}
+              allowDeselect={false}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 7 }}>
+            <Select
+              label="Other record"
+              value={otherRecordId || null}
+              onChange={(v) => setOtherRecordId(v ?? "")}
+              placeholder="Select..."
+              disabled={!candidates || candidates.items.length === 0}
+              data={(candidates?.items ?? [])
+                .filter((r) => r.id !== thisRecord.id || edgeType?.allowSelfReference)
+                .map((r) => ({ value: r.id, label: `${r.key} — ${r.name}` }))}
+              searchable
+              description={
+                candidates && candidates.totalCount > candidates.items.length
+                  ? `Showing ${candidates.items.length} of ${candidates.totalCount}.`
+                  : undefined
+              }
+            />
+          </Grid.Col>
+          {edgeFields.length > 0 && (
+            <Grid.Col span={12}>
+              <Divider my="xs" />
+              <Title order={6} mb="sm">
+                Edge data
+              </Title>
+              <Grid>
+                {edgeFields.map((field) => {
+                  const renderer = getRenderer(field.dataType);
+                  if (!renderer) {
                     return (
-                      <div key={field.id} className="col-md-6">
-                        <label className="form-label">
+                      <Grid.Col key={field.id} span={{ base: 12, md: 6 }}>
+                        <TextInput
+                          label={field.displayName}
+                          placeholder={`(${field.dataType})`}
+                          value={String(data[field.fieldKey] ?? "")}
+                          onChange={(e) =>
+                            setData((d) => ({ ...d, [field.fieldKey]: e.currentTarget.value }))
+                          }
+                        />
+                      </Grid.Col>
+                    );
+                  }
+                  return (
+                    <Grid.Col key={field.id} span={{ base: 12, md: 6 }}>
+                      <Box>
+                        <Text size="sm" fw={500} mb={4}>
                           {field.displayName}
-                          {field.isRequired && <span className="text-danger ms-1">*</span>}
-                        </label>
+                          {field.isRequired && (
+                            <Text component="span" c="red" ml={4}>
+                              *
+                            </Text>
+                          )}
+                        </Text>
                         <SimpleFieldInput
                           fieldKey={field.fieldKey}
                           dataType={field.dataType}
                           value={data[field.fieldKey]}
                           onChange={(v) => setData((d) => ({ ...d, [field.fieldKey]: v }))}
                         />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+                      </Box>
+                    </Grid.Col>
+                  );
+                })}
+              </Grid>
+            </Grid.Col>
+          )}
+        </Grid>
+        <Group justify="flex-end" mt="md" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            className="btn btn-primary"
-            disabled={!edgeType || !otherRecordId || create.isPending}
+            disabled={!edgeType || !otherRecordId}
+            loading={create.isPending}
           >
             Create link
-          </button>
-        </div>
-      </form>
-    </DialogShell>
+          </Button>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 
@@ -278,35 +286,6 @@ function labelFor(edgeType: EdgeType | undefined, dir: "forward" | "inverse") {
   return edgeType.inverseName ?? `← ${edgeType.name}`;
 }
 
-function DialogShell({
-  title,
-  children,
-  onClose
-}: {
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog modal-lg">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h5 className="modal-title">{title}</h5>
-              <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
-            </div>
-            {children}
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
-  );
-}
-
-// Simple controlled input for the EdgeLinkDialog. We don't use react-hook-form
-// here because the field set is small and changes when edge type changes.
 function SimpleFieldInput({
   fieldKey,
   dataType,
@@ -321,44 +300,36 @@ function SimpleFieldInput({
   switch (dataType) {
     case "boolean":
       return (
-        <div className="form-check form-switch">
-          <input
-            type="checkbox"
-            className="form-check-input"
-            id={`edge-${fieldKey}`}
-            checked={Boolean(value)}
-            onChange={(e) => onChange(e.target.checked)}
-          />
-          <label className="form-check-label" htmlFor={`edge-${fieldKey}`}>
-            {Boolean(value) ? "Yes" : "No"}
-          </label>
-        </div>
+        <Switch
+          id={`edge-${fieldKey}`}
+          checked={Boolean(value)}
+          onChange={(e) => onChange(e.currentTarget.checked)}
+          label={Boolean(value) ? "Yes" : "No"}
+        />
       );
     case "number":
       return (
-        <input
+        <TextInput
           type="number"
-          className="form-control"
           value={value === null || value === undefined ? "" : String(value)}
-          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+          onChange={(e) =>
+            onChange(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))
+          }
         />
       );
     case "date":
       return (
-        <input
+        <TextInput
           type="date"
-          className="form-control"
           value={(value as string | null) ?? ""}
-          onChange={(e) => onChange(e.target.value || null)}
+          onChange={(e) => onChange(e.currentTarget.value || null)}
         />
       );
     default:
       return (
-        <input
-          type="text"
-          className="form-control"
+        <TextInput
           value={(value as string | null) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
         />
       );
   }

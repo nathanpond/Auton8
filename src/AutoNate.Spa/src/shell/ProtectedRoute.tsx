@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import { Navigate, useLocation } from "react-router-dom";
+import { Center, Loader } from "@mantine/core";
 import { useMe } from "@/hooks/useMe";
 
 type Props = {
@@ -11,7 +12,11 @@ export default function ProtectedRoute({ children }: Props) {
   const { data, isLoading } = useMe();
 
   if (isLoading) {
-    return <FullPageLoader />;
+    return (
+      <Center mih="100vh">
+        <Loader />
+      </Center>
+    );
   }
 
   if (!data || data.authenticated !== true) {
@@ -20,14 +25,4 @@ export default function ProtectedRoute({ children }: Props) {
   }
 
   return children;
-}
-
-function FullPageLoader() {
-  return (
-    <div className="d-flex justify-content-center align-items-center vh-100">
-      <div className="spinner-border text-primary" role="status">
-        <span className="visually-hidden">Loading...</span>
-      </div>
-    </div>
-  );
 }

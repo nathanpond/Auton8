@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Box, Input, TextInput } from "@mantine/core";
 import { FA_ICONS, FaIcon, findIcon, preferredStyle, searchIcons, stripFaPrefix } from "@/lib/faIcons";
 
 interface IconPickerProps {
@@ -80,39 +81,49 @@ export default function IconPicker({ value, onChange, placeholder, id }: IconPic
     ? `${preferredStyle(matchedIcon)} fa-${matchedIcon.name}`
     : value
     ? `fa ${value.startsWith("fa-") ? value : `fa-${value}`}`
-    : "fa fa-question text-body text-opacity-25";
+    : "fa fa-question";
+  const previewOpacity = matchedIcon || value ? 1 : 0.25;
 
   return (
-    <div ref={containerRef} className="position-relative">
-      <div className="input-group">
-        <span className="input-group-text" style={{ width: "2.75rem", justifyContent: "center" }}>
-          <i className={previewClass} aria-hidden="true"></i>
-        </span>
-        <input
-          id={inputId}
-          className="form-control"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder={placeholder ?? "Search icons (e.g. building)"}
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setOpen(true);
-            setHighlight(0);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={onKeyDown}
-        />
-      </div>
+    <Box ref={containerRef} style={{ position: "relative" }}>
+      <TextInput
+        id={inputId}
+        autoComplete="off"
+        spellCheck={false}
+        placeholder={placeholder ?? "Search icons (e.g. building)"}
+        value={value}
+        onChange={(e) => {
+          onChange(e.currentTarget.value);
+          setOpen(true);
+          setHighlight(0);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        leftSection={
+          <i className={previewClass} aria-hidden="true" style={{ opacity: previewOpacity }} />
+        }
+      />
       {open && (
-        <div
+        <Box
           ref={listRef}
-          className="position-absolute bg-body border rounded shadow-sm w-100"
-          style={{ zIndex: 1080, maxHeight: "18rem", overflowY: "auto", top: "100%" }}
           role="listbox"
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            zIndex: 1080,
+            maxHeight: "18rem",
+            overflowY: "auto",
+            background: "var(--mantine-color-body)",
+            border: "1px solid var(--mantine-color-default-border)",
+            borderRadius: "var(--mantine-radius-default)",
+            boxShadow: "var(--mantine-shadow-sm)",
+            marginTop: 4
+          }}
         >
           {results.length === 0 ? (
-            <div className="p-3 text-body text-opacity-50 small">No matching icons.</div>
+            <Input.Description p="sm">No matching icons.</Input.Description>
           ) : (
             results.map((icon, idx) => {
               const style = preferredStyle(icon);
@@ -124,27 +135,40 @@ export default function IconPicker({ value, onChange, placeholder, id }: IconPic
                   data-idx={idx}
                   role="option"
                   aria-selected={isHighlighted}
-                  className={`d-flex align-items-center gap-2 w-100 text-start px-3 py-2 border-0 ${
-                    isHighlighted ? "bg-primary bg-opacity-10" : "bg-transparent"
-                  }`}
                   onMouseEnter={() => setHighlight(idx)}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     selectIcon(icon);
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "0.5rem 0.75rem",
+                    border: 0,
+                    background: isHighlighted
+                      ? "var(--mantine-color-default-hover)"
+                      : "transparent",
+                    color: "inherit",
+                    cursor: "pointer"
                   }}
                 >
                   <i
                     className={`${style} fa-${icon.name}`}
                     style={{ width: "1.25rem", textAlign: "center" }}
                     aria-hidden="true"
-                  ></i>
-                  <span className="font-monospace small">fa-{icon.name}</span>
+                  />
+                  <Box component="span" style={{ fontFamily: "var(--mantine-font-family-monospace)", fontSize: 13 }}>
+                    fa-{icon.name}
+                  </Box>
                 </button>
               );
             })
           )}
-        </div>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 }

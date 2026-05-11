@@ -1,13 +1,27 @@
 import { useMemo, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Code,
+  Grid,
+  Group,
+  Select,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { useUsers } from "@/hooks/useUsers";
 import { useExplainPermission, useRegistry, useRoles, useGroups } from "@/hooks/useAdmin";
 import type { ExplainGrant, ExplainResult } from "@/api/admin";
 
 // Effective permissions debugger. Pick a user, an action, a kind, and an
 // optional target id; the server replays the evaluator and returns the
-// final allow/deny along with every grant it considered. Useful both as a
-// "why did Alice get a 403?" troubleshooter and as a sanity check that a
-// new grant or role assignment had the expected effect.
+// final allow/deny along with every grant it considered.
 export default function Explain() {
   const { data: users = [] } = useUsers();
   const { data: registry } = useRegistry();
@@ -15,9 +29,9 @@ export default function Explain() {
   const { data: groups = [] } = useGroups();
   const explain = useExplainPermission();
 
-  const [asUserId, setAsUserId] = useState("");
-  const [targetKind, setTargetKind] = useState("record");
-  const [action, setAction] = useState("view");
+  const [asUserId, setAsUserId] = useState<string | null>(null);
+  const [targetKind, setTargetKind] = useState<string | null>("record");
+  const [action, setAction] = useState<string | null>("view");
   const [targetId, setTargetId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExplainResult | null>(null);
@@ -67,91 +81,82 @@ export default function Explain() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Effective Permissions</h1>
-        <p className="page-head-copy">
-          Pick a user, action, and target. The evaluator replays each grant in
-          isolation and shows you the matching trace, so you can see exactly
-          which rule (or absence of one) drove the decision.
-        </p>
-      </div>
+      <PageHeader
+        title="Effective Permissions"
+        description="Pick a user, action, and target. The evaluator replays each grant in isolation and shows you the matching trace, so you can see exactly which rule (or absence of one) drove the decision."
+      />
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && (
+        <Alert color="red" variant="light" mb="sm">
+          {error}
+        </Alert>
+      )}
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">Query</h4>
-        </div>
-        <div className="panel-body">
-          <form onSubmit={submit} className="row g-2 align-items-end">
-            <div className="col-md-3">
-              <label className="form-label small mb-1">User</label>
-              <select
-                className="form-select form-select-sm"
+      <Card withBorder shadow="sm">
+        <Title order={5} mb="md">
+          Query
+        </Title>
+
+        <Box component="form" onSubmit={submit}>
+          <Grid align="flex-end">
+            <Grid.Col span={{ base: 12, md: 3 }}>
+              <Select
+                label="User"
+                size="xs"
                 value={asUserId}
-                onChange={(e) => setAsUserId(e.target.value)}
-              >
-                <option value="">— pick a user —</option>
-                {users.map((u) => (
-                  <option key={u.userId} value={u.userId}>
-                    {u.username}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-md-2">
-              <label className="form-label small mb-1">Kind</label>
-              <select
-                className="form-select form-select-sm"
+                onChange={setAsUserId}
+                placeholder="— pick a user —"
+                data={users.map((u) => ({ value: u.userId, label: u.username }))}
+                searchable
+                clearable
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, md: 2 }}>
+              <Select
+                label="Kind"
+                size="xs"
                 value={targetKind}
-                onChange={(e) => {
-                  setTargetKind(e.target.value);
-                  setAction("");
+                onChange={(v) => {
+                  setTargetKind(v);
+                  setAction(null);
                 }}
-              >
-                <option value="">— pick a kind —</option>
-                {kinds.map((k) => (
-                  <option key={k.kind} value={k.kind}>
-                    {k.kind}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-md-2">
-              <label className="form-label small mb-1">Action</label>
-              <select
-                className="form-select form-select-sm"
+                placeholder="— pick a kind —"
+                data={kinds.map((k) => k.kind)}
+                allowDeselect={false}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, md: 2 }}>
+              <Select
+                label="Action"
+                size="xs"
                 value={action}
-                onChange={(e) => setAction(e.target.value)}
-              >
-                <option value="">— pick an action —</option>
-                {actionOptions.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-md-3">
-              <label className="form-label small mb-1">
-                Target id <span className="text-body text-opacity-50">(optional)</span>
-              </label>
-              <input
-                type="text"
-                className="form-control form-control-sm font-monospace"
+                onChange={setAction}
+                placeholder="— pick an action —"
+                data={actionOptions}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, md: 3 }}>
+              <TextInput
+                label={
+                  <>
+                    Target id <Text component="span" c="dimmed" size="xs">(optional)</Text>
+                  </>
+                }
+                size="xs"
                 placeholder="leave blank for kind-level check"
                 value={targetId}
-                onChange={(e) => setTargetId(e.target.value)}
+                onChange={(e) => setTargetId(e.currentTarget.value)}
+                styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
               />
-            </div>
-            <div className="col-md-2">
-              <button type="submit" className="btn btn-sm btn-primary w-100" disabled={explain.isPending}>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, md: 2 }}>
+              <Button type="submit" size="xs" fullWidth loading={explain.isPending}>
                 {explain.isPending ? "Evaluating…" : "Explain"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
+              </Button>
+            </Grid.Col>
+          </Grid>
+        </Box>
+      </Card>
 
       {result && (
         <ExplanationView
@@ -179,55 +184,62 @@ function ExplanationView({
   const isAllow = result.effect === "allow";
   return (
     <>
-      <div className={`alert ${isAllow ? "alert-success" : "alert-danger"} mt-3`}>
-        <strong className="text-uppercase me-2">{result.effect}</strong>
-        {result.reason}
-        <div className="small mt-1 text-body text-opacity-75">
-          User: <strong>{users[result.asUserId] ?? result.asUserId}</strong>
-          {result.isSuperAdmin && <span className="badge bg-warning text-dark ms-2">SuperAdmin</span>}
-          <span className="ms-3">Groups: {result.groupIds.length}</span>
-          <span className="ms-3">Roles: {result.roleIds.length}</span>
-        </div>
-      </div>
+      <Alert color={isAllow ? "green" : "red"} variant="light" mt="md">
+        <Group gap="xs" align="center" wrap="wrap">
+          <Text fw={700} tt="uppercase">
+            {result.effect}
+          </Text>
+          <Text>{result.reason}</Text>
+        </Group>
+        <Group gap="md" mt="xs">
+          <Text size="sm">
+            User: <strong>{users[result.asUserId] ?? result.asUserId}</strong>
+          </Text>
+          {result.isSuperAdmin && (
+            <Badge color="yellow" variant="filled">
+              SuperAdmin
+            </Badge>
+          )}
+          <Text size="sm">Groups: {result.groupIds.length}</Text>
+          <Text size="sm">Roles: {result.roleIds.length}</Text>
+        </Group>
+      </Alert>
 
       {!result.isSuperAdmin && (
-        <div className="panel panel-inverse">
-          <div className="panel-heading">
-            <h4 className="panel-title">Grants considered</h4>
-          </div>
-          <div className="panel-body">
-            {result.grants.length === 0 ? (
-              <div className="text-body text-opacity-75">
-                The user has no grants for this action via direct assignment, group membership, or role.
-              </div>
-            ) : (
-              <div className="table-responsive">
-                <table className="table table-sm align-middle">
-                  <thead>
-                    <tr>
-                      <th>Source</th>
-                      <th>Action</th>
-                      <th>Selector</th>
-                      <th>Effect</th>
-                      <th>Matched</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.grants.map((g, i) => (
-                      <GrantRow
-                        key={i}
-                        grant={g}
-                        userLabel={users[g.principalId]}
-                        roleLabel={roleNamesById.get(g.principalId)}
-                        groupLabel={groupNamesById.get(g.principalId)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
+        <Card withBorder shadow="sm" mt="md">
+          <Title order={5} mb="md">
+            Grants considered
+          </Title>
+          {result.grants.length === 0 ? (
+            <Text c="dimmed">
+              The user has no grants for this action via direct assignment, group membership, or
+              role.
+            </Text>
+          ) : (
+            <Table verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Source</Table.Th>
+                  <Table.Th>Action</Table.Th>
+                  <Table.Th>Selector</Table.Th>
+                  <Table.Th>Effect</Table.Th>
+                  <Table.Th>Matched</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {result.grants.map((g, i) => (
+                  <GrantRow
+                    key={i}
+                    grant={g}
+                    userLabel={users[g.principalId]}
+                    roleLabel={roleNamesById.get(g.principalId)}
+                    groupLabel={groupNamesById.get(g.principalId)}
+                  />
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+        </Card>
       )}
     </>
   );
@@ -255,36 +267,42 @@ function GrantRow({
 
   let matchedCell: React.ReactNode;
   if (grant.matched === true) {
-    matchedCell = <span className="badge bg-success">match</span>;
+    matchedCell = (
+      <Badge color="green" variant="filled">
+        match
+      </Badge>
+    );
   } else if (grant.matched === false) {
-    matchedCell = <span className="text-body text-opacity-50">no match</span>;
+    matchedCell = <Text c="dimmed">no match</Text>;
   } else {
     matchedCell = (
-      <span className="text-warning" title={grant.error ?? "Not evaluated"}>
+      <Text c="yellow" title={grant.error ?? "Not evaluated"}>
         n/a {grant.error ? `— ${grant.error}` : ""}
-      </span>
+      </Text>
     );
   }
 
   return (
-    <tr>
-      <td>
-        <span className="badge bg-secondary me-2 text-uppercase">{grant.principalKind}</span>
+    <Table.Tr>
+      <Table.Td>
+        <Badge color="gray" variant="filled" mr={8} tt="uppercase">
+          {grant.principalKind}
+        </Badge>
         <strong>{principalName}</strong>
-      </td>
-      <td>
-        <code>{grant.action}</code>
-      </td>
-      <td>
-        <code className="font-monospace small">{grant.selectorString}</code>
-      </td>
-      <td>
-        <span className={`badge ${grant.effect === "allow" ? "bg-info" : "bg-danger"}`}>
+      </Table.Td>
+      <Table.Td>
+        <Code>{grant.action}</Code>
+      </Table.Td>
+      <Table.Td>
+        <Code>{grant.selectorString}</Code>
+      </Table.Td>
+      <Table.Td>
+        <Badge color={grant.effect === "allow" ? "cyan" : "red"} variant="filled">
           {grant.effect}
-        </span>
-      </td>
-      <td>{matchedCell}</td>
-    </tr>
+        </Badge>
+      </Table.Td>
+      <Table.Td>{matchedCell}</Table.Td>
+    </Table.Tr>
   );
 }
 

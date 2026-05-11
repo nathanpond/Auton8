@@ -1,6 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Divider,
+  Grid,
+  Group,
+  Modal,
+  NativeSelect,
+  Switch,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
+import {
   useArchiveEdgeType,
   useCreateEdgeTypeField,
   useDeleteEdgeTypeField,
@@ -69,11 +87,9 @@ export default function EdgeTypeEditor() {
 
   if (isLoading || !type) {
     return (
-      <div className="panel panel-inverse">
-        <div className="panel-body p-4 text-center text-body text-opacity-50">
-          {isLoading ? "Loading..." : "Edge type not found."}
-        </div>
-      </div>
+      <Card withBorder p="lg" ta="center">
+        <Text c="dimmed">{isLoading ? "Loading..." : "Edge type not found."}</Text>
+      </Card>
     );
   }
 
@@ -110,185 +126,186 @@ export default function EdgeTypeEditor() {
 
   return (
     <>
-      <div className="page-head d-flex justify-content-between align-items-start">
-        <div>
-          <h1 className="page-header mb-1">
-            <code className="me-2">{type.shortCode}</code>
-            {type.name}
-            {type.isArchived && <span className="badge bg-secondary ms-2">Archived</span>}
-          </h1>
-          <p className="page-head-copy mb-0">
-            <Link to="/record-edge-types">&larr; Back to edge types</Link>
-          </p>
-        </div>
-        <div>
-          <button
-            type="button"
-            className={`btn ${type.isArchived ? "btn-outline-success" : "btn-outline-warning"}`}
+      <PageHeader
+        title={
+          <Group gap="xs" wrap="wrap" align="center">
+            <code style={{ marginRight: 4 }}>{type.shortCode}</code>
+            <Title order={1} m={0} style={{ display: "inline" }}>
+              {type.name}
+            </Title>
+            {type.isArchived && (
+              <Badge color="gray" variant="filled">
+                Archived
+              </Badge>
+            )}
+          </Group>
+        }
+        description={<Link to="/record-edge-types">&larr; Back to edge types</Link>}
+        actions={
+          <Button
+            variant="outline"
+            color={type.isArchived ? "green" : "yellow"}
+            leftSection={
+              <i className={`fa ${type.isArchived ? "fa-box-open" : "fa-box-archive"}`} />
+            }
             onClick={toggleArchived}
-            disabled={archive.isPending || restore.isPending}
+            loading={archive.isPending || restore.isPending}
           >
-            <i className={`fa ${type.isArchived ? "fa-box-open" : "fa-box-archive"} me-2`}></i>
             {type.isArchived ? "Restore" : "Archive"}
-          </button>
-        </div>
-      </div>
+          </Button>
+        }
+      />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="sm"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
-      <div className="panel panel-inverse mb-3">
-        <div className="panel-heading">
-          <h4 className="panel-title">Settings</h4>
-        </div>
-        <div className="panel-body">
-          <div className="row g-3">
-            <div className="col-md-6">
-              <label className="form-label">Forward name</label>
-              <input className="form-control" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="col-md-6">
-              <label className="form-label">Inverse name</label>
-              <input
-                className="form-control"
-                value={inverse}
-                onChange={(e) => setInverse(e.target.value)}
-                placeholder={isDirected ? "Optional" : "Used as the symmetric label"}
-              />
-            </div>
-            <div className="col-md-3">
-              <label className="form-label">Cardinality</label>
-              <select
-                className="form-select"
-                value={cardinality}
-                onChange={(e) => setCardinality(e.target.value as EdgeCardinality)}
-              >
-                <option value="many_to_many">many_to_many</option>
-                <option value="one_to_one">one_to_one</option>
-                <option value="one_to_many">one_to_many</option>
-                <option value="many_to_one">many_to_one</option>
-              </select>
-            </div>
-            <div className="col-md-3 d-flex align-items-end">
-              <div className="form-check form-switch">
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  id="ee-directed"
-                  checked={isDirected}
-                  onChange={(e) => setIsDirected(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="ee-directed">
-                  Directed
-                </label>
-              </div>
-            </div>
-            <div className="col-md-3 d-flex align-items-end">
-              <div className="form-check form-switch">
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  id="ee-self-ref"
-                  checked={allowSelfRef}
-                  onChange={(e) => setAllowSelfRef(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="ee-self-ref">
-                  Allow self-reference
-                </label>
-              </div>
-            </div>
-            <div className="col-md-6">
-              <label className="form-label">Allowed source record types</label>
-              <RecordTypeMultiSelect
-                value={fromTypes}
-                onChange={setFromTypes}
-                options={recordTypes.map((rt) => ({ id: rt.id, label: `${rt.shortCode} - ${rt.name}` }))}
-              />
-              <div className="form-text">Leave empty to allow any record type as source.</div>
-            </div>
-            <div className="col-md-6">
-              <label className="form-label">Allowed target record types</label>
-              <RecordTypeMultiSelect
-                value={toTypes}
-                onChange={setToTypes}
-                options={recordTypes.map((rt) => ({ id: rt.id, label: `${rt.shortCode} - ${rt.name}` }))}
-              />
-              <div className="form-text">Leave empty to allow any record type as target.</div>
-            </div>
-          </div>
-          <div className="mt-3 text-end">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={save}
-              disabled={!dirty || update.isPending}
-            >
-              Save settings
-            </button>
-          </div>
-        </div>
-      </div>
+      <Card withBorder shadow="sm" mb="md">
+        <Title order={5} mb="md">
+          Settings
+        </Title>
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Forward name"
+              value={name}
+              onChange={(e) => setName(e.currentTarget.value)}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Inverse name"
+              value={inverse}
+              onChange={(e) => setInverse(e.currentTarget.value)}
+              placeholder={isDirected ? "Optional" : "Used as the symmetric label"}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 3 }}>
+            <NativeSelect
+              label="Cardinality"
+              value={cardinality}
+              onChange={(e) => setCardinality(e.currentTarget.value as EdgeCardinality)}
+              data={[
+                { value: "many_to_many", label: "many_to_many" },
+                { value: "one_to_one", label: "one_to_one" },
+                { value: "one_to_many", label: "one_to_many" },
+                { value: "many_to_one", label: "many_to_one" }
+              ]}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 6, md: 3 }} style={{ display: "flex", alignItems: "flex-end" }}>
+            <Switch
+              id="ee-directed"
+              checked={isDirected}
+              onChange={(e) => setIsDirected(e.currentTarget.checked)}
+              label="Directed"
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 6, md: 3 }} style={{ display: "flex", alignItems: "flex-end" }}>
+            <Switch
+              id="ee-self-ref"
+              checked={allowSelfRef}
+              onChange={(e) => setAllowSelfRef(e.currentTarget.checked)}
+              label="Allow self-reference"
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Text size="sm" fw={500} mb={4}>
+              Allowed source record types
+            </Text>
+            <RecordTypeMultiSelect
+              value={fromTypes}
+              onChange={setFromTypes}
+              options={recordTypes.map((rt) => ({ id: rt.id, label: `${rt.shortCode} - ${rt.name}` }))}
+            />
+            <Text size="xs" c="dimmed" mt={4}>
+              Leave empty to allow any record type as source.
+            </Text>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <Text size="sm" fw={500} mb={4}>
+              Allowed target record types
+            </Text>
+            <RecordTypeMultiSelect
+              value={toTypes}
+              onChange={setToTypes}
+              options={recordTypes.map((rt) => ({ id: rt.id, label: `${rt.shortCode} - ${rt.name}` }))}
+            />
+            <Text size="xs" c="dimmed" mt={4}>
+              Leave empty to allow any record type as target.
+            </Text>
+          </Grid.Col>
+        </Grid>
+        <Group justify="flex-end" mt="md">
+          <Button onClick={save} disabled={!dirty || update.isPending} loading={update.isPending}>
+            Save settings
+          </Button>
+        </Group>
+      </Card>
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading d-flex justify-content-between align-items-center">
-          <h4 className="panel-title mb-0">Edge data fields</h4>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
+      <Card withBorder shadow="sm">
+        <Group justify="space-between" align="center" mb="md">
+          <Title order={5} m={0}>
+            Edge data fields
+          </Title>
+          <Button
+            size="xs"
             onClick={() => setFieldModal({ kind: "add" })}
             disabled={fieldTypes.length === 0}
+            leftSection={<i className="fa fa-plus" />}
           >
-            <i className="fa fa-plus me-2"></i>Add field
-          </button>
-        </div>
-        <div className="panel-body">
-          {fields.length === 0 && (
-            <p className="text-body text-opacity-50 mb-0">
-              No edge data fields. Edges of this type will only carry the source/target references.
-            </p>
-          )}
-          {fields.length > 0 && (
-            <table className="table table-striped table-bordered align-middle">
-              <thead>
-                <tr>
-                  <th style={{ width: "4rem" }}>#</th>
-                  <th>Key</th>
-                  <th>Display name</th>
-                  <th style={{ width: "9rem" }}>Type</th>
-                  <th style={{ width: "6rem" }}>Required</th>
-                  <th style={{ width: "5rem" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {fields.map((f) => (
-                  <tr key={f.id}>
-                    <td>{f.sortOrder}</td>
-                    <td><code>{f.fieldKey}</code></td>
-                    <td>{f.displayName}</td>
-                    <td>{humanDataType(f.dataType)}</td>
-                    <td>{f.isRequired ? "Yes" : ""}</td>
-                    <td className="text-end">
-                      <button
-                        type="button"
-                        className="btn btn-outline-secondary btn-sm"
-                        onClick={() => setFieldModal({ kind: "edit", field: f })}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
+            Add field
+          </Button>
+        </Group>
+        {fields.length === 0 && (
+          <Text c="dimmed">
+            No edge data fields. Edges of this type will only carry the source/target references.
+          </Text>
+        )}
+        {fields.length > 0 && (
+          <Table withTableBorder withColumnBorders striped verticalSpacing="xs">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th style={{ width: "4rem" }}>#</Table.Th>
+                <Table.Th>Key</Table.Th>
+                <Table.Th>Display name</Table.Th>
+                <Table.Th style={{ width: "9rem" }}>Type</Table.Th>
+                <Table.Th style={{ width: "6rem" }}>Required</Table.Th>
+                <Table.Th style={{ width: "5rem" }} />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {fields.map((f) => (
+                <Table.Tr key={f.id}>
+                  <Table.Td>{f.sortOrder}</Table.Td>
+                  <Table.Td>
+                    <code>{f.fieldKey}</code>
+                  </Table.Td>
+                  <Table.Td>{f.displayName}</Table.Td>
+                  <Table.Td>{humanDataType(f.dataType)}</Table.Td>
+                  <Table.Td>{f.isRequired ? "Yes" : ""}</Table.Td>
+                  <Table.Td ta="right">
+                    <Button
+                      size="xs"
+                      variant="default"
+                      onClick={() => setFieldModal({ kind: "edit", field: f })}
+                    >
+                      Edit
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </Card>
 
       {fieldModal.kind !== "none" && (
         <EdgeFieldModal
@@ -317,26 +334,37 @@ function RecordTypeMultiSelect({
   options: { id: string; label: string }[];
 }) {
   return (
-    <div className="d-flex flex-wrap gap-2 border rounded p-2">
+    <Box
+      p="xs"
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        border: "1px solid var(--mantine-color-default-border)",
+        borderRadius: "var(--mantine-radius-default)"
+      }}
+    >
       {options.length === 0 && (
-        <span className="text-body text-opacity-50 small">No record types available.</span>
+        <Text size="sm" c="dimmed">
+          No record types available.
+        </Text>
       )}
       {options.map((opt) => {
         const selected = value.includes(opt.id);
         return (
-          <button
+          <Button
             key={opt.id}
-            type="button"
-            className={`btn btn-sm ${selected ? "btn-primary" : "btn-outline-secondary"}`}
+            size="xs"
+            variant={selected ? "filled" : "default"}
             onClick={() => {
               onChange(selected ? value.filter((v) => v !== opt.id) : [...value, opt.id]);
             }}
           >
             {opt.label}
-          </button>
+          </Button>
         );
       })}
-    </div>
+    </Box>
   );
 }
 
@@ -411,103 +439,82 @@ function EdgeFieldModal({
   };
 
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog modal-lg">
-          <div className="modal-content">
-            <form onSubmit={submit}>
-              <div className="modal-header">
-                <h5 className="modal-title">{isEdit ? `Edit field: ${existing?.fieldKey}` : "Add edge field"}</h5>
-                <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
-              </div>
-              <div className="modal-body">
-                <div className="row g-3">
-                  <div className="col-md-6">
-                    <label className="form-label">Field key</label>
-                    <input
-                      className="form-control"
-                      value={fieldKey}
-                      onChange={(e) => setFieldKey(e.target.value)}
-                      placeholder="weight"
-                      required={!isEdit}
-                      disabled={isEdit}
-                    />
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Display name</label>
-                    <input
-                      className="form-control"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Data type</label>
-                    <select
-                      className="form-select"
-                      value={dataType}
-                      onChange={(e) => onTypeChange(e.target.value as FieldDataType)}
-                      disabled={isEdit}
-                    >
-                      {dataTypes.map((dt) => (
-                        <option key={dt} value={dt}>
-                          {humanDataType(dt)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="col-md-3">
-                    <label className="form-label">Sort order</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={sortOrder}
-                      onChange={(e) => setSortOrder(Number(e.target.value))}
-                    />
-                  </div>
-                  <div className="col-md-3 d-flex align-items-end">
-                    <div className="form-check form-switch">
-                      <input
-                        type="checkbox"
-                        className="form-check-input"
-                        id="edge-field-required"
-                        checked={isRequired}
-                        onChange={(e) => setIsRequired(e.target.checked)}
-                      />
-                      <label className="form-check-label" htmlFor="edge-field-required">
-                        Required
-                      </label>
-                    </div>
-                  </div>
-                </div>
-                <hr />
-                <h6 className="mb-3">Configuration</h6>
-                <FieldConfigPanel dataType={dataType} config={config} onChange={setConfig} />
-              </div>
-              <div className="modal-footer d-flex justify-content-between">
-                <div>
-                  {isEdit && (
-                    <button type="button" className="btn btn-outline-danger" onClick={remove} disabled={del.isPending}>
-                      Delete field
-                    </button>
-                  )}
-                </div>
-                <div>
-                  <button type="button" className="btn btn-outline-secondary me-2" onClick={onClose}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-primary" disabled={create.isPending || update.isPending}>
-                    {isEdit ? "Save" : "Add field"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+    <Modal
+      opened
+      onClose={onClose}
+      title={isEdit ? `Edit field: ${existing?.fieldKey}` : "Add edge field"}
+      size="lg"
+    >
+      <Box component="form" onSubmit={submit}>
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Field key"
+              value={fieldKey}
+              onChange={(e) => setFieldKey(e.currentTarget.value)}
+              placeholder="weight"
+              required={!isEdit}
+              disabled={isEdit}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Display name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.currentTarget.value)}
+              required
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <NativeSelect
+              label="Data type"
+              value={dataType}
+              onChange={(e) => onTypeChange(e.currentTarget.value as FieldDataType)}
+              disabled={isEdit}
+              data={dataTypes.map((dt) => ({ value: dt, label: humanDataType(dt) }))}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 6, md: 3 }}>
+            <TextInput
+              label="Sort order"
+              type="number"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(Number(e.currentTarget.value))}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 6, md: 3 }} style={{ display: "flex", alignItems: "flex-end" }}>
+            <Switch
+              id="edge-field-required"
+              checked={isRequired}
+              onChange={(e) => setIsRequired(e.currentTarget.checked)}
+              label="Required"
+            />
+          </Grid.Col>
+        </Grid>
+        <Divider my="md" />
+        <Title order={6} mb="md">
+          Configuration
+        </Title>
+        <FieldConfigPanel dataType={dataType} config={config} onChange={setConfig} />
+        <Group justify="space-between" mt="md">
+          <Box>
+            {isEdit && (
+              <Button variant="outline" color="red" onClick={remove} disabled={del.isPending}>
+                Delete field
+              </Button>
+            )}
+          </Box>
+          <Group gap="xs">
+            <Button variant="default" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={create.isPending || update.isPending}>
+              {isEdit ? "Save" : "Add field"}
+            </Button>
+          </Group>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 

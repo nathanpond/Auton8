@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  Group,
+  Stack,
+  Switch,
+  Text,
+  TextInput
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
+import {
   useAdminSiteSettings,
   useUpdateSiteSettings
 } from "@/hooks/useSiteSettings";
@@ -27,8 +39,6 @@ export default function SiteSettingsForm({ group, title, blurb }: Props) {
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  // Hydrate the draft from server values once they load (and again any time
-  // an update mutation refreshes the cache).
   useEffect(() => {
     if (!data || !Array.isArray(data.definitions)) return;
     const values = data.values ?? {};
@@ -80,72 +90,76 @@ export default function SiteSettingsForm({ group, title, blurb }: Props) {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">{title}</h1>
-          <p className="page-head-copy">{blurb}</p>
-        </div>
-        <div className="page-head-actions d-flex gap-2">
-          <button
-            type="button"
-            className="btn btn-outline-secondary"
-            onClick={handleReset}
-            disabled={!dirty || update.isPending}
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => void handleSave()}
-            disabled={!dirty || update.isPending}
-          >
-            {update.isPending ? "Saving…" : "Save changes"}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={title}
+        description={blurb}
+        actions={
+          <Group gap="xs">
+            <Button
+              variant="default"
+              onClick={handleReset}
+              disabled={!dirty || update.isPending}
+            >
+              Reset
+            </Button>
+            <Button
+              onClick={() => void handleSave()}
+              loading={update.isPending}
+              disabled={!dirty}
+            >
+              Save changes
+            </Button>
+          </Group>
+        }
+      />
 
-      {isLoading && <div className="panel panel-inverse"><div className="panel-body text-muted">Loading…</div></div>}
+      {isLoading && (
+        <Card withBorder shadow="sm">
+          <Text c="dimmed">Loading…</Text>
+        </Card>
+      )}
 
       {isError && (
-        <div className="panel panel-inverse">
-          <div className="panel-body text-danger">
-            Failed to load settings: {(error as Error)?.message ?? "unknown error"}
-          </div>
-        </div>
+        <Alert color="red" variant="light">
+          Failed to load settings: {(error as Error)?.message ?? "unknown error"}
+        </Alert>
       )}
 
       {!isLoading && !isError && definitions.length === 0 && (
-        <div className="panel panel-inverse">
-          <div className="panel-body text-muted">
-            No settings in this group yet.
-          </div>
-        </div>
+        <Card withBorder shadow="sm">
+          <Text c="dimmed">No settings in this group yet.</Text>
+        </Card>
       )}
 
       {!isLoading && !isError && definitions.length > 0 && (
-        <div className="panel panel-inverse">
-          <div className="panel-body">
+        <Card withBorder shadow="sm">
+          <Stack gap={0}>
             {definitions.map((def, idx) => (
-              <div
+              <Box
                 key={def.key}
-                className={idx > 0 ? "pt-3 mt-3 border-top" : ""}
+                pt={idx > 0 ? "md" : 0}
+                mt={idx > 0 ? "md" : 0}
+                style={
+                  idx > 0
+                    ? { borderTop: "1px solid var(--mantine-color-default-border)" }
+                    : undefined
+                }
               >
                 <SettingControl
                   definition={def}
                   value={draft[def.key]}
                   onChange={(v) => setValue(def.key, v)}
                 />
-              </div>
+              </Box>
             ))}
-          </div>
-        </div>
+          </Stack>
+        </Card>
       )}
 
       {saveMessage && (
-        <div className="mt-2 small text-muted" role="status">
+        <Text size="sm" c="dimmed" mt="xs" role="status">
           {saveMessage}
-        </div>
+        </Text>
       )}
     </>
   );
@@ -163,73 +177,50 @@ function SettingControl({
   if (definition.type === "bool") {
     const checked = typeof value === "boolean" ? value : Boolean(definition.defaultValue);
     return (
-      <div className="form-check form-switch">
-        <input
-          className="form-check-input"
-          type="checkbox"
-          role="switch"
-          id={`setting-${definition.key}`}
-          checked={checked}
-          onChange={(e) => onChange(e.currentTarget.checked)}
-        />
-        <label className="form-check-label" htmlFor={`setting-${definition.key}`}>
-          <strong>{definition.label}</strong>
-        </label>
-        {definition.description && (
-          <div className="form-text">{definition.description}</div>
-        )}
-      </div>
+      <Switch
+        id={`setting-${definition.key}`}
+        checked={checked}
+        onChange={(e) => onChange(e.currentTarget.checked)}
+        label={<strong>{definition.label}</strong>}
+        description={definition.description}
+      />
     );
   }
 
   if (definition.type === "string") {
     const text = typeof value === "string" ? value : String(definition.defaultValue ?? "");
     return (
-      <div>
-        <label className="form-label" htmlFor={`setting-${definition.key}`}>
-          <strong>{definition.label}</strong>
-        </label>
-        <input
-          id={`setting-${definition.key}`}
-          type="text"
-          className="form-control"
-          value={text}
-          onChange={(e) => onChange(e.currentTarget.value)}
-        />
-        {definition.description && (
-          <div className="form-text">{definition.description}</div>
-        )}
-      </div>
+      <TextInput
+        id={`setting-${definition.key}`}
+        type="text"
+        label={<strong>{definition.label}</strong>}
+        description={definition.description}
+        value={text}
+        onChange={(e) => onChange(e.currentTarget.value)}
+      />
     );
   }
 
   if (definition.type === "int") {
     const num = typeof value === "number" ? value : Number(definition.defaultValue ?? 0);
     return (
-      <div>
-        <label className="form-label" htmlFor={`setting-${definition.key}`}>
-          <strong>{definition.label}</strong>
-        </label>
-        <input
-          id={`setting-${definition.key}`}
-          type="number"
-          className="form-control"
-          value={Number.isFinite(num) ? num : 0}
-          onChange={(e) => {
-            const parsed = Number.parseInt(e.currentTarget.value, 10);
-            onChange(Number.isFinite(parsed) ? parsed : 0);
-          }}
-        />
-        {definition.description && (
-          <div className="form-text">{definition.description}</div>
-        )}
-      </div>
+      <TextInput
+        id={`setting-${definition.key}`}
+        type="number"
+        label={<strong>{definition.label}</strong>}
+        description={definition.description}
+        value={Number.isFinite(num) ? num : 0}
+        onChange={(e) => {
+          const parsed = Number.parseInt(e.currentTarget.value, 10);
+          onChange(Number.isFinite(parsed) ? parsed : 0);
+        }}
+      />
     );
   }
 
   return (
-    <div className="text-muted small">
+    <Text c="dimmed" size="sm">
       Unknown setting type for <code>{definition.key}</code>.
-    </div>
+    </Text>
   );
 }

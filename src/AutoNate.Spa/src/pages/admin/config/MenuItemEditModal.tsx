@@ -2,12 +2,25 @@ import { useEffect, useMemo, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
+import {
+  Anchor,
+  Box,
+  Button,
+  Grid,
+  Group,
+  Input,
+  Modal,
+  Select,
+  Switch,
+  Text,
+  TextInput
+} from "@mantine/core";
 import { MenuItem, MenuItemType } from "@/types/menus";
 import IconPicker from "@/components/IconPicker";
 import { findIcon } from "@/lib/faIcons";
 import { usePageTemplates } from "@/hooks/usePageTemplates";
 import { usePages } from "@/hooks/usePages";
-import { findCollidingAppRoute } from "@/routes/appRoutes";
+import { anchorPathForTemplateKey, findCollidingAppRoute } from "@/routes/appRoutes";
 import TemplatePickerModal from "./TemplatePickerModal";
 import "./TemplatePickerModal.css";
 
@@ -43,6 +56,8 @@ const DYNAMIC_CHILDREN_OPTIONS = [
 
 const ACTION_OPTIONS = [{ value: "logout", label: "Logout (POST /account/logout)" }];
 
+const MONOSPACE = { fontFamily: "var(--mantine-font-family-monospace)" } as const;
+
 export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
   const [draft, setDraft] = useState<MenuItem>(item);
   const [iconQuery, setIconQuery] = useState<string>(() => extractIconName(item.icon));
@@ -76,10 +91,6 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
   const cfgStr = (key: string) =>
     typeof config[key] === "string" ? (config[key] as string).trim() : "";
 
-  // All validation lives here. Each entry is a field key (matching the input)
-  // mapped to the human-readable error. Submit is blocked while non-empty,
-  // and the rendered inputs read this map to apply Bootstrap is-invalid +
-  // invalid-feedback styling.
   const errors = useMemo(() => {
     const e: Record<string, string> = {};
 
@@ -95,8 +106,12 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
       return true;
     };
 
-    const checkPathDoesNotShadowOrCollide = (key: string, value: string) => {
-      const collide = findCollidingAppRoute(value);
+    const checkPathDoesNotShadowOrCollide = (
+      key: string,
+      value: string,
+      opts?: { templateKey?: string }
+    ) => {
+      const collide = findCollidingAppRoute(value, opts);
       if (collide) {
         e[key] = `Conflicts with built-in route ${collide}.`;
         return;
@@ -123,10 +138,12 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
     }
 
     if (draft.itemType === "template") {
-      if (!cfgStr("templateKey")) e.templateKey = "Required.";
+      const templateKey = cfgStr("templateKey");
+      if (!templateKey) e.templateKey = "Required.";
       const p = cfgStr("path");
       if (!p) e.path = "Required.";
-      else if (checkPathFormat("path", p)) checkPathDoesNotShadowOrCollide("path", p);
+      else if (checkPathFormat("path", p))
+        checkPathDoesNotShadowOrCollide("path", p, { templateKey });
     }
 
     if (draft.itemType === "link") {
@@ -142,18 +159,13 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
     }
 
     return e;
-    // cfgStr closes over `config`, which is derived from draft.config; depending
-    // on draft alone is sufficient to catch every relevant change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, pages]);
 
   const hasErrors = Object.keys(errors).length > 0;
   const isPage = draft.itemType === "page";
   const isSeparator = draft.itemType === "separator";
-  // Page type uses a flex column layout so the content textarea can grow to
-  // fill the dialog. Other types stack form fields normally and let the body
-  // scroll if needed.
-  const topColClass = isPage ? "col-md-3" : "col-md-6";
+  const topColSpan = isPage ? { base: 12, md: 3 } : { base: 12, md: 6 };
 
   const persist = (options?: { keepOpen?: boolean }) => {
     if (hasErrors) return;
@@ -177,50 +189,48 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    // For the Page type the form's implicit submit (Enter inside an input)
-    // saves without closing so authors keep editing; the explicit "Save and
-    // close" button passes keepOpen: false.
     persist(isPage ? { keepOpen: true } : undefined);
   };
 
   const applyTemplatePick = (templateKey: string) => {
-    // Templates do not carry a default URL — the admin always provides the
-    // path on the menu item itself. Picking a template just swaps the key.
+    // If the new template is hard-routed at a canonical URL in APP_ROUTES
+    // (e.g. configFeatures → /admin/config/features), snap the path field to
+    // that URL — leaving the OLD template's anchor path here would make the
+    // built-in static route render the OLD template, ignoring the new
+    // templateKey. Only auto-overwrite when the current path is the previous
+    // template's canonical anchor (or empty); admins who deliberately mounted
+    // the template at a non-canonical path keep their value.
     setDraft((d) => {
       const prev = (d.config ?? {}) as Record<string, unknown>;
-      return { ...d, config: { ...prev, templateKey } };
+      const currentPath = typeof prev.path === "string" ? prev.path.trim() : "";
+      const prevTemplateKey = typeof prev.templateKey === "string" ? prev.templateKey : "";
+      const newAnchor = anchorPathForTemplateKey(templateKey);
+      const prevAnchor = prevTemplateKey ? anchorPathForTemplateKey(prevTemplateKey) : null;
+      const safeToOverwrite = currentPath === "" || currentPath === prevAnchor;
+      const nextPath = safeToOverwrite && newAnchor ? newAnchor : currentPath;
+      return {
+        ...d,
+        config: { ...prev, templateKey, path: nextPath }
+      };
     });
   };
 
   return (
     <>
-    <div
-      className="modal show d-block"
-      tabIndex={-1}
-      style={{ background: "rgba(0,0,0,0.5)" }}
-    >
-      <div
-        className="modal-dialog"
-        style={{
-          maxWidth: "none",
-          width: "calc(100vw - 30px)",
-          height: "calc(100vh - 30px)",
-          margin: "15px"
-        }}
+      <Modal
+        opened
+        onClose={onCancel}
+        title="Edit menu item"
+        fullScreen
+        styles={{ body: { display: "flex", flexDirection: "column", minHeight: 0 } }}
       >
-        <form
-          className="modal-content"
+        <Box
+          component="form"
           onSubmit={submit}
           noValidate
-          style={{ height: "100%", display: "flex", flexDirection: "column" }}
+          style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
         >
-          <div className="modal-header" style={{ flex: "0 0 auto" }}>
-            <h5 className="modal-title">Edit menu item</h5>
-            <button type="button" className="btn-close" onClick={onCancel} aria-label="Close" />
-          </div>
-
-          <div
-            className="modal-body"
+          <Box
             style={{
               flex: 1,
               overflowY: isPage ? "hidden" : "auto",
@@ -230,235 +240,182 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
               minHeight: 0
             }}
           >
-            <div
-              className="row g-3"
-              style={isPage ? { flex: "0 0 auto", margin: 0 } : undefined}
-            >
-              <div className={isSeparator ? "col-12" : topColClass}>
-                <label className="form-label">Item type</label>
-                <select
-                  className="form-select"
+            <Grid style={isPage ? { flex: "0 0 auto", margin: 0 } : undefined}>
+              <Grid.Col span={isSeparator ? 12 : topColSpan}>
+                <Select
+                  label="Item type"
                   value={draft.itemType}
-                  onChange={(e) => setDraft({ ...draft, itemType: e.target.value as MenuItemType })}
-                >
-                  {ITEM_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-                {!isPage && (
-                  <small className="text-muted">
-                    {ITEM_TYPES.find((t) => t.value === draft.itemType)?.description}
-                  </small>
-                )}
-              </div>
-
-              {!isSeparator && (
-                <div className={topColClass}>
-                  <label className="form-label">
-                    Display name <span className="text-danger">*</span>
-                  </label>
-                  <input
-                    className={`form-control${errors.displayName ? " is-invalid" : ""}`}
-                    value={draft.displayName}
-                    onChange={(e) => setDraft({ ...draft, displayName: e.target.value })}
-                    required
-                  />
-                  {errors.displayName && (
-                    <div className="invalid-feedback">{errors.displayName}</div>
-                  )}
-                </div>
-              )}
-              {!isSeparator && (
-                <div className={topColClass}>
-                  <label className="form-label">Icon</label>
-                  <IconPicker
-                    value={iconQuery}
-                    onChange={handleIconChange}
-                    placeholder="Search icons (e.g. star)"
-                  />
-                </div>
-              )}
-
-              {!isSeparator && (
-              <div className={topColClass}>
-                <label className="form-label">Permission required</label>
-                <input
-                  className="form-control font-monospace"
-                  placeholder="kind.action (e.g. siteconfig.edit)"
-                  value={draft.permissionRequired ?? ""}
-                  onChange={(e) =>
-                    setDraft({ ...draft, permissionRequired: e.target.value || null })
+                  onChange={(v) => v && setDraft({ ...draft, itemType: v as MenuItemType })}
+                  data={ITEM_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+                  allowDeselect={false}
+                  description={
+                    !isPage
+                      ? ITEM_TYPES.find((t) => t.value === draft.itemType)?.description
+                      : undefined
                   }
                 />
-                {!isPage && (
-                  <small className="text-muted">
-                    Optional — when set, the item is hidden from users without this permission.
-                  </small>
-                )}
-              </div>
+              </Grid.Col>
+
+              {!isSeparator && (
+                <Grid.Col span={topColSpan}>
+                  <TextInput
+                    label="Display name"
+                    required
+                    value={draft.displayName}
+                    onChange={(e) => setDraft({ ...draft, displayName: e.currentTarget.value })}
+                    error={errors.displayName}
+                  />
+                </Grid.Col>
+              )}
+              {!isSeparator && (
+                <Grid.Col span={topColSpan}>
+                  <Input.Wrapper label="Icon">
+                    <IconPicker
+                      value={iconQuery}
+                      onChange={handleIconChange}
+                      placeholder="Search icons (e.g. star)"
+                    />
+                  </Input.Wrapper>
+                </Grid.Col>
+              )}
+
+              {!isSeparator && (
+                <Grid.Col span={topColSpan}>
+                  <TextInput
+                    label="Permission required"
+                    placeholder="kind.action (e.g. siteconfig.edit)"
+                    value={draft.permissionRequired ?? ""}
+                    onChange={(e) =>
+                      setDraft({ ...draft, permissionRequired: e.currentTarget.value || null })
+                    }
+                    styles={{ input: MONOSPACE }}
+                    description={
+                      !isPage
+                        ? "Optional — when set, the item is hidden from users without this permission."
+                        : undefined
+                    }
+                  />
+                </Grid.Col>
               )}
 
               {draft.itemType === "group" && (
                 <>
-                  <div className="col-12">
-                    <label className="form-label">Dynamic children source</label>
-                    <select
-                      className="form-select"
+                  <Grid.Col span={12}>
+                    <Select
+                      label="Dynamic children source"
                       value={String(config.dynamicChildren ?? "")}
+                      onChange={(v) =>
+                        setConfigField("dynamicChildren", v === "" || v === null ? undefined : v)
+                      }
+                      data={DYNAMIC_CHILDREN_OPTIONS}
+                      description="Appends auto-generated children at runtime (e.g. one entry per record type)."
+                      allowDeselect={false}
+                    />
+                  </Grid.Col>
+                  <Grid.Col span={12}>
+                    <Switch
+                      id="group-starts-expanded"
+                      label="Starts expanded"
+                      checked={Boolean(config.startsExpanded)}
                       onChange={(e) =>
                         setConfigField(
-                          "dynamicChildren",
-                          e.target.value === "" ? undefined : e.target.value
+                          "startsExpanded",
+                          e.currentTarget.checked ? true : undefined
                         )
                       }
-                    >
-                      {DYNAMIC_CHILDREN_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <small className="text-muted">
-                      Appends auto-generated children at runtime (e.g. one entry per record type).
-                    </small>
-                  </div>
-                  <div className="col-12">
-                    <div className="form-check form-switch">
-                      <input
-                        type="checkbox"
-                        className="form-check-input"
-                        id="group-starts-expanded"
-                        checked={Boolean(config.startsExpanded)}
-                        onChange={(e) =>
-                          setConfigField(
-                            "startsExpanded",
-                            e.target.checked ? true : undefined
-                          )
-                        }
-                      />
-                      <label className="form-check-label" htmlFor="group-starts-expanded">
-                        Starts expanded
-                      </label>
-                    </div>
-                    <small className="text-muted">
-                      When checked, the group opens by default. Otherwise it starts collapsed.
-                    </small>
-                  </div>
+                      description="When checked, the group opens by default. Otherwise it starts collapsed."
+                    />
+                  </Grid.Col>
                 </>
               )}
 
               {draft.itemType === "route" && (
                 <>
-                  <div className="col-md-6">
-                    <label className="form-label">
-                      Route path (target) <span className="text-danger">*</span>
-                    </label>
-                    <input
-                      className={`form-control font-monospace${errors.path ? " is-invalid" : ""}`}
+                  <Grid.Col span={{ base: 12, md: 6 }}>
+                    <TextInput
+                      label="Route path (target)"
+                      required
                       placeholder="/records/CAR"
                       value={String(config.path ?? "")}
-                      onChange={(e) => setConfigField("path", e.target.value)}
-                      required
+                      onChange={(e) => setConfigField("path", e.currentTarget.value)}
+                      styles={{ input: MONOSPACE }}
+                      error={errors.path}
+                      description={!errors.path ? "An existing app route (e.g. /admin/roles)." : undefined}
                     />
-                    {errors.path ? (
-                      <div className="invalid-feedback">{errors.path}</div>
-                    ) : (
-                      <small className="text-muted">
-                        An existing app route (e.g. <code>/admin/roles</code>).
-                      </small>
-                    )}
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Alias URL (optional)</label>
-                    <input
-                      className={`form-control font-monospace${errors.aliasPath ? " is-invalid" : ""}`}
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 6 }}>
+                    <TextInput
+                      label="Alias URL (optional)"
                       placeholder="/cars"
                       value={String(config.aliasPath ?? "")}
                       onChange={(e) =>
                         setConfigField(
                           "aliasPath",
-                          e.target.value === "" ? undefined : e.target.value
+                          e.currentTarget.value === "" ? undefined : e.currentTarget.value
                         )
                       }
+                      styles={{ input: MONOSPACE }}
+                      error={errors.aliasPath}
+                      description={
+                        !errors.aliasPath
+                          ? "If set, the menu links to this URL and renders the target route's content underneath."
+                          : undefined
+                      }
                     />
-                    {errors.aliasPath ? (
-                      <div className="invalid-feedback">{errors.aliasPath}</div>
-                    ) : (
-                      <small className="text-muted">
-                        If set, the menu links to this URL and renders the target route's
-                        content underneath. Example: alias <code>/cars</code> shows the
-                        same view as <code>/records/CAR</code>.
-                      </small>
-                    )}
-                  </div>
+                  </Grid.Col>
                 </>
               )}
 
               {draft.itemType === "link" && (
                 <>
-                  <div className="col-md-9">
-                    <label className="form-label">
-                      URL <span className="text-danger">*</span>
-                    </label>
-                    <input
+                  <Grid.Col span={{ base: 12, md: 9 }}>
+                    <TextInput
+                      label="URL"
+                      required
                       type="url"
-                      className={`form-control font-monospace${errors.href ? " is-invalid" : ""}`}
                       placeholder="https://example.com"
                       value={String(config.href ?? "")}
-                      onChange={(e) => setConfigField("href", e.target.value)}
-                      required
+                      onChange={(e) => setConfigField("href", e.currentTarget.value)}
+                      styles={{ input: MONOSPACE }}
+                      error={errors.href}
                     />
-                    {errors.href && (
-                      <div className="invalid-feedback">{errors.href}</div>
-                    )}
-                  </div>
-                  <div className="col-md-3 d-flex align-items-end">
-                    <div className="form-check form-switch">
-                      <input
-                        type="checkbox"
-                        className="form-check-input"
-                        id="link-new-tab"
-                        checked={Boolean(config.openInNewTab)}
-                        onChange={(e) => setConfigField("openInNewTab", e.target.checked)}
-                      />
-                      <label className="form-check-label" htmlFor="link-new-tab">
-                        Open in new tab
-                      </label>
-                    </div>
-                  </div>
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 3 }} style={{ display: "flex", alignItems: "flex-end" }}>
+                    <Switch
+                      id="link-new-tab"
+                      label="Open in new tab"
+                      checked={Boolean(config.openInNewTab)}
+                      onChange={(e) => setConfigField("openInNewTab", e.currentTarget.checked)}
+                    />
+                  </Grid.Col>
                 </>
               )}
 
               {isPage && (
                 <>
-                  <div className="col-md-9">
-                    <label className="form-label">
-                      Page path <span className="text-danger">*</span>
-                    </label>
-                    <input
-                      className={`form-control font-monospace${errors.path ? " is-invalid" : ""}`}
+                  <Grid.Col span={{ base: 12, md: 9 }}>
+                    <TextInput
+                      label="Page path"
+                      required
                       placeholder="/cars/gallery"
                       value={String(config.path ?? "")}
-                      onChange={(e) => setConfigField("path", e.target.value)}
-                      required
+                      onChange={(e) => setConfigField("path", e.currentTarget.value)}
+                      styles={{ input: MONOSPACE }}
+                      error={errors.path}
                     />
-                    {errors.path && (
-                      <div className="invalid-feedback">{errors.path}</div>
-                    )}
-                  </div>
-                  <div className="col-md-3">
-                    <label className="form-label">Content type</label>
-                    <select
-                      className="form-select"
+                  </Grid.Col>
+                  <Grid.Col span={{ base: 12, md: 3 }}>
+                    <Select
+                      label="Content type"
                       value={String(config.contentType ?? "html")}
-                      onChange={(e) => setConfigField("contentType", e.target.value)}
-                    >
-                      <option value="html">HTML</option>
-                      <option value="jsx">JSX (full React component)</option>
-                    </select>
-                  </div>
+                      onChange={(v) => v && setConfigField("contentType", v)}
+                      data={[
+                        { value: "html", label: "HTML" },
+                        { value: "jsx", label: "JSX (full React component)" }
+                      ]}
+                      allowDeselect={false}
+                    />
+                  </Grid.Col>
                 </>
               )}
 
@@ -469,97 +426,87 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                     : null;
                 return (
                   <>
-                    <div className="col-md-6">
-                      <label className="form-label">
-                        Page template <span className="text-danger">*</span>
-                      </label>
-                      {selected ? (
-                        <div
-                          className={`tp-selected-card-condensed${
-                            errors.templateKey ? " border-danger" : ""
-                          }`}
-                        >
-                          <div className="tp-selected-condensed-main">
-                            <span className="tp-selected-title">{selected.name}</span>
-                            {selected.category && (
-                              <span className="tp-pill">{selected.category}</span>
-                            )}
-                          </div>
-                          <button
+                    <Grid.Col span={{ base: 12, md: 6 }}>
+                      <Input.Wrapper label="Page template" required error={errors.templateKey}>
+                        {selected ? (
+                          <Box
+                            className={`tp-selected-card-condensed${
+                              errors.templateKey ? " border-danger" : ""
+                            }`}
+                          >
+                            <Box className="tp-selected-condensed-main">
+                              <Text component="span" className="tp-selected-title">
+                                {selected.name}
+                              </Text>
+                              {selected.category && (
+                                <Text component="span" className="tp-pill">
+                                  {selected.category}
+                                </Text>
+                              )}
+                            </Box>
+                            <Anchor
+                              component="button"
+                              type="button"
+                              size="sm"
+                              ml="auto"
+                              onClick={() => setPickerOpen(true)}
+                            >
+                              Change…
+                            </Anchor>
+                          </Box>
+                        ) : (
+                          <Button
                             type="button"
-                            className="btn btn-link btn-sm p-0 ms-auto flex-shrink-0"
+                            variant="default"
+                            fullWidth
+                            leftSection={<i className="fa fa-th-large" />}
                             onClick={() => setPickerOpen(true)}
                           >
-                            Change…
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className={`tp-selected-card-condensed tp-selected-empty${
-                            errors.templateKey ? " border-danger" : ""
-                          }`}
-                          onClick={() => setPickerOpen(true)}
-                        >
-                          <i className="fa fa-th-large me-2" aria-hidden="true" />
-                          <span>Choose a page template…</span>
-                        </button>
-                      )}
-                      {errors.templateKey ? (
-                        <div className="text-danger small mt-1">
-                          {errors.templateKey}
-                        </div>
-                      ) : selected?.description ? (
-                        <small className="text-muted d-block mt-1">
-                          {selected.description}
-                        </small>
-                      ) : null}
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label">
-                        URL path <span className="text-danger">*</span>
-                      </label>
-                      <input
-                        className={`form-control font-monospace${errors.path ? " is-invalid" : ""}`}
+                            Choose a page template…
+                          </Button>
+                        )}
+                        {!errors.templateKey && selected?.description && (
+                          <Text size="xs" c="dimmed" mt={4}>
+                            {selected.description}
+                          </Text>
+                        )}
+                      </Input.Wrapper>
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, md: 6 }}>
+                      <TextInput
+                        label="URL path"
+                        required
                         placeholder="/path"
                         value={String(config.path ?? "")}
-                        onChange={(e) => setConfigField("path", e.target.value)}
-                        required
+                        onChange={(e) => setConfigField("path", e.currentTarget.value)}
+                        styles={{ input: MONOSPACE }}
+                        error={errors.path}
+                        description={
+                          !errors.path
+                            ? "The URL where this template will be mounted on this menu item."
+                            : undefined
+                        }
                       />
-                      {errors.path ? (
-                        <div className="invalid-feedback">{errors.path}</div>
-                      ) : (
-                        <small className="text-muted">
-                          The URL where this template will be mounted on this
-                          menu item.
-                        </small>
-                      )}
-                    </div>
+                    </Grid.Col>
                   </>
                 );
               })()}
 
               {draft.itemType === "action" && (
-                <div className="col-12">
-                  <label className="form-label">Action</label>
-                  <select
-                    className="form-select"
+                <Grid.Col span={12}>
+                  <Select
+                    label="Action"
                     value={String(config.action ?? "logout")}
-                    onChange={(e) => setConfigField("action", e.target.value)}
-                  >
-                    {ACTION_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    onChange={(v) => v && setConfigField("action", v)}
+                    data={ACTION_OPTIONS}
+                    allowDeselect={false}
+                  />
+                </Grid.Col>
               )}
-
-            </div>
+            </Grid>
 
             {isPage && (
-              <div
+              <Box
                 style={{
                   flex: 1,
                   display: "flex",
@@ -567,118 +514,106 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                   minHeight: 0
                 }}
               >
-                <label className="form-label">
-                  Content <span className="text-danger">*</span>
-                </label>
-                <div
-                  className={errors.content ? "is-invalid" : ""}
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    border: "1px solid var(--bs-border-color)",
-                    borderRadius: "var(--bs-border-radius)",
-                    overflow: "hidden"
-                  }}
-                >
-                  <CodeMirror
-                    value={String(config.content ?? "")}
-                    onChange={(v) => setConfigField("content", v)}
-                    height="100%"
-                    style={{ height: "100%" }}
-                    autoFocus={false}
-                    placeholder={
-                      String(config.contentType ?? "html") === "jsx"
-                        ? "function Page() {\n" +
-                          "  const [name, setName] = useState('');\n" +
-                          "  return <div>Hello {name}</div>;\n" +
-                          "}"
-                        : '<div class="alert alert-info">Hello world</div>\n' +
-                          "<script>console.log('runs on mount');</script>"
-                    }
-                    extensions={[
-                      String(config.contentType ?? "html") === "jsx"
-                        ? javascript({ jsx: true, typescript: true })
-                        : html()
-                    ]}
-                    basicSetup={{
-                      lineNumbers: true,
-                      highlightActiveLineGutter: true,
-                      highlightSpecialChars: true,
-                      history: true,
-                      foldGutter: true,
-                      drawSelection: true,
-                      dropCursor: true,
-                      allowMultipleSelections: true,
-                      indentOnInput: true,
-                      syntaxHighlighting: true,
-                      bracketMatching: true,
-                      closeBrackets: true,
-                      autocompletion: true,
-                      rectangularSelection: true,
-                      crosshairCursor: true,
-                      highlightActiveLine: true,
-                      highlightSelectionMatches: true,
-                      closeBracketsKeymap: true,
-                      defaultKeymap: true,
-                      searchKeymap: true,
-                      historyKeymap: true,
-                      foldKeymap: true,
-                      completionKeymap: true,
-                      lintKeymap: true
+                <Input.Wrapper label="Content" required error={errors.content}>
+                  <Box
+                    style={{
+                      flex: 1,
+                      minHeight: 430,
+                      border: errors.content
+                        ? "1px solid var(--mantine-color-red-filled)"
+                        : "1px solid var(--mantine-color-default-border)",
+                      borderRadius: "var(--mantine-radius-default)",
+                      overflow: "hidden",
+                      display: "flex",
+                      flexDirection: "column"
                     }}
-                  />
-                </div>
-                {errors.content && (
-                  <div className="invalid-feedback d-block">{errors.content}</div>
-                )}
-              </div>
+                  >
+                    <CodeMirror
+                      value={String(config.content ?? "")}
+                      onChange={(v) => setConfigField("content", v)}
+                      height="100%"
+                      minHeight="430px"
+                      style={{ height: "100%", flex: 1 }}
+                      autoFocus={false}
+                      placeholder={
+                        String(config.contentType ?? "html") === "jsx"
+                          ? "function Page() {\n  const [name, setName] = useState('');\n  return <div>Hello {name}</div>;\n}"
+                          : '<div class="alert alert-info">Hello world</div>\n<script>console.log(\'runs on mount\');</script>'
+                      }
+                      extensions={[
+                        String(config.contentType ?? "html") === "jsx"
+                          ? javascript({ jsx: true, typescript: true })
+                          : html()
+                      ]}
+                      basicSetup={{
+                        lineNumbers: true,
+                        highlightActiveLineGutter: true,
+                        highlightSpecialChars: true,
+                        history: true,
+                        foldGutter: true,
+                        drawSelection: true,
+                        dropCursor: true,
+                        allowMultipleSelections: true,
+                        indentOnInput: true,
+                        syntaxHighlighting: true,
+                        bracketMatching: true,
+                        closeBrackets: true,
+                        autocompletion: true,
+                        rectangularSelection: true,
+                        crosshairCursor: true,
+                        highlightActiveLine: true,
+                        highlightSelectionMatches: true,
+                        closeBracketsKeymap: true,
+                        defaultKeymap: true,
+                        searchKeymap: true,
+                        historyKeymap: true,
+                        foldKeymap: true,
+                        completionKeymap: true,
+                        lintKeymap: true
+                      }}
+                    />
+                  </Box>
+                </Input.Wrapper>
+              </Box>
             )}
+          </Box>
 
-          </div>
-
-          <div className="modal-footer" style={{ flex: "0 0 auto" }}>
-            <button type="button" className="btn btn-outline-secondary" onClick={onCancel}>
+          <Group justify="flex-end" gap="xs" mt="md">
+            <Button variant="default" onClick={onCancel}>
               Cancel
-            </button>
+            </Button>
             {isPage ? (
               <>
-                <button
-                  type="button"
-                  className="btn btn-outline-primary"
+                <Button
+                  variant="outline"
                   disabled={hasErrors}
                   onClick={() => persist({ keepOpen: true })}
                 >
                   Save
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={hasErrors}
-                  onClick={() => persist()}
-                >
+                </Button>
+                <Button disabled={hasErrors} onClick={() => persist()}>
                   Save and Close
-                </button>
+                </Button>
               </>
             ) : (
-              <button type="submit" className="btn btn-primary" disabled={hasErrors}>
+              <Button type="submit" disabled={hasErrors}>
                 Apply
-              </button>
+              </Button>
             )}
-          </div>
-        </form>
-      </div>
-    </div>
-    {pickerOpen && (
-      <TemplatePickerModal
-        templates={pageTemplates}
-        selectedKey={typeof config.templateKey === "string" ? config.templateKey : null}
-        onSelect={(template) => {
-          applyTemplatePick(template.key);
-          setPickerOpen(false);
-        }}
-        onCancel={() => setPickerOpen(false)}
-      />
-    )}
+          </Group>
+        </Box>
+      </Modal>
+      {pickerOpen && (
+        <TemplatePickerModal
+          templates={pageTemplates}
+          selectedKey={typeof config.templateKey === "string" ? config.templateKey : null}
+          onSelect={(template) => {
+            applyTemplatePick(template.key);
+            setPickerOpen(false);
+          }}
+          onCancel={() => setPickerOpen(false)}
+        />
+      )}
     </>
   );
 }

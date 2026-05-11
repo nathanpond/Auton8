@@ -1,5 +1,24 @@
 import { useMemo } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import {
+  Anchor,
+  Box,
+  Button,
+  Divider,
+  Group,
+  Indicator,
+  Menu,
+  ScrollArea,
+  Stack,
+  Text,
+  UnstyledButton
+} from "@mantine/core";
+import { Link } from "react-router-dom";
+import {
+  applyHeaderHover,
+  clearHeaderHover,
+  headerIconButtonStyle
+} from "@/shell/headerStyles";
 import { NotificationModel } from "@/api/notifications";
 import {
   useMarkAllNotificationsRead,
@@ -34,61 +53,75 @@ export default function NotificationBell() {
   };
 
   return (
-    <div className="menu-item dropdown">
-      <a
-        href="#"
-        className="menu-link menu-link-tight"
-        data-bs-toggle="dropdown"
-        aria-expanded="false"
-        title="Notifications"
-        onClick={(e) => e.preventDefault()}
-      >
-        <div className="menu-icon notification-bell-icon">
-          <i className="fa fa-bell"></i>
-          {badgeText !== null && (
-            <span className="notification-bell-badge">{badgeText}</span>
-          )}
-        </div>
-      </a>
-      <div
-        className="dropdown-menu dropdown-menu-end me-1 p-0"
-        style={{ minWidth: "20rem", maxWidth: "24rem" }}
-      >
-        <div className="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
-          <strong>Notifications</strong>
+    <Menu position="bottom-end" width={320} shadow="md" closeOnItemClick={false}>
+      <Menu.Target>
+        <UnstyledButton
+          aria-label="Notifications"
+          title="Notifications"
+          style={headerIconButtonStyle}
+          onMouseEnter={applyHeaderHover}
+          onMouseLeave={clearHeaderHover}
+        >
+          <Indicator
+            label={badgeText ?? ""}
+            disabled={badgeText === null}
+            color="red"
+            size={16}
+            offset={2}
+            inline
+          >
+            <i className="fa fa-bell" />
+          </Indicator>
+        </UnstyledButton>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Group justify="space-between" px="sm" py="xs">
+          <Text fw={600}>Notifications</Text>
           {unreadCount > 0 && (
-            <button
-              type="button"
-              className="btn btn-link btn-sm p-0"
+            <Button
+              variant="subtle"
+              size="compact-xs"
               onClick={() => markAll.mutate()}
-              disabled={markAll.isPending}
+              loading={markAll.isPending}
             >
               Mark all read
-            </button>
+            </Button>
           )}
-        </div>
-        <div style={{ maxHeight: "24rem", overflowY: "auto" }}>
-          {items.length === 0 && (
-            <div className="px-3 py-4 text-center text-muted small">No notifications.</div>
+        </Group>
+        <Divider />
+        <ScrollArea.Autosize mah={384}>
+          {items.length === 0 ? (
+            <Box px="md" py="lg">
+              <Text size="sm" c="dimmed" ta="center">
+                No notifications.
+              </Text>
+            </Box>
+          ) : (
+            <Stack gap={0}>
+              {items.map((item) => (
+                <NotificationDropdownRow
+                  key={item.id}
+                  notification={item}
+                  onClick={() => handleItemClick(item)}
+                />
+              ))}
+            </Stack>
           )}
-          {items.map((item) => (
-            <NotificationDropdownRow
-              key={item.id}
-              notification={item}
-              onClick={() => handleItemClick(item)}
-            />
-          ))}
-        </div>
-        <div className="border-top">
-          <Link
-            to="/notifications"
-            className="dropdown-item text-center small py-2"
-          >
-            View All Notifications
-          </Link>
-        </div>
-      </div>
-    </div>
+        </ScrollArea.Autosize>
+        <Divider />
+        <Anchor
+          component={Link}
+          to="/notifications"
+          ta="center"
+          py="xs"
+          display="block"
+          size="sm"
+          underline="never"
+        >
+          View All Notifications
+        </Anchor>
+      </Menu.Dropdown>
+    </Menu>
   );
 }
 
@@ -101,25 +134,34 @@ function NotificationDropdownRow({
 }) {
   const ago = useMemo(() => formatRelative(notification.createdAtUtc), [notification.createdAtUtc]);
   return (
-    <a
-      href={notification.linkPath ?? "#"}
-      className={`dropdown-item d-flex flex-column gap-1 py-2 px-3 ${notification.isRead ? "" : "fw-semibold"}`}
-      onClick={(e) => {
-        e.preventDefault();
-        onClick();
+    <Box
+      component="button"
+      type="button"
+      onClick={onClick}
+      px="sm"
+      py="xs"
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        background: "transparent",
+        border: 0,
+        cursor: "pointer",
+        borderBottom: "1px solid var(--mantine-color-default-border)"
       }}
-      style={{ whiteSpace: "normal" }}
     >
-      <div className="d-flex justify-content-between align-items-start gap-2">
-        <span className="small">{notification.title}</span>
-        <span className="text-muted" style={{ fontSize: "0.7rem" }}>
+      <Group justify="space-between" gap="xs" wrap="nowrap">
+        <Text size="sm" fw={notification.isRead ? 400 : 600} style={{ flex: 1 }}>
+          {notification.title}
+        </Text>
+        <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
           {ago}
-        </span>
-      </div>
-      <span className="small text-muted text-truncate">
+        </Text>
+      </Group>
+      <Text size="xs" c="dimmed" lineClamp={1}>
         {notification.body}
-      </span>
-    </a>
+      </Text>
+    </Box>
   );
 }
 
@@ -140,4 +182,3 @@ function formatRelative(iso: string): string {
   if (weeks < 5) return `${weeks}w`;
   return new Date(ts).toLocaleDateString();
 }
-

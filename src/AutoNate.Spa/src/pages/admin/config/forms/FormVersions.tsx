@@ -1,3 +1,4 @@
+import { Badge, Button, Group, Modal, Table, Text } from "@mantine/core";
 import { FormVersion } from "@/api/forms";
 import { useFormVersions, useRestoreFormVersion } from "@/hooks/useForms";
 
@@ -20,65 +21,46 @@ export default function FormVersions({ formId, onClose, onRestored }: Props) {
   };
 
   return (
-    <>
-      <div
-        className="modal fade show d-block"
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-      >
-        <div className="modal-dialog modal-lg">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h5 className="modal-title">Version history</h5>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={onClose}
-                aria-label="Close"
+    <Modal opened onClose={onClose} title="Version history" size="lg">
+      {isLoading && (
+        <Text c="dimmed" size="sm">
+          Loading…
+        </Text>
+      )}
+      {!isLoading && versions.length === 0 && (
+        <Text c="dimmed" size="sm">
+          No versions yet.
+        </Text>
+      )}
+      {!isLoading && versions.length > 0 && (
+        <Table withTableBorder striped>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th style={{ width: "5rem" }}>v</Table.Th>
+              <Table.Th style={{ width: "7rem" }}>Kind</Table.Th>
+              <Table.Th>When</Table.Th>
+              <Table.Th>Note</Table.Th>
+              <Table.Th style={{ width: "8rem" }} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {versions.map((v) => (
+              <VersionRow
+                key={v.id}
+                version={v}
+                isPending={restore.isPending}
+                onRestore={() => onRestore(v.versionNumber)}
               />
-            </div>
-            <div className="modal-body">
-              {isLoading && <div className="text-muted">Loading…</div>}
-              {!isLoading && versions.length === 0 && (
-                <div className="text-muted">No versions yet.</div>
-              )}
-              {!isLoading && versions.length > 0 && (
-                <div className="table-responsive">
-                  <table className="table table-sm align-middle">
-                    <thead>
-                      <tr>
-                        <th style={{ width: "5rem" }}>v</th>
-                        <th style={{ width: "7rem" }}>Kind</th>
-                        <th>When</th>
-                        <th>Note</th>
-                        <th style={{ width: "8rem" }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {versions.map((v) => (
-                        <VersionRow
-                          key={v.id}
-                          version={v}
-                          isPending={restore.isPending}
-                          onRestore={() => onRestore(v.versionNumber)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
+      <Group justify="flex-end" mt="md">
+        <Button variant="default" onClick={onClose}>
+          Close
+        </Button>
+      </Group>
+    </Modal>
   );
 }
 
@@ -92,37 +74,44 @@ function VersionRow({
   onRestore: () => void;
 }) {
   return (
-    <tr>
-      <td>
+    <Table.Tr>
+      <Table.Td>
         <code>v{version.versionNumber}</code>
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <KindBadge kind={version.kind} />
-      </td>
-      <td>{formatWhen(version.createdAtUtc)}</td>
-      <td>{version.note ?? ""}</td>
-      <td>
-        <button
-          type="button"
-          className="btn btn-outline-secondary btn-sm"
-          onClick={onRestore}
-          disabled={isPending}
-        >
+      </Table.Td>
+      <Table.Td>{formatWhen(version.createdAtUtc)}</Table.Td>
+      <Table.Td>{version.note ?? ""}</Table.Td>
+      <Table.Td>
+        <Button size="xs" variant="default" onClick={onRestore} loading={isPending}>
           Restore
-        </button>
-      </td>
-    </tr>
+        </Button>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
 function KindBadge({ kind }: { kind: FormVersion["kind"] }) {
   if (kind === "publish") {
-    return <span className="badge bg-success">Publish</span>;
+    return (
+      <Badge color="green" variant="filled">
+        Publish
+      </Badge>
+    );
   }
   if (kind === "restore") {
-    return <span className="badge bg-info text-dark">Restore</span>;
+    return (
+      <Badge color="cyan" variant="filled">
+        Restore
+      </Badge>
+    );
   }
-  return <span className="badge bg-secondary">Save</span>;
+  return (
+    <Badge color="gray" variant="filled">
+      Save
+    </Badge>
+  );
 }
 
 function formatWhen(iso: string): string {

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Button } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { useBusConnection, BusMessageEnvelope } from "@/hooks/useBusConnection";
 import { getDaprSidecarStatus } from "@/api/health";
 import "./BusWatcher.css";
@@ -38,25 +40,16 @@ export default function BusWatcher() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Bus Watcher</h1>
-          <p className="page-head-copy bus-watcher-copy">
-            Watch every workflow bus event the app consumes and stream it into a live log window.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Bus Watcher"
+        description="Watch every workflow bus event the app consumes and stream it into a live log window."
+      />
 
       <div className="bus-watcher-toolbar">
         <span className={`bus-watcher-status ${statusClass(status)}`}>{status}</span>
-        <button
-          type="button"
-          className="btn btn-outline-secondary"
-          onClick={clearLog}
-          title="Clear log"
-        >
+        <Button variant="default" onClick={clearLog} title="Clear log">
           Clear Log
-        </button>
+        </Button>
       </div>
 
       {startupWarning && (

@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { AxiosError } from "axios";
+import {
+  ActionIcon,
+  Alert,
+  Box,
+  Button,
+  Card,
+  Group,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import ColorPicker from "@/components/ColorPicker";
 import {
   useCreateStatusAppearance,
@@ -43,90 +56,90 @@ export default function StatusAppearance() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Status Appearance</h1>
-        <p className="page-head-copy">
-          Configure the status-to-color combinations used for badge previews.
-        </p>
-      </div>
+      <PageHeader
+        title="Status Appearance"
+        description="Configure the status-to-color combinations used for badge previews."
+      />
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading d-flex justify-content-between align-items-center">
-          <h4 className="panel-title mb-0">Statuses</h4>
-          <button type="button" className="btn btn-sm btn-primary" onClick={addRow}>
-            <i className="fa fa-plus me-2" />
+      <Card withBorder shadow="sm">
+        <Group justify="space-between" align="center" mb="md">
+          <Title order={5} m={0}>
+            Statuses
+          </Title>
+          <Button size="xs" leftSection={<i className="fa fa-plus" />} onClick={addRow}>
             Add status
-          </button>
-        </div>
-        <div className="panel-body">
-          {error && <div className="alert alert-danger">{error}</div>}
+          </Button>
+        </Group>
 
-          <div className="table-responsive">
-            <table className="table table-striped table-bordered align-middle mb-0">
-              <thead>
-                <tr>
-                  <th style={{ width: "32%" }}>Status</th>
-                  <th style={{ width: "34%" }}>Color</th>
-                  <th style={{ width: "22%" }}>Preview</th>
-                  <th style={{ width: "12%" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={4} className="text-center text-body text-opacity-50 p-4">
-                      Loading...
-                    </td>
-                  </tr>
-                )}
+        {error && (
+          <Alert color="red" variant="light" mb="md">
+            {error}
+          </Alert>
+        )}
 
-                {!isLoading && rows.length === 0 && draftRows.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="text-center text-body text-opacity-50 p-4">
-                      No statuses yet. Add one to get started.
-                    </td>
-                  </tr>
-                )}
+        <Table withTableBorder withColumnBorders striped verticalSpacing="sm">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th style={{ width: "32%" }}>Status</Table.Th>
+              <Table.Th style={{ width: "34%" }}>Color</Table.Th>
+              <Table.Th style={{ width: "22%" }}>Preview</Table.Th>
+              <Table.Th style={{ width: "12%" }} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {isLoading && (
+              <Table.Tr>
+                <Table.Td colSpan={4} ta="center" py="lg">
+                  <Text c="dimmed">Loading...</Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
 
-                {rows.map((row) => (
-                  <PersistedRow
-                    key={row.id}
-                    row={row}
-                    onDelete={async () => {
-                      setError(null);
-                      try {
-                        await deleteEntry.mutateAsync(row.id);
-                      } catch (err) {
-                        setError(describeError(err));
-                      }
-                    }}
-                  />
-                ))}
+            {!isLoading && rows.length === 0 && draftRows.length === 0 && (
+              <Table.Tr>
+                <Table.Td colSpan={4} ta="center" py="lg">
+                  <Text c="dimmed">No statuses yet. Add one to get started.</Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
 
-                {draftRows.map((row) => (
-                  <DraftRow
-                    key={row.id}
-                    row={row}
-                    isSaving={createEntry.isPending}
-                    onChange={(patch) => updateDraftRow(row.id, patch)}
-                    onDelete={() => setDraftRows((current) => current.filter((x) => x.id !== row.id))}
-                    onCreate={async (request) => {
-                      setError(null);
-                      try {
-                        await createEntry.mutateAsync(request);
-                        setDraftRows((current) => current.filter((x) => x.id !== row.id));
-                      } catch (err) {
-                        setError(describeError(err));
-                        throw err;
-                      }
-                    }}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+            {rows.map((row) => (
+              <PersistedRow
+                key={row.id}
+                row={row}
+                onDelete={async () => {
+                  setError(null);
+                  try {
+                    await deleteEntry.mutateAsync(row.id);
+                  } catch (err) {
+                    setError(describeError(err));
+                  }
+                }}
+              />
+            ))}
+
+            {draftRows.map((row) => (
+              <DraftRow
+                key={row.id}
+                row={row}
+                isSaving={createEntry.isPending}
+                onChange={(patch) => updateDraftRow(row.id, patch)}
+                onDelete={() => setDraftRows((current) => current.filter((x) => x.id !== row.id))}
+                onCreate={async (request) => {
+                  setError(null);
+                  try {
+                    await createEntry.mutateAsync(request);
+                    setDraftRows((current) => current.filter((x) => x.id !== row.id));
+                  } catch (err) {
+                    setError(describeError(err));
+                    throw err;
+                  }
+                }}
+              />
+            ))}
+          </Table.Tbody>
+        </Table>
+      </Card>
     </>
   );
 }
@@ -170,33 +183,33 @@ function PersistedRow({
   }, [status, color, row.id, row.status, row.color, updateEntry]);
 
   return (
-    <tr>
-      <td>
-        <input
-          className={`form-control ${error ? "is-invalid" : ""}`}
+    <Table.Tr>
+      <Table.Td>
+        <TextInput
           placeholder="Enter a status"
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          onChange={(e) => setStatus(e.currentTarget.value)}
+          error={error}
         />
-        {error && <div className="invalid-feedback d-block">{error}</div>}
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <ColorPicker id={`status-color-${row.id}`} value={color} onChange={setColor} />
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <PreviewBadge status={status} color={color} />
-      </td>
-      <td className="text-center">
-        <button
-          type="button"
-          className="btn btn-outline-danger btn-sm"
+      </Table.Td>
+      <Table.Td ta="center">
+        <ActionIcon
+          variant="outline"
+          color="red"
+          size="sm"
           onClick={() => void onDelete()}
           aria-label={`Delete ${status.trim() || row.status}`}
         >
           <i className="fa fa-trash" />
-        </button>
-      </td>
-    </tr>
+        </ActionIcon>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -246,40 +259,42 @@ function DraftRow({
   }, [row.status, row.color]);
 
   return (
-    <tr>
-      <td>
-        <input
-          className={`form-control ${error ? "is-invalid" : ""}`}
+    <Table.Tr>
+      <Table.Td>
+        <TextInput
           placeholder="Enter a status"
           value={row.status}
-          onChange={(e) => onChange({ status: e.target.value })}
+          onChange={(e) => onChange({ status: e.currentTarget.value })}
+          error={error}
         />
-        {error && <div className="invalid-feedback d-block">{error}</div>}
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <ColorPicker
           id={`status-color-${row.id}`}
           value={row.color}
           onChange={(value) => onChange({ color: value })}
         />
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         <PreviewBadge status={row.status} color={row.color} />
         {isSaving && row.status.trim() && (
-          <div className="small text-body text-opacity-50 mt-1">Saving...</div>
+          <Text size="sm" c="dimmed" mt={4}>
+            Saving...
+          </Text>
         )}
-      </td>
-      <td className="text-center">
-        <button
-          type="button"
-          className="btn btn-outline-danger btn-sm"
+      </Table.Td>
+      <Table.Td ta="center">
+        <ActionIcon
+          variant="outline"
+          color="red"
+          size="sm"
           onClick={onDelete}
           aria-label={`Delete ${row.status.trim() || "draft status"}`}
         >
           <i className="fa fa-trash" />
-        </button>
-      </td>
-    </tr>
+        </ActionIcon>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -289,16 +304,21 @@ function PreviewBadge({ status, color }: { status: string; color: string }) {
   const previewText = status.trim() || "Preview";
 
   return (
-    <span
-      className="badge rounded-pill px-3 py-2 fw-semibold"
+    <Box
+      component="span"
+      px="md"
+      py={6}
       style={{
         backgroundColor,
         color: textColor,
-        display: "inline-block"
+        display: "inline-block",
+        borderRadius: 999,
+        fontWeight: 600,
+        fontSize: 12
       }}
     >
       {previewText}
-    </span>
+    </Box>
   );
 }
 

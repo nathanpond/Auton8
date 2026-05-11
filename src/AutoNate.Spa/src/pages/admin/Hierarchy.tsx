@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ColumnDef } from "@tanstack/react-table";
+import { Alert, NativeSelect, Text } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { fetchSupervisorHierarchy, listUsers, listUsersPage } from "@/api/users";
 import { useUsers, useSetUserSupervisor } from "@/hooks/useUsers";
 import { LocalUser } from "@/types/flowable";
@@ -77,9 +79,9 @@ export default function Hierarchy() {
           <div>
             <strong>{row.original.username}</strong>
             {(row.original.firstName || row.original.lastName) && (
-              <small className="d-block text-body text-opacity-75">
+              <Text size="xs" c="dimmed" component="div">
                 {`${row.original.firstName ?? ""} ${row.original.lastName ?? ""}`.trim()}
-              </small>
+              </Text>
             )}
           </div>
         )
@@ -94,22 +96,19 @@ export default function Hierarchy() {
           const currentId = supervisorByUserId.get(user.userId) ?? "";
           const saving = savingFor === user.userId;
           return (
-            <select
-              className="form-select form-select-sm"
+            <NativeSelect
+              size="xs"
               value={currentId}
               disabled={saving}
               onClick={(e) => e.stopPropagation()}
-              onChange={(e) => void onChange(user, e.target.value)}
-            >
-              <option value="">— none —</option>
-              {allUsers
-                .filter((other) => other.userId !== user.userId)
-                .map((other) => (
-                  <option key={other.userId} value={other.userId}>
-                    {other.username}
-                  </option>
-                ))}
-            </select>
+              onChange={(e) => void onChange(user, e.currentTarget.value)}
+              data={[
+                { value: "", label: "— none —" },
+                ...allUsers
+                  .filter((other) => other.userId !== user.userId)
+                  .map((other) => ({ value: other.userId, label: other.username }))
+              ]}
+            />
           );
         }
       },
@@ -122,12 +121,14 @@ export default function Hierarchy() {
           const currentId = supervisorByUserId.get(row.original.userId) ?? "";
           const currentUser = currentId ? userByGuid.get(currentId) : null;
           if (!currentUser) {
-            return <span className="text-body text-opacity-50">—</span>;
+            return <Text component="span" c="dimmed">—</Text>;
           }
           return (
             <span>
               <strong>{currentUser.username}</strong>
-              <small className="ms-2 text-body text-opacity-50">{currentUser.userId}</small>
+              <Text component="span" size="xs" c="dimmed" ml={8}>
+                {currentUser.userId}
+              </Text>
             </span>
           );
         }
@@ -138,16 +139,22 @@ export default function Hierarchy() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Hierarchy</h1>
-        <p className="page-head-copy">
-          Declare who supervises whom. Each user has at most one supervisor; the edge
-          drives selectors like <code>/record/*[assignee=user[supervisor=user]]</code> and{" "}
-          <code>/workflowexecution/*[startedby=user[supervisor=user]]</code>.
-        </p>
-      </div>
+      <PageHeader
+        title="Hierarchy"
+        description={
+          <>
+            Declare who supervises whom. Each user has at most one supervisor; the edge drives
+            selectors like <code>/record/*[assignee=user[supervisor=user]]</code> and{" "}
+            <code>/workflowexecution/*[startedby=user[supervisor=user]]</code>.
+          </>
+        }
+      />
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
 
       <DataTable<LocalUser>
         mode="auto"

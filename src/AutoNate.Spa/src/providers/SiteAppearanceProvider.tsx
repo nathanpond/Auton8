@@ -1,6 +1,7 @@
 import {
   createContext,
   ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -39,17 +40,29 @@ export function SiteAppearanceProvider({ children }: { children: ReactNode }) {
     document.title = effectiveAppearance.siteName;
   }, [effectiveAppearance]);
 
+  // Stable callbacks so consumers (e.g. the SiteAppearance admin page) can
+  // include them in useEffect dep arrays without re-firing the effect on
+  // every render — which previously caused a setPreviewAppearance loop.
+  const setPreviewAppearance = useCallback((appearance: SiteAppearance | null) => {
+    setPreviewAppearanceState(appearance ? coerceSiteAppearance(appearance) : null);
+  }, []);
+  const clearPreviewAppearance = useCallback(() => setPreviewAppearanceState(null), []);
+
   const value = useMemo<SiteAppearanceContextValue>(
     () => ({
       savedAppearance,
       effectiveAppearance,
       isLoading,
-      setPreviewAppearance: (appearance) => {
-        setPreviewAppearanceState(appearance ? coerceSiteAppearance(appearance) : null);
-      },
-      clearPreviewAppearance: () => setPreviewAppearanceState(null)
+      setPreviewAppearance,
+      clearPreviewAppearance
     }),
-    [effectiveAppearance, isLoading, savedAppearance]
+    [
+      effectiveAppearance,
+      isLoading,
+      savedAppearance,
+      setPreviewAppearance,
+      clearPreviewAppearance
+    ]
   );
 
   return (

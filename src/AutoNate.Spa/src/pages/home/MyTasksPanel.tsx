@@ -1,16 +1,17 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMyAssignedRecords } from "@/hooks/useRecords";
+import { Alert, Badge, Button, Code, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { DataTable } from "@/components/data-table/DataTable";
+import { listAssignedToMe } from "@/api/records";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import {
-  ASSIGNED_TASKS_QUERY_KEY,
-  TEAM_TASKS_QUERY_KEY,
-  taskFormConfigQueryKey,
-  useCompleteTask,
-  useMyAssignedTasks
-} from "@/hooks/useExecutions";
-import { getTaskFormConfig, TaskFormConfig } from "@/api/executions";
+  listMyAssignedTasks,
+  getTaskFormConfig,
+  TaskFormConfig
+} from "@/api/executions";
+import { taskFormConfigQueryKey, useCompleteTask } from "@/hooks/useExecutions";
 import { useBusConnection } from "@/hooks/useBusConnection";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { RecordModel, RecordType } from "@/types/records";
@@ -22,7 +23,12 @@ import SimpleCompleteTaskModal from "@/components/workflow/SimpleCompleteTaskMod
 import GatewayChoiceModal from "@/components/workflow/GatewayChoiceModal";
 import TaskFormModal from "@/components/workflow/TaskFormModal";
 
-const PAGE_SIZE = 10;
+// Cap the assigned-records preload — beyond this the auto-mode probe switches
+// the table to server mode and fetches per page instead. The workflow-task
+// API doesn't paginate so we always pull the full task set.
+const RECORD_PRELOAD = 1000;
+const COLUMN_WIDTHS = ["24%", "10%", "16%", "20%", "8%", "14%", "8%"];
+const QUERY_KEY = ["home", "my-tasks"] as const;
 
 type TaskRow =
   | {
@@ -41,24 +47,19 @@ type TaskRow =
 
 export default function MyTasksPanel() {
   const qc = useQueryClient();
-  const params = useMemo(
-    () => ({ page: 0, pageSize: PAGE_SIZE, sort: "updated_desc" as const, includeArchived: false }),
-    []
-  );
-  const { data: recordPage, isLoading: recordsLoading, isError: recordsError } =
-    useMyAssignedRecords(params);
   const { data: types = [] } = useRecordTypes(true);
   const { data: statusAppearance = [] } = useStatusAppearance();
-  const {
-    data: workflowTasks = [],
-    isLoading: tasksLoading,
-    isError: tasksError
-  } = useMyAssignedTasks();
   const completeTask = useCompleteTask();
   const navigate = useNavigate();
   const [openingTaskId, setOpeningTaskId] = useState<string | null>(null);
   const [activeTaskConfig, setActiveTaskConfig] = useState<TaskFormConfig | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+
+  const typesById = useMemo(() => {
+    const map = new Map<string, RecordType>();
+    for (const t of types) map.set(t.id, t);
+    return map;
+  }, [types]);
 
   // Refetch on any record or workflow-execution bus event. The server-side
   // /assigned-to-me endpoints already filter by the current user, so we don't
@@ -68,16 +69,42 @@ export default function MyTasksPanel() {
   const onBusMessage = useCallback(
     (msg: { topic: string }) => {
       const topic = msg.topic ?? "";
-      if (topic.startsWith("record.")) {
-        qc.invalidateQueries({ queryKey: ["records", "assigned-to-me"] });
-      } else if (topic.startsWith("workflow.execution")) {
-        qc.invalidateQueries({ queryKey: ASSIGNED_TASKS_QUERY_KEY });
-        qc.invalidateQueries({ queryKey: TEAM_TASKS_QUERY_KEY });
+      if (topic.startsWith("record.") || topic.startsWith("workflow.execution")) {
+        qc.invalidateQueries({ queryKey: QUERY_KEY });
+        qc.invalidateQueries({ queryKey: ["home", "team-tasks"] });
       }
     },
     [qc]
   );
   useBusConnection({ onMessage: onBusMessage });
+
+  // Fan out to both endpoints in parallel and merge into the discriminated
+  // TaskRow union. Sorted by activity time so the most-recent items rise.
+  const loadAll = useCallback(async (): Promise<TaskRow[]> => {
+    const [recordsPage, workflowTasks] = await Promise.all([
+      listAssignedToMe({
+        page: 0,
+        pageSize: RECORD_PRELOAD,
+        sort: "updated_desc",
+        includeArchived: false
+      }),
+      listMyAssignedTasks()
+    ]);
+    const recordRows: TaskRow[] = recordsPage.items.map((rec) => ({
+      kind: "record",
+      id: `record:${rec.id}`,
+      sortKey: parseTime(rec.updatedAtUtc),
+      record: rec,
+      type: typesById.get(rec.recordTypeId) ?? null
+    }));
+    const workflowRows: TaskRow[] = workflowTasks.map((task) => ({
+      kind: "workflow",
+      id: `workflow:${task.id}`,
+      sortKey: parseTime(task.createdAtUtc),
+      task
+    }));
+    return [...recordRows, ...workflowRows].sort((a, b) => b.sortKey - a.sortKey);
+  }, [typesById]);
 
   // Clicking Open dispatches on the task's userForm config (set in
   // Workflow Studio). Simple → confirm modal in place, Modal → form modal
@@ -115,111 +142,146 @@ export default function MyTasksPanel() {
     [completeTask]
   );
 
-  const typesById = useMemo(() => {
-    const map = new Map<string, RecordType>();
-    for (const t of types) map.set(t.id, t);
-    return map;
-  }, [types]);
-
-  const recordItems = recordPage?.items ?? [];
-  const totalRecordCount = recordPage?.totalCount ?? 0;
-
-  const rows = useMemo<TaskRow[]>(() => {
-    const recordRows: TaskRow[] = recordItems.map((rec) => ({
-      kind: "record",
-      id: `record:${rec.id}`,
-      sortKey: parseTime(rec.updatedAtUtc),
-      record: rec,
-      type: typesById.get(rec.recordTypeId) ?? null
-    }));
-    const workflowRows: TaskRow[] = workflowTasks.map((task) => ({
-      kind: "workflow",
-      id: `workflow:${task.id}`,
-      sortKey: parseTime(task.createdAtUtc),
-      task
-    }));
-    return [...recordRows, ...workflowRows].sort((a, b) => b.sortKey - a.sortKey);
-  }, [recordItems, workflowTasks, typesById]);
-
-  const isLoading = recordsLoading || tasksLoading;
-  const hasError = recordsError || tasksError;
-  const empty = !isLoading && !hasError && rows.length === 0;
+  const columns = useMemo<ColumnDef<TaskRow>[]>(
+    () => [
+      {
+        id: "name",
+        accessorFn: (row: TaskRow) =>
+          row.kind === "record"
+            ? `${row.record.key} ${row.record.name}`
+            : (row.task.processInstanceName ??
+              row.task.processDefinitionName ??
+              row.task.processDefinitionId ??
+              row.task.name ??
+              row.task.id),
+        header: "Name",
+        cell: ({ row }) =>
+          row.original.kind === "record"
+            ? (
+                <Link to={`/record/${row.original.record.key}`} style={{ textDecoration: "none" }}>
+                  <Group gap="xs" wrap="nowrap">
+                    <Code>{row.original.record.key}</Code>
+                    <Text>{row.original.record.name}</Text>
+                  </Group>
+                </Link>
+              )
+            : (() => {
+                const task = row.original.task;
+                const name =
+                  task.processInstanceName ??
+                  task.processDefinitionName ??
+                  task.processDefinitionId ??
+                  task.name ??
+                  task.id;
+                return task.processInstanceId ? (
+                  <Link
+                    to={`/executions/${task.processInstanceId}`}
+                    style={{ textDecoration: "none" }}
+                  >
+                    {name}
+                  </Link>
+                ) : (
+                  <Text>{name}</Text>
+                );
+              })()
+      },
+      {
+        id: "status",
+        accessorFn: (row: TaskRow) =>
+          row.kind === "record"
+            ? (row.record.status ?? "")
+            : (row.task.name?.trim() ? row.task.name : (row.task.taskDefinitionKey ?? "")),
+        header: "Status",
+        cell: ({ row }) =>
+          row.original.kind === "record"
+            ? renderRecordStatus(row.original.record.status, statusAppearance)
+            : renderWorkflowStatus(row.original.task, statusAppearance)
+      },
+      {
+        id: "type",
+        accessorFn: (row: TaskRow) =>
+          row.kind === "record"
+            ? (row.type?.name ?? "Unknown")
+            : (row.task.processDefinitionName ?? row.task.processDefinitionId ?? "Workflow"),
+        header: "Type",
+        cell: ({ row }) =>
+          row.original.kind === "record"
+            ? renderRecordType(row.original.type)
+            : renderWorkflowType(row.original.task)
+      },
+      {
+        id: "description",
+        accessorFn: (row: TaskRow) =>
+          row.kind === "record" ? (readDescription(row.record.values) ?? "") : "",
+        header: "Description",
+        cell: ({ row }) =>
+          row.original.kind === "record" ? renderRecordDescription(row.original.record) : <Dim />
+      },
+      {
+        id: "dueDate",
+        accessorFn: (row: TaskRow) =>
+          row.kind === "record" ? (row.record.dueDate ?? "") : (row.task.dueDate ?? ""),
+        header: "Due Date",
+        cell: ({ row }) =>
+          row.original.kind === "record"
+            ? renderRecordDueDate(row.original.record.dueDate)
+            : renderWorkflowDueDate(row.original.task.dueDate)
+      },
+      {
+        id: "lastUpdated",
+        accessorFn: (row: TaskRow) => row.sortKey,
+        header: "Last Updated",
+        cell: ({ row }) =>
+          row.original.kind === "record"
+            ? formatWhen(row.original.record.updatedAtUtc)
+            : formatWhen(row.original.task.createdAtUtc)
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const r = row.original;
+          if (r.kind !== "workflow") return null;
+          return (
+            <Button
+              size="xs"
+              onClick={() => onOpenTask(r.task.id)}
+              loading={openingTaskId === r.task.id}
+            >
+              Open
+            </Button>
+          );
+        }
+      }
+    ],
+    [statusAppearance, openingTaskId]
+  );
 
   return (
-    <div className="panel panel-inverse">
-      <div className="panel-heading">
-        <h4 className="panel-title">
-          <i className="fa fa-user-check me-2"></i>My Tasks
-        </h4>
-      </div>
-      <div className="panel-body">
-        <div className="table-responsive">
-          <table className="table table-striped table-bordered align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th style={{ width: "10rem" }}>Status</th>
-                <th style={{ width: "14rem" }}>Type</th>
-                <th>Description</th>
-                <th style={{ width: "8rem" }}>Due Date</th>
-                <th style={{ width: "12rem" }}>Last Updated</th>
-                <th style={{ width: "8rem" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={7} className="text-center text-body text-opacity-50 p-4">
-                    Loading...
-                  </td>
-                </tr>
-              )}
-              {!isLoading && hasError && (
-                <tr>
-                  <td colSpan={7} className="text-center text-danger p-4">
-                    Failed to load tasks.
-                  </td>
-                </tr>
-              )}
-              {empty && (
-                <tr>
-                  <td colSpan={7} className="text-center text-body text-opacity-50 p-4">
-                    Nothing is assigned to you right now.
-                  </td>
-                </tr>
-              )}
-              {!isLoading && !hasError && rows.map((row) =>
-                row.kind === "record" ? (
-                  <RecordRow
-                    key={row.id}
-                    record={row.record}
-                    type={row.type}
-                    statusAppearance={statusAppearance}
-                  />
-                ) : (
-                  <WorkflowRow
-                    key={row.id}
-                    task={row.task}
-                    onOpen={onOpenTask}
-                    isOpening={openingTaskId === row.task.id}
-                    statusAppearance={statusAppearance}
-                  />
-                )
-              )}
-            </tbody>
-          </table>
-        </div>
-        {totalRecordCount > recordItems.length && (
-          <div className="text-body text-opacity-75 small mt-3">
-            Showing {recordItems.length} of {totalRecordCount} assigned records.
-          </div>
-        )}
+    <Paper withBorder radius="md" p="md">
+      <Stack gap="sm">
+        <Group gap="xs">
+          <i className="fa fa-user-check" />
+          <Title order={4}>My Tasks</Title>
+        </Group>
         {openError && (
-          <div className="alert alert-danger mt-3" role="alert">
+          <Alert color="red" variant="light">
             {openError}
-          </div>
+          </Alert>
         )}
-      </div>
+        <DataTable<TaskRow>
+          queryKey={QUERY_KEY}
+          mode="client"
+          loadAll={loadAll}
+          columns={columns}
+          columnWidths={COLUMN_WIDTHS}
+          rowKey={(r) => r.id}
+          searchPlaceholder="Search my tasks…"
+          emptyMessage="Nothing is assigned to you right now."
+          initialSort={[{ id: "lastUpdated", desc: true }]}
+        />
+      </Stack>
 
       {activeTaskConfig?.mode === "simple" &&
         (activeTaskConfig.gatewayChoices && activeTaskConfig.gatewayChoices.length > 0 ? (
@@ -242,165 +304,93 @@ export default function MyTasksPanel() {
           onComplete={(taskId, variables) => completeFromModal(taskId, variables)}
         />
       )}
-    </div>
+    </Paper>
   );
 }
 
-function RecordRow({
-  record,
-  type,
-  statusAppearance
-}: {
-  record: RecordModel;
-  type: RecordType | null;
-  statusAppearance: StatusAppearanceEntry[];
-}) {
-  const description = readDescription(record.values);
+function Dim() {
   return (
-    <tr>
-      <td>
-        <Link to={`/record/${record.key}`} className="text-decoration-none">
-          <code className="me-2">{record.key}</code>
-          {record.name}
-        </Link>
-      </td>
-      <td>
-        {record.status ? (
-          <span
-            className="badge rounded-pill"
-            style={statusBadgeStyle(record.status, statusAppearance)}
-          >
-            {record.status}
-          </span>
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-      <td>
-        {type ? (
-          <>
-            {type.icon ? (
-              <i
-                className={`${resolveIconClass(type.icon)} me-2`}
-                style={type.color ? { color: type.color } : undefined}
-                aria-hidden="true"
-              ></i>
-            ) : null}
-            <span>{type.name}</span>
-          </>
-        ) : (
-          <span className="text-body text-opacity-50 small">Unknown</span>
-        )}
-      </td>
-      <td>
-        {description ? (
-          <span className="small">{description}</span>
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-      <td>
-        {record.dueDate ? (
-          formatDate(record.dueDate)
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-      <td>{formatWhen(record.updatedAtUtc)}</td>
-      <td></td>
-    </tr>
+    <Text c="dimmed" span>
+      —
+    </Text>
   );
 }
 
-function statusBadgeStyle(
-  status: string,
+function renderRecordStatus(
+  status: string | null | undefined,
   entries: StatusAppearanceEntry[]
-): React.CSSProperties {
-  const backgroundColor = resolveStatusBadgeColor(status, entries);
-  return {
-    backgroundColor,
-    color: badgeTextColor(backgroundColor)
-  };
+) {
+  if (!status) return <Dim />;
+  return <StatusBadge status={status} entries={entries} />;
 }
 
-function WorkflowRow({
-  task,
-  onOpen,
-  isOpening,
-  statusAppearance
-}: {
-  task: FlowableTaskSummary;
-  onOpen: (taskId: string) => void;
-  isOpening: boolean;
-  statusAppearance: StatusAppearanceEntry[];
-}) {
-  // Prefer the per-execution display name (set at start time) over the
-  // process definition name. Falls back through definition name → id → task
-  // fields so we always show *something*.
-  const workflowName =
-    task.processInstanceName ??
-    task.processDefinitionName ??
-    task.processDefinitionId ??
-    task.name ??
-    task.id;
+function renderWorkflowStatus(task: FlowableTaskSummary, entries: StatusAppearanceEntry[]) {
   const activeNode = task.name?.trim() ? task.name : task.taskDefinitionKey ?? null;
+  if (!activeNode) return <Dim />;
+  return <StatusBadge status={activeNode} entries={entries} />;
+}
+
+function StatusBadge({
+  status,
+  entries
+}: {
+  status: string;
+  entries: StatusAppearanceEntry[];
+}) {
+  const bg = resolveStatusBadgeColor(status, entries);
+  const fg = badgeTextColor(bg);
   return (
-    <tr>
-      <td>
-        {task.processInstanceId ? (
-          <Link to={`/executions/${task.processInstanceId}`} className="text-decoration-none">
-            {workflowName}
-          </Link>
-        ) : (
-          <span>{workflowName}</span>
-        )}
-      </td>
-      <td>
-        {activeNode ? (
-          <span
-            className="badge rounded-pill"
-            style={statusBadgeStyle(activeNode, statusAppearance)}
-          >
-            {activeNode}
-          </span>
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-      <td>
-        <i className="fa fa-diagram-project me-2"></i>
-        <span>{task.processDefinitionName ?? task.processDefinitionId ?? "Workflow"}</span>
-      </td>
-      <td>
-        <span className="text-body text-opacity-50">—</span>
-      </td>
-      <td>
-        {task.dueDate ? (
-          formatDateTime(task.dueDate)
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-      <td>{formatWhen(task.createdAtUtc)}</td>
-      <td>
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          onClick={() => onOpen(task.id)}
-          disabled={isOpening}
-        >
-          {isOpening ? (
-            <>
-              <i className="fa fa-spinner fa-spin me-1" />
-              Opening…
-            </>
-          ) : (
-            "Open"
-          )}
-        </button>
-      </td>
-    </tr>
+    <Badge radius="xl" style={{ backgroundColor: bg, color: fg, border: 0 }}>
+      {status}
+    </Badge>
   );
+}
+
+function renderRecordType(type: RecordType | null) {
+  if (!type) {
+    return (
+      <Text size="sm" c="dimmed">
+        Unknown
+      </Text>
+    );
+  }
+  return (
+    <Group gap="xs" wrap="nowrap">
+      {type.icon ? (
+        <i
+          className={resolveIconClass(type.icon)}
+          style={type.color ? { color: type.color } : undefined}
+          aria-hidden
+        />
+      ) : null}
+      <span>{type.name}</span>
+    </Group>
+  );
+}
+
+function renderWorkflowType(task: FlowableTaskSummary) {
+  return (
+    <Group gap="xs" wrap="nowrap">
+      <i className="fa fa-diagram-project" />
+      <span>{task.processDefinitionName ?? task.processDefinitionId ?? "Workflow"}</span>
+    </Group>
+  );
+}
+
+function renderRecordDescription(record: RecordModel) {
+  const description = readDescription(record.values);
+  if (!description) return <Dim />;
+  return <Text size="sm">{description}</Text>;
+}
+
+function renderRecordDueDate(dueDate: string | null | undefined) {
+  if (!dueDate) return <Dim />;
+  return <span>{formatDate(dueDate)}</span>;
+}
+
+function renderWorkflowDueDate(dueDate: string | null | undefined) {
+  if (!dueDate) return <Dim />;
+  return <span>{formatDateTime(dueDate)}</span>;
 }
 
 function describeError(error: unknown): string {

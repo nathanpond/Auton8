@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { ColumnDef } from "@tanstack/react-table";
+import { Alert, Badge, Button, Code, Group, Text } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import {
   useDeletePlugin,
   useDisablePlugin,
@@ -41,12 +43,12 @@ export default function Plugins() {
           <>
             <strong>{row.original.name}</strong>
             {row.original.lastError && (
-              <div className="small text-danger" title={row.original.lastError}>
+              <Text size="sm" c="red" title={row.original.lastError} component="div">
                 Last error:{" "}
                 {row.original.lastError.length > 80
                   ? row.original.lastError.slice(0, 80) + "…"
                   : row.original.lastError}
-              </div>
+              </Text>
             )}
           </>
         )
@@ -55,7 +57,7 @@ export default function Plugins() {
         id: "version",
         accessorKey: "version",
         header: "Version",
-        cell: ({ row }) => <span className="font-monospace small">{row.original.version}</span>
+        cell: ({ row }) => <Code>{row.original.version}</Code>
       },
       {
         id: "status",
@@ -68,7 +70,9 @@ export default function Plugins() {
         header: "Uploaded",
         accessorFn: (p) => p.uploadedAt,
         cell: ({ row }) => (
-          <span className="small text-muted">{new Date(row.original.uploadedAt).toLocaleString()}</span>
+          <Text size="sm" c="dimmed" component="span">
+            {new Date(row.original.uploadedAt).toLocaleString()}
+          </Text>
         )
       },
       {
@@ -79,11 +83,11 @@ export default function Plugins() {
         cell: ({ row }) => {
           const p = row.original;
           return (
-            <div className="data-table-row-actions">
+            <Group gap="xs">
               {p.status === "Disabled" && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-success"
+                <Button
+                  size="xs"
+                  color="green"
                   disabled={busyId === p.id}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -91,12 +95,12 @@ export default function Plugins() {
                   }}
                 >
                   Enable
-                </button>
+                </Button>
               )}
               {p.status === "Enabled" && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-warning"
+                <Button
+                  size="xs"
+                  color="yellow"
                   disabled={busyId === p.id}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -104,11 +108,12 @@ export default function Plugins() {
                   }}
                 >
                   Disable
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
-                className="btn btn-sm btn-outline-danger"
+              <Button
+                size="xs"
+                variant="outline"
+                color="red"
                 disabled={busyId === p.id}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -122,8 +127,8 @@ export default function Plugins() {
                 }}
               >
                 Delete
-              </button>
-            </div>
+              </Button>
+            </Group>
           );
         }
       }
@@ -133,14 +138,16 @@ export default function Plugins() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Plugins</h1>
-        <p className="page-head-copy">
-          Runtime-loaded plugins that extend AutoNate via hooks. Upload, enable, disable, or delete here.
-        </p>
-      </div>
+      <PageHeader
+        title="Plugins"
+        description="Runtime-loaded plugins that extend AutoNate via hooks. Upload, enable, disable, or delete here."
+      />
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
 
       <DataTable<Plugin>
         mode="client"
@@ -158,13 +165,12 @@ export default function Plugins() {
           return `${p.name} ${p.version}`.toLowerCase().includes(needle);
         }}
         toolbarRight={
-          <button
-            type="button"
-            className="btn btn-add-user"
+          <Button
+            leftSection={<i className="fa fa-plus" />}
             onClick={() => setShowUpload(true)}
           >
-            <i className="fa fa-plus me-2"></i>Upload plugin
-          </button>
+            Upload plugin
+          </Button>
         }
       />
 
@@ -175,15 +181,31 @@ export default function Plugins() {
 
 function renderStatusBadge(p: Plugin) {
   if (p.lastError) {
-    return <span className="badge bg-danger">Error</span>;
+    return (
+      <Badge color="red" variant="filled">
+        Error
+      </Badge>
+    );
   }
   switch (p.status) {
     case "Enabled":
-      return <span className="badge bg-success">Enabled</span>;
+      return (
+        <Badge color="green" variant="filled">
+          Enabled
+        </Badge>
+      );
     case "Disabled":
-      return <span className="badge bg-secondary">Disabled</span>;
+      return (
+        <Badge color="gray" variant="filled">
+          Disabled
+        </Badge>
+      );
     case "DeletedPending":
-      return <span className="badge bg-warning text-dark">Deleted (pending)</span>;
+      return (
+        <Badge color="yellow" variant="filled">
+          Deleted (pending)
+        </Badge>
+      );
   }
 }
 

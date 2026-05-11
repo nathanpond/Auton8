@@ -1,6 +1,21 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Group,
+  Modal,
+  Stack,
+  Switch,
+  Text,
+  TextInput
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { CreateFormRequest, FormSummary, listForms } from "@/api/forms";
 import { useCreateForm, useDeleteForm } from "@/hooks/useForms";
 import { DataTable } from "@/components/data-table/DataTable";
@@ -37,9 +52,9 @@ export default function FormsList() {
         accessorKey: "name",
         header: "Name",
         cell: ({ row }) => (
-          <Link to={`/admin/config/forms/${row.original.id}`} className="fw-semibold">
+          <Anchor component={Link} to={`/admin/config/forms/${row.original.id}`} fw={600}>
             {row.original.name}
-          </Link>
+          </Anchor>
         )
       },
       {
@@ -61,15 +76,15 @@ export default function FormsList() {
         header: "Versions",
         cell: ({ row }) => (
           <>
-            <span className="text-body text-opacity-75">
+            <Text size="sm" c="dimmed" component="span">
               Draft v{row.original.draftVersionNumber}
-            </span>
+            </Text>
             {row.original.publishedVersionNumber !== null && (
               <>
                 <br />
-                <span className="text-body text-opacity-50">
+                <Text size="sm" c="dimmed" component="span">
                   Pub v{row.original.publishedVersionNumber}
-                </span>
+                </Text>
               </>
             )}
           </>
@@ -87,10 +102,11 @@ export default function FormsList() {
         enableSorting: false,
         enableGlobalFilter: false,
         cell: ({ row }) => (
-          <div className="data-table-row-actions">
-            <button
-              type="button"
-              className="btn btn-icon btn-icon-danger"
+          <Box>
+            <ActionIcon
+              variant="outline"
+              color="red"
+              size="sm"
               title="Delete form"
               aria-label={`Delete ${row.original.shortCode}`}
               disabled={deleteForm.isPending}
@@ -99,9 +115,9 @@ export default function FormsList() {
                 void onDelete(row.original);
               }}
             >
-              <i className="fa fa-trash"></i>
-            </button>
-          </div>
+              <i className="fa fa-trash" />
+            </ActionIcon>
+          </Box>
         )
       }
     ],
@@ -110,24 +126,26 @@ export default function FormsList() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Forms</h1>
-          <p className="page-head-copy">
+      <PageHeader
+        title="Forms"
+        description={
+          <>
             Author JSX forms that can be bound to records, workflow tasks, or any other data
             source. Each save snapshots a version; publishing makes the form live at{" "}
             <code>/form/&lt;shortcode&gt;</code> when Site-available is on.
-          </p>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="sm"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
       <DataTable<FormSummary>
@@ -146,13 +164,9 @@ export default function FormsList() {
           return `${f.shortCode} ${f.name}`.toLowerCase().includes(needle);
         }}
         toolbarRight={
-          <button
-            type="button"
-            className="btn btn-add-user"
-            onClick={() => setModalOpen(true)}
-          >
-            <i className="fa fa-plus me-2"></i>New form
-          </button>
+          <Button leftSection={<i className="fa fa-plus" />} onClick={() => setModalOpen(true)}>
+            New form
+          </Button>
         }
       />
 
@@ -168,20 +182,32 @@ export default function FormsList() {
 
 function StatusBadges({ form }: { form: FormSummary }) {
   if (form.publishedVersionNumber === null) {
-    return <span className="badge bg-secondary">Draft</span>;
+    return (
+      <Badge color="gray" variant="filled">
+        Draft
+      </Badge>
+    );
   }
   if (form.isDraft) {
     return (
-      <>
-        <span className="badge bg-success me-1">Published</span>
-        <span className="badge bg-warning text-dark">Has changes</span>
-      </>
+      <Group gap="xs">
+        <Badge color="green" variant="filled">
+          Published
+        </Badge>
+        <Badge color="yellow" variant="filled">
+          Has changes
+        </Badge>
+      </Group>
     );
   }
   return form.siteAvailable ? (
-    <span className="badge bg-success">Live</span>
+    <Badge color="green" variant="filled">
+      Live
+    </Badge>
   ) : (
-    <span className="badge bg-success">Published</span>
+    <Badge color="green" variant="filled">
+      Published
+    </Badge>
   );
 }
 
@@ -215,82 +241,47 @@ function CreateModal({
   };
 
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog">
-          <div className="modal-content">
-            <form onSubmit={submit}>
-              <div className="modal-header">
-                <h5 className="modal-title">New Form</h5>
-                <button
-                  type="button"
-                  className="btn-close"
-                  onClick={onClose}
-                  aria-label="Close"
-                />
-              </div>
-              <div className="modal-body">
-                <div className="mb-3">
-                  <label className="form-label">Name</label>
-                  <input
-                    className="form-control"
-                    value={values.name}
-                    onChange={(e) => setValues({ ...values, name: e.target.value })}
-                    required
-                    autoFocus
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Short code</label>
-                  <input
-                    className="form-control text-lowercase"
-                    placeholder="contact-form"
-                    value={values.shortCode}
-                    onChange={(e) => setValues({ ...values, shortCode: e.target.value })}
-                    required
-                  />
-                  <div className="form-text">
-                    Used in <code>/form/&lt;short-code&gt;</code> and{" "}
-                    <code>/formdev/&lt;short-code&gt;</code>.
-                  </div>
-                </div>
-                <div className="form-check form-switch">
-                  <input
-                    type="checkbox"
-                    className="form-check-input"
-                    id="create-site-available"
-                    checked={values.siteAvailable}
-                    onChange={(e) =>
-                      setValues({ ...values, siteAvailable: e.target.checked })
-                    }
-                  />
-                  <label className="form-check-label" htmlFor="create-site-available">
-                    Site-available (can be loaded at /form/&lt;short-code&gt; once published)
-                  </label>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-outline-secondary"
-                  onClick={onClose}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={create.isPending}
-                >
-                  Create &amp; edit
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+    <Modal opened onClose={onClose} title="New Form">
+      <Box component="form" onSubmit={submit}>
+        <Stack gap="md">
+          <TextInput
+            label="Name"
+            value={values.name}
+            onChange={(e) => setValues({ ...values, name: e.currentTarget.value })}
+            required
+            autoFocus
+          />
+          <TextInput
+            label="Short code"
+            placeholder="contact-form"
+            value={values.shortCode}
+            onChange={(e) => setValues({ ...values, shortCode: e.currentTarget.value })}
+            required
+            styles={{ input: { textTransform: "lowercase" } }}
+            description={
+              <>
+                Used in <code>/form/&lt;short-code&gt;</code> and{" "}
+                <code>/formdev/&lt;short-code&gt;</code>.
+              </>
+            }
+          />
+          <Switch
+            id="create-site-available"
+            checked={values.siteAvailable}
+            onChange={(e) => setValues({ ...values, siteAvailable: e.currentTarget.checked })}
+            label="Site-available (can be loaded at /form/<short-code> once published)"
+          />
+        </Stack>
+        <Group justify="flex-end" mt="md" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={create.isPending}>
+            Create &amp; edit
+          </Button>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 

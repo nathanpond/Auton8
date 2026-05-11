@@ -1,5 +1,24 @@
 import { useMemo, useState } from "react";
 import { ColumnDef } from "@tanstack/react-table";
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Code,
+  Grid,
+  Group,
+  Input,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import SelectorBuilder from "@/components/SelectorBuilder";
 import GrantsHelpModal from "./GrantsHelpModal";
 import { useUsers } from "@/hooks/useUsers";
@@ -26,9 +45,6 @@ const KIND_FILTERS: DataTableFilterOption<PermissionGrant>[] = [
   { id: "role", label: "Roles", predicate: (g) => g.principalKind === "role" }
 ];
 
-// Single source of truth for permissions. Every grant — whether attached to a
-// user, a group, or a role — lives in permission_grants. This page is the
-// only place to author them.
 export default function Grants() {
   const { data: users = [] } = useUsers();
   const { data: groups = [] } = useGroups();
@@ -37,7 +53,7 @@ export default function Grants() {
   const remove = useDeletePermissionGrant();
 
   const [kind, setKind] = useState<PrincipalKind>("user");
-  const [principalId, setPrincipalId] = useState("");
+  const [principalId, setPrincipalId] = useState<string | null>(null);
   const [action, setAction] = useState("view");
   const [selector, setSelector] = useState("/record/*");
   const [effect, setEffect] = useState<"allow" | "deny">("allow");
@@ -73,7 +89,7 @@ export default function Grants() {
         effect,
         priority
       });
-      setPrincipalId("");
+      setPrincipalId(null);
       setSelector("/record/*");
     } catch (err) {
       setError(describeError(err));
@@ -102,16 +118,16 @@ export default function Grants() {
         id: "selectorString",
         accessorKey: "selectorString",
         header: "Selector",
-        cell: ({ row }) => <span className="font-monospace small">{row.original.selectorString}</span>
+        cell: ({ row }) => <Code>{row.original.selectorString}</Code>
       },
       {
         id: "effect",
         accessorKey: "effect",
         header: "Effect",
         cell: ({ row }) => (
-          <span className={`badge bg-${row.original.effect === "allow" ? "success" : "danger"}`}>
+          <Badge color={row.original.effect === "allow" ? "green" : "red"} variant="filled">
             {row.original.effect}
-          </span>
+          </Badge>
         )
       },
       {
@@ -125,10 +141,11 @@ export default function Grants() {
         enableSorting: false,
         enableGlobalFilter: false,
         cell: ({ row }) => (
-          <div className="data-table-row-actions">
-            <button
-              type="button"
-              className="btn btn-icon btn-icon-danger"
+          <Box>
+            <ActionIcon
+              variant="outline"
+              color="red"
+              size="sm"
               title="Revoke grant"
               aria-label="Revoke grant"
               onClick={(e) => {
@@ -136,136 +153,146 @@ export default function Grants() {
                 if (confirm("Revoke this grant?")) void remove.mutateAsync(row.original.id);
               }}
             >
-              <i className="fa fa-trash"></i>
-            </button>
-          </div>
+              <i className="fa fa-trash" />
+            </ActionIcon>
+          </Box>
         )
       }
     ],
     [principalLabel, remove]
   );
 
+  const principalData =
+    kind === "user"
+      ? users.map((u) => ({ value: u.userId, label: u.username }))
+      : kind === "group"
+        ? groups.map((g) => ({ value: g.id, label: g.name }))
+        : roles.map((r) => ({ value: r.id, label: r.isSystem ? `${r.name} (system)` : r.name }));
+
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Permissions</h1>
-        <p className="page-head-copy">
-          Attach a permission rule to a user, a group, or a role. Roles still
-          act as bundles — you assign a role to users/groups on the Roles page,
-          and the role's permissions live here.
-        </p>
-      </div>
+      <PageHeader
+        title="Permissions"
+        description={
+          <>
+            Attach a permission rule to a user, a group, or a role. Roles still act as bundles — you
+            assign a role to users/groups on the Roles page, and the role&apos;s permissions live
+            here.
+          </>
+        }
+      />
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      <Stack gap="md">
+        <Card withBorder shadow="sm">
+          <Group justify="space-between" align="center" mb="md">
+            <Title order={5} m={0}>
+              Add grant
+            </Title>
+            <Anchor
+              component="button"
+              type="button"
+              size="sm"
+              onClick={() => setHelpOpen(true)}
+              title="How permissions work"
+              aria-label="How permissions work"
+            >
+              <i className="fa fa-circle-question" /> Help
+            </Anchor>
+          </Group>
 
-      <div className="row g-3">
-        <div className="col-12">
-          <div className="panel panel-inverse">
-            <div className="panel-heading d-flex justify-content-between align-items-center">
-              <h4 className="panel-title mb-0">Add grant</h4>
-              <button
-                type="button"
-                className="btn btn-sm btn-link p-0 text-decoration-none"
-                onClick={() => setHelpOpen(true)}
-                title="How permissions work"
-                aria-label="How permissions work"
+          <Box component="form" onSubmit={submit}>
+            <Stack gap="xs">
+              <Grid align="flex-end">
+                <Grid.Col span={{ base: 12, sm: 2 }}>
+                  <Select
+                    label="Principal kind"
+                    size="xs"
+                    value={kind}
+                    onChange={(v) => {
+                      setKind((v as PrincipalKind) ?? "user");
+                      setPrincipalId(null);
+                    }}
+                    data={[
+                      { value: "user", label: "user" },
+                      { value: "group", label: "group" },
+                      { value: "role", label: "role" }
+                    ]}
+                    allowDeselect={false}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <Select
+                    label="Principal"
+                    size="xs"
+                    value={principalId}
+                    onChange={setPrincipalId}
+                    placeholder={`— pick ${kind} —`}
+                    data={principalData}
+                    searchable
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 2 }}>
+                  <TextInput
+                    label="Action"
+                    size="xs"
+                    value={action}
+                    onChange={(e) => setAction(e.currentTarget.value)}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 2 }}>
+                  <Select
+                    label="Effect"
+                    size="xs"
+                    value={effect}
+                    onChange={(v) => setEffect((v as "allow" | "deny") ?? "allow")}
+                    data={[
+                      { value: "allow", label: "allow" },
+                      { value: "deny", label: "deny" }
+                    ]}
+                    allowDeselect={false}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 6, sm: 1 }}>
+                  <TextInput
+                    label="Priority"
+                    size="xs"
+                    type="number"
+                    value={priority}
+                    onChange={(e) => setPriority(Number(e.currentTarget.value))}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 6, sm: 1 }}>
+                  <Button type="submit" size="xs" fullWidth loading={create.isPending}>
+                    Add
+                  </Button>
+                </Grid.Col>
+              </Grid>
+
+              <Box
+                p="xs"
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                  borderRadius: "var(--mantine-radius-default)"
+                }}
               >
-                <i className="fa fa-circle-question" /> Help
-              </button>
-            </div>
-            <div className="panel-body">
-              <form onSubmit={submit} className="d-flex flex-column gap-2">
-                <div className="row g-2 align-items-end">
-                  <div className="col-sm-2">
-                    <label className="form-label small mb-1">Principal kind</label>
-                    <select
-                      className="form-select form-select-sm"
-                      value={kind}
-                      onChange={(e) => {
-                        setKind(e.target.value as PrincipalKind);
-                        setPrincipalId("");
-                      }}
-                    >
-                      <option value="user">user</option>
-                      <option value="group">group</option>
-                      <option value="role">role</option>
-                    </select>
-                  </div>
-                  <div className="col-sm-4">
-                    <label className="form-label small mb-1">Principal</label>
-                    <select
-                      className="form-select form-select-sm"
-                      value={principalId}
-                      onChange={(e) => setPrincipalId(e.target.value)}
-                    >
-                      <option value="">— pick {kind} —</option>
-                      {kind === "user" &&
-                        users.map((u) => (
-                          <option key={u.userId} value={u.userId}>
-                            {u.username}
-                          </option>
-                        ))}
-                      {kind === "group" &&
-                        groups.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.name}
-                          </option>
-                        ))}
-                      {kind === "role" &&
-                        roles.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}
-                            {r.isSystem ? " (system)" : ""}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <div className="col-sm-2">
-                    <label className="form-label small mb-1">Action</label>
-                    <input
-                      className="form-control form-control-sm"
-                      value={action}
-                      onChange={(e) => setAction(e.target.value)}
-                    />
-                  </div>
-                  <div className="col-sm-2">
-                    <label className="form-label small mb-1">Effect</label>
-                    <select
-                      className="form-select form-select-sm"
-                      value={effect}
-                      onChange={(e) => setEffect(e.target.value as "allow" | "deny")}
-                    >
-                      <option value="allow">allow</option>
-                      <option value="deny">deny</option>
-                    </select>
-                  </div>
-                  <div className="col-sm-1">
-                    <label className="form-label small mb-1">Priority</label>
-                    <input
-                      type="number"
-                      className="form-control form-control-sm"
-                      value={priority}
-                      onChange={(e) => setPriority(Number(e.target.value))}
-                    />
-                  </div>
-                  <div className="col-sm-1">
-                    <button type="submit" className="btn btn-primary w-100" disabled={create.isPending}>
-                      Add
-                    </button>
-                  </div>
-                </div>
-
-                <div className="border rounded p-2">
-                  <label className="form-label small mb-1">Selector</label>
+                <Input.Wrapper label="Selector" size="xs">
                   <SelectorBuilder value={selector} onChange={setSelector} />
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+                </Input.Wrapper>
+              </Box>
+            </Stack>
+          </Box>
+        </Card>
 
-        <div className="col-12">
-          <h4 className="mb-3">Existing grants</h4>
+        <Box>
+          <Title order={5} mb="md">
+            Existing grants
+          </Title>
           <DataTable<PermissionGrant>
             mode="auto"
             autoThreshold={1000}
@@ -297,8 +324,8 @@ export default function Grants() {
                 .includes(needle);
             }}
           />
-        </div>
-      </div>
+        </Box>
+      </Stack>
 
       {helpOpen && <GrantsHelpModal onClose={() => setHelpOpen(false)} />}
     </>

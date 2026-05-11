@@ -1,67 +1,46 @@
-.app-content {
-    min-height: calc(100vh - 64px);
+/* Inner content padding (left/right/bottom). AppShell.Main provides the
+   header offset on top. Named `app-shell-content` (not `.app-content`)
+   to avoid collision with ColorAdmin's `.app-content` which carries a
+   `margin-inline-start: $app-sidebar-width` phantom-gutter rule. */
+.app-shell-content {
+    padding: 1.5rem;
+    min-height: calc(100vh - 56px);
 }
 
-#top-menu .menu-item > .menu-link.active {
-    color: inherit;
+/* Pages that need to bleed flush to the edges of <AppShell.Main> (e.g. the
+   Site Configuration layout's left sidenav) opt in by adding this class —
+   it cancels `.app-shell-content`'s padding without forcing every page to
+   manage its own padding state. */
+.app-shell-content > .app-shell-content-edge {
+    margin: -1.5rem;
 }
 
-#top-menu .menu-item > .menu-link .menu-icon {
-    color: inherit;
+/* Floating scroll-to-top button anchored bottom-right of the viewport.
+   Uses Mantine brand color tokens so it follows SiteAppearance. */
+.btn-scroll-to-top {
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--mantine-color-green-filled);
+    color: var(--mantine-color-white);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    z-index: 1100;
+    transition: background 120ms ease;
 }
 
-#top-menu .menu-item.active > .menu-link {
-    background: color-mix(in srgb, var(--bs-app-top-menu-link-active-color) 8%, transparent);
+.btn-scroll-to-top:hover {
+    background: var(--mantine-color-green-filled-hover);
 }
 
-#top-menu .menu-item.active > .menu-link .menu-text,
-#top-menu .menu-item.active > .menu-link .menu-icon {
-    color: var(--bs-app-top-menu-link-active-color);
-}
-
-#top-menu .menu-brand-item {
-    margin-inline-end: 0.75rem;
-}
-
-#top-menu .menu-brand-link {
-    background: transparent !important;
-    font-weight: 700;
-}
-
-#top-menu .menu-brand-image {
-    display: block;
-    max-height: 34px;
-    max-width: 180px;
-    object-fit: contain;
-}
-
-#top-menu .menu-brand-link .menu-icon,
-#top-menu .menu-brand-link .menu-text {
-    color: var(--bs-app-top-menu-link-active-color) !important;
-}
-
-#top-menu .menu-submenu-separator {
-    height: 1px;
-    margin: 0.4rem 0.75rem;
-    background: color-mix(in srgb, var(--bs-app-top-menu-link-active-color) 12%, transparent);
-    padding: 0;
-    pointer-events: none;
-}
-
-/* Tightens horizontal padding on the right-side icon strip (icon menu items,
-   notification bell, user dropdown) so they don't sit ~20px apart. */
-#top-menu .menu-link.menu-link-tight {
-    padding-inline: 0.5rem;
-}
-
-/* Drop the menu-icon's right margin when there's no following text — applies
-   to the icon-only items in the right strip. */
-#top-menu .menu-link.menu-link-tight > .menu-icon:last-child {
-    margin-inline-end: 0;
-}
-
-/* Notification bell + badge. Anchor the badge to the icon's top-right
-   corner instead of fighting Bootstrap's translate-middle. */
+/* Notification bell badge — anchored to the top-right corner of the bell
+   icon in the header. */
 .notification-bell-icon {
     position: relative;
     display: inline-flex;
@@ -78,7 +57,7 @@
     font-size: 0.6rem;
     line-height: 1;
     border-radius: 0.75rem;
-    background-color: var(--bs-danger);
+    background-color: var(--mantine-color-red-filled);
     color: #fff;
     font-weight: 600;
     pointer-events: none;

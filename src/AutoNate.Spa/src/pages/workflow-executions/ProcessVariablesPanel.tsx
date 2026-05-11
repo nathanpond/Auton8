@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Button, NativeSelect, Textarea, TextInput } from "@mantine/core";
 import {
   useAddExecutionVariables,
   useUpdateExecutionVariables
@@ -234,86 +235,87 @@ function renderValueInput(args: {
   placeholder?: string;
 }) {
   const { kind, value, onChange, placeholder } = args;
-  const cls = "form-control form-control-sm";
   switch (kind) {
     case "boolean":
       return (
-        <select
-          className="form-select form-select-sm"
+        <NativeSelect
+          size="xs"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          <option value="">(unset)</option>
-          <option value="true">true</option>
-          <option value="false">false</option>
-        </select>
+          onChange={(e) => onChange(e.currentTarget.value)}
+          data={[
+            { value: "", label: "(unset)" },
+            { value: "true", label: "true" },
+            { value: "false", label: "false" }
+          ]}
+        />
       );
     case "integer":
       return (
-        <input
+        <TextInput
+          size="xs"
           type="number"
           step={1}
-          className={cls}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
           placeholder={placeholder}
         />
       );
     case "decimal":
       return (
-        <input
+        <TextInput
+          size="xs"
           type="number"
           step="any"
-          className={cls}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
           placeholder={placeholder}
         />
       );
     case "date-utc":
       return (
-        <input
+        <TextInput
+          size="xs"
           type="datetime-local"
-          className={cls}
           value={formatForDateTimeLocalInput(value)}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
         />
       );
     case "local-date":
       return (
-        <input
+        <TextInput
+          size="xs"
           type="date"
-          className={cls}
           value={formatForDateInput(value)}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
         />
       );
     case "local-datetime":
       return (
-        <input
+        <TextInput
+          size="xs"
           type="datetime-local"
-          className={cls}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
         />
       );
     case "json":
       return (
-        <textarea
-          className="form-control form-control-sm font-monospace"
+        <Textarea
+          size="xs"
+          styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
           rows={Math.min(8, Math.max(2, value.split("\n").length))}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
           placeholder={placeholder}
         />
       );
     default:
       return (
-        <input
+        <TextInput
+          size="xs"
           type="text"
-          className={cls}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
           placeholder={placeholder}
         />
       );
@@ -519,32 +521,23 @@ export default function ProcessVariablesPanel({
       <div className="workflow-execution-variables-header">
         <h3 className="workflow-execution-variables-title">Process Variables</h3>
         {!editing && canOverride && (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary"
-            onClick={beginEdit}
-          >
+          <Button size="xs" variant="outline" onClick={beginEdit}>
             {variables.length > 0 ? "Edit" : "Add Variable"}
-          </button>
+          </Button>
         )}
         {editing && (
           <div className="workflow-execution-variables-actions">
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-secondary"
-              onClick={cancelEdit}
-              disabled={saving}
-            >
+            <Button size="xs" variant="default" onClick={cancelEdit} disabled={saving}>
               Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
+            </Button>
+            <Button
+              size="xs"
               onClick={saveEdits}
-              disabled={saving || hasErrors || !hasPendingChanges}
+              loading={saving}
+              disabled={hasErrors || !hasPendingChanges}
             >
-              {saving ? "Saving…" : "Save"}
-            </button>
+              Save
+            </Button>
           </div>
         )}
       </div>
@@ -577,7 +570,7 @@ export default function ProcessVariablesPanel({
                       value,
                       onChange: (next) => handleFieldChange(variable.name, next)
                     })}
-                    {error && <div className="invalid-feedback d-block small">{error}</div>}
+                    {error && <div style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}>{error}</div>}
                   </>
                 ) : (
                   <div className="workflow-execution-variable-value">
@@ -600,18 +593,19 @@ export default function ProcessVariablesPanel({
                 return (
                   <li key={row.clientId} className="workflow-execution-variable workflow-execution-variable--new">
                     <div className="workflow-execution-variable-header">
-                      <input
-                        type="text"
-                        className="form-control form-control-sm workflow-execution-variable-new-name"
+                      <TextInput
+                        size="xs"
+                        className="workflow-execution-variable-new-name"
                         placeholder="Variable name"
                         value={row.name}
-                        onChange={(e) => updateDraftField(row.clientId, { name: e.target.value })}
+                        onChange={(e) => updateDraftField(row.clientId, { name: e.currentTarget.value })}
                       />
-                      <select
-                        className="form-select form-select-sm workflow-execution-variable-new-type"
+                      <NativeSelect
+                        size="xs"
+                        className="workflow-execution-variable-new-type"
                         value={row.type}
                         onChange={(e) => {
-                          const nextType = e.target.value as AddableType;
+                          const nextType = e.currentTarget.value as AddableType;
                           // Reset the value when the editor element changes
                           // shape (boolean / date* / json) so the previous
                           // text doesn't render as an invalid selection.
@@ -628,20 +622,18 @@ export default function ProcessVariablesPanel({
                             ...(valueChanges ? { value: "" } : {})
                           });
                         }}
-                      >
-                        {ADDABLE_TYPES.map((type) => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-danger"
+                        data={ADDABLE_TYPES.map((type) => ({ value: type, label: type }))}
+                      />
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        color="red"
                         onClick={() => removeDraft(row.clientId)}
                         aria-label={`Remove variable ${row.name || "(unnamed)"}`}
                         title="Remove"
                       >
                         ×
-                      </button>
+                      </Button>
                     </div>
                     {renderValueInput({
                       kind: editorKind,
@@ -649,21 +641,22 @@ export default function ProcessVariablesPanel({
                       onChange: (next) => updateDraftField(row.clientId, { value: next }),
                       placeholder: editorKind === "json" ? '{ "example": true }' : undefined
                     })}
-                    {error && <div className="invalid-feedback d-block small">{error}</div>}
+                    {error && <div style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}>{error}</div>}
                   </li>
                 );
               })}
             </ul>
           )}
 
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary workflow-execution-variables-add-button"
+          <Button
+            size="xs"
+            variant="default"
+            className="workflow-execution-variables-add-button"
             onClick={addEmptyDraft}
             disabled={saving}
           >
             + Add Variable
-          </button>
+          </Button>
         </div>
       )}
     </aside>

@@ -2,19 +2,19 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactNotifications } from "react-notifications-component";
+import { ModalsProvider } from "@mantine/modals";
+import { Notifications } from "@mantine/notifications";
 
 import Router from "./router";
 import { SiteAppearanceProvider } from "./providers/SiteAppearanceProvider";
+import { MantineRoot } from "./providers/MantineRoot";
 
-import "bootstrap";
 import "@fortawesome/fontawesome-free/css/all.css";
-import "bootstrap-icons/font/bootstrap-icons.css";
-import "react-notifications-component/dist/theme.css";
-import "react-perfect-scrollbar/dist/css/styles.css";
+import "@mantine/core/styles.layer.css";
+import "@mantine/notifications/styles.layer.css";
+import "mantine-datatable/styles.layer.css";
 import "./index.css";
-import "./scss/react.scss";
-import "./scss/app.css"; // AutoNate custom overlay (page-head, quick-link-card, dashboard-stat, etc.)
+import "./widgets.css"; // ManageUsers identity/avatar/status, .row-archived, .notification-unread
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,10 +35,14 @@ createRoot(container).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <SiteAppearanceProvider>
-        <BrowserRouter>
-          <ReactNotifications />
-          <Router />
-        </BrowserRouter>
+        <MantineRoot>
+          <ModalsProvider>
+            <BrowserRouter>
+              <Notifications />
+              <Router />
+            </BrowserRouter>
+          </ModalsProvider>
+        </MantineRoot>
       </SiteAppearanceProvider>
     </QueryClientProvider>
   </React.StrictMode>

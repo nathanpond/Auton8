@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { Alert, Box, Button, Code, FileInput, Group, Modal, Stack, Text } from "@mantine/core";
 import { useUploadPlugin } from "@/hooks/usePlugins";
 
 type Props = {
@@ -7,7 +8,6 @@ type Props = {
 
 export default function UploadPluginModal({ onClose }: Props) {
   const upload = useUploadPlugin();
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,52 +27,40 @@ export default function UploadPluginModal({ onClose }: Props) {
   };
 
   return (
-    <div
-      className="modal d-block"
-      tabIndex={-1}
-      role="dialog"
-      style={{ background: "rgba(0,0,0,0.5)" }}
-    >
-      <div className="modal-dialog modal-dialog-centered" role="document">
-        <form className="modal-content" onSubmit={submit}>
-          <div className="modal-header">
-            <h5 className="modal-title">Upload plugin</h5>
-            <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
-          </div>
-          <div className="modal-body">
-            <p className="text-muted small">
-              Choose a plugin <code>.zip</code> file. The archive must contain a{" "}
-              <code>plugin.json</code> manifest at the root and the entry assembly listed in it.
-            </p>
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".zip,application/zip"
-              className="form-control"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-            {file && (
-              <div className="mt-2 small text-muted">
-                Selected: <strong>{file.name}</strong> ({Math.round(file.size / 1024)} KB)
-              </div>
-            )}
-            {error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
+    <Modal opened onClose={onClose} title="Upload plugin" centered>
+      <Box component="form" onSubmit={submit}>
+        <Stack gap="md">
+          <Text size="xs" c="dimmed">
+            Choose a plugin <Code>.zip</Code> file. The archive must contain a{" "}
+            <Code>plugin.json</Code> manifest at the root and the entry assembly listed in it.
+          </Text>
+          <FileInput
+            accept=".zip,application/zip"
+            placeholder="Pick a .zip file"
+            value={file}
+            onChange={setFile}
+          />
+          {file && (
+            <Text size="xs" c="dimmed">
+              Selected: <strong>{file.name}</strong> ({Math.round(file.size / 1024)} KB)
+            </Text>
+          )}
+          {error && (
+            <Alert color="red" variant="light">
+              {error}
+            </Alert>
+          )}
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!file || upload.isPending}
-            >
-              {upload.isPending ? "Uploading…" : "Upload"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+            </Button>
+            <Button type="submit" disabled={!file} loading={upload.isPending}>
+              Upload
+            </Button>
+          </Group>
+        </Stack>
+      </Box>
+    </Modal>
   );
 }
 

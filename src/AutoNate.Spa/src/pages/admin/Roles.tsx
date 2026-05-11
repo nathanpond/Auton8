@@ -1,5 +1,24 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Code,
+  Grid,
+  Group,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+  UnstyledButton
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import RolesHelpModal from "./RolesHelpModal";
 import { useUsers } from "@/hooks/useUsers";
 import { useGroups } from "@/hooks/useAdmin";
@@ -35,74 +54,100 @@ export default function Roles() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Roles</h1>
-        <p className="page-head-copy">
-          Roles are named handles you can attach permissions to. Manage the actual
-          permissions a role conveys on the{" "}
-          <Link to="/admin/grants">Permissions</Link> page; this page handles the
-          role itself and who is assigned to it.
-        </p>
-      </div>
+      <PageHeader
+        title="Roles"
+        description={
+          <>
+            Roles are named handles you can attach permissions to. Manage the actual permissions a
+            role conveys on the <Link to="/admin/grants">Permissions</Link> page; this page handles
+            the role itself and who is assigned to it.
+          </>
+        }
+      />
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
 
-      <div className="row g-3">
-        <div className="col-lg-5">
-          <div className="panel panel-inverse">
-            <div className="panel-heading d-flex justify-content-between align-items-center">
-              <h4 className="panel-title mb-0">All roles</h4>
-              <button
+      <Grid>
+        <Grid.Col span={{ base: 12, lg: 5 }}>
+          <Card withBorder shadow="sm">
+            <Group justify="space-between" align="center" mb="md">
+              <Title order={5} m={0}>
+                All roles
+              </Title>
+              <Anchor
+                component="button"
                 type="button"
-                className="btn btn-sm btn-link p-0 text-decoration-none"
+                size="sm"
                 onClick={() => setHelpOpen(true)}
                 title="How roles work"
                 aria-label="How roles work"
               >
                 <i className="fa fa-circle-question" /> Help
-              </button>
-            </div>
-            <div className="panel-body">
-              <form onSubmit={submit} className="d-flex gap-2 mb-3">
-                <input
-                  className="form-control"
+              </Anchor>
+            </Group>
+
+            <Box component="form" onSubmit={submit} mb="md">
+              <Group gap="xs">
+                <TextInput
                   placeholder="New role name"
                   value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
+                  onChange={(e) => setNewName(e.currentTarget.value)}
+                  style={{ flex: 1 }}
                 />
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={create.isPending || !newName.trim()}
-                >
+                <Button type="submit" disabled={!newName.trim()} loading={create.isPending}>
                   Create
-                </button>
-              </form>
+                </Button>
+              </Group>
+            </Box>
 
-              {isLoading && <div>Loading…</div>}
-              {!isLoading && roles.length === 0 && <div>No roles yet.</div>}
+            {isLoading && <Text>Loading…</Text>}
+            {!isLoading && roles.length === 0 && <Text c="dimmed">No roles yet.</Text>}
 
-              <ul className="list-group">
-                {roles.map((r) => (
-                  <li
+            <Stack gap={0}>
+              {roles.map((r) => {
+                const isActive = selectedRoleId === r.id;
+                return (
+                  <UnstyledButton
                     key={r.id}
-                    className={`list-group-item d-flex justify-content-between align-items-center ${
-                      selectedRoleId === r.id ? "active" : ""
-                    }`}
-                    style={{ cursor: "pointer" }}
                     onClick={() => setSelectedRoleId(r.id)}
+                    p="sm"
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      borderBottom: "1px solid var(--mantine-color-default-border)",
+                      background: isActive ? "var(--mantine-primary-color-filled)" : "transparent",
+                      color: isActive ? "var(--mantine-primary-color-contrast)" : undefined,
+                      cursor: "pointer"
+                    }}
                   >
                     <span>
                       <strong>{r.name}</strong>
-                      {r.isSystem && <span className="badge bg-secondary ms-2">system</span>}
+                      {r.isSystem && (
+                        <Badge color="gray" variant="filled" ml={8}>
+                          system
+                        </Badge>
+                      )}
                       {r.description && (
-                        <small className="d-block text-muted">{r.description}</small>
+                        <Text
+                          size="sm"
+                          c={isActive ? "var(--mantine-primary-color-contrast)" : "dimmed"}
+                          component="div"
+                        >
+                          {r.description}
+                        </Text>
                       )}
                     </span>
                     {!r.isSystem && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-danger"
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        color={isActive ? "white" : "red"}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (confirm(`Delete role '${r.name}'?`)) {
@@ -112,25 +157,25 @@ export default function Roles() {
                         }}
                       >
                         Delete
-                      </button>
+                      </Button>
                     )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
+                  </UnstyledButton>
+                );
+              })}
+            </Stack>
+          </Card>
+        </Grid.Col>
 
-        <div className="col-lg-7">
+        <Grid.Col span={{ base: 12, lg: 7 }}>
           {selectedRoleId ? (
             <AssignmentsPanel roleId={selectedRoleId} />
           ) : (
-            <div className="panel panel-inverse">
-              <div className="panel-body text-muted">Select a role to manage assignments.</div>
-            </div>
+            <Card withBorder shadow="sm">
+              <Text c="dimmed">Select a role to manage assignments.</Text>
+            </Card>
           )}
-        </div>
-      </div>
+        </Grid.Col>
+      </Grid>
 
       {helpOpen && <RolesHelpModal onClose={() => setHelpOpen(false)} />}
     </>
@@ -144,13 +189,14 @@ function AssignmentsPanel({ roleId }: { roleId: string }) {
   const add = useAddRoleAssignment();
   const revoke = useRevokeRoleAssignment();
   const [kind, setKind] = useState<"user" | "group">("user");
-  const [principalId, setPrincipalId] = useState("");
+  const [principalId, setPrincipalId] = useState<string | null>(null);
   const [scope, setScope] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!principalId) return;
     try {
       await add.mutateAsync({
         roleId,
@@ -158,7 +204,7 @@ function AssignmentsPanel({ roleId }: { roleId: string }) {
         principalId,
         scopeString: scope.trim() || undefined
       });
-      setPrincipalId("");
+      setPrincipalId(null);
       setScope("");
     } catch (err) {
       setError(describeError(err));
@@ -175,103 +221,102 @@ function AssignmentsPanel({ roleId }: { roleId: string }) {
   };
 
   return (
-    <div className="panel panel-inverse">
-      <div className="panel-heading">
-        <h4 className="panel-title">Assignments</h4>
-      </div>
-      <div className="panel-body">
-        {error && <div className="alert alert-danger">{error}</div>}
+    <Card withBorder shadow="sm">
+      <Title order={5} mb="md">
+        Assignments
+      </Title>
 
-        <form onSubmit={submit} className="row g-2 mb-3">
-          <div className="col-sm-2">
-            <select
-              className="form-select"
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
+
+      <Box component="form" onSubmit={submit} mb="md">
+        <Grid>
+          <Grid.Col span={{ base: 12, sm: 2 }}>
+            <Select
               value={kind}
-              onChange={(e) => {
-                setKind(e.target.value as "user" | "group");
-                setPrincipalId("");
+              onChange={(v) => {
+                setKind((v as "user" | "group") ?? "user");
+                setPrincipalId(null);
               }}
-            >
-              <option value="user">user</option>
-              <option value="group">group</option>
-            </select>
-          </div>
-          <div className="col-sm-4">
-            <select
-              className="form-select"
+              data={[
+                { value: "user", label: "user" },
+                { value: "group", label: "group" }
+              ]}
+              allowDeselect={false}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 4 }}>
+            <Select
               value={principalId}
-              onChange={(e) => setPrincipalId(e.target.value)}
-            >
-              <option value="">— pick {kind} —</option>
-              {kind === "user"
-                ? users.map((u) => (
-                    <option key={u.userId} value={u.userId}>
-                      {u.username}
-                    </option>
-                  ))
-                : groups.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
-            </select>
-          </div>
-          <div className="col-sm-4">
-            <input
-              className="form-control font-monospace"
+              onChange={setPrincipalId}
+              placeholder={`— pick ${kind} —`}
+              data={
+                kind === "user"
+                  ? users.map((u) => ({ value: u.userId, label: u.username }))
+                  : groups.map((g) => ({ value: g.id, label: g.name }))
+              }
+              searchable
+              clearable
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 4 }}>
+            <TextInput
               placeholder="optional scope selector"
               value={scope}
-              onChange={(e) => setScope(e.target.value)}
+              onChange={(e) => setScope(e.currentTarget.value)}
+              styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
             />
-          </div>
-          <div className="col-sm-2">
-            <button
-              type="submit"
-              className="btn btn-primary w-100"
-              disabled={add.isPending || !principalId}
-            >
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 2 }}>
+            <Button type="submit" fullWidth disabled={!principalId} loading={add.isPending}>
               Assign
-            </button>
-          </div>
-        </form>
+            </Button>
+          </Grid.Col>
+        </Grid>
+      </Box>
 
-        {assignments.length === 0 ? (
-          <div className="text-muted">No assignments.</div>
-        ) : (
-          <table className="table table-sm">
-            <thead>
-              <tr>
-                <th>Kind</th>
-                <th>Principal</th>
-                <th>Scope</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {assignments.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.principalKind}</td>
-                  <td>{lookup(a.principalKind, a.principalId)}</td>
-                  <td className="font-monospace">{a.scopeString ?? "—"}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-danger"
-                      onClick={() =>
-                        confirm("Revoke assignment?") &&
-                        void revoke.mutateAsync({ assignmentId: a.id, roleId })
-                      }
-                    >
-                      Revoke
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+      {assignments.length === 0 ? (
+        <Text c="dimmed">No assignments.</Text>
+      ) : (
+        <Table verticalSpacing="xs">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Kind</Table.Th>
+              <Table.Th>Principal</Table.Th>
+              <Table.Th>Scope</Table.Th>
+              <Table.Th />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {assignments.map((a) => (
+              <Table.Tr key={a.id}>
+                <Table.Td>{a.principalKind}</Table.Td>
+                <Table.Td>{lookup(a.principalKind, a.principalId)}</Table.Td>
+                <Table.Td>
+                  <Code>{a.scopeString ?? "—"}</Code>
+                </Table.Td>
+                <Table.Td>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    color="red"
+                    onClick={() =>
+                      confirm("Revoke assignment?") &&
+                      void revoke.mutateAsync({ assignmentId: a.id, roleId })
+                    }
+                  >
+                    Revoke
+                  </Button>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
+    </Card>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Alert, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { GATEWAY_CHOICE_VARIABLE, GatewayChoice, TaskFormConfig } from "@/api/executions";
 
 type Props = {
@@ -32,72 +33,50 @@ export default function GatewayChoiceModal({ config, onClose, onComplete }: Prop
   const submitting = submittingFlowId !== null;
 
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h5 className="modal-title">{config.taskName || "Choose a path"}</h5>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={onClose}
-                aria-label="Close"
-                disabled={submitting}
-              />
-            </div>
-            <div className="modal-body">
-              {config.processInstanceName && (
-                <p className="text-body text-opacity-75 mb-2">
-                  <i className="fa fa-diagram-project me-2" />
-                  {config.processInstanceName}
-                </p>
-              )}
-              {config.description && (
-                <p className="mb-3" style={{ whiteSpace: "pre-wrap" }}>
-                  {config.description}
-                </p>
-              )}
-              <p className="mb-2">Pick a path to continue:</p>
-              {error && <div className="alert alert-danger">{error}</div>}
-            </div>
-            <div className="modal-footer flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn btn-outline-secondary me-auto"
-                onClick={onClose}
-                disabled={submitting}
+    <Modal
+      opened
+      onClose={onClose}
+      title={config.taskName || "Choose a path"}
+      closeOnClickOutside={!submitting}
+      closeOnEscape={!submitting}
+      withCloseButton={!submitting}
+    >
+      <Stack gap="sm">
+        {config.processInstanceName && (
+          <Text size="sm" c="dimmed">
+            <i className="fa fa-diagram-project" style={{ marginRight: 8 }} />
+            {config.processInstanceName}
+          </Text>
+        )}
+        {config.description && (
+          <Text style={{ whiteSpace: "pre-wrap" }}>{config.description}</Text>
+        )}
+        <Text>Pick a path to continue:</Text>
+        {error && (
+          <Alert color="red" variant="light">
+            {error}
+          </Alert>
+        )}
+        <Group justify="space-between" gap="xs" wrap="wrap" mt="sm">
+          <Button variant="default" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Group gap="xs" wrap="wrap">
+            {choices.map((choice) => (
+              <Button
+                key={choice.flowId}
+                onClick={() => onPick(choice)}
+                disabled={submitting && submittingFlowId !== choice.flowId}
+                loading={submittingFlowId === choice.flowId}
+                title={choice.description ?? undefined}
               >
-                Cancel
-              </button>
-              {choices.map((choice) => {
-                const isThisOne = submittingFlowId === choice.flowId;
-                return (
-                  <button
-                    key={choice.flowId}
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => onPick(choice)}
-                    disabled={submitting}
-                    title={choice.description ?? undefined}
-                  >
-                    {isThisOne ? (
-                      <>
-                        <i className="fa fa-spinner fa-spin me-2" />
-                        {choice.label}
-                      </>
-                    ) : (
-                      choice.label
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+                {choice.label}
+              </Button>
+            ))}
+          </Group>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 

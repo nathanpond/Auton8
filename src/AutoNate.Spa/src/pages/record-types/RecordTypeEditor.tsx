@@ -1,6 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Divider,
+  Grid,
+  Group,
+  Modal,
+  NativeSelect,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  Textarea,
+  TextInput,
+  Title
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
+import {
   useArchiveField,
   useArchiveRecordType,
   useCreateField,
@@ -65,16 +85,12 @@ export default function RecordTypeEditor() {
 
   if (isLoading || !type) {
     return (
-      <>
-        <div className="page-head">
-          <h1 className="page-header mb-1">Record Type</h1>
-        </div>
-        <div className="panel panel-inverse">
-          <div className="panel-body text-center text-body text-opacity-50 p-4">
-            {isLoading ? "Loading..." : "Record type not found."}
-          </div>
-        </div>
-      </>
+      <Box py="md">
+        <PageHeader title="Record Type" />
+        <Card withBorder p="lg" ta="center">
+          <Text c="dimmed">{isLoading ? "Loading..." : "Record type not found."}</Text>
+        </Card>
+      </Box>
     );
   }
 
@@ -108,174 +124,181 @@ export default function RecordTypeEditor() {
 
   return (
     <>
-      <div className="page-head d-flex justify-content-between align-items-start">
-        <div>
-          <h1 className="page-header mb-1">
-            <code className="me-2">{type.shortCode}</code>
-            {type.name}
-            {type.isArchived && <span className="badge bg-secondary ms-2">Archived</span>}
-          </h1>
-          <p className="page-head-copy mb-0">
-            <Link to="/record-types">&larr; Back to record types</Link>
-          </p>
-        </div>
-        <div className="d-flex gap-2">
-          <Link to={`/records/${type.shortCode}`} className="btn btn-outline-secondary">
-            <i className="fa fa-list me-2"></i>View records
-          </Link>
-          <button
-            type="button"
-            className={`btn ${type.isArchived ? "btn-outline-success" : "btn-outline-warning"}`}
-            onClick={toggleArchived}
-            disabled={archive.isPending || restore.isPending}
-          >
-            <i className={`fa ${type.isArchived ? "fa-box-open" : "fa-box-archive"} me-2`}></i>
-            {type.isArchived ? "Restore" : "Archive"}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={
+          <Group gap="xs" wrap="wrap" align="center">
+            <code style={{ marginRight: 4 }}>{type.shortCode}</code>
+            <Title order={1} m={0} style={{ display: "inline" }}>
+              {type.name}
+            </Title>
+            {type.isArchived && (
+              <Badge color="gray" variant="filled">
+                Archived
+              </Badge>
+            )}
+          </Group>
+        }
+        description={<Link to="/record-types">&larr; Back to record types</Link>}
+        actions={
+          <Group gap="xs">
+            <Button
+              component={Link}
+              to={`/records/${type.shortCode}`}
+              variant="default"
+              leftSection={<i className="fa fa-list" />}
+            >
+              View records
+            </Button>
+            <Button
+              variant="outline"
+              color={type.isArchived ? "green" : "yellow"}
+              leftSection={
+                <i className={`fa ${type.isArchived ? "fa-box-open" : "fa-box-archive"}`} />
+              }
+              onClick={toggleArchived}
+              loading={archive.isPending || restore.isPending}
+            >
+              {type.isArchived ? "Restore" : "Archive"}
+            </Button>
+          </Group>
+        }
+      />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="md"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
-      <div className="panel panel-inverse mb-3">
-        <div className="panel-heading">
-          <h4 className="panel-title">Details</h4>
-        </div>
-        <div className="panel-body">
-          <div className="row g-3">
-            <div className="col-md-6">
-              <label className="form-label">Name</label>
-              <input
-                className="form-control"
-                value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-              />
-            </div>
-            <div className="col-md-3">
-              <label className="form-label">Icon</label>
-              <IconPicker value={iconDraft} onChange={setIconDraft} />
-            </div>
-            <div className="col-md-3">
-              <label className="form-label">Color</label>
-              <ColorPicker value={colorDraft} onChange={setColorDraft} />
-            </div>
-            <div className="col-12">
-              <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows={3}
-                value={descDraft}
-                onChange={(e) => setDescDraft(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="mt-3 text-end">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={saveDetails}
-              disabled={!dirty || update.isPending}
-            >
-              Save details
-            </button>
-          </div>
-        </div>
-      </div>
+      <Card withBorder shadow="sm" mb="md">
+        <Title order={5} mb="md">
+          Details
+        </Title>
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Name"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.currentTarget.value)}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 3 }}>
+            <Text size="sm" fw={500} mb={4}>
+              Icon
+            </Text>
+            <IconPicker value={iconDraft} onChange={setIconDraft} />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 3 }}>
+            <Text size="sm" fw={500} mb={4}>
+              Color
+            </Text>
+            <ColorPicker value={colorDraft} onChange={setColorDraft} />
+          </Grid.Col>
+          <Grid.Col span={12}>
+            <Textarea
+              label="Description"
+              rows={3}
+              value={descDraft}
+              onChange={(e) => setDescDraft(e.currentTarget.value)}
+            />
+          </Grid.Col>
+        </Grid>
+        <Group justify="flex-end" mt="md">
+          <Button onClick={saveDetails} disabled={!dirty || update.isPending} loading={update.isPending}>
+            Save details
+          </Button>
+        </Group>
+      </Card>
 
-      <div className="panel panel-inverse mb-3">
-        <div className="panel-heading d-flex justify-content-between align-items-center">
-          <h4 className="panel-title mb-0">Fields</h4>
-          <div className="d-flex align-items-center gap-3">
-            <div className="form-check form-switch mb-0">
-              <input
-                type="checkbox"
-                className="form-check-input"
-                id="include-archived-fields"
-                checked={includeArchivedFields}
-                onChange={(e) => setIncludeArchivedFields(e.target.checked)}
-              />
-              <label className="form-check-label small" htmlFor="include-archived-fields">
-                Show archived
-              </label>
-            </div>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
+      <Card withBorder shadow="sm" mb="md">
+        <Group justify="space-between" align="center" mb="md">
+          <Title order={5} m={0}>
+            Fields
+          </Title>
+          <Group gap="md" align="center">
+            <Switch
+              id="include-archived-fields"
+              size="sm"
+              checked={includeArchivedFields}
+              onChange={(e) => setIncludeArchivedFields(e.currentTarget.checked)}
+              label="Show archived"
+            />
+            <Button
+              size="xs"
               onClick={() => setFieldModal({ kind: "add" })}
               disabled={fieldTypes.length === 0}
+              leftSection={<i className="fa fa-plus" />}
             >
-              <i className="fa fa-plus me-2"></i>Add field
-            </button>
-          </div>
-        </div>
-        <div className="panel-body">
-          <table className="table table-striped table-bordered align-middle">
-            <thead>
-              <tr>
-                <th style={{ width: "4rem" }}>#</th>
-                <th>Field key</th>
-                <th>Display name</th>
-                <th style={{ width: "9rem" }}>Type</th>
-                <th style={{ width: "6rem" }}>Required</th>
-                <th style={{ width: "9rem" }}>Status</th>
-                <th style={{ width: "6rem" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {fields.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="text-center text-body text-opacity-50 p-4">
-                    No fields yet. Add one to start capturing data.
-                  </td>
-                </tr>
-              )}
-              {fields.map((f) => (
-                <tr key={f.id} className={f.isArchived ? "text-body text-opacity-50" : undefined}>
-                  <td>{f.sortOrder}</td>
-                  <td>
-                    <code>{f.fieldKey}</code>
-                  </td>
-                  <td>{f.displayName}</td>
-                  <td>{humanDataType(f.dataType)}</td>
-                  <td>{f.isRequired ? "Yes" : ""}</td>
-                  <td>
-                    {f.isArchived ? (
-                      <span className="badge bg-secondary">Archived</span>
-                    ) : (
-                      <span className="badge bg-success">Active</span>
-                    )}
-                  </td>
-                  <td className="text-end">
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary btn-sm"
-                      onClick={() => setFieldModal({ kind: "edit", field: f })}
-                    >
-                      Edit
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              Add field
+            </Button>
+          </Group>
+        </Group>
+        <Table withTableBorder withColumnBorders striped verticalSpacing="xs">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th style={{ width: "4rem" }}>#</Table.Th>
+              <Table.Th>Field key</Table.Th>
+              <Table.Th>Display name</Table.Th>
+              <Table.Th style={{ width: "9rem" }}>Type</Table.Th>
+              <Table.Th style={{ width: "6rem" }}>Required</Table.Th>
+              <Table.Th style={{ width: "9rem" }}>Status</Table.Th>
+              <Table.Th style={{ width: "6rem" }} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {fields.length === 0 && (
+              <Table.Tr>
+                <Table.Td colSpan={7} ta="center" py="lg">
+                  <Text c="dimmed">No fields yet. Add one to start capturing data.</Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
+            {fields.map((f) => (
+              <Table.Tr key={f.id} style={f.isArchived ? { opacity: 0.5 } : undefined}>
+                <Table.Td>{f.sortOrder}</Table.Td>
+                <Table.Td>
+                  <code>{f.fieldKey}</code>
+                </Table.Td>
+                <Table.Td>{f.displayName}</Table.Td>
+                <Table.Td>{humanDataType(f.dataType)}</Table.Td>
+                <Table.Td>{f.isRequired ? "Yes" : ""}</Table.Td>
+                <Table.Td>
+                  {f.isArchived ? (
+                    <Badge color="gray" variant="filled">
+                      Archived
+                    </Badge>
+                  ) : (
+                    <Badge color="green" variant="filled">
+                      Active
+                    </Badge>
+                  )}
+                </Table.Td>
+                <Table.Td ta="right">
+                  <Button
+                    size="xs"
+                    variant="default"
+                    onClick={() => setFieldModal({ kind: "edit", field: f })}
+                  >
+                    Edit
+                  </Button>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      </Card>
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">Schema change history</h4>
-        </div>
-        <div className="panel-body">
-          <SchemaAuditPanel recordTypeId={type.id} />
-        </div>
-      </div>
+      <Card withBorder shadow="sm">
+        <Title order={5} mb="md">
+          Schema change history
+        </Title>
+        <SchemaAuditPanel recordTypeId={type.id} />
+      </Card>
 
       {fieldModal.kind !== "none" && (
         <FieldModal
@@ -382,120 +405,93 @@ function FieldModal({
   };
 
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog modal-lg">
-          <div className="modal-content">
-            <form onSubmit={submit}>
-              <div className="modal-header">
-                <h5 className="modal-title">{isEdit ? `Edit field: ${existing?.fieldKey}` : "Add field"}</h5>
-                <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
-              </div>
-              <div className="modal-body">
-                <div className="row g-3">
-                  <div className="col-md-6">
-                    <label className="form-label">Field key</label>
-                    <input
-                      className="form-control"
-                      value={fieldKey}
-                      onChange={(e) => setFieldKey(e.target.value)}
-                      placeholder="status"
-                      required={!isEdit}
-                      disabled={isEdit}
-                    />
-                    <div className="form-text">
-                      Lowercase snake_case. Used as the stable identifier in data and filters. Cannot be changed later.
-                    </div>
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Display name</label>
-                    <input
-                      className="form-control"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Data type</label>
-                    <select
-                      className="form-select"
-                      value={dataType}
-                      onChange={(e) => onTypeChange(e.target.value as FieldDataType)}
-                      disabled={isEdit}
-                    >
-                      {dataTypes.map((dt) => (
-                        <option key={dt} value={dt}>
-                          {humanDataType(dt)}
-                        </option>
-                      ))}
-                    </select>
-                    {isEdit && (
-                      <div className="form-text">
-                        Data type cannot change. Archive this field and add a new one instead.
-                      </div>
-                    )}
-                  </div>
-                  <div className="col-md-3">
-                    <label className="form-label">Sort order</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={sortOrder}
-                      onChange={(e) => setSortOrder(Number(e.target.value))}
-                    />
-                  </div>
-                  <div className="col-md-3 d-flex align-items-end">
-                    <div className="form-check form-switch">
-                      <input
-                        type="checkbox"
-                        className="form-check-input"
-                        id="field-required"
-                        checked={isRequired}
-                        onChange={(e) => setIsRequired(e.target.checked)}
-                      />
-                      <label className="form-check-label" htmlFor="field-required">
-                        Required
-                      </label>
-                    </div>
-                  </div>
-                </div>
-                <hr />
-                <h6 className="mb-3">Configuration</h6>
-                <FieldConfigPanel dataType={dataType} config={config} onChange={setConfig} />
-              </div>
-              <div className="modal-footer d-flex justify-content-between">
-                <div>
-                  {isEdit && existing && (
-                    <button
-                      type="button"
-                      className={`btn ${existing.isArchived ? "btn-outline-success" : "btn-outline-warning"}`}
-                      onClick={toggleArchived}
-                      disabled={archive.isPending || restore.isPending}
-                    >
-                      {existing.isArchived ? "Restore field" : "Archive field"}
-                    </button>
-                  )}
-                </div>
-                <div>
-                  <button type="button" className="btn btn-outline-secondary me-2" onClick={onClose}>
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    disabled={create.isPending || update.isPending}
-                  >
-                    {isEdit ? "Save" : "Add field"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+    <Modal
+      opened
+      onClose={onClose}
+      title={isEdit ? `Edit field: ${existing?.fieldKey}` : "Add field"}
+      size="lg"
+    >
+      <Box component="form" onSubmit={submit}>
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Field key"
+              value={fieldKey}
+              onChange={(e) => setFieldKey(e.currentTarget.value)}
+              placeholder="status"
+              required={!isEdit}
+              disabled={isEdit}
+              description="Lowercase snake_case. Used as the stable identifier in data and filters. Cannot be changed later."
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <TextInput
+              label="Display name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.currentTarget.value)}
+              required
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 6 }}>
+            <NativeSelect
+              label="Data type"
+              value={dataType}
+              onChange={(e) => onTypeChange(e.currentTarget.value as FieldDataType)}
+              disabled={isEdit}
+              data={dataTypes.map((dt) => ({ value: dt, label: humanDataType(dt) }))}
+              description={
+                isEdit
+                  ? "Data type cannot change. Archive this field and add a new one instead."
+                  : undefined
+              }
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 6, md: 3 }}>
+            <TextInput
+              label="Sort order"
+              type="number"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(Number(e.currentTarget.value))}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 6, md: 3 }} style={{ display: "flex", alignItems: "flex-end" }}>
+            <Switch
+              id="field-required"
+              checked={isRequired}
+              onChange={(e) => setIsRequired(e.currentTarget.checked)}
+              label="Required"
+            />
+          </Grid.Col>
+        </Grid>
+        <Divider my="md" />
+        <Title order={6} mb="md">
+          Configuration
+        </Title>
+        <FieldConfigPanel dataType={dataType} config={config} onChange={setConfig} />
+        <Group justify="space-between" mt="md">
+          <Box>
+            {isEdit && existing && (
+              <Button
+                variant="outline"
+                color={existing.isArchived ? "green" : "yellow"}
+                onClick={toggleArchived}
+                disabled={archive.isPending || restore.isPending}
+              >
+                {existing.isArchived ? "Restore field" : "Archive field"}
+              </Button>
+            )}
+          </Box>
+          <Group gap="xs">
+            <Button variant="default" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={create.isPending || update.isPending}>
+              {isEdit ? "Save" : "Add field"}
+            </Button>
+          </Group>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 

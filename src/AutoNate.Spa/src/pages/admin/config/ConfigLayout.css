@@ -1,7 +1,7 @@
 .config-layout {
     display: flex;
     align-items: stretch;
-    min-height: calc(100vh - 64px);
+    min-height: calc(100vh - 56px);
 }
 
 .config-sidenav {

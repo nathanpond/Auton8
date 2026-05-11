@@ -1,3 +1,4 @@
+import { Alert, Badge, Box, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { ComponentHealth, ConnectionHealth, HealthStatus } from "@/api/health";
 import { useSystemHealth } from "@/hooks/useSystemHealth";
 import "./SystemHealth.css";
@@ -7,25 +8,25 @@ export default function SystemHealth() {
 
   if (isLoading) {
     return (
-      <>
-        <div className="page-head">
-          <h1 className="page-header mb-1">System Health</h1>
-        </div>
-        <p className="text-muted">Probing components…</p>
-      </>
+      <Box py="md">
+        <Title order={1} mb="sm">
+          System Health
+        </Title>
+        <Text c="dimmed">Probing components…</Text>
+      </Box>
     );
   }
 
   if (isError || !data) {
     return (
-      <>
-        <div className="page-head">
-          <h1 className="page-header mb-1">System Health</h1>
-        </div>
-        <div className="alert alert-danger">
+      <Box py="md">
+        <Title order={1} mb="sm">
+          System Health
+        </Title>
+        <Alert color="red" variant="light">
           {error instanceof Error ? error.message : "Failed to load system health."}
-        </div>
-      </>
+        </Alert>
+      </Box>
     );
   }
 
@@ -33,69 +34,61 @@ export default function SystemHealth() {
   const componentsById = new Map(data.components.map((c) => [c.id, c]));
 
   return (
-    <>
-      <div className="page-head d-flex justify-content-between align-items-start gap-3">
-        <div>
-          <h1 className="page-header mb-1">System Health</h1>
-          <p className="page-head-copy mb-0">
+    <Box py="md">
+      <Group justify="space-between" align="flex-start" wrap="wrap" gap="md" mb="lg">
+        <Stack gap={4}>
+          <Title order={1}>System Health</Title>
+          <Text size="sm" c="dimmed" maw={680}>
             Live status of every component and the connections between them. Refreshes
             automatically every 5 seconds.
-          </p>
-        </div>
-        <div className="text-end small text-muted">
-          <div>
+          </Text>
+        </Stack>
+        <Stack gap={6} align="flex-end">
+          <Text size="xs" c="dimmed">
             Last checked: <strong>{new Date(dataUpdatedAt).toLocaleTimeString()}</strong>
-            {isFetching && <i className="fa fa-rotate fa-spin ms-2" aria-hidden="true" />}
-          </div>
-          <div className="mt-1">
+            {isFetching && <i className="fa fa-rotate fa-spin" aria-hidden style={{ marginLeft: 8 }} />}
+          </Text>
+          <Group gap="xs">
             <SummaryPill label="Services" up={summary.componentsUp} total={summary.componentsTotal} />
             <SummaryPill
               label="Connections"
               up={summary.connectionsUp}
               total={summary.connectionsTotal}
             />
-          </div>
-        </div>
-      </div>
+          </Group>
+        </Stack>
+      </Group>
 
       <div className="system-health-grid">
-        <div className="panel panel-inverse system-health-services">
-          <div className="panel-heading">
-            <h4 className="panel-title">
-              <i className="fa fa-cubes me-2" aria-hidden="true" />
-              Services
-            </h4>
-          </div>
-          <div className="panel-body p-0">
-            <ul className="system-health-service-list">
-              {data.components.map((component) => (
-                <ServiceRow key={component.id} component={component} />
-              ))}
-            </ul>
-          </div>
-        </div>
+        <Paper withBorder radius="md" className="system-health-services">
+          <Group gap="xs" px="md" py="sm" style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}>
+            <i className="fa fa-cubes" aria-hidden />
+            <Text fw={600}>Services</Text>
+          </Group>
+          <ul className="system-health-service-list">
+            {data.components.map((component) => (
+              <ServiceRow key={component.id} component={component} />
+            ))}
+          </ul>
+        </Paper>
 
-        <div className="panel panel-inverse system-health-connections-panel">
-          <div className="panel-heading">
-            <h4 className="panel-title">
-              <i className="fa fa-link me-2" aria-hidden="true" />
-              Connections
-            </h4>
-          </div>
-          <div className="panel-body">
-            <ul className="system-health-connection-list">
-              {data.connections.map((connection, index) => (
-                <ConnectionLink
-                  key={`${connection.from}->${connection.to}-${index}`}
-                  connection={connection}
-                  componentsById={componentsById}
-                />
-              ))}
-            </ul>
-          </div>
-        </div>
+        <Paper withBorder radius="md" className="system-health-connections-panel">
+          <Group gap="xs" px="md" py="sm" style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}>
+            <i className="fa fa-link" aria-hidden />
+            <Text fw={600}>Connections</Text>
+          </Group>
+          <ul className="system-health-connection-list">
+            {data.connections.map((connection, index) => (
+              <ConnectionLink
+                key={`${connection.from}->${connection.to}-${index}`}
+                connection={connection}
+                componentsById={componentsById}
+              />
+            ))}
+          </ul>
+        </Paper>
       </div>
-    </>
+    </Box>
   );
 }
 
@@ -153,11 +146,11 @@ function ConnectionLink({
 
 function SummaryPill({ label, up, total }: { label: string; up: number; total: number }) {
   const allHealthy = up === total;
-  const cls = allHealthy ? "bg-success" : up === 0 ? "bg-danger" : "bg-warning text-dark";
+  const color = allHealthy ? "green" : up === 0 ? "red" : "yellow";
   return (
-    <span className={`badge rounded-pill me-2 ${cls}`}>
+    <Badge color={color} radius="xl" variant="filled">
       {label}: {up}/{total}
-    </span>
+    </Badge>
   );
 }
 

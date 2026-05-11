@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Alert, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { TaskFormConfig } from "@/api/executions";
 
 type Props = {
@@ -28,71 +29,48 @@ export default function SimpleCompleteTaskModal({ config, onClose, onComplete }:
   };
 
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h5 className="modal-title">{config.taskName || "Complete task"}</h5>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={onClose}
-                aria-label="Close"
-                disabled={submitting}
-              />
-            </div>
-            <div className="modal-body">
-              {config.processInstanceName && (
-                <p className="text-body text-opacity-75 mb-2">
-                  <i className="fa fa-diagram-project me-2" />
-                  {config.processInstanceName}
-                </p>
-              )}
-              {config.description && (
-                <p className="mb-2" style={{ whiteSpace: "pre-wrap" }}>
-                  {config.description}
-                </p>
-              )}
-              <p>
-                Mark this task complete? The workflow will continue from here using the
-                process variables already on the instance.
-              </p>
-              {error && <div className="alert alert-danger">{error}</div>}
-            </div>
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-outline-secondary"
-                onClick={onClose}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-success"
-                onClick={onClick}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <>
-                    <i className="fa fa-spinner fa-spin me-2" />
-                    Completing…
-                  </>
-                ) : (
-                  <>
-                    <i className="fa fa-check me-2" />
-                    Complete Task
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+    <Modal
+      opened
+      onClose={onClose}
+      title={config.taskName || "Complete task"}
+      closeOnClickOutside={!submitting}
+      closeOnEscape={!submitting}
+      withCloseButton={!submitting}
+    >
+      <Stack gap="sm">
+        {config.processInstanceName && (
+          <Text size="sm" c="dimmed">
+            <i className="fa fa-diagram-project" style={{ marginRight: 8 }} />
+            {config.processInstanceName}
+          </Text>
+        )}
+        {config.description && (
+          <Text style={{ whiteSpace: "pre-wrap" }}>{config.description}</Text>
+        )}
+        <Text>
+          Mark this task complete? The workflow will continue from here using the process
+          variables already on the instance.
+        </Text>
+        {error && (
+          <Alert color="red" variant="light">
+            {error}
+          </Alert>
+        )}
+        <Group justify="flex-end" gap="xs" mt="sm">
+          <Button variant="default" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            color="green"
+            onClick={onClick}
+            loading={submitting}
+            leftSection={!submitting ? <i className="fa fa-check" /> : undefined}
+          >
+            Complete Task
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 

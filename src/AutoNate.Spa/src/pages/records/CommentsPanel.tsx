@@ -1,5 +1,16 @@
 import { useState } from "react";
 import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Group,
+  Stack,
+  Switch,
+  Text,
+  Textarea
+} from "@mantine/core";
+import {
   useCreateComment,
   useDeleteComment,
   useEditComment,
@@ -66,114 +77,120 @@ export default function CommentsPanel({ recordId }: Props) {
   };
 
   return (
-    <>
-      <div className="d-flex justify-content-end mb-3">
-        <div className="form-check form-switch mb-0">
-          <input
-            type="checkbox"
-            className="form-check-input"
-            id="comments-include-deleted"
-            checked={includeDeleted}
-            onChange={(e) => setIncludeDeleted(e.target.checked)}
-          />
-          <label className="form-check-label small" htmlFor="comments-include-deleted">
-            Show deleted
-          </label>
-        </div>
-      </div>
+    <Stack gap="md">
+      <Group justify="flex-end">
+        <Switch
+          checked={includeDeleted}
+          onChange={(e) => setIncludeDeleted(e.currentTarget.checked)}
+          label="Show deleted"
+          size="sm"
+        />
+      </Group>
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
-      {isLoading && <p className="text-body text-opacity-50 mb-3">Loading comments...</p>}
+      {isLoading && (
+        <Text size="sm" c="dimmed">
+          Loading comments...
+        </Text>
+      )}
 
       {!isLoading && ordered.length === 0 && (
-        <p className="text-body text-opacity-50 mb-3">No comments yet.</p>
+        <Text size="sm" c="dimmed">
+          No comments yet.
+        </Text>
       )}
 
-      <ul className="list-unstyled mb-3">
+      <Stack gap="md">
         {ordered.map((c) => {
           const isEditing = editingId === c.id;
           return (
-            <li
+            <Box
               key={c.id}
-              className={`mb-3 pb-3 border-bottom ${c.isDeleted ? "text-body text-opacity-50" : ""}`}
+              pb="md"
+              style={{
+                borderBottom: "1px solid var(--mantine-color-default-border)",
+                opacity: c.isDeleted ? 0.6 : 1
+              }}
             >
-              <div className="d-flex justify-content-between align-items-start small text-body text-opacity-75 mb-1">
-                <div>
-                  <i className="fa fa-user me-2"></i>
+              <Group justify="space-between" align="flex-start" wrap="nowrap" mb={6}>
+                <Text size="xs" c="dimmed" component="div">
+                  <i className="fa fa-user" style={{ marginRight: 6 }} />
                   <UserBadge userId={c.authorId} />
-                  <span className="mx-2">·</span>
+                  <span style={{ margin: "0 8px" }}>·</span>
                   <span>{formatWhen(c.createdAtUtc)}</span>
                   {c.isEdited && !c.isDeleted && (
-                    <button
-                      type="button"
-                      className="btn btn-link btn-sm p-0 ms-2 align-baseline"
+                    <Button
+                      variant="subtle"
+                      size="compact-xs"
+                      ml={4}
                       onClick={() => setRevisionsTarget(c)}
                     >
                       (edited — view history)
-                    </button>
+                    </Button>
                   )}
-                  {c.isDeleted && <span className="badge bg-secondary ms-2">Deleted</span>}
-                </div>
+                  {c.isDeleted && (
+                    <Badge color="gray" variant="filled" ml={8}>
+                      Deleted
+                    </Badge>
+                  )}
+                </Text>
                 {!c.isDeleted && !isEditing && (
-                  <div className="d-flex gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-link btn-sm p-0"
-                      onClick={() => startEdit(c)}
-                    >
+                  <Group gap="xs">
+                    <Button variant="subtle" size="compact-xs" onClick={() => startEdit(c)}>
                       Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-link btn-sm p-0 text-danger"
+                    </Button>
+                    <Button
+                      variant="subtle"
+                      color="red"
+                      size="compact-xs"
                       onClick={() => onDelete(c.id)}
-                      disabled={del.isPending}
+                      loading={del.isPending}
                     >
                       Delete
-                    </button>
-                  </div>
+                    </Button>
+                  </Group>
                 )}
-              </div>
+              </Group>
               {isEditing ? (
-                <div>
-                  <textarea
-                    className="form-control mb-2"
-                    rows={3}
+                <Stack gap="xs">
+                  <Textarea
+                    minRows={3}
+                    autosize
                     value={editingBody}
-                    onChange={(e) => setEditingBody(e.target.value)}
+                    onChange={(e) => setEditingBody(e.currentTarget.value)}
                   />
-                  <div className="text-end">
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary btn-sm me-2"
+                  <Group justify="flex-end" gap="xs">
+                    <Button
+                      variant="default"
+                      size="xs"
                       onClick={() => {
                         setEditingId(null);
                         setEditingBody("");
                       }}
                     >
                       Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
+                    </Button>
+                    <Button
+                      size="xs"
                       onClick={saveEdit}
-                      disabled={edit.isPending || editingBody.trim().length === 0}
+                      loading={edit.isPending}
+                      disabled={editingBody.trim().length === 0}
                     >
                       Save
-                    </button>
-                  </div>
-                </div>
+                    </Button>
+                  </Group>
+                </Stack>
               ) : (
                 <pre
-                  className="mb-0"
                   style={{
                     whiteSpace: "pre-wrap",
                     fontFamily: "inherit",
@@ -184,31 +201,33 @@ export default function CommentsPanel({ recordId }: Props) {
                   {c.body}
                 </pre>
               )}
-            </li>
+            </Box>
           );
         })}
-      </ul>
+      </Stack>
 
-      <form onSubmit={submitNew}>
-        <div className="mb-2">
-          <textarea
-            className="form-control"
-            rows={3}
+      <Box component="form" onSubmit={submitNew}>
+        <Stack gap="xs">
+          <Textarea
+            minRows={3}
+            autosize
             placeholder="Add a comment..."
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => setDraft(e.currentTarget.value)}
           />
-        </div>
-        <div className="text-end">
-          <button
-            type="submit"
-            className="btn btn-primary btn-sm"
-            disabled={create.isPending || draft.trim().length === 0}
-          >
-            <i className="fa fa-comment me-2"></i>Post comment
-          </button>
-        </div>
-      </form>
+          <Group justify="flex-end">
+            <Button
+              type="submit"
+              size="sm"
+              loading={create.isPending}
+              disabled={draft.trim().length === 0}
+              leftSection={<i className="fa fa-comment" />}
+            >
+              Post comment
+            </Button>
+          </Group>
+        </Stack>
+      </Box>
 
       {revisionsTarget && (
         <CommentRevisionsDialog
@@ -217,7 +236,7 @@ export default function CommentsPanel({ recordId }: Props) {
           onClose={() => setRevisionsTarget(null)}
         />
       )}
-    </>
+    </Stack>
   );
 }
 

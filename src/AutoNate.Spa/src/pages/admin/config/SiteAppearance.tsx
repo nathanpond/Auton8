@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { AxiosError } from "axios";
-import ColorPicker from "@/components/ColorPicker";
+import {
+  Alert,
+  Box,
+  Button,
+  ColorInput,
+  Group,
+  Paper,
+  Radio,
+  SimpleGrid,
+  Stack,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
 import SiteBrand from "@/components/SiteBrand";
 import {
   useAdminSiteAppearance,
@@ -29,35 +42,22 @@ type BrandingFieldKey =
   | "loginTagline"
   | "loginCoverImageUrl";
 
+// Only the keys that drive the live Mantine theme are surfaced. ColorAdmin-era
+// fields (header above the top bar, sidebar, secondaryButton, dropdownBg,
+// modalBg) keep their saved values in the database but aren't editable here —
+// they have no effect on the current UI.
 type ColorFieldKey =
   | "primaryAccentColor"
-  | "headerBg"
-  | "headerColor"
   | "topMenuBg"
   | "topMenuLinkColor"
   | "topMenuLinkHoverBg"
   | "topMenuLinkHoverColor"
   | "topMenuLinkActiveBg"
   | "topMenuLinkActiveColor"
-  | "sidebarBg"
-  | "sidebarLinkColor"
-  | "sidebarLinkHoverColor"
-  | "sidebarActiveBg"
-  | "sidebarActiveColor"
-  | "sidebarIconColor"
-  | "sidebarSubmenuBg"
-  | "sidebarSectionColor"
   | "surfaceBg"
   | "surfaceSecondaryBg"
   | "surfaceTextColor"
-  | "borderColor"
-  | "dropdownBg"
-  | "modalBg"
-  | "secondaryButtonBg"
-  | "secondaryButtonTextColor"
-  | "secondaryButtonBorderColor"
-  | "secondaryButtonHoverBg"
-  | "secondaryButtonHoverTextColor";
+  | "borderColor";
 
 type TextFieldConfig = {
   key: BrandingFieldKey;
@@ -78,7 +78,7 @@ const BRANDING_FIELDS: TextFieldConfig[] = [
   {
     key: "logoImageUrl",
     label: "Logo image URL/path",
-    placeholder: "/spa/assets/img/logo.png",
+    placeholder: "/assets/img/logo.png",
     optional: true
   },
   {
@@ -90,49 +90,28 @@ const BRANDING_FIELDS: TextFieldConfig[] = [
   {
     key: "loginCoverImageUrl",
     label: "Login cover image URL/path",
-    placeholder: "/spa/assets/img/login-bg/login-bg-17.jpg",
+    placeholder: "/assets/img/login-bg/space.jpg",
     optional: true
   }
 ];
 
-const HEADER_FIELDS: ColorFieldConfig[] = [
-  { key: "headerBg", label: "Header background" },
-  { key: "headerColor", label: "Header text" },
-  { key: "topMenuBg", label: "Top menu background" },
-  { key: "topMenuLinkColor", label: "Top menu link color" },
-  { key: "topMenuLinkHoverBg", label: "Top menu hover background" },
-  { key: "topMenuLinkHoverColor", label: "Top menu hover color" },
-  { key: "topMenuLinkActiveBg", label: "Top menu active background" },
-  { key: "topMenuLinkActiveColor", label: "Top menu active color" }
-];
-
-const SIDEBAR_FIELDS: ColorFieldConfig[] = [
-  { key: "sidebarBg", label: "Sidebar background" },
-  { key: "sidebarLinkColor", label: "Sidebar link color" },
-  { key: "sidebarLinkHoverColor", label: "Sidebar hover color" },
-  { key: "sidebarActiveBg", label: "Sidebar active background" },
-  { key: "sidebarActiveColor", label: "Sidebar active color" },
-  { key: "sidebarIconColor", label: "Sidebar icon color" },
-  { key: "sidebarSubmenuBg", label: "Sidebar submenu background" },
-  { key: "sidebarSectionColor", label: "Sidebar section text" }
+const TOP_BAR_FIELDS: ColorFieldConfig[] = [
+  { key: "topMenuBg", label: "Background" },
+  { key: "topMenuLinkColor", label: "Text & icon color" },
+  { key: "topMenuLinkHoverBg", label: "Hover background" },
+  { key: "topMenuLinkHoverColor", label: "Hover text color" },
+  { key: "topMenuLinkActiveBg", label: "Active background" },
+  { key: "topMenuLinkActiveColor", label: "Active text color" }
 ];
 
 const SURFACE_FIELDS: ColorFieldConfig[] = [
-  { key: "surfaceBg", label: "Surface background" },
-  { key: "surfaceSecondaryBg", label: "Secondary surface background" },
-  { key: "surfaceTextColor", label: "Surface text color" },
-  { key: "borderColor", label: "Border color" },
-  { key: "dropdownBg", label: "Dropdown background" },
-  { key: "modalBg", label: "Modal background" }
+  { key: "surfaceBg", label: "Page background" },
+  { key: "surfaceSecondaryBg", label: "Secondary surface" },
+  { key: "surfaceTextColor", label: "Body text" },
+  { key: "borderColor", label: "Border color" }
 ];
 
-const SECONDARY_BUTTON_FIELDS: ColorFieldConfig[] = [
-  { key: "secondaryButtonBg", label: "Secondary button background" },
-  { key: "secondaryButtonTextColor", label: "Secondary button text" },
-  { key: "secondaryButtonBorderColor", label: "Secondary button border" },
-  { key: "secondaryButtonHoverBg", label: "Secondary button hover background" },
-  { key: "secondaryButtonHoverTextColor", label: "Secondary button hover text" }
-];
+const SAVED_MESSAGE = "Appearance settings saved.";
 
 export default function SiteAppearancePage() {
   const { data, isLoading } = useAdminSiteAppearance();
@@ -158,7 +137,6 @@ export default function SiteAppearancePage() {
 
   useEffect(() => {
     if (!hasDraft) return;
-
     if (isDirty) {
       setPreviewAppearance(currentDraft);
     } else {
@@ -194,7 +172,7 @@ export default function SiteAppearancePage() {
       setDraft(normalized);
       clearPreviewAppearance();
       setErrors({});
-      setSaveMessage("Appearance settings saved.");
+      setSaveMessage(SAVED_MESSAGE);
     } catch (error) {
       setSaveMessage(describeError(error));
     }
@@ -214,126 +192,103 @@ export default function SiteAppearancePage() {
   };
 
   return (
-    <>
-      <div className="page-head">
-        <div className="d-flex flex-wrap gap-3 justify-content-between align-items-start">
-          <div>
-            <h1 className="page-header mb-1">Appearance</h1>
-            <p className="page-head-copy mb-0">
+    <Box py="md">
+      <Stack gap="lg">
+        <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
+          <Stack gap={4}>
+            <Title order={1}>Appearance</Title>
+            <Text size="sm" c="dimmed">
               Customize branding, navigation colors, and core surfaces with a live preview.
-            </p>
-          </div>
-
-          <div className="d-flex flex-wrap gap-2 site-appearance-actions">
-            <button
-              type="button"
-              className="btn btn-site-secondary"
+            </Text>
+          </Stack>
+          <Group gap="xs" wrap="wrap">
+            <Button
+              variant="default"
               onClick={resetToSaved}
               disabled={isLoading || updateAppearance.isPending}
             >
               Reset to saved
-            </button>
-            <button
-              type="button"
-              className="btn btn-site-secondary"
+            </Button>
+            <Button
+              variant="default"
               onClick={resetToDefaults}
               disabled={updateAppearance.isPending}
             >
               Reset to defaults
-            </button>
-            <button
-              type="button"
-              className="btn btn-theme"
+            </Button>
+            <Button
               onClick={() => void handleSave()}
-              disabled={isLoading || updateAppearance.isPending || !isDirty}
+              loading={updateAppearance.isPending}
+              disabled={isLoading || !isDirty}
             >
-              {updateAppearance.isPending ? "Saving..." : "Save changes"}
-            </button>
-          </div>
-        </div>
-      </div>
+              Save changes
+            </Button>
+          </Group>
+        </Group>
 
-      <div className="site-appearance-grid">
         {saveMessage && (
-          <div
-            className={`alert ${saveMessage === "Appearance settings saved." ? "alert-success" : "alert-danger"} mb-0`}
-          >
+          <Alert color={saveMessage === SAVED_MESSAGE ? "green" : "red"} variant="light">
             {saveMessage}
-          </div>
+          </Alert>
         )}
 
-        <div className="panel panel-inverse">
-          <div className="panel-heading">
-            <h4 className="panel-title mb-0">Branding</h4>
-          </div>
-          <div className="panel-body">
-            <div className="mb-3">
-              <div className="form-label">Logo mode</div>
-              <div className="d-flex flex-wrap gap-3">
-                <label className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="radio"
-                    name="logoMode"
-                    checked={currentDraft.logoMode === "icon"}
-                    onChange={() => updateField("logoMode", "icon")}
-                  />
-                  <span className="form-check-label">Icon + text</span>
-                </label>
-                <label className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="radio"
-                    name="logoMode"
-                    checked={currentDraft.logoMode === "image"}
-                    onChange={() => updateField("logoMode", "image")}
-                  />
-                  <span className="form-check-label">Image logo</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="site-appearance-section-grid">
+        <Section title="Branding">
+          <Stack gap="md">
+            <Radio.Group
+              label="Logo mode"
+              value={currentDraft.logoMode}
+              onChange={(value) => updateField("logoMode", value as SiteAppearance["logoMode"])}
+            >
+              <Group gap="md" mt="xs">
+                <Radio value="icon" label="Icon + text" />
+                <Radio value="image" label="Image logo" />
+              </Group>
+            </Radio.Group>
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
               {BRANDING_FIELDS.map((field) => (
                 <TextInput
                   key={field.key}
-                  label={field.label}
-                  value={currentDraft[field.key]}
+                  label={
+                    field.optional ? (
+                      <span>
+                        {field.label}{" "}
+                        <Text component="span" c="dimmed" size="xs">
+                          (optional)
+                        </Text>
+                      </span>
+                    ) : (
+                      field.label
+                    )
+                  }
+                  value={currentDraft[field.key] ?? ""}
                   placeholder={field.placeholder}
-                  optional={field.optional}
                   error={errors[field.key]}
-                  onChange={(value) => updateField(field.key, value)}
+                  onChange={(event) => updateField(field.key, event.currentTarget.value)}
                 />
               ))}
-            </div>
-          </div>
-        </div>
+            </SimpleGrid>
+          </Stack>
+        </Section>
 
-        <div className="panel panel-inverse">
-          <div className="panel-heading">
-            <h4 className="panel-title mb-0">Primary Theme</h4>
-          </div>
-          <div className="panel-body">
-            <ColorField
-              label="Primary accent color"
+        <Section title="Brand Color">
+          <Box maw={360}>
+            <ColorInput
+              label="Primary accent"
+              description="Drives Mantine's brand palette and the active states in the top bar."
+              format="hex"
+              withEyeDropper
               value={currentDraft.primaryAccentColor}
               error={errors.primaryAccentColor}
               onChange={(value) => updateField("primaryAccentColor", value)}
+              popoverProps={{ withinPortal: true, position: "bottom-start" }}
             />
-          </div>
-        </div>
+          </Box>
+        </Section>
 
         <ColorSection
-          title="Header / Top Menu"
-          fields={HEADER_FIELDS}
-          values={currentDraft}
-          errors={errors}
-          onChange={updateField}
-        />
-
-        <ColorSection
-          title="Sidebar"
-          fields={SIDEBAR_FIELDS}
+          title="Top Bar"
+          description="Controls the dark navigation bar at the top of every signed-in page."
+          fields={TOP_BAR_FIELDS}
           values={currentDraft}
           errors={errors}
           onChange={updateField}
@@ -341,151 +296,122 @@ export default function SiteAppearancePage() {
 
         <ColorSection
           title="Surfaces"
+          description="Mirrored into Mantine's body / text / border tokens via the SiteAppearance bridge."
           fields={SURFACE_FIELDS}
           values={currentDraft}
           errors={errors}
           onChange={updateField}
         />
 
-        <ColorSection
-          title="Secondary Buttons"
-          fields={SECONDARY_BUTTON_FIELDS}
-          values={currentDraft}
-          errors={errors}
-          onChange={updateField}
-        />
+        <Section title="Live Preview">
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+            <TopMenuPreview appearance={currentDraft} />
+            <SurfacePreview appearance={currentDraft} />
+            <LoginPreview appearance={currentDraft} />
+          </SimpleGrid>
+        </Section>
+      </Stack>
+    </Box>
+  );
+}
 
-        <div className="panel panel-inverse">
-          <div className="panel-heading">
-            <h4 className="panel-title mb-0">Live Preview</h4>
-          </div>
-          <div className="panel-body">
-            <div className="site-appearance-preview-grid">
-              <TopMenuPreview appearance={currentDraft} />
-              <SidebarPreview appearance={currentDraft} />
-              <SurfacePreview appearance={currentDraft} />
-              <LoginPreview appearance={currentDraft} />
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
+function Section({
+  title,
+  description,
+  children
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Paper withBorder radius="md" p="md">
+      <Stack gap="sm">
+        <Stack gap={2}>
+          <Title order={4}>{title}</Title>
+          {description && (
+            <Text size="xs" c="dimmed">
+              {description}
+            </Text>
+          )}
+        </Stack>
+        {children}
+      </Stack>
+    </Paper>
   );
 }
 
 function ColorSection({
   title,
+  description,
   fields,
   values,
   errors,
   onChange
 }: {
   title: string;
+  description?: string;
   fields: ColorFieldConfig[];
   values: SiteAppearance;
   errors: SiteAppearanceErrors;
   onChange: <K extends keyof SiteAppearance>(key: K, value: SiteAppearance[K]) => void;
 }) {
   return (
-    <div className="panel panel-inverse">
-      <div className="panel-heading">
-        <h4 className="panel-title mb-0">{title}</h4>
-      </div>
-      <div className="panel-body">
-        <div className="site-appearance-section-grid">
-          {fields.map((field) => (
-            <ColorField
-              key={field.key}
-              label={field.label}
-              value={values[field.key]}
-              error={errors[field.key]}
-              onChange={(value) => onChange(field.key, value)}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TextInput({
-  label,
-  value,
-  placeholder,
-  optional,
-  error,
-  onChange
-}: {
-  label: string;
-  value: string | null;
-  placeholder?: string;
-  optional?: boolean;
-  error?: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div>
-      <label className="form-label">
-        {label}
-        {optional ? <span className="text-body text-opacity-50 ms-1">(optional)</span> : null}
-      </label>
-      <input
-        className={`form-control ${error ? "is-invalid" : ""}`}
-        value={value ?? ""}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      {error ? <div className="invalid-feedback">{error}</div> : null}
-    </div>
-  );
-}
-
-function ColorField({
-  label,
-  value,
-  error,
-  onChange
-}: {
-  label: string;
-  value: string;
-  error?: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div>
-      <div className="site-appearance-swatch-label">{label}</div>
-      <ColorPicker value={value} onChange={onChange} />
-      {error ? <div className="text-danger small mt-1">{error}</div> : null}
-    </div>
+    <Section title={title} description={description}>
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+        {fields.map((field) => (
+          <ColorInput
+            key={field.key}
+            label={field.label}
+            format="hex"
+            withEyeDropper
+            value={values[field.key]}
+            error={errors[field.key]}
+            onChange={(value) => onChange(field.key, value)}
+            popoverProps={{ withinPortal: true, position: "bottom-start" }}
+          />
+        ))}
+      </SimpleGrid>
+    </Section>
   );
 }
 
 function TopMenuPreview({ appearance }: { appearance: SiteAppearance }) {
   return (
-    <div className="site-appearance-preview-card">
-      <div
-        className="site-appearance-preview-header d-flex justify-content-between align-items-center gap-3"
+    <PreviewCard>
+      <Box
+        className="site-appearance-preview-header"
         style={{ background: appearance.topMenuBg, color: appearance.topMenuLinkColor }}
       >
-        <SiteBrand
-          appearance={appearance}
-          className="d-inline-flex align-items-center gap-2 fw-bold"
-          iconClassName="d-inline-flex align-items-center"
-          textClassName="d-inline-flex align-items-center"
-          imageClassName="site-appearance-brand-image"
-        />
-        <div className="d-flex gap-2 flex-wrap">
-          <PreviewMenuChip label="Home" bg={appearance.topMenuLinkHoverBg} color={appearance.topMenuLinkHoverColor} />
-          <PreviewMenuChip label="Records" bg={appearance.topMenuLinkActiveBg} color={appearance.topMenuLinkActiveColor} />
-          <PreviewMenuChip label="Workflows" bg="transparent" color={appearance.topMenuLinkColor} />
-        </div>
-      </div>
-      <div className="site-appearance-preview-body">
-        <div className="small text-body text-opacity-50 mb-2">Buttons and badges</div>
-        <div className="d-flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="btn"
+        <Group justify="space-between" align="center" wrap="nowrap" gap="md">
+          <SiteBrand
+            appearance={appearance}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 700 }}
+            iconClassName=""
+            textClassName=""
+            imageClassName="site-appearance-brand-image"
+          />
+          <Group gap="xs" wrap="wrap">
+            <PreviewMenuChip
+              label="Home"
+              bg={appearance.topMenuLinkHoverBg}
+              color={appearance.topMenuLinkHoverColor}
+            />
+            <PreviewMenuChip
+              label="Records"
+              bg={appearance.topMenuLinkActiveBg}
+              color={appearance.topMenuLinkActiveColor}
+            />
+            <PreviewMenuChip label="Workflows" bg="transparent" color={appearance.topMenuLinkColor} />
+          </Group>
+        </Group>
+      </Box>
+      <Box className="site-appearance-preview-body">
+        <Text size="xs" c="dimmed" mb="xs">
+          Buttons and badges
+        </Text>
+        <Group gap="xs" wrap="wrap">
+          <Button
             style={{
               background: appearance.primaryAccentColor,
               borderColor: appearance.primaryAccentColor,
@@ -493,143 +419,145 @@ function TopMenuPreview({ appearance }: { appearance: SiteAppearance }) {
             }}
           >
             Primary action
-          </button>
-          <button type="button" className="btn btn-site-secondary">
-            Secondary action
-          </button>
-          <span
-            className="badge rounded-pill px-3 py-2"
+          </Button>
+          <Button variant="default">Secondary action</Button>
+          <Box
+            component="span"
+            px="md"
+            py={6}
             style={{
+              borderRadius: 999,
+              fontSize: 12,
               background: appearance.primaryAccentColor,
               color: badgeTextColor(appearance.primaryAccentColor)
             }}
           >
             Accent badge
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SidebarPreview({ appearance }: { appearance: SiteAppearance }) {
-  return (
-    <div className="site-appearance-preview-card site-appearance-preview-sidebar">
-      <div className="site-appearance-preview-body">
-        <div
-          className="text-uppercase small fw-bold mb-3"
-          style={{ color: appearance.sidebarSectionColor }}
-        >
-          Site Configuration
-        </div>
-        <div className="nav flex-column gap-2">
-          <a href="#" className="nav-link active" onClick={preventDefault}>
-            <i
-              className="fa fa-palette me-2"
-              style={{ color: appearance.sidebarIconColor }}
-            />
-            Appearance
-          </a>
-          <a href="#" className="nav-link" onClick={preventDefault}>
-            <i
-              className="fa fa-sliders me-2"
-              style={{ color: appearance.sidebarIconColor }}
-            />
-            Status Appearance
-          </a>
-          <div
-            className="rounded-3 p-3 mt-2"
-            style={{
-              background: appearance.sidebarSubmenuBg,
-              border: `1px solid ${appearance.borderColor}`
-            }}
-          >
-            <div className="small" style={{ color: appearance.sidebarLinkHoverColor }}>
-              Nested submenu background
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+          </Box>
+        </Group>
+      </Box>
+    </PreviewCard>
   );
 }
 
 function SurfacePreview({ appearance }: { appearance: SiteAppearance }) {
   return (
-    <div className="site-appearance-preview-card">
-      <div className="site-appearance-preview-body">
-        <div className="small text-body text-opacity-50 mb-2">Surface colors</div>
-        <div
-          className="rounded-3 p-3 mb-3"
-          style={{
-            background: appearance.surfaceBg,
-            color: appearance.surfaceTextColor,
-            border: `1px solid ${appearance.borderColor}`
-          }}
-        >
-          Primary panel surface
-        </div>
-        <div
-          className="rounded-3 p-3 mb-3"
-          style={{
-            background: appearance.surfaceSecondaryBg,
-            color: appearance.surfaceTextColor,
-            border: `1px solid ${appearance.borderColor}`
-          }}
-        >
-          Secondary surface
-        </div>
-        <div
-          className="rounded-3 p-3"
-          style={{
-            background: appearance.dropdownBg,
-            color: appearance.surfaceTextColor,
-            border: `1px solid ${appearance.borderColor}`
-          }}
-        >
-          Dropdown / modal background preview
-        </div>
-      </div>
-    </div>
+    <PreviewCard>
+      <Box className="site-appearance-preview-body">
+        <Text size="xs" c="dimmed" mb="xs">
+          Surface colors
+        </Text>
+        <Stack gap="md">
+          <SurfaceSwatch
+            label="Primary panel surface"
+            background={appearance.surfaceBg}
+            color={appearance.surfaceTextColor}
+            border={appearance.borderColor}
+          />
+          <SurfaceSwatch
+            label="Secondary surface"
+            background={appearance.surfaceSecondaryBg}
+            color={appearance.surfaceTextColor}
+            border={appearance.borderColor}
+          />
+          <SurfaceSwatch
+            label="Dropdown / modal background preview"
+            background={appearance.dropdownBg}
+            color={appearance.surfaceTextColor}
+            border={appearance.borderColor}
+          />
+        </Stack>
+      </Box>
+    </PreviewCard>
+  );
+}
+
+function SurfaceSwatch({
+  label,
+  background,
+  color,
+  border
+}: {
+  label: string;
+  background: string;
+  color: string;
+  border: string;
+}) {
+  return (
+    <Box
+      p="md"
+      style={{
+        borderRadius: 12,
+        background,
+        color,
+        border: `1px solid ${border}`
+      }}
+    >
+      {label}
+    </Box>
   );
 }
 
 function LoginPreview({ appearance }: { appearance: SiteAppearance }) {
   return (
-    <div className="site-appearance-preview-card">
-      <div
-        className="site-appearance-login-cover d-flex align-items-end p-3"
+    <PreviewCard>
+      <Box
+        className="site-appearance-login-cover"
         style={{
           backgroundColor: appearance.headerBg,
           backgroundImage: appearance.loginCoverImageUrl
             ? `url("${appearance.loginCoverImageUrl}")`
-            : undefined
+            : undefined,
+          display: "flex",
+          alignItems: "flex-end",
+          padding: 16
         }}
       >
-        <div className="site-appearance-login-brand text-white">
+        <Box className="site-appearance-login-brand" style={{ color: "#fff" }}>
           <SiteBrand
             appearance={appearance}
-            className="d-inline-flex align-items-center gap-2 fs-5 fw-bold"
-            iconClassName="d-inline-flex align-items-center"
-            textClassName="d-inline-flex align-items-center"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 18, fontWeight: 700 }}
+            iconClassName=""
+            textClassName=""
             imageClassName="site-appearance-brand-image"
           />
-          <div className="small mt-2">{appearance.loginTagline || "Optional login subtitle"}</div>
-        </div>
-      </div>
-      <div className="site-appearance-preview-body">
-        <div
-          className="rounded-3 p-3"
+          <Text size="xs" mt="xs">
+            {appearance.loginTagline || "Optional login subtitle"}
+          </Text>
+        </Box>
+      </Box>
+      <Box className="site-appearance-preview-body">
+        <Box
+          p="md"
           style={{
+            borderRadius: 12,
             background: appearance.modalBg,
             color: appearance.surfaceTextColor,
             border: `1px solid ${appearance.borderColor}`
           }}
         >
           Login card surface
-        </div>
-      </div>
-    </div>
+        </Box>
+      </Box>
+    </PreviewCard>
+  );
+}
+
+function PreviewCard({
+  children,
+  style
+}: {
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <Paper
+      withBorder
+      radius="md"
+      style={{ overflow: "hidden", minHeight: "100%", ...style }}
+    >
+      {children}
+    </Paper>
   );
 }
 
@@ -644,17 +572,20 @@ function PreviewMenuChip({
 }) {
   const normalizedBg = normalizeHex(bg) ?? "transparent";
   return (
-    <span
-      className="rounded-pill px-3 py-1 small"
-      style={{ background: normalizedBg, color }}
+    <Box
+      component="span"
+      px="md"
+      py={4}
+      style={{
+        borderRadius: 999,
+        background: normalizedBg,
+        color,
+        fontSize: 12
+      }}
     >
       {label}
-    </span>
+    </Box>
   );
-}
-
-function preventDefault(event: React.MouseEvent<HTMLAnchorElement>) {
-  event.preventDefault();
 }
 
 function describeError(error: unknown): string {

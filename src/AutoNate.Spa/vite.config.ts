@@ -13,14 +13,6 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src")
     }
   },
-  css: {
-    preprocessorOptions: {
-      scss: {
-        loadPaths: [path.resolve(__dirname)],
-        silenceDeprecations: ["legacy-js-api", "import", "global-builtin", "color-functions", "if-function"]
-      }
-    }
-  },
   server: {
     port: 5173,
     strictPort: true,

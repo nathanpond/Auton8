@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Alert, Badge, Box, Button, Group, Paper, Stack, Tabs, Text, Title } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import {
   useArchiveRecord,
   useRecordByKey,
@@ -41,17 +43,25 @@ export default function RecordDetail() {
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   if (isLoading || !type) {
-    return <div className="panel panel-inverse"><div className="panel-body p-4 text-center">Loading...</div></div>;
+    return (
+      <Paper withBorder radius="md" p="lg" ta="center">
+        <Text c="dimmed">Loading...</Text>
+      </Paper>
+    );
   }
 
   if (!record) {
     return (
-      <div className="page-head">
-        <h1 className="page-header mb-1">Record not found</h1>
-        <p className="page-head-copy">
-          <code>{key}</code> wasn't found. <Link to={`/records/${code}`}>Back to list</Link>.
-        </p>
-      </div>
+      <Box py="md">
+        <PageHeader
+          title="Record not found"
+          description={
+            <>
+              <code>{key}</code> wasn&apos;t found. <Link to={`/records/${code}`}>Back to list</Link>.
+            </>
+          }
+        />
+      </Box>
     );
   }
 
@@ -84,81 +94,68 @@ export default function RecordDetail() {
   };
 
   return (
-    <>
-      <div className="page-head d-flex justify-content-between align-items-start">
-        <div>
-          <h1 className="page-header mb-1">
-            <code className="me-2">{record.key}</code>
-            {record.name}
-            {record.isArchived && <span className="badge bg-secondary ms-2">Archived</span>}
-          </h1>
-          <p className="page-head-copy mb-0">
-            <Link to={`/records/${code}`}>&larr; Back to list</Link>
-          </p>
-        </div>
-        <div className="d-flex gap-2">
-          <button
-            type="button"
-            className={`btn ${isWatching ? "btn-primary" : "btn-outline-primary"}`}
-            onClick={toggleWatched}
-            disabled={watch.isPending || unwatch.isPending}
-          >
-            <i className={`fa ${isWatching ? "fa-eye-slash" : "fa-eye"} me-2`}></i>
-            {isWatching ? "Unwatch" : "Watch"}
-          </button>
-          <button
-            type="button"
-            className={`btn ${record.isArchived ? "btn-outline-success" : "btn-outline-warning"}`}
-            onClick={toggleArchived}
-            disabled={archive.isPending || restore.isPending}
-          >
-            <i className={`fa ${record.isArchived ? "fa-box-open" : "fa-box-archive"} me-2`}></i>
-            {record.isArchived ? "Restore" : "Archive"}
-          </button>
-        </div>
-      </div>
+    <Box py="md">
+      <PageHeader
+        title={
+          <Group gap="xs" wrap="wrap" align="center">
+            <code style={{ marginRight: 4 }}>{record.key}</code>
+            <Title order={1} m={0} style={{ display: "inline" }}>
+              {record.name}
+            </Title>
+            {record.isArchived && (
+              <Badge color="gray" variant="filled">
+                Archived
+              </Badge>
+            )}
+          </Group>
+        }
+        description={<Link to={`/records/${code}`}>&larr; Back to list</Link>}
+        actions={
+          <Group gap="xs">
+            <Button
+              variant={isWatching ? "filled" : "outline"}
+              leftSection={<i className={`fa ${isWatching ? "fa-eye-slash" : "fa-eye"}`} />}
+              onClick={toggleWatched}
+              loading={watch.isPending || unwatch.isPending}
+            >
+              {isWatching ? "Unwatch" : "Watch"}
+            </Button>
+            <Button
+              variant="outline"
+              color={record.isArchived ? "green" : "yellow"}
+              leftSection={
+                <i className={`fa ${record.isArchived ? "fa-box-open" : "fa-box-archive"}`} />
+              }
+              onClick={toggleArchived}
+              loading={archive.isPending || restore.isPending}
+            >
+              {record.isArchived ? "Restore" : "Archive"}
+            </Button>
+          </Group>
+        }
+      />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="sm"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
-      <ul className="nav nav-tabs mb-3">
-        <li className="nav-item">
-          <button
-            type="button"
-            className={`nav-link ${tab === "details" ? "active" : ""}`}
-            onClick={() => setTab("details")}
-          >
-            Details
-          </button>
-        </li>
-        <li className="nav-item">
-          <button
-            type="button"
-            className={`nav-link ${tab === "edges" ? "active" : ""}`}
-            onClick={() => setTab("edges")}
-          >
-            Edges
-          </button>
-        </li>
-        <li className="nav-item">
-          <button
-            type="button"
-            className={`nav-link ${tab === "history" ? "active" : ""}`}
-            onClick={() => setTab("history")}
-          >
-            History
-          </button>
-        </li>
-      </ul>
+      <Tabs value={tab} onChange={(value) => value && setTab(value as Tab)} mb="md">
+        <Tabs.List>
+          <Tabs.Tab value="details">Details</Tabs.Tab>
+          <Tabs.Tab value="edges">Edges</Tabs.Tab>
+          <Tabs.Tab value="history">History</Tabs.Tab>
+        </Tabs.List>
+      </Tabs>
 
-      <div className="panel panel-inverse">
-        <div className="panel-body">
+      <Stack gap="md">
+        <Paper withBorder radius="md" p="md">
           {tab === "details" && (
             <RecordForm
               fields={fields}
@@ -181,18 +178,16 @@ export default function RecordDetail() {
           )}
           {tab === "edges" && <EdgesPanel record={record} />}
           {tab === "history" && <RecordHistoryPanel recordId={record.id} fields={fields} />}
-        </div>
-      </div>
+        </Paper>
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">Comments</h4>
-        </div>
-        <div className="panel-body">
+        <Paper withBorder radius="md" p="md">
+          <Title order={4} mb="sm">
+            Comments
+          </Title>
           <CommentsPanel recordId={record.id} />
-        </div>
-      </div>
-    </>
+        </Paper>
+      </Stack>
+    </Box>
   );
 }
 

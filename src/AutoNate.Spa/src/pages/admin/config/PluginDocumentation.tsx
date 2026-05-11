@@ -1,24 +1,22 @@
 // Long-form plugin documentation rendered inside the Site Configuration shell.
-// Authored as JSX so React renders it without dangerouslySetInnerHTML; styling
-// uses the existing Bootstrap utilities the rest of the admin pages share.
+// Authored as JSX so React renders it without dangerouslySetInnerHTML.
+import { Card, Stack, Title } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 
 export default function PluginDocumentation() {
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Plugin Documentation</h1>
-        <p className="page-head-copy">
-          How AutoNate plugins work, what the host gives them, and the patterns
-          to use when building one.
-        </p>
-      </div>
+      <PageHeader
+        title="Plugin Documentation"
+        description="How AutoNate plugins work, what the host gives them, and the patterns to use when building one."
+      />
 
-      <div className="panel panel-inverse">
-        <div className="panel-heading">
-          <h4 className="panel-title">Contents</h4>
-        </div>
-        <div className="panel-body">
-          <ul className="mb-0">
+      <Stack gap="md">
+      <Card withBorder shadow="sm">
+        <Title order={5} mb="md">
+          Contents
+        </Title>
+          <ul style={{ margin: 0 }}>
             <li><a href="#what-is-a-plugin">What a plugin is</a></li>
             <li><a href="#project-layout">Project layout &amp; manifest</a></li>
             <li><a href="#lifecycle">Lifecycle</a></li>
@@ -36,8 +34,7 @@ export default function PluginDocumentation() {
             <li><a href="#hello">Worked example: HelloPlugin</a></li>
             <li><a href="#troubleshooting">Troubleshooting</a></li>
           </ul>
-        </div>
-      </div>
+      </Card>
 
       <Section id="what-is-a-plugin" title="What a plugin is">
         <p>
@@ -101,8 +98,8 @@ export default function PluginDocumentation() {
             <code>.sql</code> files (see Migrations).
           </li>
         </ul>
-        <h5 className="mt-3">plugin.json</h5>
-        <pre className="bg-light p-3 small mb-2">
+        <h5 style={{ marginTop: 16 }}>plugin.json</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, marginBottom: 8, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)" }}>
 {`{
   "name": "HelloPlugin",
   "version": "1.0.0",
@@ -129,7 +126,7 @@ export default function PluginDocumentation() {
           Manage Plugins admin page; the same transitions also run automatically
           at startup for any plugin row that was previously enabled.
         </p>
-        <h5 className="mt-3">Upload</h5>
+        <h5 style={{ marginTop: 16 }}>Upload</h5>
         <ol>
           <li>The zip is validated (size cap, no path traversal, manifest parses).</li>
           <li>Files are extracted to <code>plugins/&lt;PluginId&gt;/</code> on the host.</li>
@@ -146,7 +143,7 @@ export default function PluginDocumentation() {
             password.
           </li>
         </ol>
-        <h5 className="mt-3">Enable</h5>
+        <h5 style={{ marginTop: 16 }}>Enable</h5>
         <ol>
           <li>
             Any pending migration files in the plugin's{" "}
@@ -173,7 +170,7 @@ export default function PluginDocumentation() {
           </li>
           <li>Hooks the plugin registers are kept in a per-plugin scoped registrar.</li>
         </ol>
-        <h5 className="mt-3">Disable</h5>
+        <h5 style={{ marginTop: 16 }}>Disable</h5>
         <p>
           The host revokes every hook the plugin registered, disposes the
           plugin's pooled <code>NpgsqlDataSource</code>, and{" "}
@@ -184,7 +181,7 @@ export default function PluginDocumentation() {
           restart. <strong>Plugin data is preserved</strong> — the schema and
           role are untouched.
         </p>
-        <h5 className="mt-3">Delete</h5>
+        <h5 style={{ marginTop: 16 }}>Delete</h5>
         <p>
           Disable runs first, then the host invokes the plugin's{" "}
           <code>Cleanup(IPluginContext)</code> callback (loading the assembly
@@ -206,7 +203,7 @@ export default function PluginDocumentation() {
           Every plugin implements one interface from{" "}
           <code>AutoNate.Plugin.Abstractions</code>:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`public interface IAutoNatePlugin
 {
     string Name { get; }
@@ -235,7 +232,7 @@ export default function PluginDocumentation() {
         <p>
           The <code>IPluginContext</code> argument carries everything you need:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`public interface IPluginContext
 {
     Guid PluginId { get; }
@@ -275,8 +272,8 @@ export default function PluginDocumentation() {
           Hooks are the plugin's entry into the host's behaviour. There are two
           kinds, both registered through <code>IHookRegistrar</code>:
         </p>
-        <h5 className="mt-3">Actions — fire-and-forget callbacks</h5>
-        <pre className="bg-light p-3 small">
+        <h5 style={{ marginTop: 16 }}>Actions — fire-and-forget callbacks</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`context.Hooks.AddAction("autonate.something.happened", priority: 100, ctx =>
 {
     // log, record metrics, queue a job. Don't return a value; don't block.
@@ -288,8 +285,8 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
         await SomethingAsync(ctx, ct);
     });`}
         </pre>
-        <h5 className="mt-3">Filters — transform a value</h5>
-        <pre className="bg-light p-3 small">
+        <h5 style={{ marginTop: 16 }}>Filters — transform a value</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`context.Hooks.AddFilterAsync<AuthorizeFilterContext>(
     HookPoints.AuthorizeAuthorize,
     priority: 100,
@@ -315,7 +312,7 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
           token. Return either the input unchanged or a modified copy — never
           mutate the input.
         </p>
-        <h5 className="mt-3">Priority</h5>
+        <h5 style={{ marginTop: 16 }}>Priority</h5>
         <p>
           Hooks fire in ascending <code>priority</code> order. Lower numbers run
           first; same number, undefined order — don't rely on it. Use a number
@@ -327,7 +324,7 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
           can keep and pass to <code>Remove</code> to detach a single hook —
           rarely needed because disable revokes them all in bulk.
         </p>
-        <h5 className="mt-3">Available hook points</h5>
+        <h5 style={{ marginTop: 16 }}>Available hook points</h5>
         <p>
           See <code>AutoNate.Plugin.Abstractions/HookPoints.cs</code> for the
           full canonical list. Each constant ships with a comment describing
@@ -397,8 +394,8 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
           enable time, in their own transactions, and tracks applied filenames
           in <code>plg_&lt;code&gt;.__plugin_migrations</code>.
         </p>
-        <h5 className="mt-3">Authoring</h5>
-        <pre className="bg-light p-3 small">
+        <h5 style={{ marginTop: 16 }}>Authoring</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`migrations/
   001_init.sql
   002_add_seen_at.sql
@@ -409,7 +406,7 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
           pattern is a zero-padded numeric prefix. Use plain DDL — there's no
           DSL or templating layer.
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`-- 001_init.sql
 CREATE TABLE IF NOT EXISTS widgets (
     id BIGSERIAL PRIMARY KEY,
@@ -417,7 +414,7 @@ CREATE TABLE IF NOT EXISTS widgets (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );`}
         </pre>
-        <h5 className="mt-3">Rules</h5>
+        <h5 style={{ marginTop: 16 }}>Rules</h5>
         <ul>
           <li>
             <strong>Files are immutable once shipped.</strong> Never edit a
@@ -440,7 +437,7 @@ CREATE TABLE IF NOT EXISTS widgets (
             keeps a manually-recovered environment idempotent.
           </li>
         </ul>
-        <h5 className="mt-3">MSBuild integration</h5>
+        <h5 style={{ marginTop: 16 }}>MSBuild integration</h5>
         <p>
           The shared <code>plugins/Directory.Build.props</code> automatically
           copies any <code>migrations/*.sql</code> next to <code>plugin.json</code>{" "}
@@ -456,7 +453,7 @@ CREATE TABLE IF NOT EXISTS widgets (
           helpers — your plugin doesn't need to take a Dapper dependency itself,
           the abstractions assembly already does.
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`public interface IPluginDataAccess
 {
     Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken ct = default);
@@ -468,8 +465,8 @@ CREATE TABLE IF NOT EXISTS widgets (
     Task<T?> QuerySingleOrDefaultAsync<T>(string sql, object? param = null, CancellationToken ct = default);
 }`}
         </pre>
-        <h5 className="mt-3">Common patterns</h5>
-        <pre className="bg-light p-3 small">
+        <h5 style={{ marginTop: 16 }}>Common patterns</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`// Insert
 await context.Data.ExecuteAsync(
     "INSERT INTO greetings (saw_action, saw_kind) VALUES (@action, @kind);",
@@ -502,7 +499,7 @@ await using var conn = await context.Data.OpenConnectionAsync(ct);
         <p>
           Plugin B can SELECT from plugin A's schema using the qualified name:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`var labels = await context.Data.QueryAsync<string>(
     "SELECT label FROM plg_a1b2c3d4.widgets ORDER BY id;",
     ct: ct);`}
@@ -511,7 +508,7 @@ await using var conn = await context.Data.OpenConnectionAsync(ct);
           Hard-coding another plugin's code is brittle. Resolve it at runtime by
           name from the <code>plugins</code> table:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`var otherCode = await context.Data.QuerySingleOrDefaultAsync<string>(
     "SELECT code FROM public.plugins WHERE name = @name AND status = 1;",
     new { name = "OtherPlugin" },
@@ -543,7 +540,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           <code>context.Menus</code>. There are three add helpers (specialised
           to common cases) and one introspection helper:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`public interface IPluginMenus
 {
     // Snapshot of every menu and its items so a plugin can introspect
@@ -575,8 +572,8 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
 }`}
         </pre>
 
-        <h5 className="mt-3">NewMenuItem</h5>
-        <pre className="bg-light p-3 small">
+        <h5 style={{ marginTop: 16 }}>NewMenuItem</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`public sealed record NewMenuItem(
     string DisplayName,
     string ItemType,
@@ -586,7 +583,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
     bool IsVisible = true);`}
         </pre>
 
-        <h5 className="mt-3">Item types &amp; config shapes</h5>
+        <h5 style={{ marginTop: 16 }}>Item types &amp; config shapes</h5>
         <p>
           The <code>ItemType</code> string drives how the menu item renders.
           The host's config table:
@@ -639,14 +636,14 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           </tbody>
         </table>
 
-        <h5 className="mt-3">JSX content (recommended for plugin pages)</h5>
+        <h5 style={{ marginTop: 16 }}>JSX content (recommended for plugin pages)</h5>
         <p>
           For a page that needs interactivity, use{" "}
           <code>contentType: "jsx"</code> and ship JSX source code. The host
           compiles it at runtime via Sucrase. The contract is{" "}
           <strong>define a function called <code>Page</code></strong>:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`context.Menus.AddPluginMenuItem(new NewMenuItem(
     DisplayName: "My Plugin Settings",
     ItemType:    "page",
@@ -679,7 +676,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           accepted — Sucrase strips the type annotations.
         </p>
 
-        <h5 className="mt-3">HTML content</h5>
+        <h5 style={{ marginTop: 16 }}>HTML content</h5>
         <p>
           For plain pages, <code>contentType: "html"</code> renders the{" "}
           <code>content</code> string with{" "}
@@ -688,7 +685,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           execute (innerHTML-inserted scripts no-op by browser spec).
         </p>
 
-        <h5 className="mt-3">Path conventions</h5>
+        <h5 style={{ marginTop: 16 }}>Path conventions</h5>
         <ul>
           <li>
             Paths under <code>/admin/config/*</code> render <em>inside</em> the
@@ -706,7 +703,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           </li>
         </ul>
 
-        <h5 className="mt-3">Lifecycle &amp; ownership</h5>
+        <h5 style={{ marginTop: 16 }}>Lifecycle &amp; ownership</h5>
         <p>
           Every row inserted by these helpers has{" "}
           <code>menu_items.created_by_plugin_id</code> set to the plugin's id.
@@ -732,8 +729,8 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           </li>
         </ul>
 
-        <h5 className="mt-3">Examples</h5>
-        <pre className="bg-light p-3 small">
+        <h5 style={{ marginTop: 16 }}>Examples</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`// Single item under the Plugins group:
 context.Menus.AddPluginMenuItem(new NewMenuItem(
     DisplayName: "My Plugin Settings",
@@ -783,14 +780,14 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
           one-off settings screen tied to a specific sidebar entry.
         </p>
 
-        <h5 className="mt-3">Folder convention</h5>
+        <h5 style={{ marginTop: 16 }}>Folder convention</h5>
         <p>
           Drop <code>.template</code> files in a top-level{" "}
           <code>PageTemplates/</code> folder next to your csproj. The shared{" "}
           <code>plugins/Directory.Build.props</code> copies them into the zip
           automatically.
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`MyPlugin/
   MyPlugin.csproj
   plugin.json
@@ -819,7 +816,7 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
           </li>
         </ul>
 
-        <h5 className="mt-3">Auto-registration on enable</h5>
+        <h5 style={{ marginTop: 16 }}>Auto-registration on enable</h5>
         <p>
           On every enable, the host's <code>PluginRuntime</code> walks{" "}
           <code>PageTemplates/*.template</code> and{" "}
@@ -856,13 +853,13 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
           </li>
         </ul>
 
-        <h5 className="mt-3">Mounting a template in a menu</h5>
+        <h5 style={{ marginTop: 16 }}>Mounting a template in a menu</h5>
         <p>
           Once registered, a template is identified by its key wherever a
           menu item uses <code>item_type = "template"</code>. The plugin can
           mount its own template:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`context.Menus.AddMenuItem("icon", settingsGroupId, new NewMenuItem(
     DisplayName: "Audit Log",
     ItemType:    "template",
@@ -878,14 +875,14 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
           admin can mount it under any group without touching the plugin.
         </p>
 
-        <h5 className="mt-3">Fetching plugin data from a template</h5>
+        <h5 style={{ marginTop: 16 }}>Fetching plugin data from a template</h5>
         <p>
           A template that needs to read plugin data hits the host's per-plugin
           data endpoint. The host fires{" "}
           <code>HookPoints.PluginDataHookFor(code)</code>, the plugin
           subscribes in <code>Configure()</code> and returns a JSON payload:
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`// In the plugin's Configure(), wired once:
 context.Hooks.AddFilterAsync<PluginDataResponse>(
     HookPoints.PluginDataHookFor(context.Code),
@@ -907,7 +904,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
    .then((res) => setRows(res.data.rows));`}
         </pre>
 
-        <h5 className="mt-3">Lifecycle</h5>
+        <h5 style={{ marginTop: 16 }}>Lifecycle</h5>
         <ul>
           <li>
             <strong>Enable</strong>: registers / refreshes the rows; sweeps
@@ -937,7 +934,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           plugin actually owns artifacts beyond what's listed below.
         </p>
 
-        <h5 className="mt-3">When it runs</h5>
+        <h5 style={{ marginTop: 16 }}>When it runs</h5>
         <ul>
           <li>
             <strong>On every delete, even if the plugin is disabled</strong>.
@@ -962,7 +959,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           </li>
         </ul>
 
-        <h5 className="mt-3">What the host already cleans up for free</h5>
+        <h5 style={{ marginTop: 16 }}>What the host already cleans up for free</h5>
         <p>
           You do <strong>not</strong> need to do any of this in{" "}
           <code>Cleanup</code> — the host handles it after your callback
@@ -993,7 +990,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           </li>
         </ul>
 
-        <h5 className="mt-3">What Cleanup is for</h5>
+        <h5 style={{ marginTop: 16 }}>What Cleanup is for</h5>
         <p>
           Anything the plugin created that the host has no FK / schema
           ownership over:
@@ -1023,8 +1020,8 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           </li>
         </ul>
 
-        <h5 className="mt-3">Example</h5>
-        <pre className="bg-light p-3 small">
+        <h5 style={{ marginTop: 16 }}>Example</h5>
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`public void Cleanup(IPluginContext context)
 {
     var logger = context.HostServices
@@ -1057,7 +1054,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
 }`}
         </pre>
 
-        <h5 className="mt-3">What you should NOT do in Cleanup</h5>
+        <h5 style={{ marginTop: 16 }}>What you should NOT do in Cleanup</h5>
         <ul>
           <li>
             Don't try to mutate <code>public.*</code> tables directly. The
@@ -1087,27 +1084,27 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           you need doesn't exist is a host-side change, not a plugin-side
           workaround.
         </p>
-        <h5 className="mt-3">Configure() does registration only</h5>
+        <h5 style={{ marginTop: 16 }}>Configure() does registration only</h5>
         <p>
           Heavy work — schema bootstrap, network calls, background loops —
           belongs inside hook handlers (so it runs on the relevant request) or
           in a long-lived service the plugin owns. Don't block enable.
         </p>
-        <h5 className="mt-3">Idempotent hook handlers</h5>
+        <h5 style={{ marginTop: 16 }}>Idempotent hook handlers</h5>
         <p>
           Action hooks may fire more than once for the same logical event during
           replays, retries, or hot-reload scenarios. Use natural keys
           (<code>ON CONFLICT DO NOTHING</code>, <code>WHERE NOT EXISTS</code>)
           so a duplicate fire is a no-op rather than a duplicate row.
         </p>
-        <h5 className="mt-3">Don't capture <code>IPluginContext</code> long-term</h5>
+        <h5 style={{ marginTop: 16 }}>Don't capture <code>IPluginContext</code> long-term</h5>
         <p>
           Stash the bits you need (<code>context.Data</code>, the logger
           factory) in your own fields. The context object itself is fine to
           capture, but don't expose it as a public surface — your plugin's
           internals shouldn't leak across an ABI boundary.
         </p>
-        <h5 className="mt-3">Logging</h5>
+        <h5 style={{ marginTop: 16 }}>Logging</h5>
         <p>
           Resolve <code>ILoggerFactory</code> from{" "}
           <code>context.HostServices</code> and create one logger per plugin
@@ -1115,7 +1112,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           messages appear under whatever category name you pass to{" "}
           <code>CreateLogger</code>.
         </p>
-        <h5 className="mt-3">Don't ship host-shared assemblies</h5>
+        <h5 style={{ marginTop: 16 }}>Don't ship host-shared assemblies</h5>
         <p>
           Five DLLs are loaded by the host and shared into every plugin ALC for
           type identity:
@@ -1134,7 +1131,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           copies in two ALCs means two distinct <code>Type</code> instances
           and silently failed casts.
         </p>
-        <h5 className="mt-3">Versioning</h5>
+        <h5 style={{ marginTop: 16 }}>Versioning</h5>
         <p>
           Bump <code>plugin.json</code>'s <code>version</code> when shipping a
           new build; the admin Manage Plugins page shows the version, and{" "}
@@ -1151,7 +1148,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           build, the targets file zips the bin output (minus host-shared DLLs
           and PDBs) into <code>&lt;ProjectDir&gt;/dist/&lt;PluginName&gt;.zip</code>.
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`# from the repo root:
 dotnet build plugins/HelloPlugin/HelloPlugin.csproj
 # → plugins/HelloPlugin/dist/HelloPlugin.zip
@@ -1165,7 +1162,7 @@ dotnet build plugins/HelloPlugin/HelloPlugin.csproj
           assemblies that aren't in the host-shared list are bundled into the
           zip.
         </p>
-        <h5 className="mt-3">Reload semantics</h5>
+        <h5 style={{ marginTop: 16 }}>Reload semantics</h5>
         <p>
           Re-uploading a plugin <em>creates a new install</em> with a new code
           and a new schema. To upgrade in place, delete the existing install
@@ -1181,7 +1178,7 @@ dotnet build plugins/HelloPlugin/HelloPlugin.csproj
           extension point: a hook, a per-plugin schema with a migration, and a
           JSX settings page added to the sidebar.
         </p>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`// HelloPlugin.cs
 public sealed class HelloPlugin : IAutoNatePlugin
 {
@@ -1247,7 +1244,7 @@ public sealed class HelloPlugin : IAutoNatePlugin
     """;
 }`}
         </pre>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`-- migrations/001_init.sql
 CREATE TABLE IF NOT EXISTS greetings (
     id BIGSERIAL PRIMARY KEY,
@@ -1271,7 +1268,7 @@ CREATE TABLE IF NOT EXISTS greetings (
             <code>plg_&lt;code&gt;.greetings</code>.
           </li>
         </ul>
-        <pre className="bg-light p-3 small">
+        <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`\\dn plg_*
 SELECT * FROM plg_<code>.greetings ORDER BY seen_at DESC LIMIT 10;
 SELECT id, display_name, item_type, config->>'path' AS path
@@ -1348,17 +1345,18 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
           </dd>
         </dl>
       </Section>
+      </Stack>
     </>
   );
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <div className="panel panel-inverse" id={id}>
-      <div className="panel-heading">
-        <h4 className="panel-title">{title}</h4>
-      </div>
-      <div className="panel-body">{children}</div>
-    </div>
+    <Card withBorder shadow="sm" id={id}>
+      <Title order={5} mb="md">
+        {title}
+      </Title>
+      <div>{children}</div>
+    </Card>
   );
 }

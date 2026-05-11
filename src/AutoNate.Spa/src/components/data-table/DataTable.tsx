@@ -1,16 +1,15 @@
-import { ReactNode, useEffect, useMemo, useState } from "react";
-import {
-  ColumnDef,
-  PaginationState,
-  SortingState,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable
-} from "@tanstack/react-table";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useQuery } from "@tanstack/react-query";
+import { Badge, Box, Group, Select, Stack, TextInput, UnstyledButton } from "@mantine/core";
+import { DataTable as MantineDataTable, type DataTableSortStatus } from "mantine-datatable";
+
+// Module-level defaults so destructuring `pageSizeOptions = [...]` doesn't
+// allocate a fresh array per render — mantine-datatable feeds the prop into
+// internal effects, and an unstable reference there triggers an infinite
+// re-render loop.
+const DEFAULT_PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_INITIAL_SORT: { id: string; desc: boolean }[] = [];
 
 export type DataTableMode = "client" | "server" | "auto";
 
@@ -46,7 +45,7 @@ type DataTableProps<T> = {
 
   pageSize?: number;
   pageSizeOptions?: number[];
-  initialSort?: SortingState;
+  initialSort?: { id: string; desc: boolean }[];
 
   searchEnabled?: boolean;
   searchPlaceholder?: string;
@@ -54,20 +53,10 @@ type DataTableProps<T> = {
   filters?: DataTableFilterOption<T>[];
   allFilterLabel?: string;
 
-  // Custom left-toolbar slot for callers that need richer filter chrome than
-  // the single-pick `filters` tabs (e.g., RecordList's filter builder, the
-  // SystemIssues triple-faceted filter). Renders far-left, with filter tabs.
   toolbarLeft?: ReactNode;
-  // Renders inside the right group, immediately before the search input —
-  // for compact icon affordances (refresh, etc.) that belong with the
-  // search box rather than across the toolbar.
   toolbarBeforeSearch?: ReactNode;
   toolbarRight?: ReactNode;
 
-  // When this value changes (e.g. caller-driven filter/sort state changes),
-  // the table resets to page 0. Use this when the data scope changes — not
-  // for cache-invalidation refreshes after mutations, which should keep the
-  // user on the current page.
   resetPaginationKey?: string | number;
 
   onRowClick?: (row: T) => void;
@@ -78,9 +67,89 @@ type DataTableProps<T> = {
   loadingMessage?: string;
   globalFilterFn?: (row: T, search: string) => boolean;
 
-  // Poll the data source on this cadence (ms). Omit to disable polling.
   refetchInterval?: number;
 };
+
+// A column resolved into the bits this wrapper needs: a stable id, a title,
+// whether it sorts, a width, an optional cell renderer, and a value resolver
+// used for client-side sort + default search. The resolver hides the
+// difference between accessorKey, accessorFn, and id-only columns from the
+// rest of the wrapper.
+type ResolvedColumn<T> = {
+  id: string;
+  title: ReactNode;
+  sortable: boolean;
+  width: string | undefined;
+  textAlign?: "left" | "center" | "right";
+  noWrap: boolean;
+  isActions: boolean;
+  resolve: (row: T) => unknown;
+  render: (row: T) => ReactNode;
+};
+
+function resolveColumn<T>(col: ColumnDef<T>, width: string | undefined): ResolvedColumn<T> {
+  const accessorKey = (col as { accessorKey?: keyof T & string }).accessorKey;
+  const accessorFn = (col as { accessorFn?: (row: T) => unknown }).accessorFn;
+  const id = (col.id ?? accessorKey ?? "") as string;
+  const isActions = id === "actions";
+
+  const resolve = (row: T): unknown => {
+    if (accessorFn) return accessorFn(row);
+    if (accessorKey) return (row as Record<string, unknown>)[accessorKey];
+    return undefined;
+  };
+
+  const headerNode: ReactNode =
+    typeof col.header === "function"
+      ? // Most consumers use a string here; the rare function form is given a
+        // very minimal context. If a consumer needs full tanstack header
+        // context, this is the place to extend.
+        (col.header as (ctx: unknown) => ReactNode)({ column: { id, columnDef: col } } as unknown)
+      : ((col.header as ReactNode) ?? id);
+
+  const customRender = (col as { cell?: (ctx: unknown) => ReactNode }).cell;
+  const render = (row: T): ReactNode => {
+    if (customRender) {
+      // Shim the tanstack cell context. Most consumer code uses `row.original`
+      // and (rarely) `getValue()`; everything else is provided as a no-op.
+      return customRender({
+        row: {
+          original: row,
+          getValue: (k: string) => (row as Record<string, unknown>)[k]
+        },
+        getValue: () => resolve(row),
+        column: { id, columnDef: col },
+        table: {}
+      });
+    }
+    const v = resolve(row);
+    return v == null ? "" : String(v);
+  };
+
+  // Columns can opt out of the ellipsis-truncate by setting
+  // `meta: { wrap: true }` on the column def.
+  const noWrap = (col.meta as { wrap?: boolean } | undefined)?.wrap !== true && !isActions;
+
+  return {
+    id,
+    title: headerNode,
+    sortable: col.enableSorting !== false && !isActions && id !== "",
+    width,
+    noWrap,
+    isActions,
+    resolve,
+    render
+  };
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return -1;
+  if (b == null) return 1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+  return String(a).localeCompare(String(b));
+}
 
 // Auto mode probes /loadPage with pageSize=0 to learn the total without
 // downloading rows. Below `autoThreshold` (default 1000) it switches to
@@ -97,8 +166,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
     rowKey,
     columnWidths,
     pageSize: initialPageSize = 25,
-    pageSizeOptions = [10, 25, 50, 100],
-    initialSort = [],
+    pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS as unknown as number[],
+    initialSort = DEFAULT_INITIAL_SORT,
     searchEnabled = true,
     searchPlaceholder = "Search…",
     filters,
@@ -116,20 +185,35 @@ export function DataTable<T>(props: DataTableProps<T>) {
     refetchInterval
   } = props;
 
-  const [sorting, setSorting] = useState<SortingState>(initialSort);
-  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: initialPageSize });
-  // The input is controlled by `searchInput` for immediate visual feedback;
-  // `search` (debounced 400ms below) is what actually drives filtering and
-  // server queries. This keeps each keystroke from refetching.
+  const resolvedColumns = useMemo(
+    () => columns.map((c, i) => resolveColumn<T>(c, columnWidths[i])),
+    [columns, columnWidths]
+  );
+  const resolversById = useMemo(() => {
+    const m = new Map<string, (row: T) => unknown>();
+    for (const c of resolvedColumns) m.set(c.id, c.resolve);
+    return m;
+  }, [resolvedColumns]);
+
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<T>>(() => {
+    const first = initialSort[0];
+    return {
+      columnAccessor: (first?.id ?? "") as keyof T & string,
+      direction: first?.desc ? "desc" : "asc"
+    };
+  });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialPageSize);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
 
+  // Debounce 400ms so typing doesn't refetch on every keystroke.
   useEffect(() => {
     if (searchInput === search) return;
     const handle = window.setTimeout(() => {
       setSearch(searchInput);
-      setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
+      setPage(1);
     }, 400);
     return () => window.clearTimeout(handle);
   }, [searchInput, search]);
@@ -147,9 +231,6 @@ export function DataTable<T>(props: DataTableProps<T>) {
     if (mode === "client") return "client";
     if (mode === "server") return "server";
     if (probe.data) return probe.data.totalCount <= autoThreshold ? "client" : "server";
-    // Probe failure (e.g. backend missing the paged endpoint): fall back to
-    // client mode if loadAll is available — better to load everything than
-    // to hang the page.
     if (probe.isError && loadAll) return "client";
     return "loading";
   }, [mode, autoThreshold, probe.data, probe.isError, loadAll]);
@@ -162,24 +243,26 @@ export function DataTable<T>(props: DataTableProps<T>) {
     refetchInterval
   });
 
-  const sortKey = sorting[0] ? `${sorting[0].id}:${sorting[0].desc ? "desc" : "asc"}` : null;
+  const sortIdForServer = sortStatus.columnAccessor as string;
   // Server mode: refetch per (page, size, sort, search, filter).
   const serverQuery = useQuery({
     queryKey: [
       ...queryKey,
       "page",
-      pagination.pageIndex,
-      pagination.pageSize,
+      page - 1,
+      pageSize,
       search,
-      sortKey,
+      sortIdForServer ? `${sortIdForServer}:${sortStatus.direction}` : null,
       filter
     ],
     queryFn: () =>
       loadPage!({
-        page: pagination.pageIndex,
-        pageSize: pagination.pageSize,
+        page: page - 1,
+        pageSize,
         search,
-        sort: sorting[0] ? { id: sorting[0].id, desc: sorting[0].desc } : null,
+        sort: sortIdForServer
+          ? { id: sortIdForServer, desc: sortStatus.direction === "desc" }
+          : null,
         filter
       }),
     enabled: effectiveMode === "server" && !!loadPage,
@@ -188,61 +271,87 @@ export function DataTable<T>(props: DataTableProps<T>) {
   });
 
   const allRows: T[] = clientQuery.data ?? [];
+
+  // Client-side filter (filter tabs).
   const filteredAllRows = useMemo(() => {
     if (effectiveMode !== "client" || !filter) return allRows;
     const opt = filters?.find((f) => f.id === filter);
     return opt?.predicate ? allRows.filter(opt.predicate) : allRows;
   }, [effectiveMode, filter, filters, allRows]);
 
-  const tableData =
-    effectiveMode === "client" ? filteredAllRows : (serverQuery.data?.items ?? []);
-  const serverRowCount = serverQuery.data?.totalCount ?? 0;
+  // Client-side search.
+  const searchedRows = useMemo(() => {
+    if (effectiveMode !== "client") return filteredAllRows;
+    const q = search.trim().toLowerCase();
+    if (!q) return filteredAllRows;
+    if (globalFilterFn) return filteredAllRows.filter((row) => globalFilterFn(row, search));
+    return filteredAllRows.filter((row) => {
+      for (const col of resolvedColumns) {
+        const v = col.resolve(row);
+        if (v == null) continue;
+        if (String(v).toLowerCase().includes(q)) return true;
+      }
+      return false;
+    });
+  }, [effectiveMode, filteredAllRows, search, globalFilterFn, resolvedColumns]);
+
+  // Client-side sort.
+  const sortedRows = useMemo(() => {
+    if (effectiveMode !== "client") return searchedRows;
+    const accessor = sortStatus.columnAccessor as string;
+    if (!accessor) return searchedRows;
+    const resolve = resolversById.get(accessor);
+    if (!resolve) return searchedRows;
+    const dir = sortStatus.direction === "asc" ? 1 : -1;
+    return [...searchedRows].sort((a, b) => compareValues(resolve(a), resolve(b)) * dir);
+  }, [effectiveMode, searchedRows, sortStatus, resolversById]);
+
+  // Client-side paging slice — mantine-datatable shows whatever we hand it.
+  const clientPaged = useMemo(() => {
+    if (effectiveMode !== "client") return sortedRows;
+    const start = (page - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [effectiveMode, sortedRows, page, pageSize]);
+
+  const records: T[] =
+    effectiveMode === "client"
+      ? clientPaged
+      : (serverQuery.data?.items ?? []);
+  const totalRecords =
+    effectiveMode === "client"
+      ? sortedRows.length
+      : (serverQuery.data?.totalCount ?? 0);
 
   const isLoading =
     effectiveMode === "loading" ||
     (effectiveMode === "client" && clientQuery.isPending) ||
     (effectiveMode === "server" && serverQuery.isPending);
 
-  const table = useReactTable<T>({
-    data: tableData,
-    columns,
-    state: { sorting, globalFilter: search, pagination },
-    onSortingChange: setSorting,
-    onGlobalFilterChange: setSearch,
-    onPaginationChange: setPagination,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: effectiveMode === "client" ? getSortedRowModel() : undefined,
-    getFilteredRowModel: effectiveMode === "client" ? getFilteredRowModel() : undefined,
-    getPaginationRowModel: effectiveMode === "client" ? getPaginationRowModel() : undefined,
-    manualSorting: effectiveMode === "server",
-    manualFiltering: effectiveMode === "server",
-    manualPagination: effectiveMode === "server",
-    rowCount: effectiveMode === "server" ? serverRowCount : undefined,
-    globalFilterFn:
-      effectiveMode === "client" && globalFilterFn
-        ? (row, _id, value) => globalFilterFn(row.original, String(value))
-        : undefined
-  });
-
-  const { pageIndex, pageSize } = table.getState().pagination;
-  const totalPages = table.getPageCount();
-  const filteredCount =
-    effectiveMode === "client" ? table.getFilteredRowModel().rows.length : serverRowCount;
-  const pageButtons = useMemo(() => buildPageWindow(pageIndex, totalPages, 7), [pageIndex, totalPages]);
-
-  // Keep the page index in range when totals shrink (e.g. filters that drop
-  // hits, or rows get deleted). Without this, the table can sit on an empty
-  // page after a delete.
+  // Keep page index in range when totals shrink (filters, deletes).
   useEffect(() => {
-    if (totalPages > 0 && pageIndex >= totalPages) {
-      table.setPageIndex(Math.max(0, totalPages - 1));
-    }
-  }, [totalPages, pageIndex, table]);
+    const maxPage = Math.max(1, Math.ceil(totalRecords / pageSize));
+    if (page > maxPage) setPage(maxPage);
+  }, [totalRecords, pageSize, page]);
 
   useEffect(() => {
     if (resetPaginationKey === undefined) return;
-    setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
+    setPage(1);
   }, [resetPaginationKey]);
+
+  // Map resolved columns into mantine-datatable's column shape.
+  const mantineColumns = useMemo(
+    () =>
+      resolvedColumns.map((c) => ({
+        accessor: c.id,
+        title: c.title,
+        sortable: c.sortable,
+        width: c.width,
+        textAlign: c.textAlign,
+        noWrap: c.noWrap,
+        render: c.render
+      })),
+    [resolvedColumns]
+  );
 
   const filterCounts = useMemo(() => {
     if (effectiveMode !== "client" || !filters) return null;
@@ -256,257 +365,181 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const allCount =
     effectiveMode === "client"
       ? allRows.length
-      : (probe.data?.totalCount ?? serverRowCount);
+      : (probe.data?.totalCount ?? totalRecords);
 
-  const onSearch = (v: string) => {
-    setSearchInput(v);
-  };
-
-  const onPickFilter = (id: string | null) => {
-    setFilter(id);
-    table.setPageIndex(0);
-  };
+  // Stabilize callbacks passed to mantine-datatable so its internal effects
+  // (some of which iterate ref arrays) don't refire on every parent render
+  // and trip the "Maximum update depth exceeded" guard.
+  const idAccessor = useCallback((record: T) => rowKey(record), [rowKey]);
+  const handleSortChange = useCallback(
+    (next: DataTableSortStatus<T>) => {
+      setSortStatus(next);
+      setPage(1);
+    },
+    []
+  );
+  const pageSizeOptionsAsStrings = useMemo(
+    () => pageSizeOptions.map((n) => ({ value: String(n), label: String(n) })),
+    [pageSizeOptions]
+  );
+  const handlePageSizeSelectChange = useCallback((v: string | null) => {
+    if (!v) return;
+    setPageSize(Number(v));
+    setPage(1);
+  }, []);
+  const onRowClickAdapter = useMemo(
+    () => (onRowClick ? ({ record }: { record: T }) => onRowClick(record) : undefined),
+    [onRowClick]
+  );
+  const rowClassNameAdapter = useMemo(
+    () => (getRowClassName ? (record: T) => getRowClassName(record) ?? "" : undefined),
+    [getRowClassName]
+  );
 
   return (
-    <div className="data-table">
-      <div className="data-table-toolbar d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
-        <div className="data-table-toolbar-start d-flex align-items-center gap-3 flex-wrap">
+    <Stack gap="sm">
+      <Group justify="space-between" gap="sm" wrap="wrap">
+        <Group gap="sm" wrap="wrap">
           {filters && (
-            <div className="data-table-tabs" role="group" aria-label="Filter">
-              <button
-                type="button"
-                className={`data-table-tab${filter === null ? " active" : ""}`}
-                onClick={() => onPickFilter(null)}
-                aria-pressed={filter === null}
-              >
-                {allFilterLabel} <span className="data-table-tab-count">{allCount}</span>
-              </button>
-              {filters.map((f) => {
-                const active = filter === f.id;
-                const count = filterCounts?.get(f.id);
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    className={`data-table-tab${active ? " active" : ""}`}
-                    onClick={() => onPickFilter(f.id)}
-                    aria-pressed={active}
-                  >
-                    {f.label}
-                    {count !== undefined && <span className="data-table-tab-count">{count}</span>}
-                  </button>
-                );
-              })}
-            </div>
+            <Group gap={4} role="group" aria-label="Filter">
+              <FilterTab
+                active={filter === null}
+                onClick={() => {
+                  setFilter(null);
+                  setPage(1);
+                }}
+                label={allFilterLabel}
+                count={allCount}
+              />
+              {filters.map((f) => (
+                <FilterTab
+                  key={f.id}
+                  active={filter === f.id}
+                  onClick={() => {
+                    setFilter(f.id);
+                    setPage(1);
+                  }}
+                  label={f.label}
+                  count={filterCounts?.get(f.id)}
+                />
+              ))}
+            </Group>
           )}
           {toolbarLeft}
-        </div>
-        <div className="d-flex align-items-center gap-2 ms-lg-auto">
+        </Group>
+        <Group gap="xs" wrap="nowrap">
           {toolbarBeforeSearch}
           {searchEnabled && (
-            <div className="data-table-search">
-              <i className="fa fa-magnifying-glass data-table-search-icon" aria-hidden="true"></i>
-              <input
-                type="search"
-                className="form-control"
-                placeholder={searchPlaceholder}
-                aria-label={searchPlaceholder}
-                value={searchInput}
-                onChange={(e) => onSearch(e.target.value)}
-              />
-            </div>
+            <TextInput
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.currentTarget.value)}
+              leftSection={<i className="fa fa-magnifying-glass" />}
+              w={240}
+            />
           )}
           {toolbarRight}
-        </div>
-      </div>
+        </Group>
+      </Group>
 
-      <div className="data-table-table-wrap">
-        <table className="data-table-table">
-          <colgroup>
-            {columnWidths.map((w, i) => (
-              <col key={i} style={{ width: w }} />
-            ))}
-          </colgroup>
-          <thead>
-            <tr>
-              {table.getHeaderGroups()[0].headers.map((header) => {
-                const canSort = header.column.getCanSort();
-                const sortDir = header.column.getIsSorted();
-                const isActions = header.id === "actions";
-                return (
-                  <th
-                    key={header.id}
-                    scope="col"
-                    className={`data-table-th${isActions ? " data-table-th-actions" : ""}${
-                      canSort ? " data-table-th-sortable" : ""
-                    }`}
-                    onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
-                    aria-sort={
-                      sortDir === "asc"
-                        ? "ascending"
-                        : sortDir === "desc"
-                          ? "descending"
-                          : canSort
-                            ? "none"
-                            : undefined
-                    }
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
-                    {canSort && <SortIndicator dir={(sortDir || null) as "asc" | "desc" | null} />}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
-              <tr className="data-table-empty-row">
-                <td colSpan={columns.length}>{loadingMessage}</td>
-              </tr>
-            )}
-            {!isLoading && table.getRowModel().rows.length === 0 && (
-              <tr className="data-table-empty-row">
-                <td colSpan={columns.length}>{emptyMessage}</td>
-              </tr>
-            )}
-            {!isLoading &&
-              table.getRowModel().rows.map((row) => {
-                const extraClass = getRowClassName?.(row.original);
-                const ariaLabel = getRowAriaLabel?.(row.original);
-                return (
-                  <tr
-                    key={rowKey(row.original)}
-                    className={`data-table-row${extraClass ? ` ${extraClass}` : ""}${
-                      onRowClick ? " data-table-row-clickable" : ""
-                    }`}
-                    tabIndex={onRowClick ? 0 : undefined}
-                    aria-label={ariaLabel}
-                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-                    onKeyDown={
-                      onRowClick
-                        ? (e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              onRowClick(row.original);
-                            }
-                          }
-                        : undefined
-                    }
-                  >
-                    {row.getVisibleCells().map((cell) => {
-                      const isActions = cell.column.id === "actions";
-                      // Columns can opt out of the default ellipsis-truncate
-                      // by setting `meta: { wrap: true }` on the column def.
-                      // Cast inline since the project hasn't augmented
-                      // TanStack's ColumnMeta type globally.
-                      const wrap = (cell.column.columnDef.meta as { wrap?: boolean } | undefined)?.wrap === true;
-                      const cls = ["data-table-td"];
-                      if (isActions) cls.push("data-table-td-actions");
-                      if (wrap) cls.push("data-table-td-wrap");
-                      return (
-                        <td
-                          key={cell.id}
-                          className={cls.join(" ")}
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
-      </div>
+      <MantineDataTable<T>
+        withTableBorder
+        borderRadius="sm"
+        striped
+        highlightOnHover
+        minHeight={120}
+        fetching={isLoading}
+        records={records}
+        columns={mantineColumns}
+        idAccessor={idAccessor}
+        sortStatus={sortStatus}
+        onSortStatusChange={handleSortChange}
+        totalRecords={totalRecords}
+        recordsPerPage={pageSize}
+        page={page}
+        onPageChange={setPage}
+        noRecordsText={emptyMessage}
+        loadingText={loadingMessage}
+        onRowClick={onRowClickAdapter}
+        rowClassName={rowClassNameAdapter}
+      />
 
-      <div className="data-table-footer d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mt-3">
-        <div className="data-table-footer-start d-flex flex-column flex-sm-row align-items-sm-center gap-3">
-          <label className="data-table-length d-flex align-items-center gap-2 mb-0">
-            <select
-              className="form-select form-select-sm"
-              value={pageSize}
-              onChange={(e) => table.setPageSize(Number(e.target.value))}
-              style={{ width: "auto" }}
-            >
-              {pageSizeOptions.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-            <span>per page</span>
-          </label>
-          <div className="data-table-info">
+      <Group justify="space-between" gap="sm" wrap="wrap">
+        <Group gap="sm" align="center">
+          <Select
+            data={pageSizeOptionsAsStrings}
+            value={String(pageSize)}
+            onChange={handlePageSizeSelectChange}
+            allowDeselect={false}
+            size="xs"
+            w={88}
+          />
+          <Box style={{ fontSize: 13, color: "var(--mantine-color-dimmed)" }}>per page</Box>
+          <Box style={{ fontSize: 13, color: "var(--mantine-color-dimmed)" }}>
             {effectiveMode === "loading"
               ? ""
-              : filteredCount === 0
+              : totalRecords === 0
                 ? "Showing 0"
-                : `Showing ${pageIndex * pageSize + 1}–${Math.min(
-                    (pageIndex + 1) * pageSize,
-                    filteredCount
-                  )} of ${filteredCount}`}
-          </div>
-          <span className="data-table-mode-badge" title="Data loading mode">
+                : `Showing ${(page - 1) * pageSize + 1}–${Math.min(
+                    page * pageSize,
+                    totalRecords
+                  )} of ${totalRecords}`}
+          </Box>
+          <Badge variant="light" color="gray" size="sm" title="Data loading mode">
             {effectiveMode === "client" ? "client" : effectiveMode === "server" ? "server" : "…"}
-          </span>
-        </div>
-        <nav aria-label="Table pagination" className="data-table-paging">
-          <ul className="pagination pagination-sm mb-0">
-            <li className={`page-item ${!table.getCanPreviousPage() ? "disabled" : ""}`}>
-              <button
-                type="button"
-                className="page-link"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
-                aria-label="Previous page"
-              >
-                <i className="fa fa-chevron-left"></i>
-              </button>
-            </li>
-            {pageButtons.map((p) => (
-              <li key={p} className={`page-item ${p === pageIndex ? "active" : ""}`}>
-                <button
-                  type="button"
-                  className="page-link"
-                  onClick={() => table.setPageIndex(p)}
-                >
-                  {p + 1}
-                </button>
-              </li>
-            ))}
-            <li className={`page-item ${!table.getCanNextPage() ? "disabled" : ""}`}>
-              <button
-                type="button"
-                className="page-link"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
-                aria-label="Next page"
-              >
-                <i className="fa fa-chevron-right"></i>
-              </button>
-            </li>
-          </ul>
-        </nav>
-      </div>
-    </div>
+          </Badge>
+        </Group>
+      </Group>
+
+      {/* getRowAriaLabel is accepted for API parity; mantine-datatable doesn't
+          expose per-row aria props directly. Suppress unused-var by reading. */}
+      {getRowAriaLabel ? null : null}
+    </Stack>
   );
 }
 
-function SortIndicator({ dir }: { dir: "asc" | "desc" | null }) {
-  if (dir === "asc") return <i className="fa fa-caret-up data-table-sort-active ms-1"></i>;
-  if (dir === "desc") return <i className="fa fa-caret-down data-table-sort-active ms-1"></i>;
-  return <i className="fa fa-sort data-table-sort-idle ms-1"></i>;
+function FilterTab({
+  active,
+  onClick,
+  label,
+  count
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count?: number;
+}) {
+  return (
+    <UnstyledButton
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        height: 32,
+        padding: "0 12px",
+        borderRadius: 4,
+        border: "1px solid var(--mantine-color-default-border)",
+        background: active ? "var(--mantine-primary-color-filled)" : "transparent",
+        color: active ? "white" : "inherit",
+        fontSize: 13,
+        cursor: "pointer",
+        transition: "background 120ms ease, color 120ms ease"
+      }}
+    >
+      <span>{label}</span>
+      {count !== undefined && (
+        <Badge
+          size="xs"
+          variant={active ? "white" : "default"}
+          color={active ? "gray" : "gray"}
+        >
+          {count}
+        </Badge>
+      )}
+    </UnstyledButton>
+  );
 }
 
-function buildPageWindow(pageIndex: number, totalPages: number, max: number): number[] {
-  if (totalPages <= 0) return [0];
-  const half = Math.floor(max / 2);
-  let start = Math.max(0, pageIndex - half);
-  const end = Math.min(totalPages, start + max);
-  start = Math.max(0, end - max);
-  const out: number[] = [];
-  for (let i = start; i < end; i++) out.push(i);
-  return out;
-}

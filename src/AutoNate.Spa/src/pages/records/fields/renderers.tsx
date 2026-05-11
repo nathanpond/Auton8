@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Controller } from "react-hook-form";
+import { Checkbox, Group, NativeSelect, Switch, Textarea, TextInput } from "@mantine/core";
 import { FieldFormProps, FieldRenderer, getOptionChoices, registerRenderer } from "./registry";
 import { OptionChoice } from "@/types/records";
 
@@ -14,27 +15,21 @@ const textRenderer: FieldRenderer = {
         control={control}
         render={({ field: f, fieldState }) =>
           isMulti ? (
-            <>
-              <textarea
-                className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-                rows={4}
-                value={(f.value as string | null) ?? ""}
-                onChange={(e) => f.onChange(e.target.value)}
-                onBlur={f.onBlur}
-              />
-              {fieldState.error && <div className="invalid-feedback">{fieldState.error.message}</div>}
-            </>
+            <Textarea
+              rows={4}
+              value={(f.value as string | null) ?? ""}
+              onChange={(e) => f.onChange(e.currentTarget.value)}
+              onBlur={f.onBlur}
+              error={fieldState.error?.message}
+            />
           ) : (
-            <>
-              <input
-                type="text"
-                className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-                value={(f.value as string | null) ?? ""}
-                onChange={(e) => f.onChange(e.target.value)}
-                onBlur={f.onBlur}
-              />
-              {fieldState.error && <div className="invalid-feedback">{fieldState.error.message}</div>}
-            </>
+            <TextInput
+              type="text"
+              value={(f.value as string | null) ?? ""}
+              onChange={(e) => f.onChange(e.currentTarget.value)}
+              onBlur={f.onBlur}
+              error={fieldState.error?.message}
+            />
           )
         }
       />
@@ -60,21 +55,18 @@ const numberRenderer: FieldRenderer = {
       name={field.fieldKey}
       control={control}
       render={({ field: f, fieldState }) => (
-        <>
-          <input
-            type="number"
-            className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-            step={
-              (field.config as { variant?: string }).variant === "integer"
-                ? 1
-                : 1 / Math.pow(10, Number((field.config as { precision?: number }).precision ?? 2))
-            }
-            value={f.value === null || f.value === undefined ? "" : String(f.value)}
-            onChange={(e) => f.onChange(e.target.value === "" ? null : Number(e.target.value))}
-            onBlur={f.onBlur}
-          />
-          {fieldState.error && <div className="invalid-feedback">{fieldState.error.message}</div>}
-        </>
+        <TextInput
+          type="number"
+          step={
+            (field.config as { variant?: string }).variant === "integer"
+              ? 1
+              : 1 / Math.pow(10, Number((field.config as { precision?: number }).precision ?? 2))
+          }
+          value={f.value === null || f.value === undefined ? "" : String(f.value)}
+          onChange={(e) => f.onChange(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))}
+          onBlur={f.onBlur}
+          error={fieldState.error?.message}
+        />
       )}
     />
   ),
@@ -105,39 +97,36 @@ const dateRenderer: FieldRenderer = {
             const range = (f.value as { start: string; end: string } | null) ?? { start: "", end: "" };
             return (
               <div>
-                <div className="row g-2">
-                  <div className="col">
-                    <input
-                      type="date"
-                      className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-                      value={range.start ?? ""}
-                      onChange={(e) => f.onChange({ ...range, start: e.target.value })}
-                    />
+                <Group grow gap="xs">
+                  <TextInput
+                    type="date"
+                    value={range.start ?? ""}
+                    onChange={(e) => f.onChange({ ...range, start: e.currentTarget.value })}
+                    error={!!fieldState.error}
+                  />
+                  <TextInput
+                    type="date"
+                    value={range.end ?? ""}
+                    onChange={(e) => f.onChange({ ...range, end: e.currentTarget.value })}
+                    error={!!fieldState.error}
+                  />
+                </Group>
+                {fieldState.error && (
+                  <div style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}>
+                    {fieldState.error.message}
                   </div>
-                  <div className="col">
-                    <input
-                      type="date"
-                      className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-                      value={range.end ?? ""}
-                      onChange={(e) => f.onChange({ ...range, end: e.target.value })}
-                    />
-                  </div>
-                </div>
-                {fieldState.error && <div className="invalid-feedback d-block">{fieldState.error.message}</div>}
+                )}
               </div>
             );
           }
           return (
-            <>
-              <input
-                type={variant === "datetime" ? "datetime-local" : "date"}
-                className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-                value={(f.value as string | null) ?? ""}
-                onChange={(e) => f.onChange(e.target.value || null)}
-                onBlur={f.onBlur}
-              />
-              {fieldState.error && <div className="invalid-feedback">{fieldState.error.message}</div>}
-            </>
+            <TextInput
+              type={variant === "datetime" ? "datetime-local" : "date"}
+              value={(f.value as string | null) ?? ""}
+              onChange={(e) => f.onChange(e.currentTarget.value || null)}
+              onBlur={f.onBlur}
+              error={fieldState.error?.message}
+            />
           );
         }}
       />
@@ -184,17 +173,14 @@ const phoneRenderer: FieldRenderer = {
       name={field.fieldKey}
       control={control}
       render={({ field: f, fieldState }) => (
-        <>
-          <input
-            type="tel"
-            className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-            placeholder="+1 415 555 2671"
-            value={(f.value as string | null) ?? ""}
-            onChange={(e) => f.onChange(e.target.value)}
-            onBlur={f.onBlur}
-          />
-          {fieldState.error && <div className="invalid-feedback">{fieldState.error.message}</div>}
-        </>
+        <TextInput
+          type="tel"
+          placeholder="+1 415 555 2671"
+          value={(f.value as string | null) ?? ""}
+          onChange={(e) => f.onChange(e.currentTarget.value)}
+          onBlur={f.onBlur}
+          error={fieldState.error?.message}
+        />
       )}
     />
   ),
@@ -217,16 +203,13 @@ const emailRenderer: FieldRenderer = {
       name={field.fieldKey}
       control={control}
       render={({ field: f, fieldState }) => (
-        <>
-          <input
-            type="email"
-            className={`form-control ${fieldState.error ? "is-invalid" : ""}`}
-            value={(f.value as string | null) ?? ""}
-            onChange={(e) => f.onChange(e.target.value)}
-            onBlur={f.onBlur}
-          />
-          {fieldState.error && <div className="invalid-feedback">{fieldState.error.message}</div>}
-        </>
+        <TextInput
+          type="email"
+          value={(f.value as string | null) ?? ""}
+          onChange={(e) => f.onChange(e.currentTarget.value)}
+          onBlur={f.onBlur}
+          error={fieldState.error?.message}
+        />
       )}
     />
   ),
@@ -253,50 +236,45 @@ const optionRenderer: FieldRenderer = {
         render={({ field: f, fieldState }) =>
           isMulti ? (
             <>
-              <div className={`d-flex flex-wrap gap-2 ${fieldState.error ? "is-invalid" : ""}`}>
+              <Group gap="xs" wrap="wrap">
                 {choices.map((c) => {
                   const arr = Array.isArray(f.value) ? (f.value as string[]) : [];
                   const checked = arr.includes(c.value);
                   return (
-                    <div key={c.value} className="form-check">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        id={`${field.fieldKey}-${c.value}`}
-                        checked={checked}
-                        onChange={(e) => {
-                          const next = e.target.checked
-                            ? [...arr, c.value]
-                            : arr.filter((v) => v !== c.value);
-                          f.onChange(next);
-                        }}
-                      />
-                      <label className="form-check-label" htmlFor={`${field.fieldKey}-${c.value}`}>
-                        {c.label}
-                      </label>
-                    </div>
+                    <Checkbox
+                      key={c.value}
+                      id={`${field.fieldKey}-${c.value}`}
+                      label={c.label}
+                      checked={checked}
+                      onChange={(e) => {
+                        const next = e.currentTarget.checked
+                          ? [...arr, c.value]
+                          : arr.filter((v) => v !== c.value);
+                        f.onChange(next);
+                      }}
+                    />
                   );
                 })}
-              </div>
-              {fieldState.error && <div className="text-danger small mt-1">{fieldState.error.message}</div>}
+              </Group>
+              {fieldState.error && (
+                <div
+                  style={{ color: "var(--mantine-color-red-filled)", fontSize: "0.875rem", marginTop: 4 }}
+                >
+                  {fieldState.error.message}
+                </div>
+              )}
             </>
           ) : (
-            <>
-              <select
-                className={`form-select ${fieldState.error ? "is-invalid" : ""}`}
-                value={(f.value as string | null) ?? ""}
-                onChange={(e) => f.onChange(e.target.value || null)}
-                onBlur={f.onBlur}
-              >
-                <option value="">{field.isRequired ? "Select..." : "(none)"}</option>
-                {choices.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-              {fieldState.error && <div className="invalid-feedback">{fieldState.error.message}</div>}
-            </>
+            <NativeSelect
+              value={(f.value as string | null) ?? ""}
+              onChange={(e) => f.onChange(e.currentTarget.value || null)}
+              onBlur={f.onBlur}
+              error={fieldState.error?.message}
+              data={[
+                { value: "", label: field.isRequired ? "Select..." : "(none)" },
+                ...choices.map((c) => ({ value: c.value, label: c.label }))
+              ]}
+            />
           )
         }
       />
@@ -341,18 +319,12 @@ const booleanRenderer: FieldRenderer = {
       name={field.fieldKey}
       control={control}
       render={({ field: f }) => (
-        <div className="form-check form-switch">
-          <input
-            className="form-check-input"
-            type="checkbox"
-            id={`bool-${field.fieldKey}`}
-            checked={Boolean(f.value)}
-            onChange={(e) => f.onChange(e.target.checked)}
-          />
-          <label className="form-check-label" htmlFor={`bool-${field.fieldKey}`}>
-            {field.displayName}
-          </label>
-        </div>
+        <Switch
+          id={`bool-${field.fieldKey}`}
+          checked={Boolean(f.value)}
+          onChange={(e) => f.onChange(e.currentTarget.checked)}
+          label={field.displayName}
+        />
       )}
     />
   ),

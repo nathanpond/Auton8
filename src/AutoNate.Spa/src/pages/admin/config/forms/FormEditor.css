@@ -145,7 +145,7 @@
 .form-editor-sidebar-editor {
     flex: 1 1 auto;
     min-height: 16rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: var(--bs-border-radius);
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: var(--mantine-radius-default);
     overflow: hidden;
 }

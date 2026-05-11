@@ -31,6 +31,51 @@ export type AppRoute = {
 
 const protect = (node: ReactElement) => <ProtectedRoute>{node}</ProtectedRoute>;
 
+// (path, templateKey) pairs that mount a built-in page template at a fixed
+// URL inside `admin/config`. Each entry contributes one APP_ROUTE child below
+// AND lets the menu-item validator recognize that placing a template menu item
+// at that path is the design — not a route collision (see `findCollidingAppRoute`).
+const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] = [
+  { path: "general", templateKey: "configGeneral" },
+  { path: "features", templateKey: "configFeatures" },
+  { path: "appearance", templateKey: "configAppearance" },
+  { path: "status-appearance", templateKey: "configStatusAppearance" },
+  { path: "external-connections", templateKey: "configExternalConnections" },
+  { path: "pages-menus", templateKey: "configPagesMenus" },
+  { path: "bus-watcher", templateKey: "configBusWatcher" },
+  { path: "events", templateKey: "configEvents" },
+  { path: "system-health", templateKey: "configSystemHealth" },
+  { path: "users", templateKey: "configSecurityUsers" },
+  { path: "groups", templateKey: "configSecurityGroups" },
+  { path: "roles", templateKey: "configSecurityRoles" },
+  { path: "permissions", templateKey: "configSecurityPermissions" },
+  { path: "permission-checker", templateKey: "configSecurityPermissionChecker" },
+  { path: "plugins", templateKey: "configPlugins" },
+  { path: "plugins/documentation", templateKey: "configPluginDocumentation" },
+  { path: "forms", templateKey: "configForms" },
+  { path: "form-mappings", templateKey: "configFormMappings" },
+  { path: "chatbot-settings", templateKey: "configChatbotSettings" },
+  { path: "chatbot-models", templateKey: "configChatbotModels" }
+];
+
+// Absolute-path → templateKey index, materialized once for the validator.
+const TEMPLATE_ANCHOR_PATHS = new Map<string, string>(
+  CONFIG_TEMPLATE_ANCHORS.map((a) => [`/admin/config/${a.path}`, a.templateKey])
+);
+
+// templateKey → absolute anchor path, so the edit-menu UI can snap the path
+// field to the new template's canonical URL when the user swaps templates.
+const TEMPLATE_KEY_TO_ANCHOR_PATH = new Map<string, string>(
+  CONFIG_TEMPLATE_ANCHORS.map((a) => [a.templateKey, `/admin/config/${a.path}`])
+);
+
+// Returns the canonical mount path for `templateKey` if one is hard-routed in
+// APP_ROUTES (template-anchor route), otherwise null. Used by the menu-item
+// editor to auto-fix the path when the admin switches templates.
+export function anchorPathForTemplateKey(templateKey: string): string | null {
+  return TEMPLATE_KEY_TO_ANCHOR_PATH.get(templateKey) ?? null;
+}
+
 // A single template wrapped in ProtectedRoute. Used to mount templates as
 // hardcoded children of layout shells (today: ConfigLayout) so the section
 // renders inside the shell while still living in the template registry.
@@ -85,27 +130,11 @@ export const APP_ROUTES: AppRoute[] = [
     element: protect(<ConfigLayout />),
     children: [
       { index: true, element: <ConfigIndex /> },
-      { path: "general", element: template("configGeneral") },
-      { path: "features", element: template("configFeatures") },
-      { path: "appearance", element: template("configAppearance") },
-      { path: "status-appearance", element: template("configStatusAppearance") },
-      { path: "external-connections", element: template("configExternalConnections") },
-      { path: "pages-menus", element: template("configPagesMenus") },
-      { path: "bus-watcher", element: template("configBusWatcher") },
-      { path: "events", element: template("configEvents") },
-      { path: "system-health", element: template("configSystemHealth") },
-      { path: "users", element: template("configSecurityUsers") },
-      { path: "groups", element: template("configSecurityGroups") },
-      { path: "roles", element: template("configSecurityRoles") },
-      { path: "permissions", element: template("configSecurityPermissions") },
-      { path: "permission-checker", element: template("configSecurityPermissionChecker") },
-      { path: "plugins", element: template("configPlugins") },
-      { path: "plugins/documentation", element: template("configPluginDocumentation") },
-      { path: "forms", element: template("configForms") },
+      ...CONFIG_TEMPLATE_ANCHORS.map((a) => ({
+        path: a.path,
+        element: template(a.templateKey)
+      })),
       { path: "forms/:id", element: protect(<FormEditor />) },
-      { path: "form-mappings", element: template("configFormMappings") },
-      { path: "chatbot-settings", element: template("configChatbotSettings") },
-      { path: "chatbot-models", element: template("configChatbotModels") },
       // Catch-all so menu items added by plugins under /admin/config/* render
       // inside ConfigLayout's sidebar shell. The dynamic page component reads
       // the menu_item config (path/content/contentType) and renders it.
@@ -156,9 +185,26 @@ function flattenAppRoutes(
 // Returns the colliding route pattern (e.g. "/records/:typeShortCode") if the
 // given admin path would be shadowed by a built-in route, or null otherwise.
 // Uses react-router's matcher so parameterized routes are evaluated correctly.
-export function findCollidingAppRoute(path: string): string | null {
+//
+// Template-anchor routes (e.g. /admin/config/general) are intentional mount
+// points for their associated template — placing a template menu item at that
+// path with the matching `templateKey` is the design, not a collision. Pass
+// the picked templateKey in `opts.templateKey` to suppress the false positive;
+// callers that don't know (or are validating a non-template item) omit it and
+// get the original strict behavior.
+export function findCollidingAppRoute(
+  path: string,
+  opts?: { templateKey?: string }
+): string | null {
   for (const pattern of flattenAppRoutes()) {
-    if (matchPath({ path: pattern, end: true }, path)) return pattern;
+    if (!matchPath({ path: pattern, end: true }, path)) continue;
+    const anchorTemplateKey = TEMPLATE_ANCHOR_PATHS.get(pattern);
+    if (anchorTemplateKey && opts?.templateKey === anchorTemplateKey) {
+      // Template-anchored route matching the same templateKey the admin
+      // picked — not a collision, just the canonical mount point.
+      continue;
+    }
+    return pattern;
   }
   return null;
 }

@@ -16,19 +16,19 @@
 }
 
 .site-appearance-preview-card {
-  border: 1px solid var(--bs-component-border-color);
+  border: 1px solid var(--mantine-color-default-border);
   border-radius: 0.75rem;
-  background: var(--bs-component-bg);
-  color: var(--bs-component-color);
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
   overflow: hidden;
   min-height: 100%;
 }
 
 .site-appearance-preview-header {
   padding: 0.9rem 1rem;
-  border-bottom: 1px solid var(--bs-component-border-color);
-  background: var(--bs-app-top-menu-bg);
-  color: var(--bs-app-top-menu-link-color);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--app-top-menu-bg);
+  color: var(--app-top-menu-link-color);
 }
 
 .site-appearance-preview-body {
@@ -36,19 +36,19 @@
 }
 
 .site-appearance-preview-sidebar {
-  background: var(--bs-app-sidebar-bg);
-  color: var(--bs-app-sidebar-menu-link-color);
+  background: var(--app-sidebar-bg);
+  color: var(--app-sidebar-menu-link-color);
 }
 
 .site-appearance-preview-sidebar .nav-link {
   border-radius: 0.6rem;
-  color: var(--bs-app-sidebar-menu-link-color);
+  color: var(--app-sidebar-menu-link-color);
   padding: 0.55rem 0.75rem;
 }
 
 .site-appearance-preview-sidebar .nav-link.active {
-  background: var(--bs-app-sidebar-component-active-bg);
-  color: var(--bs-app-sidebar-component-active-color);
+  background: var(--app-sidebar-component-active-bg);
+  color: var(--app-sidebar-component-active-color);
 }
 
 .site-appearance-brand-image {
@@ -79,7 +79,7 @@
 
 .site-appearance-swatch-label {
   font-size: 0.8rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--mantine-color-dimmed, #6c757d);
   margin-bottom: 0.35rem;
 }
 

@@ -1,6 +1,19 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Code,
+  Group,
+  Stack,
+  Text,
+  Textarea
+} from "@mantine/core";
+import { modals } from "@mantine/modals";
+import {
   AgentConversation,
   AgentConversationDetail,
   AgentMessage,
@@ -32,15 +45,24 @@ export function AgentSidebar() {
   // children left to make room for the sidebar. Fixed-position sidebar stays
   // pinned to the viewport regardless. Cleared on close so closed sidebar
   // never reserves space.
+  //
+  // The push target depends on whether the chatbot is in "over header" mode:
+  //  - over-header: push #app so the header itself narrows and its icons stay
+  //    visible to the left of the chatbot (chatbot covers from y=0 down).
+  //  - under-header: push only #content so the header stays full-width; if
+  //    we also pushed the header here, the body bg would show through in the
+  //    y=0..56 strip above the chatbot.
   useEffect(() => {
     if (typeof document === "undefined") return;
     const body = document.body;
     const shouldFill = isOpen && chatbotWindowMode === "fill";
-    body.classList.toggle("agent-sidebar-fill", shouldFill);
+    body.classList.toggle("agent-sidebar-fill-app", shouldFill && chatbotOverHeader);
+    body.classList.toggle("agent-sidebar-fill-content", shouldFill && !chatbotOverHeader);
     return () => {
-      body.classList.remove("agent-sidebar-fill");
+      body.classList.remove("agent-sidebar-fill-app");
+      body.classList.remove("agent-sidebar-fill-content");
     };
-  }, [isOpen, chatbotWindowMode]);
+  }, [isOpen, chatbotWindowMode, chatbotOverHeader]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
@@ -131,6 +153,16 @@ export function AgentSidebar() {
     }
   };
 
+  const confirmDeleteConversation = (id: string) => {
+    modals.openConfirmModal({
+      title: "Delete chat",
+      children: <Text size="sm">Delete this chat permanently?</Text>,
+      labels: { confirm: "Delete", cancel: "Cancel" },
+      confirmProps: { color: "red" },
+      onConfirm: () => deleteMutation.mutate(id)
+    });
+  };
+
   return (
     <aside
       className={[
@@ -145,94 +177,115 @@ export function AgentSidebar() {
     >
       {isOpen && (
         <div className="agent-sidebar__inner">
-          <header className="agent-sidebar__header">
-            <div className="fw-semibold">AutoNate Assistant</div>
-            <small className="text-muted" title={activePageSummary ?? undefined}>
-              {activePageSummary
-                ? `page: ${pageKey} · ${truncate(activePageSummary, 60)}`
-                : `page: ${pageKey}`}
-            </small>
-            <button
-              type="button"
-              className="btn btn-sm btn-link ms-auto"
-              onClick={() => createMutation.mutate()}
-              disabled={createMutation.isPending}
-            >
-              <i className="fa fa-plus me-1" /> New chat
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-icon"
-              onClick={close}
-              aria-label="Close assistant"
-              title="Close"
-            >
-              <i className="fa fa-times" />
-            </button>
-          </header>
+          <Box
+            className="agent-sidebar__header"
+            px="sm"
+            py="xs"
+            style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
+          >
+            <Group gap="xs" wrap="nowrap" align="center">
+              <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+                <Text fw={600} size="sm">
+                  AutoNate Assistant
+                </Text>
+                <Text size="xs" c="dimmed" lineClamp={1} title={activePageSummary ?? undefined}>
+                  {activePageSummary
+                    ? `page: ${pageKey} · ${truncate(activePageSummary, 60)}`
+                    : `page: ${pageKey}`}
+                </Text>
+              </Stack>
+              <Button
+                variant="subtle"
+                size="compact-sm"
+                leftSection={<i className="fa fa-plus" />}
+                onClick={() => createMutation.mutate()}
+                loading={createMutation.isPending}
+              >
+                New chat
+              </Button>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                onClick={close}
+                aria-label="Close assistant"
+                title="Close"
+              >
+                <i className="fa fa-times" />
+              </ActionIcon>
+            </Group>
+          </Box>
 
-            <div className="agent-sidebar__body">
-              {!conversationId && (
-                <ConversationList
-                  conversations={conversationsQuery.data ?? []}
-                  loading={conversationsQuery.isLoading}
-                  onSelect={(id) => setConversationId(id)}
-                  onDelete={(id) => deleteMutation.mutate(id)}
-                />
-              )}
-
-              {conversationId && (
-                <ChatThread
-                  conversationId={conversationId}
-                  detail={detailQuery.data}
-                  loading={detailQuery.isLoading}
-                  streamText={stream.state.text}
-                  streaming={stream.state.streaming}
-                  toolCalls={stream.state.toolCalls}
-                  errorText={stream.state.error}
-                  pendingUserText={pendingUserText}
-                  onBack={() => setConversationId(null)}
-                  onDelete={() => deleteMutation.mutate(conversationId)}
-                />
-              )}
-            </div>
-
-            <form className="agent-sidebar__composer" onSubmit={onSubmit}>
-              <textarea
-                ref={composerRef}
-                className="form-control"
-                rows={2}
-                value={composer}
-                onChange={(e) => setComposer(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (composer.trim().length > 0) {
-                      void onSubmit(e as unknown as FormEvent<HTMLFormElement>);
-                    }
-                  }
-                }}
-                placeholder={conversationId ? "Send a message…" : "Ask the assistant about this page…"}
-                disabled={stream.state.streaming}
+          <div className="agent-sidebar__body">
+            {!conversationId && (
+              <ConversationList
+                conversations={conversationsQuery.data ?? []}
+                loading={conversationsQuery.isLoading}
+                onSelect={(id) => setConversationId(id)}
+                onDelete={confirmDeleteConversation}
               />
-              <div className="d-flex justify-content-between align-items-center gap-2 mt-2">
-                <ModelInUseLabel
-                  current={modelDefault.current}
-                  status={modelDefault.status}
-                />
-                <div className="d-flex gap-2">
-                  {stream.state.streaming ? (
-                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={stream.cancel}>
-                      Stop
-                    </button>
-                  ) : (
-                    <button type="submit" className="btn btn-sm btn-primary" disabled={composer.trim().length === 0}>
-                      Send
-                    </button>
-                  )}
-                </div>
-              </div>
-            </form>
+            )}
+
+            {conversationId && (
+              <ChatThread
+                conversationId={conversationId}
+                detail={detailQuery.data}
+                loading={detailQuery.isLoading}
+                streamText={stream.state.text}
+                streaming={stream.state.streaming}
+                toolCalls={stream.state.toolCalls}
+                errorText={stream.state.error}
+                pendingUserText={pendingUserText}
+                onBack={() => setConversationId(null)}
+                onDelete={() => confirmDeleteConversation(conversationId)}
+              />
+            )}
+          </div>
+
+          <Box
+            component="form"
+            className="agent-sidebar__composer"
+            onSubmit={onSubmit}
+            p="sm"
+            style={{
+              borderTop: "1px solid var(--mantine-color-default-border)",
+              background: "var(--mantine-color-default-hover)"
+            }}
+          >
+            <Textarea
+              ref={composerRef}
+              autosize
+              minRows={2}
+              maxRows={8}
+              value={composer}
+              onChange={(e) => setComposer(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (composer.trim().length > 0) {
+                    void onSubmit(e as unknown as FormEvent<HTMLFormElement>);
+                  }
+                }
+              }}
+              placeholder={
+                conversationId ? "Send a message…" : "Ask the assistant about this page…"
+              }
+              disabled={stream.state.streaming}
+            />
+            <Group justify="space-between" gap="xs" mt="xs" wrap="nowrap">
+              <ModelInUseLabel current={modelDefault.current} status={modelDefault.status} />
+              <Group gap="xs">
+                {stream.state.streaming ? (
+                  <Button size="xs" color="red" variant="outline" onClick={stream.cancel}>
+                    Stop
+                  </Button>
+                ) : (
+                  <Button size="xs" type="submit" disabled={composer.trim().length === 0}>
+                    Send
+                  </Button>
+                )}
+              </Group>
+            </Group>
+          </Box>
         </div>
       )}
     </aside>
@@ -264,18 +317,21 @@ function ModelInUseLabel({ current, status }: ModelInUseLabelProps) {
   }
 
   return (
-    <small
-      className="text-muted text-truncate"
-      style={{ maxWidth: "60%" }}
-      title={
-        current?.modelId
-          ? `Model in use: ${current.modelId}${current.provider ? ` (${current.provider})` : ""}`
-          : "Model in use"
-      }
-    >
-      <i className="fa fa-microchip me-1" aria-hidden="true" />
-      {text}
-    </small>
+    <Group gap={6} wrap="nowrap" style={{ minWidth: 0, maxWidth: "60%" }}>
+      <i className="fa fa-microchip" aria-hidden style={{ opacity: 0.6 }} />
+      <Text
+        size="xs"
+        c="dimmed"
+        truncate
+        title={
+          current?.modelId
+            ? `Model in use: ${current.modelId}${current.provider ? ` (${current.provider})` : ""}`
+            : "Model in use"
+        }
+      >
+        {text}
+      </Text>
+    </Group>
   );
 }
 
@@ -287,41 +343,64 @@ type ConversationListProps = {
 };
 
 function ConversationList({ conversations, loading, onSelect, onDelete }: ConversationListProps) {
-  if (loading) return <div className="p-3 text-muted">Loading…</div>;
+  if (loading)
+    return (
+      <Text c="dimmed" p="md" size="sm">
+        Loading…
+      </Text>
+    );
   if (conversations.length === 0) {
     return (
-      <div className="p-3 text-muted">
+      <Text c="dimmed" p="md" size="sm">
         No chats on this page yet. Send a message below to start a new one.
-      </div>
+      </Text>
     );
   }
   return (
-    <ul className="list-group list-group-flush agent-conversations">
+    <Stack gap={0} className="agent-conversations">
       {conversations.map((c) => (
-        <li key={c.id} className="list-group-item d-flex align-items-start">
-          <button
+        <Group
+          key={c.id}
+          gap="xs"
+          wrap="nowrap"
+          align="flex-start"
+          px="sm"
+          py="xs"
+          style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
+        >
+          <Box
+            component="button"
             type="button"
-            className="btn btn-link text-start flex-grow-1 p-0"
             onClick={() => onSelect(c.id)}
-          >
-            <div className="fw-semibold">{c.title ?? "Untitled chat"}</div>
-            <small className="text-muted">
-              {c.lastMessageAtUtc ? new Date(c.lastMessageAtUtc).toLocaleString() : "(empty)"}
-            </small>
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-link text-danger"
-            aria-label={`Delete ${c.title ?? "chat"}`}
-            onClick={() => {
-              if (window.confirm("Delete this chat permanently?")) onDelete(c.id);
+            style={{
+              flex: 1,
+              minWidth: 0,
+              textAlign: "left",
+              background: "transparent",
+              border: 0,
+              padding: 0,
+              cursor: "pointer"
             }}
           >
+            <Text fw={600} size="sm" truncate>
+              {c.title ?? "Untitled chat"}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {c.lastMessageAtUtc ? new Date(c.lastMessageAtUtc).toLocaleString() : "(empty)"}
+            </Text>
+          </Box>
+          <ActionIcon
+            variant="subtle"
+            color="red"
+            size="sm"
+            aria-label={`Delete ${c.title ?? "chat"}`}
+            onClick={() => onDelete(c.id)}
+          >
             <i className="fa fa-trash" />
-          </button>
-        </li>
+          </ActionIcon>
+        </Group>
       ))}
-    </ul>
+    </Stack>
   );
 }
 
@@ -338,7 +417,17 @@ type ChatThreadProps = {
   onDelete: () => void;
 };
 
-function ChatThread({ detail, loading, streamText, streaming, toolCalls, errorText, pendingUserText, onBack, onDelete }: ChatThreadProps) {
+function ChatThread({
+  detail,
+  loading,
+  streamText,
+  streaming,
+  toolCalls,
+  errorText,
+  pendingUserText,
+  onBack,
+  onDelete
+}: ChatThreadProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
 
   // Pin the scroll viewport to the bottom whenever new content lands — a new
@@ -351,32 +440,50 @@ function ChatThread({ detail, loading, streamText, streaming, toolCalls, errorTe
     el.scrollTop = el.scrollHeight;
   }, [detail?.messages.length, pendingUserText, streamText, toolCalls.length, streaming]);
 
-  if (loading || !detail) return <div className="p-3 text-muted">Loading…</div>;
+  if (loading || !detail)
+    return (
+      <Text c="dimmed" p="md" size="sm">
+        Loading…
+      </Text>
+    );
 
   return (
     <div className="agent-thread">
-      <div className="d-flex align-items-center px-3 py-2 border-bottom">
-        <button type="button" className="btn btn-sm btn-link" onClick={onBack}>
-          <i className="fa fa-arrow-left" /> Chats
-        </button>
-        <div className="flex-grow-1" />
-        <button
-          type="button"
-          className="btn btn-sm btn-link text-danger"
-          onClick={() => {
-            if (window.confirm("Delete this chat permanently?")) onDelete();
-          }}
+      <Group
+        px="sm"
+        py="xs"
+        gap="xs"
+        wrap="nowrap"
+        style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
+      >
+        <Button
+          variant="subtle"
+          size="compact-sm"
+          leftSection={<i className="fa fa-arrow-left" />}
+          onClick={onBack}
         >
-          <i className="fa fa-trash" /> Delete
-        </button>
-      </div>
+          Chats
+        </Button>
+        <Box style={{ flex: 1 }} />
+        <Button
+          variant="subtle"
+          color="red"
+          size="compact-sm"
+          leftSection={<i className="fa fa-trash" />}
+          onClick={onDelete}
+        >
+          Delete
+        </Button>
+      </Group>
       <div className="agent-thread__messages" ref={messagesRef}>
         {detail.messages.map((m) => (
-          <MessageBubble key={m.id} message={m} toolCallsForMessage={detail.toolCalls.filter((tc) => tc.messageId === m.id)} />
+          <MessageBubble
+            key={m.id}
+            message={m}
+            toolCallsForMessage={detail.toolCalls.filter((tc) => tc.messageId === m.id)}
+          />
         ))}
-        {pendingUserText && (
-          <div className="agent-bubble agent-bubble--user">{pendingUserText}</div>
-        )}
+        {pendingUserText && <div className="agent-bubble agent-bubble--user">{pendingUserText}</div>}
         {streaming && (
           <div className="agent-bubble agent-bubble--assistant">
             {toolCalls.map((tc) => (
@@ -394,7 +501,11 @@ function ChatThread({ detail, loading, streamText, streaming, toolCalls, errorTe
             {!streamText && toolCalls.length === 0 && <TypingIndicator />}
           </div>
         )}
-        {errorText && <div className="alert alert-danger m-2">{errorText}</div>}
+        {errorText && (
+          <Alert color="red" variant="light" m="xs">
+            {errorText}
+          </Alert>
+        )}
       </div>
     </div>
   );
@@ -428,9 +539,8 @@ function MessageBubble({ message, toolCallsForMessage }: MessageBubbleProps) {
           durationMs={tc.durationMs ?? undefined}
         />
       ))}
-      {text && (message.role === "assistant"
-        ? <MarkdownView source={text} />
-        : <div>{text}</div>)}
+      {text &&
+        (message.role === "assistant" ? <MarkdownView source={text} /> : <div>{text}</div>)}
     </div>
   );
 }
@@ -461,31 +571,53 @@ type ToolCallCardProps = {
 
 function ToolCallCard({ name, args, status, result, error, durationMs }: ToolCallCardProps) {
   const [open, setOpen] = useState(false);
-  const badge =
-    status === "pending" ? "bg-secondary" : status === "succeeded" ? "bg-success" : "bg-danger";
+  const badgeColor = status === "pending" ? "gray" : status === "succeeded" ? "green" : "red";
   return (
     <div className="agent-tool-call">
-      <button type="button" className="agent-tool-call__head" onClick={() => setOpen((o) => !o)}>
-        <span className={`badge ${badge} me-2`}>{status}</span>
-        <code>{name}</code>
-        {typeof durationMs === "number" && <small className="text-muted ms-2">{durationMs}ms</small>}
+      <button
+        type="button"
+        className="agent-tool-call__head"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          background: "transparent",
+          border: 0,
+          cursor: "pointer",
+          width: "100%",
+          textAlign: "left"
+        }}
+      >
+        <Group gap="xs" wrap="nowrap">
+          <Badge size="sm" color={badgeColor}>
+            {status}
+          </Badge>
+          <Code>{name}</Code>
+          {typeof durationMs === "number" && (
+            <Text size="xs" c="dimmed">
+              {durationMs}ms
+            </Text>
+          )}
+        </Group>
       </button>
       {open && (
         <div className="agent-tool-call__body">
           <div>
-            <strong>args:</strong>
+            <Text fw={700} size="xs" component="strong">
+              args:
+            </Text>
             <pre>{JSON.stringify(args, null, 2)}</pre>
           </div>
           {result !== undefined && result !== null && (
             <div>
-              <strong>result:</strong>
+              <Text fw={700} size="xs" component="strong">
+                result:
+              </Text>
               <pre>{JSON.stringify(result, null, 2)}</pre>
             </div>
           )}
           {error && (
-            <div className="text-danger">
+            <Text size="sm" c="red">
               <strong>error:</strong> {error}
-            </div>
+            </Text>
           )}
         </div>
       )}

@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  Grid,
+  Group,
+  Tabs,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
+import {
   useAdminMenu,
   useCreateMenu,
   useCreateMenuItem,
@@ -47,47 +60,57 @@ export default function PagesMenus() {
 
   return (
     <>
-      <div className="page-head d-flex justify-content-between align-items-start gap-3">
-        <div>
-          <h1 className="page-header mb-1">Pages / Menus</h1>
-          <p className="page-head-copy">
-            Manage every navigation surface on the site. Each tab is a menu — drag items
-            to reorder, edit them to change icons, names, or destinations, and add new
-            items including custom <strong>page</strong> items that create their own routes.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn btn-sm btn-link p-0 text-decoration-none flex-shrink-0"
-          onClick={() => setHelpOpen(true)}
-          title="How Pages / Menus works"
-          aria-label="How Pages / Menus works"
-        >
-          <i className="fa fa-circle-question" /> Help
-        </button>
-      </div>
+      <PageHeader
+        title="Pages / Menus"
+        description={
+          <>
+            Manage every navigation surface on the site. Each tab is a menu — drag items to
+            reorder, edit them to change icons, names, or destinations, and add new items
+            including custom <strong>page</strong> items that create their own routes.
+          </>
+        }
+        actions={
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            leftSection={<i className="fa fa-circle-question" />}
+            onClick={() => setHelpOpen(true)}
+            title="How Pages / Menus works"
+            aria-label="How Pages / Menus works"
+          >
+            Help
+          </Button>
+        }
+      />
 
-      {isLoading && <div>Loading…</div>}
+      {isLoading && <Text>Loading…</Text>}
 
       {!isLoading && orderedMenus.length > 0 && (
         <>
-          <ul className="nav nav-tabs mb-3">
-            {orderedMenus.map((m) => (
-              <li className="nav-item" key={m.key}>
-                <button
-                  type="button"
-                  className={`nav-link ${activeKey === m.key ? "active" : ""}`}
-                  onClick={() => setActiveKey(m.key)}
-                >
-                  {m.name}
-                  {m.isSystem && <i className="fa fa-lock ms-2 text-muted" title="System menu" />}
-                </button>
-              </li>
-            ))}
-            <li className="nav-item ms-auto">
+          <Tabs value={activeKey} onChange={setActiveKey}>
+            <Group justify="space-between" align="flex-end" mb="md" wrap="nowrap">
+              <Tabs.List style={{ flex: 1 }}>
+                {orderedMenus.map((m) => (
+                  <Tabs.Tab
+                    key={m.key}
+                    value={m.key}
+                    rightSection={
+                      m.isSystem ? (
+                        <i
+                          className="fa fa-lock"
+                          title="System menu"
+                          style={{ color: "var(--mantine-color-dimmed)" }}
+                        />
+                      ) : undefined
+                    }
+                  >
+                    {m.name}
+                  </Tabs.Tab>
+                ))}
+              </Tabs.List>
               <NewMenuButton />
-            </li>
-          </ul>
+            </Group>
+          </Tabs>
 
           {activeKey && <MenuPanel key={activeKey} menuKey={activeKey} />}
         </>
@@ -111,7 +134,6 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
   const updateMenu = useUpdateMenu(menu?.id ?? "");
   const deleteMenu = useDeleteMenu();
 
-  // Snapshot stays "saved" until the user reorders something locally.
   const dirty = pendingItems !== null;
 
   const isStructurallyDirty = useMemo(() => {
@@ -125,7 +147,7 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
     return JSON.stringify(original) !== JSON.stringify(current);
   }, [pendingItems, menu]);
 
-  if (isLoading || !menu) return <div>Loading…</div>;
+  if (isLoading || !menu) return <Text>Loading…</Text>;
 
   const handleAddRoot = async (itemType: MenuItemType = "group") => {
     setError(null);
@@ -174,73 +196,70 @@ function MenuPanel({ menuKey }: { menuKey: string }) {
   };
 
   return (
-    <div className="row g-3">
-      <div className="col-lg-12">
-        <div className="panel panel-inverse">
-          <div className="panel-heading d-flex justify-content-between align-items-center">
-            <h4 className="panel-title mb-0">{menu.name}</h4>
-            <div className="d-flex gap-2">
-              {dirty && isStructurallyDirty && (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary"
-                    onClick={handleCancel}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary"
-                    onClick={handleSave}
-                    disabled={replaceTree.isPending}
-                  >
-                    Save order
-                  </button>
-                </>
-              )}
-              {!menu.isSystem && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-danger"
-                  onClick={() => {
-                    if (confirm(`Delete menu '${menu.name}'? This removes all items.`)) {
-                      void deleteMenu.mutateAsync(menu.id);
-                    }
-                  }}
-                >
-                  Delete menu
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="panel-body">
-            {error && <div className="alert alert-danger">{error}</div>}
+    <Card withBorder shadow="sm">
+      <Group justify="space-between" align="center" mb="md">
+        <Title order={5} m={0}>
+          {menu.name}
+        </Title>
+        <Group gap="xs">
+          {dirty && isStructurallyDirty && (
+            <>
+              <Button size="xs" variant="default" onClick={handleCancel}>
+                Cancel
+              </Button>
+              <Button size="xs" onClick={handleSave} loading={replaceTree.isPending}>
+                Save order
+              </Button>
+            </>
+          )}
+          {!menu.isSystem && (
+            <Button
+              size="xs"
+              variant="outline"
+              color="red"
+              onClick={() => {
+                if (confirm(`Delete menu '${menu.name}'? This removes all items.`)) {
+                  void deleteMenu.mutateAsync(menu.id);
+                }
+              }}
+            >
+              Delete menu
+            </Button>
+          )}
+        </Group>
+      </Group>
 
-            {menu.key === "standalone" && (
-              <div className="alert alert-info py-2 mb-3 small">
-                <i className="fa fa-circle-info me-2" />
-                Items on the <strong>Standalone</strong> menu are URL-reachable but do
-                not appear in any visible navigation menu. Use it to expose page
-                templates that should be available by URL without taking up nav space.
-              </div>
-            )}
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
 
-            <MenuMetaForm menu={menu} onUpdate={(req) => updateMenu.mutateAsync(req)} />
+      {menu.key === "standalone" && (
+        <Alert color="blue" variant="light" mb="md">
+          <Group gap="xs" align="center">
+            <i className="fa fa-circle-info" />
+            <Text size="sm">
+              Items on the <strong>Standalone</strong> menu are URL-reachable but do not
+              appear in any visible navigation menu. Use it to expose page templates that
+              should be available by URL without taking up nav space.
+            </Text>
+          </Group>
+        </Alert>
+      )}
 
-            <MenuTreeEditor
-              menu={menu}
-              onChange={setPendingItems}
-              onAddRoot={handleAddRoot}
-              onDelete={(id) => void deleteItem.mutateAsync(id)}
-              onEditItem={handleEditItem}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+      <MenuMetaForm menu={menu} onUpdate={(req) => updateMenu.mutateAsync(req)} />
+
+      <MenuTreeEditor
+        menu={menu}
+        onChange={setPendingItems}
+        onAddRoot={handleAddRoot}
+        onDelete={(id) => void deleteItem.mutateAsync(id)}
+        onEditItem={handleEditItem}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
+    </Card>
   );
 }
 
@@ -276,29 +295,31 @@ function MenuMetaForm({
   };
 
   return (
-    <form className="row g-2 mb-3" onSubmit={submit}>
-      <div className="col-md-4">
-        <label className="form-label small">Name</label>
-        <input className="form-control" value={name} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <div className="col-md-7">
-        <label className="form-label small">Description</label>
-        <input
-          className="form-control"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-      <div className="col-md-1 d-flex align-items-end">
-        <button
-          type="submit"
-          className="btn btn-outline-primary w-100"
-          disabled={!isDirty || saving}
-        >
-          Save
-        </button>
-      </div>
-    </form>
+    <Box component="form" onSubmit={submit} mb="md">
+      <Grid align="flex-end">
+        <Grid.Col span={{ base: 12, md: 4 }}>
+          <TextInput
+            label="Name"
+            size="xs"
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, md: 7 }}>
+          <TextInput
+            label="Description"
+            size="xs"
+            value={description}
+            onChange={(e) => setDescription(e.currentTarget.value)}
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, md: 1 }}>
+          <Button type="submit" size="xs" fullWidth variant="outline" disabled={!isDirty || saving}>
+            Save
+          </Button>
+        </Grid.Col>
+      </Grid>
+    </Box>
   );
 }
 
@@ -311,14 +332,14 @@ function NewMenuButton() {
 
   if (!adding) {
     return (
-      <button
-        type="button"
-        className="btn btn-sm btn-outline-primary"
+      <Button
+        size="xs"
+        variant="outline"
+        leftSection={<i className="fa fa-plus" />}
         onClick={() => setAdding(true)}
       >
-        <i className="fa fa-plus me-1" />
         New menu
-      </button>
+      </Button>
     );
   }
 
@@ -336,34 +357,42 @@ function NewMenuButton() {
   };
 
   return (
-    <form className="d-flex gap-1" onSubmit={submit}>
-      <input
-        className="form-control form-control-sm font-monospace"
-        placeholder="key"
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-      />
-      <input
-        className="form-control form-control-sm"
-        placeholder="Display name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <button type="submit" className="btn btn-sm btn-primary" disabled={!key || !name}>
-        Add
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-link"
-        onClick={() => {
-          setAdding(false);
-          setError(null);
-        }}
-      >
-        Cancel
-      </button>
-      {error && <span className="text-danger small ms-2">{error}</span>}
-    </form>
+    <Box component="form" onSubmit={submit}>
+      <Group gap={4} align="flex-end" wrap="nowrap">
+        <TextInput
+          size="xs"
+          placeholder="key"
+          value={key}
+          onChange={(e) => setKey(e.currentTarget.value)}
+          styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
+        />
+        <TextInput
+          size="xs"
+          placeholder="Display name"
+          value={name}
+          onChange={(e) => setName(e.currentTarget.value)}
+        />
+        <Button type="submit" size="xs" disabled={!key || !name}>
+          Add
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="subtle"
+          onClick={() => {
+            setAdding(false);
+            setError(null);
+          }}
+        >
+          Cancel
+        </Button>
+        {error && (
+          <Text c="red" size="sm" ml={8}>
+            {error}
+          </Text>
+        )}
+      </Group>
+    </Box>
   );
 }
 

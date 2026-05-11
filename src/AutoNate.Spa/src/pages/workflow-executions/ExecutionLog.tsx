@@ -1,3 +1,4 @@
+import { Alert, Badge, Text } from "@mantine/core";
 import { useExecutionLog } from "@/hooks/useExecutions";
 import { useUserDirectory, userFullDisplay } from "@/hooks/useUserDirectory";
 import { WorkflowExecutionLogEntry, WorkflowExecutionLogKind } from "@/types/flowable";
@@ -15,26 +16,42 @@ export default function ExecutionLog({ processInstanceId }: Props) {
 
   if (error) {
     return (
-      <div className="alert alert-danger" role="alert">
+      <Alert color="red" variant="light" role="alert">
         {describeError(error)}
-      </div>
+      </Alert>
     );
   }
 
   if (isLoading) {
-    return <p className="workflow-executions-loading">Loading execution log...</p>;
+    return (
+      <Text size="sm" c="dimmed">
+        Loading execution log...
+      </Text>
+    );
   }
 
   if (entries.length === 0) {
-    return <p className="text-body text-opacity-50 mb-0">No log entries yet.</p>;
+    return (
+      <Text size="sm" c="dimmed">
+        No log entries yet.
+      </Text>
+    );
   }
 
   return (
-    <ol className="list-unstyled mb-0 workflow-execution-log-list">
+    <ol
+      className="workflow-execution-log-list"
+      style={{ listStyle: "none", margin: 0, padding: 0 }}
+    >
       {entries.map((entry, index) => (
         <li
           key={`${entry.kind}-${entry.occurredAtUtc ?? index}-${index}`}
-          className="mb-3 pb-3 border-bottom workflow-execution-log-item"
+          className="workflow-execution-log-item"
+          style={{
+            marginBottom: 16,
+            paddingBottom: 16,
+            borderBottom: "1px solid var(--mantine-color-default-border)"
+          }}
         >
           {renderEntry(entry, directory)}
         </li>
@@ -62,19 +79,19 @@ function renderError(
 ) {
   return (
     <>
-      <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
-        <span className="badge text-bg-danger">error</span>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <Badge color="red" variant="filled">error</Badge>
         <strong>{err.activityName ?? err.activityId}</strong>
         {err.rawFlowableEventType && (
-          <span className="badge text-bg-light text-dark">{err.rawFlowableEventType}</span>
+          <Badge color="gray" variant="light">{err.rawFlowableEventType}</Badge>
         )}
       </div>
-      <div className="small text-body text-opacity-75">
+      <div style={{ fontSize: "0.875rem", color: "var(--mantine-color-dimmed)" }}>
         <span>{formatTimestamp(entry.occurredAtUtc)}</span>
       </div>
       {err.errorMessage && (
-        <div className="small text-danger mt-1">
-          <code className="text-danger">{err.errorMessage}</code>
+        <div style={{ fontSize: "0.875rem", color: "var(--mantine-color-red-filled)", marginTop: 4 }}>
+          <code style={{ color: "var(--mantine-color-red-filled)" }}>{err.errorMessage}</code>
         </div>
       )}
     </>
@@ -87,24 +104,24 @@ function renderVariableUpdate(
 ) {
   return (
     <>
-      <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
-        <span className={kindBadgeClass(entry.kind)}>variable</span>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <Badge color={kindBadgeColor(entry.kind)} variant="filled">variable</Badge>
         <strong>{v.name}</strong>
-        {v.type && <span className="badge text-bg-secondary">{v.type}</span>}
+        {v.type && <Badge color="gray" variant="filled">{v.type}</Badge>}
         {v.revision !== null && (
-          <span className="text-body text-opacity-50 small">rev {v.revision}</span>
+          <span style={{ color: "var(--mantine-color-dimmed)", fontSize: "0.875rem" }}>rev {v.revision}</span>
         )}
       </div>
       {v.value !== null && (
-        <div className="small mb-1">
-          <code className="text-body">{v.value}</code>
+        <div style={{ fontSize: "0.875rem", marginBottom: 4 }}>
+          <code>{v.value}</code>
         </div>
       )}
-      <div className="small text-body text-opacity-75">
+      <div style={{ fontSize: "0.875rem", color: "var(--mantine-color-dimmed)" }}>
         <span>{formatTimestamp(entry.occurredAtUtc)}</span>
         {v.taskId && (
           <>
-            <span className="mx-2">·</span>
+            <span style={{ margin: "0 8px" }}>·</span>
             <span>during task {v.taskId}</span>
           </>
         )}
@@ -120,39 +137,37 @@ function renderTaskEvent(
 ) {
   return (
     <>
-      <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
-        <span className={kindBadgeClass(entry.kind)}>{kindLabel(entry.kind)}</span>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <Badge color={kindBadgeColor(entry.kind)} variant="filled">{kindLabel(entry.kind)}</Badge>
         <strong>{t.name ?? t.taskDefinitionKey ?? t.taskId}</strong>
         {t.deleteReason && entry.kind === "task-cancelled" && (
-          <span className="badge text-bg-warning">{t.deleteReason}</span>
+          <Badge color="yellow" variant="filled">{t.deleteReason}</Badge>
         )}
         {t.isOverride && entry.kind === "task-completed" && (
-          <span className="badge text-bg-warning" title="Completed via admin override">
-            override
-          </span>
+          <Badge color="yellow" variant="filled" title="Completed via admin override">override</Badge>
         )}
-        {t.formKey && <span className="badge text-bg-light text-dark">form: {t.formKey}</span>}
+        {t.formKey && <Badge color="gray" variant="light">form: {t.formKey}</Badge>}
         {t.priority !== null && t.priority !== 50 && (
-          <span className="badge text-bg-light text-dark">priority {t.priority}</span>
+          <Badge color="gray" variant="light">priority {t.priority}</Badge>
         )}
       </div>
-      <div className="small text-body text-opacity-75">
+      <div style={{ fontSize: "0.875rem", color: "var(--mantine-color-dimmed)" }}>
         <span>{formatTimestamp(entry.occurredAtUtc)}</span>
         {t.assignee && (
           <>
-            <span className="mx-2">·</span>
+            <span style={{ margin: "0 8px" }}>·</span>
             <span>Assignee: {userFullDisplay(directory.get(t.assignee), t.assignee)}</span>
           </>
         )}
         {t.owner && t.owner !== t.assignee && (
           <>
-            <span className="mx-2">·</span>
+            <span style={{ margin: "0 8px" }}>·</span>
             <span>Owner: {userFullDisplay(directory.get(t.owner), t.owner)}</span>
           </>
         )}
         {entry.kind === "task-completed" && t.completedByUserId && t.completedByUserId !== t.assignee && (
           <>
-            <span className="mx-2">·</span>
+            <span style={{ margin: "0 8px" }}>·</span>
             <span>
               Task Completed By: {userFullDisplay(directory.get(t.completedByUserId), t.completedByUserId)}
             </span>
@@ -160,7 +175,7 @@ function renderTaskEvent(
         )}
         {t.dueAtUtc && (
           <>
-            <span className="mx-2">·</span>
+            <span style={{ margin: "0 8px" }}>·</span>
             <span>Due {formatTimestamp(t.dueAtUtc)}</span>
           </>
         )}
@@ -169,22 +184,22 @@ function renderTaskEvent(
   );
 }
 
-function kindBadgeClass(kind: WorkflowExecutionLogKind): string {
+function kindBadgeColor(kind: WorkflowExecutionLogKind): string {
   switch (kind) {
     case "variable-update":
-      return "badge text-bg-info";
+      return "cyan";
     case "task-created":
-      return "badge text-bg-secondary";
+      return "gray";
     case "task-claimed":
-      return "badge text-bg-primary";
+      return "blue";
     case "task-completed":
-      return "badge text-bg-success";
+      return "green";
     case "task-cancelled":
-      return "badge text-bg-warning";
+      return "yellow";
     case "error":
-      return "badge text-bg-danger";
+      return "red";
     default:
-      return "badge text-bg-secondary";
+      return "gray";
   }
 }
 

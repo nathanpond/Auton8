@@ -26,7 +26,7 @@
 
 .menu-tree-editor .menu-tree-separator hr {
     border: 0;
-    border-top: 1px solid var(--bs-border-color);
+    border-top: 1px solid var(--mantine-color-default-border);
     opacity: 1;
 }
 
@@ -37,7 +37,7 @@
 }
 
 .nav-tabs .nav-link.active {
-    background: var(--bs-body-bg);
-    border: 1px solid var(--bs-border-color);
-    border-bottom-color: var(--bs-body-bg);
+    background: var(--mantine-color-body);
+    border: 1px solid var(--mantine-color-default-border);
+    border-bottom-color: var(--mantine-color-body);
 }

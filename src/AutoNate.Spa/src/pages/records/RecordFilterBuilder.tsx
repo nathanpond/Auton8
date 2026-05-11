@@ -1,4 +1,14 @@
 import { useState } from "react";
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Group,
+  NativeSelect,
+  Stack,
+  Text,
+  TextInput
+} from "@mantine/core";
 import { FilterOperatorWire, RecordTypeField, SearchFilterClause } from "@/types/records";
 import "./fields/renderers";
 import { defaultOperator, operatorsFor } from "./fields/operators";
@@ -53,104 +63,101 @@ export default function RecordFilterBuilder({ fields, initialFilters, onApply, o
 
   if (filterableFields.length === 0) {
     return (
-      <p className="text-body text-opacity-50 mb-0">
+      <Text c="dimmed">
         No fields are defined yet — add fields to the record type to enable filtering.
-      </p>
+      </Text>
     );
   }
 
   return (
-    <div className="vstack gap-2">
+    <Stack gap="xs">
       {drafts.length === 0 && (
-        <p className="text-body text-opacity-50 mb-0 small">
+        <Text c="dimmed" size="sm">
           No filters. Click "Add filter" to narrow the list.
-        </p>
+        </Text>
       )}
       {drafts.map((clause, i) => {
         const field = fieldByKey.get(clause.fieldKey) ?? filterableFields[0];
         const operators = operatorsFor(field);
         return (
-          <div key={i} className="d-flex gap-2 align-items-start">
-            <select
-              className="form-select form-select-sm"
+          <Group key={i} gap="xs" align="flex-start" wrap="nowrap">
+            <NativeSelect
+              size="xs"
               style={{ maxWidth: "14rem" }}
               value={clause.fieldKey}
               onChange={(e) => {
                 const nextField =
-                  filterableFields.find((f) => f.fieldKey === e.target.value) ?? filterableFields[0];
+                  filterableFields.find((f) => f.fieldKey === e.currentTarget.value) ??
+                  filterableFields[0];
                 updateClause(i, {
                   fieldKey: nextField.fieldKey,
                   op: defaultOperator(nextField),
                   value: clauseDefault(nextField)
                 });
               }}
-            >
-              {filterableFields.map((f) => (
-                <option key={f.id} value={f.fieldKey}>
-                  {f.displayName}
-                </option>
-              ))}
-            </select>
-            <select
-              className="form-select form-select-sm"
+              data={filterableFields.map((f) => ({ value: f.fieldKey, label: f.displayName }))}
+            />
+            <NativeSelect
+              size="xs"
               style={{ maxWidth: "8rem" }}
               value={clause.op}
-              onChange={(e) => updateClause(i, { op: e.target.value as FilterOperatorWire })}
-            >
-              {operators.map((op) => (
-                <option key={op.value} value={op.value}>
-                  {op.label}
-                </option>
-              ))}
-            </select>
-            <div className="flex-grow-1">
+              onChange={(e) =>
+                updateClause(i, { op: e.currentTarget.value as FilterOperatorWire })
+              }
+              data={operators.map((op) => ({ value: op.value, label: op.label }))}
+            />
+            <Box style={{ flex: 1 }}>
               <ClauseValueInput
                 field={field}
                 value={clause.value}
                 onChange={(v) => updateClause(i, { value: v })}
               />
-            </div>
-            <button
-              type="button"
-              className="btn btn-outline-danger btn-sm"
+            </Box>
+            <ActionIcon
+              variant="outline"
+              color="red"
+              size="sm"
               onClick={() => removeClause(i)}
               aria-label="Remove filter"
             >
-              <i className="fa fa-times"></i>
-            </button>
-          </div>
+              <i className="fa fa-times" />
+            </ActionIcon>
+          </Group>
         );
       })}
-      <div className="d-flex justify-content-between">
-        <button type="button" className="btn btn-outline-secondary btn-sm" onClick={addClause}>
-          <i className="fa fa-plus me-2"></i>Add filter
-        </button>
-        <div className="d-flex gap-2">
+      <Group justify="space-between">
+        <Button
+          size="xs"
+          variant="default"
+          leftSection={<i className="fa fa-plus" />}
+          onClick={addClause}
+        >
+          Add filter
+        </Button>
+        <Group gap="xs">
           {drafts.length > 0 && (
-            <button
-              type="button"
-              className="btn btn-outline-secondary btn-sm"
+            <Button
+              size="xs"
+              variant="default"
               onClick={() => {
                 setDrafts([]);
                 onClear();
               }}
             >
               Clear
-            </button>
+            </Button>
           )}
-          <button type="button" className="btn btn-primary btn-sm" onClick={apply}>
+          <Button size="xs" onClick={apply}>
             Apply
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Group>
+    </Stack>
   );
 }
 
 /**
- * A compact, type-aware value input for a single filter clause. Designed to
- * render inside a horizontal row alongside the field/operator selectors, so
- * it favors single-line variants regardless of the field's storage variant.
+ * A compact, type-aware value input for a single filter clause.
  */
 function ClauseValueInput({
   field,
@@ -164,59 +171,59 @@ function ClauseValueInput({
   switch (field.dataType) {
     case "boolean":
       return (
-        <select
-          className="form-select form-select-sm"
+        <NativeSelect
+          size="xs"
           value={value === true ? "true" : value === false ? "false" : ""}
-          onChange={(e) => onChange(e.target.value === "true")}
-        >
-          <option value="true">true</option>
-          <option value="false">false</option>
-        </select>
+          onChange={(e) => onChange(e.currentTarget.value === "true")}
+          data={[
+            { value: "true", label: "true" },
+            { value: "false", label: "false" }
+          ]}
+        />
       );
     case "number":
       return (
-        <input
+        <TextInput
+          size="xs"
           type="number"
-          className="form-control form-control-sm"
           value={value === null || value === undefined ? "" : String(value)}
-          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+          onChange={(e) =>
+            onChange(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))
+          }
         />
       );
     case "date": {
       const variant = (field.config as { variant?: string }).variant ?? "date";
       return (
-        <input
+        <TextInput
+          size="xs"
           type={variant === "datetime" ? "datetime-local" : "date"}
-          className="form-control form-control-sm"
           value={(value as string | null) ?? ""}
-          onChange={(e) => onChange(e.target.value || null)}
+          onChange={(e) => onChange(e.currentTarget.value || null)}
         />
       );
     }
     case "option": {
       const choices = getOptionChoices(field);
       return (
-        <select
-          className="form-select form-select-sm"
+        <NativeSelect
+          size="xs"
           value={(value as string | null) ?? ""}
-          onChange={(e) => onChange(e.target.value || null)}
-        >
-          <option value="">(any)</option>
-          {choices.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
-            </option>
-          ))}
-        </select>
+          onChange={(e) => onChange(e.currentTarget.value || null)}
+          data={[
+            { value: "", label: "(any)" },
+            ...choices.map((c) => ({ value: c.value, label: c.label }))
+          ]}
+        />
       );
     }
     default:
       return (
-        <input
+        <TextInput
+          size="xs"
           type={field.dataType === "email" ? "email" : "text"}
-          className="form-control form-control-sm"
           value={(value as string | null) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
         />
       );
   }

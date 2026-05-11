@@ -1,4 +1,5 @@
 import { Outlet } from "react-router-dom";
+import { AppShell as MantineAppShell } from "@mantine/core";
 import NavMenu from "./NavMenu";
 import { AgentSidebar } from "@/agent/AgentSidebar";
 import { AgentSidebarProvider } from "@/agent/AgentSidebarContext";
@@ -12,27 +13,32 @@ export default function AppShell() {
     <UserPreferencesProvider>
       <PageContextRegistryProvider>
         <AgentSidebarProvider>
-          <div id="app" className="app app-without-header app-without-sidebar app-with-top-menu">
-            <NavMenu />
+          <MantineAppShell header={{ height: 56 }} padding={0}>
+            <MantineAppShell.Header withBorder={false}>
+              <NavMenu />
+            </MantineAppShell.Header>
 
-            <div id="content" className="app-content">
-              <Outlet />
-            </div>
+            <MantineAppShell.Main>
+              <div id="content" className="app-shell-content">
+                <Outlet />
+              </div>
+            </MantineAppShell.Main>
+          </MantineAppShell>
 
-            <AgentSidebar />
+          <AgentSidebar />
 
-            <a
-              href="#"
-              className="btn btn-icon btn-circle btn-success btn-scroll-to-top"
-              data-toggle="scroll-to-top"
-              onClick={(e) => {
-                e.preventDefault();
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-            >
-              <i className="fa fa-angle-up"></i>
-            </a>
-          </div>
+          <a
+            href="#"
+            className="btn-scroll-to-top"
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            aria-label="Scroll to top"
+          >
+            <i className="fa fa-angle-up"></i>
+          </a>
+
           <PreferencesModal />
         </AgentSidebarProvider>
       </PageContextRegistryProvider>

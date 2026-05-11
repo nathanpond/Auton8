@@ -4,6 +4,7 @@ import { SiteAppearance } from "@/types/siteAppearance";
 type SiteBrandProps = {
   appearance: SiteAppearance;
   className?: string;
+  style?: React.CSSProperties;
   iconClassName?: string;
   textClassName?: string;
   imageClassName?: string;
@@ -12,6 +13,7 @@ type SiteBrandProps = {
 export default function SiteBrand({
   appearance,
   className,
+  style,
   iconClassName,
   textClassName,
   imageClassName
@@ -28,7 +30,7 @@ export default function SiteBrand({
     !imageFailed;
 
   return (
-    <span className={className}>
+    <span className={className} style={style}>
       {showImage ? (
         <img
           src={appearance.logoImageUrl ?? undefined}

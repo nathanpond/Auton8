@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
+import { Alert, Box } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { ExecutionContent, describeError } from "./WorkflowExecutions";
 
 export default function ExecutionPage() {
@@ -8,27 +10,27 @@ export default function ExecutionPage() {
 
   if (!id) {
     return (
-      <div className="alert alert-danger" role="alert">
-        Missing execution id in the URL.
-      </div>
+      <Box py="md">
+        <Alert color="red" variant="light" role="alert">
+          Missing execution id in the URL.
+        </Alert>
+      </Box>
     );
   }
 
   return (
-    <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Execution</h1>
-        </div>
-      </div>
+    <Box py="md">
+      <PageHeader title="Execution" />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="sm"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
       <div className="workflow-execution-page">
@@ -38,7 +40,7 @@ export default function ExecutionPage() {
           onError={(message) => setFlash({ kind: "error", message })}
         />
       </div>
-    </>
+    </Box>
   );
 }
 

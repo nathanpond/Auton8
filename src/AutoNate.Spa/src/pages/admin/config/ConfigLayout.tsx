@@ -38,10 +38,10 @@ export default function ConfigLayout() {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
 
   return (
-    <div className="config-layout app-content-margin">
+    <div className="config-layout app-shell-content-edge">
       <aside className="config-sidenav">
         <div className="config-sidenav-header">
-          <i className="fa fa-sliders me-2" />
+          <i className="fa fa-sliders" style={{ marginRight: 8 }} />
           Site Configuration
         </div>
         <nav className="config-sidenav-nav">

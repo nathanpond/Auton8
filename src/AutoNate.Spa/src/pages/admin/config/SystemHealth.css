@@ -28,10 +28,10 @@
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
-  border-bottom: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.1));
+  border-bottom: 1px solid var(--mantine-color-default-border, rgba(0, 0, 0, 0.1));
   font-size: 0.88rem;
   border-left: 3px solid transparent;
-  color: var(--bs-body-color);
+  color: var(--mantine-color-text);
 }
 
 .system-health-service-row:last-child {
@@ -76,16 +76,16 @@
 }
 
 .system-health-service-row.status-up .system-health-service-status {
-  color: var(--bs-success, #198754);
+  color: var(--mantine-color-green-filled, #198754);
 }
 .system-health-service-row.status-down .system-health-service-status {
-  color: var(--bs-danger, #dc3545);
+  color: var(--mantine-color-red-filled, #dc3545);
 }
 .system-health-service-row.status-degraded .system-health-service-status {
-  color: var(--bs-warning, #f59f00);
+  color: var(--mantine-color-yellow-filled, #f59f00);
 }
 .system-health-service-row.status-unknown .system-health-service-status {
-  color: var(--bs-secondary, #6c757d);
+  color: var(--mantine-color-gray-filled, #6c757d);
 }
 
 .system-health-dot {
@@ -137,7 +137,7 @@
 .system-health-endpoint {
   font-size: 0.88rem;
   font-weight: 500;
-  color: var(--bs-body-color);
+  color: var(--mantine-color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -164,7 +164,7 @@
 .system-health-line-label {
   font-size: 0.72rem;
   text-align: center;
-  color: var(--bs-secondary-color, var(--bs-body-color));
+  color: var(--mantine-color-dimmed, var(--mantine-color-text));
   letter-spacing: 0.3px;
   white-space: nowrap;
   overflow: hidden;
@@ -253,8 +253,8 @@
   text-overflow: ellipsis;
 }
 .system-health-line-message.status-down {
-  color: var(--bs-danger, #dc3545);
+  color: var(--mantine-color-red-filled, #dc3545);
 }
 .system-health-line-message.status-degraded {
-  color: var(--bs-warning, #f59f00);
+  color: var(--mantine-color-yellow-filled, #f59f00);
 }

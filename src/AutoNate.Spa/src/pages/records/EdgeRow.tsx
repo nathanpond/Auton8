@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ActionIcon, Badge, Code, Table, Text } from "@mantine/core";
 import { useRecord } from "@/hooks/useRecords";
 import { Edge, EdgeType } from "@/types/records";
 
@@ -15,44 +16,46 @@ export default function EdgeRow({ edge, edgeType, thisRecordId, onDelete, busy }
   const otherRecordId = direction === "outgoing" ? edge.toRecordId : edge.fromRecordId;
   const { data: other } = useRecord(otherRecordId);
 
-  const verb = direction === "outgoing"
-    ? edgeType.name
-    : edgeType.inverseName ?? `← ${edgeType.name}`;
+  const verb =
+    direction === "outgoing" ? edgeType.name : edgeType.inverseName ?? `← ${edgeType.name}`;
 
   return (
-    <tr>
-      <td>
-        <span className="badge bg-secondary me-2">{edgeType.shortCode}</span>
+    <Table.Tr>
+      <Table.Td>
+        <Badge color="gray" variant="filled" mr={8}>
+          {edgeType.shortCode}
+        </Badge>
         {verb}
-      </td>
-      <td>
+      </Table.Td>
+      <Table.Td>
         {other ? (
           <Link to={`/record/${other.key}`}>
-            <code className="me-2">{other.key}</code>
+            <Code mr={8}>{other.key}</Code>
             {other.name}
           </Link>
         ) : (
-          <span className="text-body text-opacity-50">{otherRecordId.substring(0, 8)}...</span>
+          <Text c="dimmed" component="span">
+            {otherRecordId.substring(0, 8)}...
+          </Text>
         )}
-      </td>
-      <td className="text-body text-opacity-75 small">
-        {Object.keys(edge.data).length === 0 ? (
-          <em>—</em>
-        ) : (
-          <code>{JSON.stringify(edge.data)}</code>
-        )}
-      </td>
-      <td className="text-end">
-        <button
-          type="button"
-          className="btn btn-outline-danger btn-sm"
+      </Table.Td>
+      <Table.Td>
+        <Text size="sm" c="dimmed" component="div">
+          {Object.keys(edge.data).length === 0 ? <em>—</em> : <Code>{JSON.stringify(edge.data)}</Code>}
+        </Text>
+      </Table.Td>
+      <Table.Td ta="right">
+        <ActionIcon
+          variant="outline"
+          color="red"
+          size="sm"
           onClick={() => onDelete(edge.id)}
           disabled={busy}
           title="Remove edge"
         >
-          <i className="fa fa-trash"></i>
-        </button>
-      </td>
-    </tr>
+          <i className="fa fa-trash" />
+        </ActionIcon>
+      </Table.Td>
+    </Table.Tr>
   );
 }

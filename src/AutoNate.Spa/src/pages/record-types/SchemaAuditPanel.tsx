@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Anchor, Badge, Code, Grid, Group, Text } from "@mantine/core";
 import { useRecordTypeAudit } from "@/hooks/useRecordTypes";
 import { RecordTypeAuditEntry } from "@/types/records";
 import UserBadge from "../records/UserBadge";
@@ -21,18 +22,18 @@ const KIND_LABELS: Record<string, string> = {
   field_unarchived: "Field restored"
 };
 
-const KIND_BADGES: Record<string, string> = {
-  type_created: "bg-success",
-  type_updated: "bg-info text-dark",
-  type_archived: "bg-warning text-dark",
-  type_unarchived: "bg-info text-dark",
-  field_added: "bg-success",
-  field_renamed: "bg-info text-dark",
-  field_config_changed: "bg-info text-dark",
-  field_required_changed: "bg-info text-dark",
-  field_reordered: "bg-info text-dark",
-  field_archived: "bg-warning text-dark",
-  field_unarchived: "bg-info text-dark"
+const KIND_BADGE_COLORS: Record<string, string> = {
+  type_created: "green",
+  type_updated: "cyan",
+  type_archived: "yellow",
+  type_unarchived: "cyan",
+  field_added: "green",
+  field_renamed: "cyan",
+  field_config_changed: "cyan",
+  field_required_changed: "cyan",
+  field_reordered: "cyan",
+  field_archived: "yellow",
+  field_unarchived: "cyan"
 };
 
 export default function SchemaAuditPanel({ recordTypeId }: Props) {
@@ -40,11 +41,19 @@ export default function SchemaAuditPanel({ recordTypeId }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   if (isLoading) {
-    return <p className="text-body text-opacity-50 mb-0">Loading history...</p>;
+    return (
+      <Text c="dimmed" size="sm">
+        Loading history...
+      </Text>
+    );
   }
 
   if (audit.length === 0) {
-    return <p className="text-body text-opacity-50 mb-0">No schema changes yet.</p>;
+    return (
+      <Text c="dimmed" size="sm">
+        No schema changes yet.
+      </Text>
+    );
   }
 
   const toggle = (id: number) => {
@@ -57,49 +66,58 @@ export default function SchemaAuditPanel({ recordTypeId }: Props) {
   };
 
   return (
-    <ol className="list-unstyled mb-0">
+    <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {audit.map((entry) => {
         const label = KIND_LABELS[entry.changeKind] ?? entry.changeKind;
-        const badge = KIND_BADGES[entry.changeKind] ?? "bg-secondary";
+        const color = KIND_BADGE_COLORS[entry.changeKind] ?? "gray";
         const isExpanded = expanded.has(entry.id);
         const summary = describeChange(entry);
         return (
-          <li key={entry.id} className="mb-2 pb-2 border-bottom">
-            <div className="d-flex justify-content-between align-items-start">
+          <li
+            key={entry.id}
+            style={{
+              marginBottom: 8,
+              paddingBottom: 8,
+              borderBottom: "1px solid var(--mantine-color-default-border)"
+            }}
+          >
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
               <div>
-                <span className={`badge ${badge} me-2`}>{label}</span>
+                <Badge color={color} variant="filled" mr={8}>
+                  {label}
+                </Badge>
                 {summary && <span>{summary}</span>}
-                <div className="small text-body text-opacity-75 mt-1">
+                <Text size="sm" c="dimmed" mt={4} component="div">
                   <UserBadge userId={entry.changedBy} withByPrefix />
-                  <span className="mx-2">·</span>
+                  <span style={{ margin: "0 8px" }}>·</span>
                   {formatWhen(entry.changedAtUtc)}
-                </div>
+                </Text>
               </div>
               {(entry.before !== null || entry.after !== null) && (
-                <button
-                  type="button"
-                  className="btn btn-link btn-sm p-0"
-                  onClick={() => toggle(entry.id)}
-                >
+                <Anchor component="button" type="button" size="sm" onClick={() => toggle(entry.id)}>
                   {isExpanded ? "Hide details" : "Details"}
-                </button>
+                </Anchor>
               )}
-            </div>
+            </Group>
             {isExpanded && (
-              <div className="row g-2 mt-2">
-                <div className="col">
-                  <div className="small text-body text-opacity-75 mb-1">Before</div>
-                  <pre className="bg-body-secondary p-2 rounded mb-0 small" style={{ whiteSpace: "pre-wrap" }}>
+              <Grid mt="xs">
+                <Grid.Col span={6}>
+                  <Text size="sm" c="dimmed" mb={4}>
+                    Before
+                  </Text>
+                  <Code block style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>
                     {formatJson(entry.before)}
-                  </pre>
-                </div>
-                <div className="col">
-                  <div className="small text-body text-opacity-75 mb-1">After</div>
-                  <pre className="bg-body-tertiary p-2 rounded mb-0 small" style={{ whiteSpace: "pre-wrap" }}>
+                  </Code>
+                </Grid.Col>
+                <Grid.Col span={6}>
+                  <Text size="sm" c="dimmed" mb={4}>
+                    After
+                  </Text>
+                  <Code block style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>
                     {formatJson(entry.after)}
-                  </pre>
-                </div>
-              </div>
+                  </Code>
+                </Grid.Col>
+              </Grid>
             )}
           </li>
         );

@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
+import { Button, Text } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import {
   NotificationModel,
   listNotificationsPage
@@ -41,9 +43,14 @@ export default function Notifications() {
         cell: ({ row }) =>
           row.original.isRead ? null : (
             <span
-              className="d-inline-block bg-primary rounded-circle"
-              style={{ width: "0.5rem", height: "0.5rem" }}
               title="Unread"
+              style={{
+                display: "inline-block",
+                width: "0.5rem",
+                height: "0.5rem",
+                borderRadius: "50%",
+                background: "var(--mantine-color-blue-filled)"
+              }}
             />
           )
       },
@@ -54,7 +61,9 @@ export default function Notifications() {
         cell: ({ row }) => (
           <>
             <div>{row.original.title}</div>
-            <div className="small text-muted">{row.original.body}</div>
+            <Text size="sm" c="dimmed">
+              {row.original.body}
+            </Text>
           </>
         )
       },
@@ -63,7 +72,9 @@ export default function Notifications() {
         accessorKey: "kind",
         header: "Type",
         cell: ({ row }) => (
-          <span className="small text-muted">{labelForKind(row.original.kind)}</span>
+          <Text size="sm" c="dimmed" component="span">
+            {labelForKind(row.original.kind)}
+          </Text>
         )
       },
       {
@@ -71,9 +82,9 @@ export default function Notifications() {
         accessorKey: "createdAtUtc",
         header: "Received",
         cell: ({ row }) => (
-          <span className="small text-muted">
+          <Text size="sm" c="dimmed" component="span">
             {new Date(row.original.createdAtUtc).toLocaleString()}
-          </span>
+          </Text>
         )
       }
     ],
@@ -94,15 +105,10 @@ export default function Notifications() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Notifications</h1>
-          <p className="page-head-copy">
-            Everything that's been routed to you — record assignments and workflow tasks waiting on
-            you.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Notifications"
+        description="Everything that's been routed to you — record assignments and workflow tasks waiting on you."
+      />
 
       <DataTable<NotificationModel>
         mode="server"
@@ -120,14 +126,14 @@ export default function Notifications() {
         getRowAriaLabel={(n) => `Open ${n.title}`}
         getRowClassName={(n) => (n.isRead ? undefined : "notification-unread")}
         toolbarRight={
-          <button
-            type="button"
-            className="btn btn-outline-secondary btn-sm"
+          <Button
+            size="xs"
+            variant="default"
             onClick={() => markAll.mutate()}
-            disabled={markAll.isPending}
+            loading={markAll.isPending}
           >
             Mark all read
-          </button>
+          </Button>
         }
       />
     </>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Alert, Button, Code, Group, Modal, Stack, Text } from "@mantine/core";
 import { TaskFormConfig } from "@/api/executions";
 import { JsxFormHost } from "@/components/JsxFormHost";
 
@@ -43,56 +44,55 @@ export default function TaskFormModal({ config, onClose, onComplete }: Props) {
   };
 
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog modal-lg">
-          <div className="modal-content">
-            <div className="modal-header">
-              <div>
-                <h5 className="modal-title">{config.taskName || "Complete task"}</h5>
-                {config.processInstanceName && (
-                  <small className="text-body text-opacity-75">
-                    <i className="fa fa-diagram-project me-2" />
-                    {config.processInstanceName}
-                  </small>
-                )}
-              </div>
-              <button
-                type="button"
-                className="btn-close"
-                onClick={onClose}
-                aria-label="Close"
-                disabled={submitting}
-              />
-            </div>
-            <div className="modal-body">
-              {config.form.isDraftFallback && (
-                <div className="alert alert-warning small">
-                  <strong>Heads up:</strong> form <code>{config.form.shortCode}</code> has no
-                  published version yet — the draft is being shown.
-                </div>
-              )}
-              {error && <div className="alert alert-danger">{error}</div>}
-              <JsxFormHost
-                source={config.form.formCode}
-                data={config.variables as Record<string, unknown>}
-                mode="edit"
-                context={{
-                  taskId: config.taskId,
-                  taskName: config.taskName,
-                  taskDefinitionKey: config.taskDefinitionKey,
-                  processInstanceId: config.processInstanceId,
-                  processInstanceName: config.processInstanceName
-                }}
-                extras={{ shortCode: config.form.shortCode }}
-                onSubmit={submit}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+    <Modal
+      opened
+      onClose={onClose}
+      size="lg"
+      closeOnClickOutside={!submitting}
+      closeOnEscape={!submitting}
+      withCloseButton={!submitting}
+      title={
+        <Stack gap={2}>
+          <Text fw={600}>{config.taskName || "Complete task"}</Text>
+          {config.processInstanceName && (
+            <Text size="xs" c="dimmed">
+              <i className="fa fa-diagram-project" style={{ marginRight: 8 }} />
+              {config.processInstanceName}
+            </Text>
+          )}
+        </Stack>
+      }
+    >
+      <Stack gap="sm">
+        {config.form.isDraftFallback && (
+          <Alert color="yellow" variant="light">
+            <Text size="sm">
+              <strong>Heads up:</strong> form <Code>{config.form.shortCode}</Code> has no
+              published version yet — the draft is being shown.
+            </Text>
+          </Alert>
+        )}
+        {error && (
+          <Alert color="red" variant="light">
+            {error}
+          </Alert>
+        )}
+        <JsxFormHost
+          source={config.form.formCode}
+          data={config.variables as Record<string, unknown>}
+          mode="edit"
+          context={{
+            taskId: config.taskId,
+            taskName: config.taskName,
+            taskDefinitionKey: config.taskDefinitionKey,
+            processInstanceId: config.processInstanceId,
+            processInstanceName: config.processInstanceName
+          }}
+          extras={{ shortCode: config.form.shortCode }}
+          onSubmit={submit}
+        />
+      </Stack>
+    </Modal>
   );
 }
 
@@ -106,27 +106,18 @@ function NoFormModal({
   onClose: () => void;
 }) {
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h5 className="modal-title">{title}</h5>
-              <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
-            </div>
-            <div className="modal-body">
-              <div className="alert alert-warning mb-0">{message}</div>
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+    <Modal opened onClose={onClose} title={title}>
+      <Stack gap="sm">
+        <Alert color="yellow" variant="light">
+          {message}
+        </Alert>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 

@@ -12,7 +12,6 @@
     <option name="AUTO_ATTACH_CHILDREN" value="0" />
     <option name="MIXED_MODE_DEBUG" value="0" />
     <method v="2">
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="infra: Ensure Up" run_configuration_type="ShConfigurationType" />
       <option name="RunConfigurationTask" enabled="false" run_configuration_name="dapr: AutoNate.Web Sidecar" run_configuration_type="ShConfigurationType" />
       <option name="Build" />
     </method>

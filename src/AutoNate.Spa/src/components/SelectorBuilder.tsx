@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Anchor, Box, Button, Code, Grid, Group, Select, Stack, Text, TextInput } from "@mantine/core";
 import { RegistryKind } from "@/api/admin";
 import { useRegistry } from "@/hooks/useAdmin";
 
@@ -17,36 +18,31 @@ const NESTED_USER_EDGE_KINDS = ["supervisor", "manager"] as const;
 
 export type TagFilter = {
   tag: string;
-  value: string;        // either "user" sentinel, a literal, or "*"
-  isUserValue: boolean; // true => emit as `=user`; false => literal text
-  nestedEdgeKind?: string; // when set with isUserValue, emits `=user[<edge>=user]`
+  value: string;
+  isUserValue: boolean;
+  nestedEdgeKind?: string;
 };
 
 export type SelectorBuilderValue = {
   kind: string;
   idMode: "any" | "specific";
-  ids: string;          // comma-separated when specific
+  ids: string;
   tags: TagFilter[];
 };
 
 type Props = {
-  // Raw selector string ("" for empty). Builder reflects + drives this.
   value: string;
   onChange: (next: string) => void;
-  // Optional: restrict the kind dropdown to certain kinds.
   allowedKinds?: string[];
 };
+
+const MONOSPACE = { fontFamily: "var(--mantine-font-family-monospace)" } as const;
 
 export default function SelectorBuilder({ value, onChange, allowedKinds }: Props) {
   const { data, isLoading } = useRegistry();
   const [mode, setMode] = useState<"visual" | "raw">("visual");
   const [state, setState] = useState<SelectorBuilderValue>(() => parseSelector(value));
 
-  // Reflect external value changes back into the builder when in visual mode.
-  // Uses the functional setState form so we can compare against the latest
-  // state without capturing it in the effect's closure — that lets the dep
-  // array stay [value, mode] without an eslint suppression and without
-  // looping on our own setState calls.
   useEffect(() => {
     if (mode !== "visual") return;
     const parsed = parseSelector(value);
@@ -67,177 +63,187 @@ export default function SelectorBuilder({ value, onChange, allowedKinds }: Props
 
   if (mode === "raw") {
     return (
-      <div className="d-flex flex-column gap-2">
-        <input
-          className="form-control font-monospace"
+      <Stack gap="xs">
+        <TextInput
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.currentTarget.value)}
           placeholder="/record/*[assignee=user]"
+          styles={{ input: MONOSPACE }}
         />
-        <div>
-          <button type="button" className="btn btn-link p-0" onClick={() => setMode("visual")}>
-            ← back to visual builder
-          </button>
-        </div>
-      </div>
+        <Anchor component="button" type="button" onClick={() => setMode("visual")}>
+          ← back to visual builder
+        </Anchor>
+      </Stack>
     );
   }
 
   if (isLoading) {
-    return <div className="text-muted">Loading registry…</div>;
+    return (
+      <Text c="dimmed" size="sm">
+        Loading registry…
+      </Text>
+    );
   }
 
   return (
-    <div className="d-flex flex-column gap-2">
-      <div className="row g-2">
-        <div className="col-sm-3">
-          <label className="form-label small mb-1">Kind</label>
-          <select
-            className="form-select form-select-sm"
-            value={state.kind}
-            onChange={(e) => apply({ ...state, kind: e.target.value, tags: [] })}
-          >
-            <option value="">— pick a kind —</option>
-            {kinds.map((k) => (
-              <option key={k.kind} value={k.kind}>{k.kind}</option>
-            ))}
-          </select>
-        </div>
-        <div className="col-sm-3">
-          <label className="form-label small mb-1">IDs</label>
-          <select
-            className="form-select form-select-sm"
+    <Stack gap="xs">
+      <Grid>
+        <Grid.Col span={{ base: 12, sm: 3 }}>
+          <Select
+            label="Kind"
+            size="xs"
+            value={state.kind || null}
+            onChange={(v) => apply({ ...state, kind: v ?? "", tags: [] })}
+            placeholder="— pick a kind —"
+            data={kinds.map((k) => k.kind)}
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 3 }}>
+          <Select
+            label="IDs"
+            size="xs"
             value={state.idMode}
-            onChange={(e) => apply({ ...state, idMode: e.target.value as "any" | "specific" })}
-          >
-            <option value="any">any (*)</option>
-            <option value="specific">specific…</option>
-          </select>
-        </div>
+            onChange={(v) => apply({ ...state, idMode: (v as "any" | "specific") ?? "any" })}
+            data={[
+              { value: "any", label: "any (*)" },
+              { value: "specific", label: "specific…" }
+            ]}
+            allowDeselect={false}
+          />
+        </Grid.Col>
         {state.idMode === "specific" && (
-          <div className="col-sm-6">
-            <label className="form-label small mb-1">comma-separated</label>
-            <input
-              className="form-control form-control-sm font-monospace"
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <TextInput
+              label="comma-separated"
+              size="xs"
               value={state.ids}
-              onChange={(e) => apply({ ...state, ids: e.target.value })}
+              onChange={(e) => apply({ ...state, ids: e.currentTarget.value })}
               placeholder="abc-123, def-456"
+              styles={{ input: MONOSPACE }}
             />
-          </div>
+          </Grid.Col>
         )}
-      </div>
+      </Grid>
 
       {currentKind && currentKind.tags.length > 0 && (
-        <div>
-          <label className="form-label small mb-1">Tag predicates</label>
+        <Box>
+          <Text size="xs" fw={500} mb={4}>
+            Tag predicates
+          </Text>
           {state.tags.map((t, i) => (
-            <div key={i} className="row g-2 mb-1 align-items-center">
-              <div className="col-sm-3">
-                <select
-                  className="form-select form-select-sm"
-                  value={t.tag}
-                  onChange={(e) => {
+            <Grid mb={4} align="center" key={i}>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                <Select
+                  size="xs"
+                  value={t.tag || null}
+                  onChange={(v) => {
                     const tags = [...state.tags];
-                    tags[i] = { ...tags[i], tag: e.target.value };
+                    tags[i] = { ...tags[i], tag: v ?? "" };
                     apply({ ...state, tags });
                   }}
-                >
-                  <option value="">— tag —</option>
-                  {currentKind.tags.map((tg: string) => (
-                    <option key={tg} value={tg}>{tg}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-sm-1 text-center">=</div>
-              <div className="col-sm-2">
-                <select
-                  className="form-select form-select-sm"
+                  placeholder="— tag —"
+                  data={currentKind.tags as string[]}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 1 }} ta="center">
+                =
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 2 }}>
+                <Select
+                  size="xs"
                   value={t.isUserValue ? "user" : "literal"}
-                  onChange={(e) => {
+                  onChange={(v) => {
                     const tags = [...state.tags];
-                    const isUserValue = e.target.value === "user";
+                    const isUserValue = v === "user";
                     tags[i] = {
                       ...tags[i],
                       isUserValue,
-                      // Clear nesting when leaving user mode.
                       nestedEdgeKind: isUserValue ? tags[i].nestedEdgeKind : undefined
                     };
                     apply({ ...state, tags });
                   }}
-                >
-                  <option value="user">current user</option>
-                  <option value="literal">literal value</option>
-                </select>
-              </div>
+                  data={[
+                    { value: "user", label: "current user" },
+                    { value: "literal", label: "literal value" }
+                  ]}
+                  allowDeselect={false}
+                />
+              </Grid.Col>
               {!t.isUserValue && (
-                <div className="col-sm-4">
-                  <input
-                    className="form-control form-control-sm font-monospace"
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <TextInput
+                    size="xs"
                     value={t.value}
                     onChange={(e) => {
                       const tags = [...state.tags];
-                      tags[i] = { ...tags[i], value: e.target.value };
+                      tags[i] = { ...tags[i], value: e.currentTarget.value };
                       apply({ ...state, tags });
                     }}
                     placeholder="value"
+                    styles={{ input: MONOSPACE }}
                   />
-                </div>
+                </Grid.Col>
               )}
               {t.isUserValue && (
-                <div className="col-sm-4">
-                  <select
-                    className="form-select form-select-sm"
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <Select
+                    size="xs"
                     value={t.nestedEdgeKind ?? ""}
-                    onChange={(e) => {
+                    onChange={(v) => {
                       const tags = [...state.tags];
-                      const next = e.target.value;
-                      tags[i] = { ...tags[i], nestedEdgeKind: next === "" ? undefined : next };
+                      tags[i] = { ...tags[i], nestedEdgeKind: v ?? undefined };
                       apply({ ...state, tags });
                     }}
+                    placeholder="— the actor themselves —"
+                    clearable
+                    data={NESTED_USER_EDGE_KINDS.map((edge) => ({
+                      value: edge,
+                      label: `someone the actor's ${edge} of (=user[${edge}=user])`
+                    }))}
                     title="Optionally walk one more user→user edge from the actor."
-                  >
-                    <option value="">— the actor themselves —</option>
-                    {NESTED_USER_EDGE_KINDS.map((edge) => (
-                      <option key={edge} value={edge}>
-                        someone the actor's {edge} of (=user[{edge}=user])
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  />
+                </Grid.Col>
               )}
-              <div className="col-sm-2">
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-danger w-100"
+              <Grid.Col span={{ base: 12, sm: 2 }}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  color="red"
+                  fullWidth
                   onClick={() => {
                     const tags = state.tags.filter((_, idx) => idx !== i);
                     apply({ ...state, tags });
                   }}
                 >
                   Remove
-                </button>
-              </div>
-            </div>
+                </Button>
+              </Grid.Col>
+            </Grid>
           ))}
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary mt-1"
+          <Button
+            size="xs"
+            variant="outline"
+            color="gray"
+            mt={4}
             onClick={() =>
-              apply({ ...state, tags: [...state.tags, { tag: currentKind.tags[0], value: "", isUserValue: true }] })
+              apply({
+                ...state,
+                tags: [...state.tags, { tag: currentKind.tags[0], value: "", isUserValue: true }]
+              })
             }
           >
             + add tag predicate
-          </button>
-        </div>
+          </Button>
+        </Box>
       )}
 
-      <div className="d-flex justify-content-between align-items-center mt-1">
-        <code className="text-muted small">{value || "(empty)"}</code>
-        <button type="button" className="btn btn-link p-0 small" onClick={() => setMode("raw")}>
+      <Group justify="space-between" align="center" mt={4}>
+        <Code c="dimmed">{value || "(empty)"}</Code>
+        <Anchor component="button" type="button" size="sm" onClick={() => setMode("raw")}>
           edit raw →
-        </button>
-      </div>
-    </div>
+        </Anchor>
+      </Group>
+    </Stack>
   );
 }
 
@@ -275,17 +281,10 @@ function splitIds(raw: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-// Best-effort visual reflection of an incoming raw string. Recognizes the
-// shapes the builder emits — including `<tag>=user[<edge>=user]` — and
-// returns an empty state for anything more complex (which pops the user
-// into raw mode if they want it).
 export function parseSelector(raw: string): SelectorBuilderValue {
   const empty: SelectorBuilderValue = { kind: "", idMode: "any", ids: "", tags: [] };
   if (!raw) return empty;
 
-  // Match the path part and the optional outer predicate body. The body may
-  // contain nested `[…]` brackets for multi-hop forms, so capture greedily
-  // up to the final `]`.
   const match = raw.match(/^\/([a-zA-Z][\w-]*)\/(?:\*|([^[/]+))(?:\[(.*)\])?$/);
   if (!match) return empty;
 
@@ -305,12 +304,11 @@ export function parseSelector(raw: string): SelectorBuilderValue {
     const parts = splitTopLevel(predBody);
     for (const p of parts) {
       const eq = p.indexOf("=");
-      if (eq <= 0) return empty; // unsupported shape
+      if (eq <= 0) return empty;
       const tag = p.slice(0, eq).trim();
       const rest = p.slice(eq + 1).trim();
       if (!tag) return empty;
 
-      // Multi-hop shape: `user[<innerEdge>=user]`
       const nestedMatch = rest.match(/^user\[([a-zA-Z][\w-]*)=user\]$/);
       if (nestedMatch) {
         tags.push({ tag, value: "", isUserValue: true, nestedEdgeKind: nestedMatch[1] });
@@ -318,7 +316,6 @@ export function parseSelector(raw: string): SelectorBuilderValue {
       }
 
       const isUserValue = rest === "user";
-      // Anything else with brackets is beyond what the visual builder models.
       if (rest.includes("[") || rest.includes("]")) return empty;
 
       tags.push({
@@ -332,9 +329,6 @@ export function parseSelector(raw: string): SelectorBuilderValue {
   return { kind, idMode, ids, tags };
 }
 
-// Splits a predicate body on top-level `;` or `,`, ignoring separators that
-// fall inside nested `[]` so shapes like `assignee=user[supervisor=user]`
-// stay together.
 function splitTopLevel(body: string): string[] {
   const out: string[] = [];
   let depth = 0;

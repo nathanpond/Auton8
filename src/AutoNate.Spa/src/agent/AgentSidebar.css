@@ -21,32 +21,33 @@
 }
 
 /* When the user picks "Show Chatbot Over Header" the sidebar covers the top
-   nav. Otherwise it slides down to start beneath the top-menu. The variable
-   is set by the ColorAdmin theme; the fallback matches its 40px default. */
+   nav. Otherwise it slides down to start beneath the top-menu. Hardcoded to
+   the Mantine NavMenu height (56px) — the legacy --bs-app-top-menu-height
+   var is still set to 40px by ColorAdmin's SCSS, so using it as a fallback
+   would leave a 16px strip of the header poking through. */
 .agent-sidebar--over-header {
   top: 0;
   z-index: 1030;
 }
 
 .agent-sidebar--under-header {
-  top: var(--bs-app-top-menu-height, 40px);
+  top: 56px;
   z-index: 1010;
 }
 
-/* Portal-mounted clone of the header trigger (see AgentChatTrigger.tsx).
-   #top-menu (z-index 1015) traps the in-flow icon's stacking context, so
-   the clone is rendered to document.body where this z-index actually wins
-   against the over-header sidebar's 1030. */
-.agent-chat-trigger-overlay {
-  z-index: 1031;
-  display: flex;
-  align-items: center;
+/* "Fill" mode: AgentSidebar.tsx sets one of two body classes depending on
+   whether the chatbot is shown over the header.
+    - fill-app: chatbot covers from y=0 down, so push the whole #app
+      (header included) — keeps the header icons visible to the left of the
+      chatbot panel.
+    - fill-content: chatbot starts below the header, so push only #content;
+      leaving the header full-width so the body bg doesn't show through above
+      the chatbot in the y=0..header-height strip. */
+body.agent-sidebar-fill-app #app {
+  padding-right: 380px;
+  transition: padding-right 160ms ease;
 }
-
-/* "Fill" mode: AgentSidebar.tsx sets body.agent-sidebar-fill so the page
-   content can be pushed narrower. Fixed-position sidebar itself doesn't move,
-   so the right-edge padding lives on #app (covers both header and content). */
-body.agent-sidebar-fill #app {
+body.agent-sidebar-fill-content #content {
   padding-right: 380px;
   transition: padding-right 160ms ease;
 }
@@ -57,26 +58,15 @@ body.agent-sidebar-fill #app {
   height: 100%;
 }
 
-.agent-sidebar__header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color, #dee2e6);
-  flex-wrap: wrap;
-}
+/* Header + composer were styled by the old Bootstrap markup; the new Mantine
+   shell controls padding/border inline. Keeping the classes as no-op anchors
+   in case other rules ever need to target them. */
 
 .agent-sidebar__body {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-}
-
-.agent-sidebar__composer {
-  border-top: 1px solid var(--border-color, #dee2e6);
-  padding: 0.75rem;
-  background: var(--surface-secondary-bg, #f8f9fa);
 }
 
 .agent-conversations .list-group-item {

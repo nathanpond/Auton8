@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Button, Group, Modal, Stack } from "@mantine/core";
 
 type ConfirmVariant = "danger" | "warning" | "primary";
 
@@ -13,10 +14,15 @@ type Props = {
   onCancel: () => void;
 };
 
-// Lightweight confirmation modal used in place of window.confirm. Renders a
-// Bootstrap modal, autofocuses the confirm action, and closes on Escape or
-// backdrop click. The caller owns mount/unmount — render this only when a
-// confirmation is pending.
+const variantColor: Record<ConfirmVariant, string | undefined> = {
+  danger: "red",
+  warning: "yellow",
+  primary: undefined
+};
+
+// Lightweight confirmation modal used in place of window.confirm. Mantine
+// Modal handles focus trap, Escape, and backdrop click; the caller owns
+// mount/unmount.
 export default function ConfirmModal({
   title,
   message,
@@ -33,68 +39,32 @@ export default function ConfirmModal({
     confirmRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) {
-        onCancel();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [busy, onCancel]);
-
   return (
-    <>
-      <div
-        className="modal fade show d-block"
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-modal-title"
-      >
-        <div className="modal-dialog modal-dialog-centered">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h5 className="modal-title" id="confirm-modal-title">
-                {title}
-              </h5>
-              <button
-                type="button"
-                className="btn-close"
-                aria-label="Close"
-                onClick={onCancel}
-                disabled={busy}
-              />
-            </div>
-            <div className="modal-body">{message}</div>
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-outline-secondary"
-                onClick={onCancel}
-                disabled={busy}
-              >
-                {cancelLabel}
-              </button>
-              <button
-                ref={confirmRef}
-                type="button"
-                className={`btn btn-${variant}`}
-                onClick={onConfirm}
-                disabled={busy}
-              >
-                {confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div
-        className="modal-backdrop fade show"
-        onClick={() => {
-          if (!busy) onCancel();
-        }}
-      />
-    </>
+    <Modal
+      opened
+      onClose={onCancel}
+      title={title}
+      closeOnClickOutside={!busy}
+      closeOnEscape={!busy}
+      withCloseButton={!busy}
+      centered
+    >
+      <Stack gap="md">
+        <div>{message}</div>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onCancel} disabled={busy}>
+            {cancelLabel}
+          </Button>
+          <Button
+            ref={confirmRef}
+            color={variantColor[variant]}
+            onClick={onConfirm}
+            loading={busy}
+          >
+            {confirmLabel}
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }

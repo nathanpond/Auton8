@@ -257,10 +257,20 @@ public sealed class Auditor : IAutoNatePlugin
 
         public async Task HandleAsync(AuditEventNotification notification, CancellationToken ct)
         {
+            // The hook fires inside the originating request's cancellation
+            // scope, but a client-side abort (page navigation, AbortController
+            // tearing down a fetch) shouldn't kill the audit write — we'd lose
+            // the record of the very action that was cancelled. Use CT.None
+            // for all DB work below; the only reason to honor `ct` would be a
+            // host shutdown, in which case the connection pool teardown will
+            // surface its own errors.
+            _ = ct;
+            var dbCt = CancellationToken.None;
+
             AuditorSettings settings;
             try
             {
-                settings = await LoadSettingsAsync(ct).ConfigureAwait(false);
+                settings = await LoadSettingsAsync(dbCt).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -319,7 +329,7 @@ public sealed class Auditor : IAutoNatePlugin
                         authDecisionReason = (object?)notification.AuthDecisionReason ?? DBNull.Value,
                         envelope = notification.EnvelopeJson,
                     },
-                    ct).ConfigureAwait(false);
+                    dbCt).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -327,7 +337,7 @@ public sealed class Auditor : IAutoNatePlugin
                 return;
             }
 
-            await TryPruneAsync(settings.RetentionDays, ct).ConfigureAwait(false);
+            await TryPruneAsync(settings.RetentionDays, dbCt).ConfigureAwait(false);
         }
 
         private async Task<AuditorSettings> LoadSettingsAsync(CancellationToken ct)

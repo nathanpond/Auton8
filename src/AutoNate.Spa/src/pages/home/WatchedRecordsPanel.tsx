@@ -1,20 +1,24 @@
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useQueryClient } from "@tanstack/react-query";
-import { useWatchedRecords } from "@/hooks/useRecords";
+import { Badge, Code, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { DataTable } from "@/components/data-table/DataTable";
+import { listWatchedRecords, WatchedRecord } from "@/api/records";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { useBusConnection } from "@/hooks/useBusConnection";
-import { WatchedRecord } from "@/api/records";
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
 import UserBadge from "@/pages/records/UserBadge";
 
-const PAGE_SIZE = 10;
+// Cap the client-mode preload — beyond this the auto-mode probe switches
+// the table to server mode and fetches per page instead.
+const CLIENT_PRELOAD = 1000;
+const COLUMN_WIDTHS = ["28%", "30%", "12%", "18%", "12%"];
+const QUERY_KEY = ["home", "watched-records"] as const;
 
 export default function WatchedRecordsPanel() {
   const qc = useQueryClient();
-  const params = useMemo(() => ({ page: 0, pageSize: PAGE_SIZE }), []);
-  const { data: page, isLoading, isError } = useWatchedRecords(params);
   const { data: statusAppearance = [] } = useStatusAppearance();
 
   // Refetch when records change so a watched record's status / due date /
@@ -22,143 +26,143 @@ export default function WatchedRecordsPanel() {
   const onBusMessage = useCallback(
     (msg: { topic: string }) => {
       if ((msg.topic ?? "").startsWith("record.")) {
-        qc.invalidateQueries({ queryKey: ["records", "watched-by-me"] });
+        qc.invalidateQueries({ queryKey: QUERY_KEY });
       }
     },
     [qc]
   );
   useBusConnection({ onMessage: onBusMessage });
 
-  const items = page?.items ?? [];
-  const totalCount = page?.totalCount ?? 0;
-  const empty = !isLoading && !isError && items.length === 0;
+  const loadAll = useCallback(async () => {
+    const page = await listWatchedRecords({ page: 0, pageSize: CLIENT_PRELOAD });
+    return page.items;
+  }, []);
 
-  return (
-    <div className="panel panel-inverse">
-      <div className="panel-heading">
-        <h4 className="panel-title">
-          <i className="fa fa-eye me-2"></i>Watched Records
-        </h4>
-      </div>
-      <div className="panel-body">
-        <div className="table-responsive">
-          <table className="table table-striped table-bordered align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th style={{ width: "10rem" }}>Status</th>
-                <th style={{ width: "12rem" }}>Assigned To</th>
-                <th style={{ width: "8rem" }}>Due Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={5} className="text-center text-body text-opacity-50 p-4">
-                    Loading...
-                  </td>
-                </tr>
+  const loadPage = useCallback(
+    async (req: { page: number; pageSize: number }) => {
+      const page = await listWatchedRecords({ page: req.page, pageSize: req.pageSize });
+      return { items: page.items, totalCount: page.totalCount };
+    },
+    []
+  );
+
+  const columns = useMemo<ColumnDef<WatchedRecord>[]>(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <Link to={`/record/${row.original.key}`} style={{ textDecoration: "none" }}>
+            <Group gap="xs" wrap="nowrap">
+              <Code>{row.original.key}</Code>
+              <Text span>{row.original.name}</Text>
+              {row.original.isArchived && (
+                <Badge color="gray" variant="filled" size="sm">
+                  Archived
+                </Badge>
               )}
-              {!isLoading && isError && (
-                <tr>
-                  <td colSpan={5} className="text-center text-danger p-4">
-                    Failed to load watched records.
-                  </td>
-                </tr>
-              )}
-              {empty && (
-                <tr>
-                  <td colSpan={5} className="text-center text-body text-opacity-50 p-4">
-                    You aren't watching any records yet. Open a record and click "Watch" to add it here.
-                  </td>
-                </tr>
-              )}
-              {!isLoading && !isError && items.map((row) => (
-                <WatchedRow key={row.id} record={row} statusAppearance={statusAppearance} />
+            </Group>
+          </Link>
+        )
+      },
+      {
+        id: "description",
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) =>
+          row.original.description ? (
+            <Text size="sm">{row.original.description}</Text>
+          ) : (
+            <Dim />
+          )
+      },
+      {
+        id: "status",
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) =>
+          row.original.status ? (
+            <StatusBadge status={row.original.status} entries={statusAppearance} />
+          ) : (
+            <Dim />
+          )
+      },
+      {
+        id: "assignees",
+        accessorFn: (r: WatchedRecord) => r.assigneeIds.join(", "),
+        header: "Assigned To",
+        cell: ({ row }) =>
+          row.original.assigneeIds.length > 0 ? (
+            <Group gap={4} wrap="wrap">
+              {row.original.assigneeIds.map((id, i) => (
+                <span key={id}>
+                  <UserBadge userId={id} />
+                  {i < row.original.assigneeIds.length - 1 ? "," : ""}
+                </span>
               ))}
-            </tbody>
-          </table>
-        </div>
-        {totalCount > items.length && (
-          <div className="text-body text-opacity-75 small mt-3">
-            Showing {items.length} of {totalCount} watched records.
-          </div>
-        )}
-      </div>
-    </div>
+            </Group>
+          ) : (
+            <Text c="dimmed">Unassigned</Text>
+          )
+      },
+      {
+        id: "dueDate",
+        accessorKey: "dueDate",
+        header: "Due Date",
+        cell: ({ row }) =>
+          row.original.dueDate ? <span>{formatDate(row.original.dueDate)}</span> : <Dim />
+      }
+    ],
+    [statusAppearance]
   );
-}
 
-function WatchedRow({
-  record,
-  statusAppearance
-}: {
-  record: WatchedRecord;
-  statusAppearance: StatusAppearanceEntry[];
-}) {
   return (
-    <tr>
-      <td>
-        <Link to={`/record/${record.key}`} className="text-decoration-none">
-          <code className="me-2">{record.key}</code>
-          {record.name}
-          {record.isArchived && <span className="badge bg-secondary ms-2">Archived</span>}
-        </Link>
-      </td>
-      <td>
-        {record.description ? (
-          <span className="small">{record.description}</span>
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-      <td>
-        {record.status ? (
-          <span
-            className="badge rounded-pill"
-            style={statusBadgeStyle(record.status, statusAppearance)}
-          >
-            {record.status}
-          </span>
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-      <td>
-        {record.assigneeIds.length > 0 ? (
-          <span className="d-inline-flex flex-wrap gap-1">
-            {record.assigneeIds.map((id, i) => (
-              <span key={id}>
-                <UserBadge userId={id} />
-                {i < record.assigneeIds.length - 1 ? "," : ""}
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="text-body text-opacity-50">Unassigned</span>
-        )}
-      </td>
-      <td>
-        {record.dueDate ? (
-          formatDate(record.dueDate)
-        ) : (
-          <span className="text-body text-opacity-50">—</span>
-        )}
-      </td>
-    </tr>
+    <Paper withBorder radius="md" p="md">
+      <Stack gap="sm">
+        <Group gap="xs">
+          <i className="fa fa-eye" />
+          <Title order={4}>Watched Records</Title>
+        </Group>
+        <DataTable<WatchedRecord>
+          queryKey={QUERY_KEY}
+          mode="auto"
+          loadAll={loadAll}
+          loadPage={loadPage}
+          columns={columns}
+          columnWidths={COLUMN_WIDTHS}
+          rowKey={(r) => r.id}
+          searchPlaceholder="Search watched records…"
+          emptyMessage='You aren&apos;t watching any records yet. Open a record and click "Watch" to add it here.'
+          initialSort={[{ id: "name", desc: false }]}
+        />
+      </Stack>
+    </Paper>
   );
 }
 
-function statusBadgeStyle(
-  status: string,
-  entries: StatusAppearanceEntry[]
-): React.CSSProperties {
-  const backgroundColor = resolveStatusBadgeColor(status, entries);
-  return {
-    backgroundColor,
-    color: badgeTextColor(backgroundColor)
-  };
+function Dim() {
+  return (
+    <Text c="dimmed" span>
+      —
+    </Text>
+  );
+}
+
+function StatusBadge({
+  status,
+  entries
+}: {
+  status: string;
+  entries: StatusAppearanceEntry[];
+}) {
+  const bg = resolveStatusBadgeColor(status, entries);
+  const fg = badgeTextColor(bg);
+  return (
+    <Badge radius="xl" style={{ backgroundColor: bg, color: fg, border: 0 }}>
+      {status}
+    </Badge>
+  );
 }
 
 // `YYYY-MM-DD` is parsed as UTC by `new Date()`, which would shift the rendered

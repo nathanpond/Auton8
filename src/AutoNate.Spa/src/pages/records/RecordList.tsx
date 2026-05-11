@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
+import { Badge, Box, Button, Group, NativeSelect, Switch } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { useRecordTypeFields, useRecordTypes } from "@/hooks/useRecordTypes";
 import { searchRecords } from "@/api/records";
 import {
@@ -121,9 +123,13 @@ export default function RecordList() {
         enableGlobalFilter: false,
         cell: ({ row }) =>
           row.original.isArchived ? (
-            <span className="badge bg-secondary">Archived</span>
+            <Badge color="gray" variant="filled">
+              Archived
+            </Badge>
           ) : (
-            <span className="badge bg-success">Active</span>
+            <Badge color="green" variant="filled">
+              Active
+            </Badge>
           )
       }
     ];
@@ -149,49 +155,55 @@ export default function RecordList() {
 
   if (!loadingTypes && !type) {
     return (
-      <div className="page-head">
-        <h1 className="page-header mb-1">Records</h1>
-        <p className="page-head-copy">
-          Unknown record type code <code>{code}</code>.{" "}
-          <Link to="/record-types">Browse record types</Link>.
-        </p>
-      </div>
+      <PageHeader
+        title="Records"
+        description={
+          <>
+            Unknown record type code <code>{code}</code>.{" "}
+            <Link to="/record-types">Browse record types</Link>.
+          </>
+        }
+      />
     );
   }
 
   return (
     <>
-      <div className="page-head d-flex justify-content-between align-items-start">
-        <div>
-          <h1 className="page-header mb-1">
-            <code className="me-2">{code}</code>
+      <PageHeader
+        title={
+          <>
+            <code style={{ marginRight: 8 }}>{code}</code>
             {type?.name ?? "Records"}
-          </h1>
-          <p className="page-head-copy mb-0">
-            <Link to={`/record-types/${type?.id ?? ""}`}>Edit type definition</Link>
-          </p>
-        </div>
-        <div>
-          <button
-            type="button"
-            className="btn btn-primary"
+          </>
+        }
+        description={<Link to={`/record-types/${type?.id ?? ""}`}>Edit type definition</Link>}
+        actions={
+          <Button
             onClick={() => navigate(`/records/${code}/new`)}
             disabled={!type}
+            leftSection={<i className="fa fa-plus" />}
           >
-            <i className="fa fa-plus me-2"></i>New {type?.name ?? "Record"}
-          </button>
-        </div>
-      </div>
+            New {type?.name ?? "Record"}
+          </Button>
+        }
+      />
 
       {filtersOpen && (
-        <div className="border rounded p-3 mb-3">
+        <Box
+          p="md"
+          mb="md"
+          style={{
+            border: "1px solid var(--mantine-color-default-border)",
+            borderRadius: "var(--mantine-radius-default)"
+          }}
+        >
           <RecordFilterBuilder
             fields={fields}
             initialFilters={filters}
             onApply={(applied) => setFilters(applied)}
             onClear={() => setFilters([])}
           />
-        </div>
+        </Box>
       )}
 
       <DataTable<RecordModel>
@@ -218,50 +230,49 @@ export default function RecordList() {
         onRowClick={(r) => navigate(`/record/${r.key}`)}
         getRowAriaLabel={(r) => `Open ${r.key}`}
         toolbarLeft={
-          <div className="d-flex align-items-center gap-3 flex-wrap">
-            <button
-              type="button"
-              className={`btn btn-sm ${filtersActive ? "btn-primary" : "btn-outline-secondary"}`}
+          <Group gap="md" wrap="wrap" align="center">
+            <Button
+              size="xs"
+              variant={filtersActive ? "filled" : "default"}
               onClick={() => setFiltersOpen((o) => !o)}
+              leftSection={<i className="fa fa-filter" />}
+              rightSection={
+                filtersActive ? (
+                  <Badge size="sm" color="gray" variant="light">
+                    {filters.length}
+                  </Badge>
+                ) : undefined
+              }
             >
-              <i className="fa fa-filter me-2"></i>
               Filters
-              {filtersActive && (
-                <span className="badge bg-light text-dark ms-2">{filters.length}</span>
-              )}
-            </button>
-            <label className="d-flex align-items-center gap-2 mb-0 small">
-              Sort:
-              <select
-                className="form-select form-select-sm"
-                value={sort}
-                onChange={(e) => setSort(e.target.value)}
-              >
-                <option value="updated_desc">Updated (newest)</option>
-                <option value="created_desc">Created (newest)</option>
-                <option value="key_asc">Key ascending</option>
-                <option value="key_desc">Key descending</option>
-                <option value="name_asc">Name A-Z</option>
-                <option value="name_desc">Name Z-A</option>
-                <option value="status_asc">Status A-Z</option>
-                <option value="status_desc">Status Z-A</option>
-                <option value="due_date_asc">Due date (earliest)</option>
-                <option value="due_date_desc">Due date (latest)</option>
-              </select>
-            </label>
-            <div className="form-check form-switch mb-0">
-              <input
-                type="checkbox"
-                className="form-check-input"
-                id="include-archived-records"
-                checked={includeArchived}
-                onChange={(e) => setIncludeArchived(e.target.checked)}
-              />
-              <label className="form-check-label small" htmlFor="include-archived-records">
-                Show archived
-              </label>
-            </div>
-          </div>
+            </Button>
+            <NativeSelect
+              size="xs"
+              label="Sort"
+              value={sort}
+              onChange={(e) => setSort(e.currentTarget.value)}
+              data={[
+                { value: "updated_desc", label: "Updated (newest)" },
+                { value: "created_desc", label: "Created (newest)" },
+                { value: "key_asc", label: "Key ascending" },
+                { value: "key_desc", label: "Key descending" },
+                { value: "name_asc", label: "Name A-Z" },
+                { value: "name_desc", label: "Name Z-A" },
+                { value: "status_asc", label: "Status A-Z" },
+                { value: "status_desc", label: "Status Z-A" },
+                { value: "due_date_asc", label: "Due date (earliest)" },
+                { value: "due_date_desc", label: "Due date (latest)" }
+              ]}
+              styles={{ root: { display: "inline-flex", flexDirection: "row", gap: 8, alignItems: "center" } }}
+            />
+            <Switch
+              id="include-archived-records"
+              size="sm"
+              label="Show archived"
+              checked={includeArchived}
+              onChange={(e) => setIncludeArchived(e.currentTarget.checked)}
+            />
+          </Group>
         }
       />
     </>

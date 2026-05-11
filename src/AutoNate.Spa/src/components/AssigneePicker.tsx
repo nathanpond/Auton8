@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Badge, Box, CloseButton, Group, Select, Text } from "@mantine/core";
 import { useUserDirectory, userDisplayName } from "@/hooks/useUserDirectory";
 import { useUsers } from "@/hooks/useUsers";
 
@@ -31,57 +32,56 @@ export default function AssigneePicker({ value, onChange, disabled }: Props) {
   };
 
   return (
-    <div>
-      <div className="d-flex flex-wrap gap-2 mb-2">
+    <Box>
+      <Group gap="xs" wrap="wrap" mb="xs">
         {value.length === 0 ? (
-          <span className="text-body text-opacity-50 small">No one assigned</span>
+          <Text size="sm" c="dimmed">
+            No one assigned
+          </Text>
         ) : (
           value.map((id) => {
             const u = directory.get(id);
             const name = userDisplayName(u) ?? `${id.substring(0, 8)}`;
             return (
-              <span
+              <Badge
                 key={id}
-                className="badge bg-secondary d-inline-flex align-items-center gap-2"
+                color="gray"
+                variant="filled"
+                size="lg"
+                rightSection={
+                  <CloseButton
+                    size="xs"
+                    iconSize={12}
+                    onClick={() => remove(id)}
+                    aria-label={`Remove ${name}`}
+                    disabled={disabled}
+                    style={{ color: "inherit" }}
+                  />
+                }
               >
-                <span>{name}</span>
-                <button
-                  type="button"
-                  className="btn-close btn-close-white"
-                  aria-label={`Remove ${name}`}
-                  onClick={() => remove(id)}
-                  disabled={disabled}
-                  style={{ fontSize: "0.55rem" }}
-                />
-              </span>
+                {name}
+              </Badge>
             );
           })
         )}
-      </div>
-      <select
-        className="form-select"
-        value=""
-        onChange={(e) => {
-          const id = e.target.value;
+      </Group>
+      <Select
+        value={null}
+        onChange={(id) => {
           if (!id) return;
           if (!selectedLower.has(id.toLowerCase())) {
             onChange([...value, id]);
           }
         }}
+        placeholder={available.length === 0 ? "All users assigned" : "Add assignee…"}
         disabled={disabled || available.length === 0}
-      >
-        <option value="">
-          {available.length === 0 ? "All users assigned" : "Add assignee…"}
-        </option>
-        {available.map((u) => {
-          const name = userDisplayName(u) ?? u.username;
-          return (
-            <option key={u.userId} value={u.userId}>
-              {name}
-            </option>
-          );
-        })}
-      </select>
-    </div>
+        data={available.map((u) => ({
+          value: u.userId,
+          label: userDisplayName(u) ?? u.username
+        }))}
+        searchable
+        clearable={false}
+      />
+    </Box>
   );
 }

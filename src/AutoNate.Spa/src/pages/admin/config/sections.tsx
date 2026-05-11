@@ -1,3 +1,4 @@
+import { Box, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import SiteSettingsForm from "./SiteSettingsForm";
 
 type StubProps = {
@@ -7,39 +8,43 @@ type StubProps = {
 
 function Stub({ title, blurb }: StubProps) {
   return (
-    <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">{title}</h1>
-        <p className="page-head-copy">{blurb}</p>
-      </div>
-
-      <div className="panel panel-inverse">
-        <div className="panel-body text-muted">
-          <i className="fa fa-screwdriver-wrench me-2" />
-          This section is a stub. Functionality coming soon.
-        </div>
-      </div>
-    </>
+    <Box py="md">
+      <Stack gap="lg">
+        <Stack gap={4}>
+          <Title order={1}>{title}</Title>
+          <Text size="sm" c="dimmed">
+            {blurb}
+          </Text>
+        </Stack>
+        <Paper withBorder radius="md" p="md">
+          <Group gap="xs" c="dimmed">
+            <i className="fa fa-screwdriver-wrench" />
+            <Text size="sm">This section is a stub. Functionality coming soon.</Text>
+          </Group>
+        </Paper>
+      </Stack>
+    </Box>
   );
 }
 
 export function ConfigIndex() {
   return (
-    <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Site Configuration</h1>
-        <p className="page-head-copy">
-          Manage sitewide settings and security from a single place. Choose a
-          section from the navigation on the left to get started.
-        </p>
-      </div>
-
-      <div className="panel panel-inverse">
-        <div className="panel-body text-muted">
-          Select a category on the left to begin.
-        </div>
-      </div>
-    </>
+    <Box py="md">
+      <Stack gap="lg">
+        <Stack gap={4}>
+          <Title order={1}>Site Configuration</Title>
+          <Text size="sm" c="dimmed">
+            Manage sitewide settings and security from a single place. Choose a section from the
+            navigation on the left to get started.
+          </Text>
+        </Stack>
+        <Paper withBorder radius="md" p="md">
+          <Text size="sm" c="dimmed">
+            Select a category on the left to begin.
+          </Text>
+        </Paper>
+      </Stack>
+    </Box>
   );
 }
 

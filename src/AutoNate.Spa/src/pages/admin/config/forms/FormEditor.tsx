@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Alert, Badge, Box, Button, Card, Code, Grid, Group, Switch, Text, TextInput, Title } from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { Form, SaveFormRequest } from "@/api/forms";
 import {
   useForm as useFormQuery,
@@ -73,18 +75,20 @@ export default function FormEditor() {
 
   if (isLoading) {
     return (
-      <div className="p-3 text-muted">
-        <i className="fa fa-spinner fa-spin me-2" />
-        Loading form…
-      </div>
+      <Box p="md">
+        <Text c="dimmed">
+          <i className="fa fa-spinner fa-spin" style={{ marginRight: 8 }} />
+          Loading form…
+        </Text>
+      </Box>
     );
   }
   if (error || !form || !buffer) {
     return (
-      <div className="alert alert-danger">
+      <Alert color="red" variant="light">
         <strong>Failed to load form.</strong>{" "}
         <Link to="/admin/config/forms">Back to list</Link>
-      </div>
+      </Alert>
     );
   }
 
@@ -128,125 +132,140 @@ export default function FormEditor() {
 
   return (
     <div className="form-editor">
-      <div className="page-head d-flex flex-wrap gap-3 align-items-start justify-content-between">
-        <div>
-          <h1 className="page-header mb-1">{form.name || "Untitled form"}</h1>
-          <p className="page-head-copy mb-0">
-            <code>{form.shortCode}</code> · Draft v{form.draftVersionNumber}
+      <PageHeader
+        title={form.name || "Untitled form"}
+        description={
+          <Group gap={6} wrap="wrap">
+            <Code>{form.shortCode}</Code>
+            <span>· Draft v{form.draftVersionNumber}</span>
             {form.publishedVersionNumber !== null && (
-              <> · Published v{form.publishedVersionNumber}</>
-            )}{" "}
+              <span>· Published v{form.publishedVersionNumber}</span>
+            )}
             <StatusChip form={form} dirty={isDirty} />
-          </p>
-        </div>
-        <div className="d-flex flex-wrap gap-2">
-          <Link className="btn btn-outline-secondary" to="/admin/config/forms">
-            <i className="fa fa-chevron-left me-1" /> Back
-          </Link>
-          <button
-            type="button"
-            className="btn btn-outline-secondary"
-            onClick={() => setVersionsOpen(true)}
-          >
-            <i className="fa fa-clock-rotate-left me-1" /> Versions
-          </button>
-          <a
-            className="btn btn-outline-secondary"
-            href={devUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <i className="fa fa-arrow-up-right-from-square me-1" /> Open dev
-          </a>
-          {form.publishedVersionNumber !== null && form.siteAvailable && (
-            <a
-              className="btn btn-outline-secondary"
-              href={liveUrl}
+          </Group>
+        }
+        actions={
+          <Group gap="xs" wrap="wrap">
+            <Button
+              component={Link}
+              to="/admin/config/forms"
+              variant="default"
+              leftSection={<i className="fa fa-chevron-left" />}
+            >
+              Back
+            </Button>
+            <Button
+              variant="default"
+              leftSection={<i className="fa fa-clock-rotate-left" />}
+              onClick={() => setVersionsOpen(true)}
+            >
+              Versions
+            </Button>
+            <Button
+              component="a"
+              href={devUrl}
               target="_blank"
               rel="noreferrer"
+              variant="default"
+              leftSection={<i className="fa fa-arrow-up-right-from-square" />}
             >
-              <i className="fa fa-globe me-1" /> Open live
-            </a>
-          )}
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onSave}
-            disabled={save.isPending || !isDirty}
-          >
-            <i className="fa fa-floppy-disk me-1" /> Save
-          </button>
-          <button
-            type="button"
-            className="btn btn-success"
-            onClick={onPublish}
-            disabled={publish.isPending}
-          >
-            <i className="fa fa-rocket me-1" /> Publish
-          </button>
-        </div>
-      </div>
+              Open dev
+            </Button>
+            {form.publishedVersionNumber !== null && form.siteAvailable && (
+              <Button
+                component="a"
+                href={liveUrl}
+                target="_blank"
+                rel="noreferrer"
+                variant="default"
+                leftSection={<i className="fa fa-globe" />}
+              >
+                Open live
+              </Button>
+            )}
+            <Button
+              onClick={onSave}
+              loading={save.isPending}
+              disabled={!isDirty}
+              leftSection={<i className="fa fa-floppy-disk" />}
+            >
+              Save
+            </Button>
+            <Button
+              color="green"
+              onClick={onPublish}
+              loading={publish.isPending}
+              leftSection={<i className="fa fa-rocket" />}
+            >
+              Publish
+            </Button>
+          </Group>
+        }
+      />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="sm"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
-      <div className="panel panel-inverse mb-3">
-        <div className="panel-heading">
-          <h4 className="panel-title">Metadata</h4>
-        </div>
-        <div className="panel-body">
-          <div className="row g-3">
-            <div className="col-md-7">
-              <label className="form-label">Name</label>
-              <input
-                className="form-control"
-                value={buffer.name}
-                onChange={(e) => setBuffer({ ...buffer, name: e.target.value })}
-              />
-            </div>
-            <div className="col-md-5">
-              <label className="form-label">Short code</label>
-              <input
-                className="form-control text-lowercase"
-                value={buffer.shortCode}
-                onChange={(e) =>
-                  setBuffer({ ...buffer, shortCode: e.target.value })
-                }
-              />
-            </div>
-          </div>
-          <div className="form-check form-switch mt-3">
-            <input
-              type="checkbox"
-              className="form-check-input"
-              id="form-site-available"
-              checked={buffer.siteAvailable}
-              onChange={(e) =>
-                setBuffer({ ...buffer, siteAvailable: e.target.checked })
-              }
+      <Card withBorder shadow="sm" mb="md">
+        <Title order={5} mb="md">
+          Metadata
+        </Title>
+        <Grid>
+          <Grid.Col span={{ base: 12, md: 7 }}>
+            <TextInput
+              label="Name"
+              value={buffer.name}
+              onChange={(e) => setBuffer({ ...buffer, name: e.currentTarget.value })}
             />
-            <label className="form-check-label" htmlFor="form-site-available">
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 5 }}>
+            <TextInput
+              label="Short code"
+              styles={{ input: { textTransform: "lowercase" } }}
+              value={buffer.shortCode}
+              onChange={(e) => setBuffer({ ...buffer, shortCode: e.currentTarget.value })}
+            />
+          </Grid.Col>
+        </Grid>
+        <Switch
+          id="form-site-available"
+          mt="md"
+          checked={buffer.siteAvailable}
+          onChange={(e) => setBuffer({ ...buffer, siteAvailable: e.currentTarget.checked })}
+          label={
+            <>
               Site-available (visible at <code>/form/{buffer.shortCode || "<short-code>"}</code>{" "}
               once published)
-            </label>
-          </div>
-        </div>
-      </div>
+            </>
+          }
+        />
+      </Card>
 
       <div
         className={`form-editor-layout${devPropsOpen ? " form-editor-layout--sidebar-open" : ""}`}
       >
-        <section className="form-editor-main panel panel-inverse mb-0">
-          <div className="panel-heading">
-            <h4 className="panel-title">Form code (JSX)</h4>
-          </div>
-          <div className="panel-body p-0 form-editor-canvas">
+        <section className="form-editor-main">
+          <Box
+            px="md"
+            py="sm"
+            style={{
+              borderBottom: "1px solid var(--mantine-color-default-border)",
+              background: "var(--mantine-color-default-hover)"
+            }}
+          >
+            <Title order={5} m={0}>
+              Form code (JSX)
+            </Title>
+          </Box>
+          <div className="form-editor-canvas">
             <div className="form-editor-code">
               <JsxCodeEditor
                 value={buffer.formCode}
@@ -275,7 +294,7 @@ export default function FormEditor() {
                 title="Dev props"
                 aria-label="Open dev props"
               >
-                <i className="bi bi-braces" aria-hidden="true"></i>
+                <i className="fa fa-code" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -289,7 +308,7 @@ export default function FormEditor() {
           >
             <div className="form-editor-sidebar-header">
               <h2 className="form-editor-sidebar-title">
-                <i className="bi bi-braces" aria-hidden="true"></i>
+                <i className="fa fa-code" aria-hidden="true"></i>
                 <span>Dev props</span>
               </h2>
               <button
@@ -299,16 +318,16 @@ export default function FormEditor() {
                 aria-label="Collapse dev props"
                 title="Collapse"
               >
-                <i className="bi bi-chevron-double-right" aria-hidden="true"></i>
+                <i className="fa fa-angles-right" aria-hidden="true"></i>
               </button>
             </div>
             <div className="form-editor-sidebar-body">
-              <p className="form-text mb-2">
+              <Text size="sm" c="dimmed" mb="xs">
                 JSON forwarded to <code>Page(props)</code> when the form renders at{" "}
                 <code>/formdev/{form.shortCode}</code>. Standard keys: <code>data</code>,{" "}
                 <code>onChange</code>, <code>onSubmit</code>, <code>mode</code>,{" "}
                 <code>context</code>.
-              </p>
+              </Text>
               <div className="form-editor-sidebar-editor">
                 <JsxCodeEditor
                   value={devPropsRaw}
@@ -337,17 +356,34 @@ export default function FormEditor() {
 }
 
 function StatusChip({ form, dirty }: { form: Form; dirty: boolean }) {
-  if (dirty) return <span className="badge bg-warning text-dark ms-2">Unsaved</span>;
+  if (dirty)
+    return (
+      <Badge color="yellow" variant="filled" ml={8}>
+        Unsaved
+      </Badge>
+    );
   if (form.publishedVersionNumber === null) {
-    return <span className="badge bg-secondary ms-2">Draft</span>;
+    return (
+      <Badge color="gray" variant="filled" ml={8}>
+        Draft
+      </Badge>
+    );
   }
   if (form.isDraft) {
-    return <span className="badge bg-warning text-dark ms-2">Has unpublished changes</span>;
+    return (
+      <Badge color="yellow" variant="filled" ml={8}>
+        Has unpublished changes
+      </Badge>
+    );
   }
   return form.siteAvailable ? (
-    <span className="badge bg-success ms-2">Live</span>
+    <Badge color="green" variant="filled" ml={8}>
+      Live
+    </Badge>
   ) : (
-    <span className="badge bg-success ms-2">Published</span>
+    <Badge color="green" variant="filled" ml={8}>
+      Published
+    </Badge>
   );
 }
 

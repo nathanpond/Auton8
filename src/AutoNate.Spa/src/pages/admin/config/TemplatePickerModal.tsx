@@ -5,6 +5,7 @@ import {
   useRef,
   useState
 } from "react";
+import { Button, Group, Modal, Text, TextInput } from "@mantine/core";
 import type { PageTemplateInfo } from "@/api/pageTemplates";
 import "./TemplatePickerModal.css";
 
@@ -196,89 +197,64 @@ export default function TemplatePickerModal({
   }, [onCancel, onSelect, selectedTemplate]);
 
   return (
-    <>
-      <div
-        className="modal show d-block"
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Choose a page template"
-        // Bumped above the parent MenuItemEditModal (z-index 1055) so the
-        // picker's own backdrop can dim the parent. Picker modal: 1065,
-        // backdrop: 1060 — picker stays above its backdrop, backdrop sits
-        // above the parent.
-        style={{ zIndex: 1065 }}
-      >
-        <div
-          className="modal-dialog modal-dialog-centered tp-modal-dialog"
-          style={{
-            maxWidth: "min(800px, calc(100vw - 32px))",
-            width: "100%"
-          }}
-        >
-          <div
-            className="modal-content tp-modal-content"
-            style={{ height: "90vh", maxHeight: "calc(100vh - 32px)" }}
-          >
-            <div className="modal-header">
-              <div className="tp-modal-title-block">
-                <h5 className="modal-title">Choose a page template</h5>
-                <div className="text-muted small mt-1">
-                  Pick a built-in starter to mount on this menu item.
-                </div>
-              </div>
-              <div className="tp-header-right">
-                <div className="tp-search">
-                  <i className="fa fa-search tp-search-icon" aria-hidden="true" />
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="Search templates"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    aria-label="Search templates"
-                  />
-                </div>
-                <div
-                  className="btn-group btn-group-sm tp-view-toggle"
-                  role="tablist"
-                  aria-label="View"
+    <Modal
+      opened
+      onClose={onCancel}
+      title={
+        <div className="tp-modal-title-block">
+          <Text fw={600} size="lg">
+            Choose a page template
+          </Text>
+          <Text size="xs" c="dimmed" mt={4}>
+            Pick a built-in starter to mount on this menu item.
+          </Text>
+        </div>
+      }
+      size="xl"
+      zIndex={1065}
+      styles={{
+        body: {
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          maxHeight: "70vh"
+        }
+      }}
+    >
+            <div className="tp-header-row" style={{ display: "flex", gap: 8, padding: "8px 16px", alignItems: "center", borderBottom: "1px solid var(--mantine-color-default-border)" }}>
+              <TextInput
+                size="xs"
+                leftSection={<i className="fa fa-search" aria-hidden="true" />}
+                placeholder="Search templates"
+                value={search}
+                onChange={(e) => setSearch(e.currentTarget.value)}
+                aria-label="Search templates"
+                style={{ flex: 1, maxWidth: 320 }}
+              />
+              <Group gap={4} ml="auto">
+                <Button
+                  size="xs"
+                  variant={view === "thumbnail" ? "filled" : "default"}
+                  onClick={() => setView("thumbnail")}
+                  aria-pressed={view === "thumbnail"}
+                  leftSection={<i className="fa fa-th-large" />}
                 >
-                  <button
-                    type="button"
-                    className={`btn btn-outline-secondary${
-                      view === "thumbnail" ? " active" : ""
-                    }`}
-                    onClick={() => setView("thumbnail")}
-                    aria-pressed={view === "thumbnail"}
-                    title="Thumbnail view"
-                  >
-                    <i className="fa fa-th-large me-1" aria-hidden="true" />
-                    Thumbnails
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-outline-secondary${
-                      view === "list" ? " active" : ""
-                    }`}
-                    onClick={() => setView("list")}
-                    aria-pressed={view === "list"}
-                    title="List view"
-                  >
-                    <i className="fa fa-list me-1" aria-hidden="true" />
-                    List
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  className="btn-close"
-                  onClick={onCancel}
-                  aria-label="Close"
-                />
-              </div>
+                  Thumbnails
+                </Button>
+                <Button
+                  size="xs"
+                  variant={view === "list" ? "filled" : "default"}
+                  onClick={() => setView("list")}
+                  aria-pressed={view === "list"}
+                  leftSection={<i className="fa fa-list" />}
+                >
+                  List
+                </Button>
+              </Group>
             </div>
 
-            <div className="modal-body tp-body">
+            <div className="tp-body">
               <aside className="tp-cats">
                 <div className="tp-cats-header">Categories</div>
                 {grouped.length === 0 && (
@@ -341,11 +317,7 @@ export default function TemplatePickerModal({
                             <div className="tp-card-body">
                               <h3 className="tp-card-title">{t.name}</h3>
                               <p className="tp-card-desc">
-                                {t.description ?? (
-                                  <em className="text-muted">
-                                    No description
-                                  </em>
-                                )}
+                                {t.description ?? <em>No description</em>}
                               </p>
                               <div className="tp-card-foot">
                                 <span className="tp-pill">
@@ -388,9 +360,7 @@ export default function TemplatePickerModal({
                           >
                             <h3 className="tp-list-title">{t.name}</h3>
                             <p className="tp-list-desc">
-                              {t.description ?? (
-                                <em className="text-muted">No description</em>
-                              )}
+                              {t.description ?? <em>No description</em>}
                             </p>
                           </button>
                         ))}
@@ -400,46 +370,33 @@ export default function TemplatePickerModal({
               </div>
             </div>
 
-            <div className="modal-footer">
-              <div className="tp-footer-meta">
+            <div
+              className="tp-footer"
+              style={{
+                display: "flex",
+                gap: 8,
+                padding: "8px 16px",
+                alignItems: "center",
+                borderTop: "1px solid var(--mantine-color-default-border)"
+              }}
+            >
+              <div className="tp-footer-meta" style={{ flex: 1, fontSize: 13, color: "var(--mantine-color-dimmed)" }}>
                 {selectedTemplate ? (
                   <>
                     Selected: <strong>{selectedTemplate.name}</strong>
-                    {selectedTemplate.category && (
-                      <>
-                        {" "}
-                        · {selectedTemplate.category}
-                      </>
-                    )}
+                    {selectedTemplate.category && <> · {selectedTemplate.category}</>}
                   </>
                 ) : (
                   <>Pick a template to continue · double-click to use immediately</>
                 )}
               </div>
-              <button
-                type="button"
-                className="btn btn-outline-secondary"
-                onClick={onCancel}
-              >
+              <Button variant="default" onClick={onCancel}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-theme"
-                disabled={!selectedTemplate}
-                onClick={confirm}
-              >
+              </Button>
+              <Button disabled={!selectedTemplate} onClick={confirm}>
                 Use template
-              </button>
+              </Button>
             </div>
-          </div>
-        </div>
-      </div>
-      <div
-        className="modal-backdrop fade show"
-        onClick={onCancel}
-        style={{ zIndex: 1060 }}
-      />
-    </>
+    </Modal>
   );
 }

@@ -3,6 +3,19 @@ import { ColumnDef } from "@tanstack/react-table";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  ActionIcon,
+  Alert,
+  Box,
+  Button,
+  Group,
+  Modal,
+  Stack,
+  Switch,
+  Text,
+  TextInput
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
+import {
   useCreateUser,
   useDeleteUser,
   useResetUserPassword,
@@ -36,9 +49,6 @@ type ModalState =
 
 type UserStatus = "Active" | "Disabled" | "Invited" | "Locked";
 
-// Status is derived from the LocalUser flags. There is no "Disabled" field on
-// the data model today, so that filter never matches — kept here so the chip
-// row matches the spec and lights up automatically once the field exists.
 function getUserStatus(u: LocalUser): UserStatus {
   if (u.isLocked) return "Locked";
   if (!u.lastLoginDate) return "Invited";
@@ -58,8 +68,6 @@ export default function ManageUsers() {
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
-  // Kind-level check for the unlock switch on the edit modal. Backend gate
-  // uses id="*" (RequireKindPermissionFilter), so the SPA mirrors that.
   const unlockCheck = useMemo(
     () => [{ kind: "user", action: "unlock", id: "*" }],
     []
@@ -67,9 +75,6 @@ export default function ManageUsers() {
   const { data: unlockPermissions } = usePermissionChecks(unlockCheck);
   const canUnlock = unlockPermissions?.get(permissionKey(unlockCheck[0])) ?? false;
 
-  // Admin badge: light up the avatar for direct SuperAdmin role assignees.
-  // Group-mediated admin membership isn't reflected here — the badge is a
-  // hint, not an authorization check.
   const { data: roles = [] } = useRoles();
   const superAdminRoleId = useMemo(
     () => roles.find((r) => r.isSystem && r.name === "SuperAdmin")?.id ?? null,
@@ -117,7 +122,13 @@ export default function ManageUsers() {
         header: "Last login",
         accessorFn: (u) => u.lastLoginDate ?? "",
         cell: ({ row }) => (
-          <span className={row.original.lastLoginDate ? "manage-users-last-login" : "manage-users-last-login-never"}>
+          <span
+            className={
+              row.original.lastLoginDate
+                ? "manage-users-last-login"
+                : "manage-users-last-login-never"
+            }
+          >
             {formatLastLogin(row.original.lastLoginDate)}
           </span>
         )
@@ -134,10 +145,11 @@ export default function ManageUsers() {
         enableSorting: false,
         enableGlobalFilter: false,
         cell: ({ row }) => (
-          <div className="data-table-row-actions">
-            <button
-              type="button"
-              className="btn btn-icon"
+          <Group gap="xs">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="sm"
               title="Reset password"
               aria-label={`Reset password for ${row.original.username}`}
               onClick={(e) => {
@@ -145,11 +157,12 @@ export default function ManageUsers() {
                 setModal({ kind: "reset", user: row.original });
               }}
             >
-              <i className="fa fa-key"></i>
-            </button>
-            <button
-              type="button"
-              className="btn btn-icon btn-icon-danger"
+              <i className="fa fa-key" />
+            </ActionIcon>
+            <ActionIcon
+              variant="outline"
+              color="red"
+              size="sm"
               title="Delete user"
               aria-label={`Delete ${row.original.username}`}
               onClick={(e) => {
@@ -157,9 +170,9 @@ export default function ManageUsers() {
                 setModal({ kind: "delete", user: row.original });
               }}
             >
-              <i className="fa fa-trash"></i>
-            </button>
-          </div>
+              <i className="fa fa-trash" />
+            </ActionIcon>
+          </Group>
         )
       }
     ],
@@ -182,22 +195,20 @@ export default function ManageUsers() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Manage Users</h1>
-          <p className="page-head-copy">
-            Manage local users with search, sorting, paging, and quick account actions.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Manage Users"
+        description="Manage local users with search, sorting, paging, and quick account actions."
+      />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="sm"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
       <DataTable<LocalUser>
@@ -223,13 +234,12 @@ export default function ManageUsers() {
             .includes(needle);
         }}
         toolbarRight={
-          <button
-            type="button"
-            className="btn btn-add-user"
+          <Button
+            leftSection={<i className="fa fa-plus" />}
             onClick={() => setModal({ kind: "add" })}
           >
-            <i className="fa fa-plus me-2"></i>Add user
-          </button>
+            Add user
+          </Button>
         }
       />
 
@@ -300,7 +310,10 @@ function UserAvatar({ isAdmin }: { isAdmin: boolean }) {
 function StatusDot({ status }: { status: UserStatus }) {
   return (
     <span className="manage-users-status">
-      <span className={`manage-users-status-indicator manage-users-status-${status.toLowerCase()}`} aria-hidden="true" />
+      <span
+        className={`manage-users-status-indicator manage-users-status-${status.toLowerCase()}`}
+        aria-hidden="true"
+      />
       {status}
     </span>
   );
@@ -313,7 +326,11 @@ type AddProps = {
 };
 
 function AddUserModal({ onClose, onSuccess, onError }: AddProps) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<CreateUserForm>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting }
+  } = useForm<CreateUserForm>({
     resolver: zodResolver(createUserSchema),
     defaultValues: { username: "", firstName: "", lastName: "", password: "", email: "" }
   });
@@ -335,35 +352,35 @@ function AddUserModal({ onClose, onSuccess, onError }: AddProps) {
   };
 
   return (
-    <ModalShell title="Add User" onClose={onClose}>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="modal-body">
-          <FormField label="Username" error={errors.username?.message}>
-            <input className="form-control" {...register("username")} />
-          </FormField>
-          <FormField label="First Name" error={errors.firstName?.message}>
-            <input className="form-control" {...register("firstName")} />
-          </FormField>
-          <FormField label="Last Name" error={errors.lastName?.message}>
-            <input className="form-control" {...register("lastName")} />
-          </FormField>
-          <FormField label="Email" error={errors.email?.message}>
-            <input className="form-control" type="email" {...register("email")} />
-          </FormField>
-          <FormField label="Password" error={errors.password?.message}>
-            <input className="form-control" type="password" {...register("password")} />
-          </FormField>
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+    <Modal opened onClose={onClose} title="Add User">
+      <Box component="form" onSubmit={handleSubmit(onSubmit)}>
+        <Stack gap="md">
+          <TextInput label="Username" error={errors.username?.message} {...register("username")} />
+          <TextInput label="First Name" error={errors.firstName?.message} {...register("firstName")} />
+          <TextInput label="Last Name" error={errors.lastName?.message} {...register("lastName")} />
+          <TextInput
+            label="Email"
+            type="email"
+            error={errors.email?.message}
+            {...register("email")}
+          />
+          <TextInput
+            label="Password"
+            type="password"
+            error={errors.password?.message}
+            {...register("password")}
+          />
+        </Stack>
+        <Group justify="flex-end" mt="md" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Cancel
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+          </Button>
+          <Button type="submit" loading={isSubmitting}>
             Add User
-          </button>
-        </div>
-      </form>
-    </ModalShell>
+          </Button>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 
@@ -374,7 +391,11 @@ type EditProps = AddProps & {
 };
 
 function EditUserModal({ user, canUnlock, onClose, onSuccess, onUnlocked, onError }: EditProps) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<EditUserForm>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting }
+  } = useForm<EditUserForm>({
     resolver: zodResolver(editUserSchema),
     defaultValues: {
       username: user.username,
@@ -397,8 +418,6 @@ function EditUserModal({ user, canUnlock, onClose, onSuccess, onUnlocked, onErro
   };
 
   const onToggleLocked = async () => {
-    // Lockout is set automatically after 3 failed logins. The switch only
-    // ever flips locked → unlocked; flipping back is not exposed.
     if (!isLocked) return;
     try {
       const updated = await unlock.mutateAsync(user.id);
@@ -410,58 +429,52 @@ function EditUserModal({ user, canUnlock, onClose, onSuccess, onUnlocked, onErro
   };
 
   return (
-    <ModalShell title={`Edit ${user.username}`} onClose={onClose}>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="modal-body">
-          <FormField label="Username" error={errors.username?.message}>
-            <input className="form-control" {...register("username")} />
-          </FormField>
-          <FormField label="First Name" error={errors.firstName?.message}>
-            <input className="form-control" {...register("firstName")} />
-          </FormField>
-          <FormField label="Last Name" error={errors.lastName?.message}>
-            <input className="form-control" {...register("lastName")} />
-          </FormField>
-          <FormField label="Email" error={errors.email?.message}>
-            <input className="form-control" type="email" {...register("email")} />
-          </FormField>
-          <div className="mb-3">
-            <label className="form-label">Account locked</label>
-            <div className="form-check form-switch">
-              <input
-                id="account-locked-switch"
-                className="form-check-input"
-                type="checkbox"
-                role="switch"
-                checked={isLocked}
-                disabled={!isLocked || !canUnlock || unlock.isPending}
-                onChange={onToggleLocked}
-              />
-              <label className="form-check-label" htmlFor="account-locked-switch">
-                {isLocked
+    <Modal opened onClose={onClose} title={`Edit ${user.username}`}>
+      <Box component="form" onSubmit={handleSubmit(onSubmit)}>
+        <Stack gap="md">
+          <TextInput label="Username" error={errors.username?.message} {...register("username")} />
+          <TextInput label="First Name" error={errors.firstName?.message} {...register("firstName")} />
+          <TextInput label="Last Name" error={errors.lastName?.message} {...register("lastName")} />
+          <TextInput
+            label="Email"
+            type="email"
+            error={errors.email?.message}
+            {...register("email")}
+          />
+          <Box>
+            <Text size="sm" fw={500} mb={4}>
+              Account locked
+            </Text>
+            <Switch
+              id="account-locked-switch"
+              checked={isLocked}
+              disabled={!isLocked || !canUnlock || unlock.isPending}
+              onChange={onToggleLocked}
+              label={
+                isLocked
                   ? canUnlock
                     ? "Locked — toggle off to unlock"
                     : "Locked (you don't have permission to unlock)"
-                  : "Active"}
-              </label>
-            </div>
+                  : "Active"
+              }
+            />
             {user.failedLoginAttempts > 0 && isLocked && (
-              <div className="text-body-secondary small mt-1">
+              <Text size="sm" c="dimmed" mt={4}>
                 {user.failedLoginAttempts} failed login attempts recorded.
-              </div>
+              </Text>
             )}
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+          </Box>
+        </Stack>
+        <Group justify="flex-end" mt="md" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Cancel
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+          </Button>
+          <Button type="submit" loading={isSubmitting}>
             Save
-          </button>
-        </div>
-      </form>
-    </ModalShell>
+          </Button>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 
@@ -473,7 +486,11 @@ type ResetProps = {
 };
 
 function ResetPasswordModal({ user, onClose, onSuccess, onError }: ResetProps) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ResetPasswordForm>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting }
+  } = useForm<ResetPasswordForm>({
     resolver: zodResolver(resetPasswordSchema),
     defaultValues: { password: "" }
   });
@@ -489,23 +506,24 @@ function ResetPasswordModal({ user, onClose, onSuccess, onError }: ResetProps) {
   };
 
   return (
-    <ModalShell title={`Reset password for ${user.username}`} onClose={onClose}>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="modal-body">
-          <FormField label="New password" error={errors.password?.message}>
-            <input className="form-control" type="password" {...register("password")} />
-          </FormField>
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+    <Modal opened onClose={onClose} title={`Reset password for ${user.username}`}>
+      <Box component="form" onSubmit={handleSubmit(onSubmit)}>
+        <TextInput
+          label="New password"
+          type="password"
+          error={errors.password?.message}
+          {...register("password")}
+        />
+        <Group justify="flex-end" mt="md" gap="xs">
+          <Button variant="default" onClick={onClose}>
             Cancel
-          </button>
-          <button type="submit" className="btn btn-warning" disabled={isSubmitting}>
+          </Button>
+          <Button type="submit" color="yellow" loading={isSubmitting}>
             Reset password
-          </button>
-        </div>
-      </form>
-    </ModalShell>
+          </Button>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 
@@ -529,66 +547,19 @@ function DeleteUserModal({ user, onClose, onSuccess, onError }: DeleteProps) {
   };
 
   return (
-    <ModalShell title={`Delete ${user.username}?`} onClose={onClose}>
-      <div className="modal-body">
-        <p className="mb-0">
-          This will permanently delete <strong>{user.username}</strong>. The action cannot be undone.
-        </p>
-      </div>
-      <div className="modal-footer">
-        <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+    <Modal opened onClose={onClose} title={`Delete ${user.username}?`}>
+      <Text>
+        This will permanently delete <strong>{user.username}</strong>. The action cannot be undone.
+      </Text>
+      <Group justify="flex-end" mt="md" gap="xs">
+        <Button variant="default" onClick={onClose}>
           Cancel
-        </button>
-        <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={del.isPending}>
+        </Button>
+        <Button color="red" onClick={onConfirm} loading={del.isPending}>
           Delete user
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
-function ModalShell({
-  title,
-  onClose,
-  children
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <>
-      <div className="modal fade show d-block" tabIndex={-1} role="dialog" aria-modal="true">
-        <div className="modal-dialog">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h5 className="modal-title">{title}</h5>
-              <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
-            </div>
-            {children}
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
-  );
-}
-
-function FormField({
-  label,
-  error,
-  children
-}: {
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-3">
-      <label className="form-label">{label}</label>
-      {children}
-      {error && <div className="text-danger small mt-1">{error}</div>}
-    </div>
+        </Button>
+      </Group>
+    </Modal>
   );
 }
 

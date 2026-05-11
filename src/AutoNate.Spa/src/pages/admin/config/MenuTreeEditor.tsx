@@ -16,6 +16,7 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { ActionIcon, Badge, Button, Group, Text, UnstyledButton } from "@mantine/core";
 import { Menu, MenuItem, MenuItemType, UpdateMenuItemRequest } from "@/types/menus";
 import {
   FlatMenuItem,
@@ -174,28 +175,30 @@ export default function MenuTreeEditor({
 
   return (
     <div className="menu-tree-editor">
-      <div className="d-flex justify-content-between align-items-center mb-2">
-        <small className="text-muted">
+      <Group justify="space-between" align="center" mb="xs">
+        <Text size="sm" c="dimmed">
           Drag rows to reorder. Drag right or left to change nesting.
-        </small>
-        <div className="d-flex gap-2">
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
+        </Text>
+        <Group gap="xs">
+          <Button
+            size="xs"
+            variant="default"
             onClick={() => onAddRoot("separator")}
             title="Add a divider line (vertical menus only)"
+            leftSection={<i className="fa fa-grip-lines" />}
           >
-            <i className="fa fa-grip-lines me-1" /> Add separator
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary"
+            Add separator
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
             onClick={() => onAddRoot()}
+            leftSection={<i className="fa fa-plus" />}
           >
-            <i className="fa fa-plus me-1" /> Add top-level item
-          </button>
-        </div>
-      </div>
+            Add top-level item
+          </Button>
+        </Group>
+      </Group>
 
       <DndContext
         sensors={sensors}
@@ -206,7 +209,10 @@ export default function MenuTreeEditor({
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={visibleIds} strategy={verticalListSortingStrategy}>
-          <ul className="list-group menu-tree-list">
+          <ul
+            className="menu-tree-list"
+            style={{ listStyle: "none", margin: 0, padding: 0 }}
+          >
             {visibleItems.map((item) => {
               const childCount = items.filter((i) => i.parentId === item.id).length;
               const isCollapsed = collapsed.has(item.id);
@@ -304,32 +310,49 @@ function SortableRow({
     opacity: isDragging ? 0.5 : 1
   };
 
+  // Keep paddingLeft out of `rowStyle` so the computed depth-based paddingLeft
+  // on `style` (which is spread second) isn't overridden by a `padding`
+  // shorthand collapsing all rows to the same indent.
+  const rowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    paddingTop: "0.5rem",
+    paddingBottom: "0.5rem",
+    paddingRight: "0.75rem",
+    border: "1px solid var(--mantine-color-default-border)",
+    borderTop: 0,
+    background: isSelected ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-body)",
+    color: isSelected ? "var(--mantine-primary-color-contrast)" : undefined,
+    cursor: "pointer"
+  };
+
   if (isSeparator) {
     return (
       <li
         ref={setNodeRef}
-        style={style}
-        className={`list-group-item d-flex align-items-center gap-2 menu-tree-separator ${
-          isSelected ? "active" : ""
-        }`}
+        style={{ ...rowStyle, ...style }}
+        className={`menu-tree-separator${isSelected ? " active" : ""}`}
         onClick={onSelect}
       >
-        <button
+        <UnstyledButton
           ref={setActivatorNodeRef}
-          type="button"
-          className="btn btn-sm btn-link p-0 text-secondary"
           title="Drag to move"
           {...attributes}
           {...listeners}
           onClick={(e) => e.stopPropagation()}
+          style={{ color: "var(--mantine-color-dimmed)" }}
         >
           <i className="fa fa-grip-vertical" />
-        </button>
-        <hr className="flex-grow-1 my-0" />
-        <span className="badge bg-light text-dark text-uppercase">separator</span>
-        <button
-          type="button"
-          className={`btn btn-sm ${item.isVisible ? "btn-outline-secondary" : "btn-warning"}`}
+        </UnstyledButton>
+        <hr style={{ flex: 1, margin: 0 }} />
+        <Badge color="gray" variant="light" tt="uppercase">
+          separator
+        </Badge>
+        <ActionIcon
+          size="sm"
+          variant={item.isVisible ? "default" : "filled"}
+          color={item.isVisible ? "gray" : "yellow"}
           title={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
           aria-pressed={item.isVisible}
           onClick={(e) => {
@@ -338,18 +361,17 @@ function SortableRow({
           }}
         >
           <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm btn-link p-0 text-danger"
+        </ActionIcon>
+        <UnstyledButton
           title="Delete"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
+          style={{ color: "var(--mantine-color-red-filled)" }}
         >
           <i className="fa fa-xmark" />
-        </button>
+        </UnstyledButton>
       </li>
     );
   }
@@ -357,26 +379,21 @@ function SortableRow({
   return (
     <li
       ref={setNodeRef}
-      style={style}
-      className={`list-group-item d-flex align-items-center gap-2 ${
-        isSelected ? "active" : ""
-      }`}
+      style={{ ...style, ...rowStyle }}
+      className={isSelected ? "active" : undefined}
       onClick={onSelect}
     >
-      <button
+      <UnstyledButton
         ref={setActivatorNodeRef}
-        type="button"
-        className="btn btn-sm btn-link p-0 text-secondary"
         title="Drag to move"
         {...attributes}
         {...listeners}
         onClick={(e) => e.stopPropagation()}
+        style={{ color: "var(--mantine-color-dimmed)" }}
       >
         <i className="fa fa-grip-vertical" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-link p-0"
+      </UnstyledButton>
+      <UnstyledButton
         style={{ visibility: childCount > 0 ? "visible" : "hidden" }}
         onClick={(e) => {
           e.stopPropagation();
@@ -385,16 +402,23 @@ function SortableRow({
         aria-label={isCollapsed ? "Expand" : "Collapse"}
       >
         <i className={`fa fa-chevron-${isCollapsed ? "right" : "down"}`} />
-      </button>
-      {item.icon && <i className={`${item.icon} text-secondary`} />}
-      <span className="flex-grow-1">
+      </UnstyledButton>
+      {item.icon && <i className={item.icon} style={{ color: "var(--mantine-color-dimmed)" }} />}
+      <span style={{ flex: 1 }}>
         {item.displayName}
-        {!item.isVisible && <span className="badge bg-warning text-dark ms-2">hidden</span>}
+        {!item.isVisible && (
+          <Badge color="yellow" variant="filled" ml={8}>
+            hidden
+          </Badge>
+        )}
       </span>
-      <span className="badge bg-light text-dark text-uppercase">{item.itemType}</span>
-      <button
-        type="button"
-        className={`btn btn-sm ${item.isVisible ? "btn-outline-secondary" : "btn-warning"}`}
+      <Badge color="gray" variant="light" tt="uppercase">
+        {item.itemType}
+      </Badge>
+      <ActionIcon
+        size="sm"
+        variant={item.isVisible ? "default" : "filled"}
+        color={item.isVisible ? "gray" : "yellow"}
         title={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
         aria-pressed={item.isVisible}
         onClick={(e) => {
@@ -403,37 +427,50 @@ function SortableRow({
         }}
       >
         <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline-secondary"
+      </ActionIcon>
+      <ActionIcon
+        size="sm"
+        variant="default"
         onClick={(e) => {
           e.stopPropagation();
           onEdit();
         }}
       >
         <i className="fa fa-pen" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline-danger"
+      </ActionIcon>
+      <ActionIcon
+        size="sm"
+        variant="outline"
+        color="red"
         onClick={(e) => {
           e.stopPropagation();
           onDelete();
         }}
       >
         <i className="fa fa-trash" />
-      </button>
+      </ActionIcon>
     </li>
   );
 }
 
 function DragPreview({ item }: { item: FlatMenuItem }) {
   return (
-    <div className="list-group-item d-flex align-items-center gap-2 shadow">
-      {item.icon && <i className={`${item.icon} text-secondary`} />}
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "0.5rem 0.75rem",
+        border: "1px solid var(--mantine-color-default-border)",
+        background: "var(--mantine-color-body)",
+        boxShadow: "var(--mantine-shadow-md)"
+      }}
+    >
+      {item.icon && <i className={item.icon} style={{ color: "var(--mantine-color-dimmed)" }} />}
       <span>{item.displayName}</span>
-      <span className="badge bg-light text-dark text-uppercase ms-auto">{item.itemType}</span>
+      <Badge color="gray" variant="light" tt="uppercase" style={{ marginLeft: "auto" }}>
+        {item.itemType}
+      </Badge>
     </div>
   );
 }

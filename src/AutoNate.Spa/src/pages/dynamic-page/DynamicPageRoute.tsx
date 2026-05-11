@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Routes, useLocation } from "react-router-dom";
+import { Alert, Box, Text } from "@mantine/core";
 import { usePage, usePages } from "@/hooks/usePages";
 import NotFound from "@/pages/not-found/NotFound";
 import { renderAppRoutes } from "@/routes/appRoutes";
@@ -16,12 +17,12 @@ export default function DynamicPageRoute() {
 
   if (registryLoading || (matched && pageLoading)) {
     return (
-      <div className="p-4">
-        <div className="text-muted">
-          <i className="fa fa-spinner fa-spin me-2" />
+      <Box p="md">
+        <Text c="dimmed">
+          <i className="fa fa-spinner fa-spin" style={{ marginRight: 8 }} />
           Loading…
-        </div>
-      </div>
+        </Text>
+      </Box>
     );
   }
 
@@ -35,11 +36,11 @@ export default function DynamicPageRoute() {
   if (page.contentType === "alias") {
     if (!page.content) {
       return (
-        <div className="p-4">
-          <div className="alert alert-warning">
+        <Box p="md">
+          <Alert color="yellow" variant="light">
             Alias menu item has no target path configured.
-          </div>
-        </div>
+          </Alert>
+        </Box>
       );
     }
     return <Routes location={page.content}>{renderAppRoutes()}</Routes>;
@@ -53,13 +54,13 @@ export default function DynamicPageRoute() {
   }
 
   return (
-    <div className="dynamic-page p-4">
+    <Box className="dynamic-page" p="lg">
       {page.contentType === "jsx" ? (
         <JsxPage source={page.content} />
       ) : (
         <HtmlPage html={page.content} />
       )}
-    </div>
+    </Box>
   );
 }
 

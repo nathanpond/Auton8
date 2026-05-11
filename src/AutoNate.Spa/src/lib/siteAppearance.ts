@@ -1,5 +1,6 @@
 import { SiteAppearance, SiteAppearanceLogoMode } from "@/types/siteAppearance";
 import { badgeTextColor } from "@/lib/statusAppearance";
+import { generateColors } from "@mantine/colors-generator";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -10,7 +11,7 @@ export const DEFAULT_SITE_APPEARANCE: SiteAppearance = {
   logoIcon: "fa fa-robot",
   logoText: "Auto Nate",
   loginTagline: "Sign in to continue to the automation dashboard",
-  loginCoverImageUrl: "/spa/assets/img/login-bg/login-bg-17.jpg",
+  loginCoverImageUrl: "/assets/img/login-bg/space.jpg",
   primaryAccentColor: "#00acac",
   headerBg: "#ffffff",
   headerColor: "#212529",
@@ -273,85 +274,90 @@ export function applySiteAppearanceToDocument(
   const rootStyle = doc.documentElement.style;
 
   const accent = normalized.primaryAccentColor;
-  const accentHover = mixHex(accent, "#000000", 0.25);
-  const accentDisabled = mixHex(accent, "#ffffff", 0.25);
   const accentText = badgeTextColor(accent);
-  const accentHoverText = badgeTextColor(accentHover);
-  const accentDisabledText = badgeTextColor(accentDisabled);
 
-  setColorVar(rootStyle, "--bs-app-theme", accent);
-  setRgbVar(rootStyle, "--bs-app-theme-rgb", accent);
-  setColorVar(rootStyle, "--bs-app-theme-color", accentText);
-  setRgbVar(rootStyle, "--bs-app-theme-color-rgb", accentText);
-  setColorVar(rootStyle, "--bs-app-theme-hover", accentHover);
-  setColorVar(rootStyle, "--bs-app-theme-hover-border-color", accentHover);
-  setColorVar(rootStyle, "--bs-app-theme-hover-color", accentHoverText);
-  setColorVar(rootStyle, "--bs-app-theme-active", accentHover);
-  setColorVar(rootStyle, "--bs-app-theme-active-border-color", accentHover);
-  setColorVar(rootStyle, "--bs-app-theme-active-color", accentHoverText);
-  setColorVar(rootStyle, "--bs-app-theme-disabled", accentDisabled);
-  setColorVar(rootStyle, "--bs-app-theme-disabled-border-color", accentDisabled);
-  setColorVar(rootStyle, "--bs-app-theme-disabled-color", accentDisabledText);
-  setColorVar(rootStyle, "--bs-primary", accent);
-  setRgbVar(rootStyle, "--bs-primary-rgb", accent);
-  setColorVar(rootStyle, "--bs-link-color", accent);
-  setColorVar(rootStyle, "--bs-link-hover-color", accentHover);
+  // SiteAppearance-owned tokens for the header/top-menu/sidebar surfaces.
+  // Header chrome (`headerStyles.ts`) and the SiteAppearance preview read
+  // from these names. (Bootstrap's `--bs-*` namespace used to mirror these
+  // for ColorAdmin's sake — that overlay is gone, so we publish only the
+  // `--app-*` names plus the Mantine bridge vars below.)
+  setColorVar(rootStyle, "--app-header-bg", normalized.headerBg);
+  setColorVar(rootStyle, "--app-header-color", normalized.headerColor);
+  setColorVar(rootStyle, "--app-top-menu-bg", normalized.topMenuBg);
+  setColorVar(rootStyle, "--app-top-menu-link-color", normalized.topMenuLinkColor);
+  setColorVar(rootStyle, "--app-top-menu-link-hover-bg", normalized.topMenuLinkHoverBg);
+  setColorVar(rootStyle, "--app-top-menu-link-hover-color", normalized.topMenuLinkHoverColor);
+  setColorVar(rootStyle, "--app-top-menu-link-active-bg", normalized.topMenuLinkActiveBg);
+  setColorVar(rootStyle, "--app-top-menu-link-active-color", normalized.topMenuLinkActiveColor);
+  setColorVar(rootStyle, "--app-sidebar-bg", normalized.sidebarBg);
+  setColorVar(rootStyle, "--app-sidebar-menu-link-color", normalized.sidebarLinkColor);
+  setColorVar(rootStyle, "--app-sidebar-component-active-bg", normalized.sidebarActiveBg);
+  setColorVar(rootStyle, "--app-sidebar-component-active-color", normalized.sidebarActiveColor);
 
-  setColorVar(rootStyle, "--bs-app-header-bg", normalized.headerBg);
-  setRgbVar(rootStyle, "--bs-app-header-bg-rgb", normalized.headerBg);
-  setColorVar(rootStyle, "--bs-app-header-color", normalized.headerColor);
-  setRgbVar(rootStyle, "--bs-app-header-color-rgb", normalized.headerColor);
+  // Mantine bridge: mirror SiteAppearance into Mantine's root CSS vars so
+  // migrated pages and Mantine components share one theme source.
+  setColorVar(rootStyle, "--mantine-color-body", normalized.surfaceBg);
+  setColorVar(rootStyle, "--mantine-color-text", normalized.surfaceTextColor);
+  setColorVar(rootStyle, "--mantine-color-default", normalized.surfaceBg);
+  setColorVar(rootStyle, "--mantine-color-default-hover", normalized.surfaceSecondaryBg);
+  setColorVar(rootStyle, "--mantine-color-default-color", normalized.surfaceTextColor);
+  setColorVar(rootStyle, "--mantine-color-default-border", normalized.borderColor);
+  setColorVar(rootStyle, "--mantine-color-dimmed", normalized.sidebarSectionColor);
 
-  setColorVar(rootStyle, "--bs-app-top-menu-bg", normalized.topMenuBg);
-  setColorVar(rootStyle, "--bs-app-top-menu-link-color", normalized.topMenuLinkColor);
-  setColorVar(rootStyle, "--bs-app-top-menu-link-hover-bg", normalized.topMenuLinkHoverBg);
-  setColorVar(rootStyle, "--bs-app-top-menu-link-hover-color", normalized.topMenuLinkHoverColor);
-  setColorVar(rootStyle, "--bs-app-top-menu-link-active-bg", normalized.topMenuLinkActiveBg);
-  setColorVar(rootStyle, "--bs-app-top-menu-link-active-color", normalized.topMenuLinkActiveColor);
-  setColorVar(rootStyle, "--bs-app-top-menu-control-link-bg", normalized.topMenuBg);
-  setColorVar(rootStyle, "--bs-app-top-menu-control-link-color", normalized.topMenuLinkColor);
-  setColorVar(rootStyle, "--bs-app-top-menu-control-link-hover-bg", normalized.topMenuLinkHoverBg);
-  setColorVar(rootStyle, "--bs-app-top-menu-control-link-hover-color", normalized.topMenuLinkHoverColor);
+  // Live brand palette. The MantineProvider's static theme establishes that
+  // `brand` is the primary color; here we overwrite the 10-shade tuple at
+  // runtime so accent edits flicker through to every Mantine component using
+  // `color="brand"` without re-rendering the theme object.
+  //
+  // generateColors() places the input color wherever it fits on a lightness
+  // spectrum — NOT necessarily at index 6 (the "filled" slot). For an admin
+  // configurable accent, the user expects their saved color to be the actual
+  // button color, so we pin index 6 (and the `-filled` alias) to the input
+  // and derive hover/light from manual mix.
+  const brandShades = generateColors(accent).slice() as string[];
+  brandShades[6] = accent;
+  const filledHover = mixHex(accent, "#000000", 0.12);
+  const lightBg = mixHex(accent, "#ffffff", 0.9);
+  const lightHoverBg = mixHex(accent, "#ffffff", 0.8);
 
-  setColorVar(rootStyle, "--bs-app-sidebar-bg", normalized.sidebarBg);
-  setRgbVar(rootStyle, "--bs-app-sidebar-bg-rgb", normalized.sidebarBg);
-  setColorVar(rootStyle, "--bs-app-sidebar-menu-link-color", normalized.sidebarLinkColor);
-  setColorVar(rootStyle, "--bs-app-sidebar-menu-link-hover-color", normalized.sidebarLinkHoverColor);
-  setColorVar(rootStyle, "--bs-app-sidebar-component-active-bg", normalized.sidebarActiveBg);
-  setColorVar(rootStyle, "--bs-app-sidebar-component-active-color", normalized.sidebarActiveColor);
-  setColorVar(rootStyle, "--bs-app-sidebar-menu-icon-color", normalized.sidebarIconColor);
-  setColorVar(rootStyle, "--bs-app-sidebar-menu-submenu-bg", normalized.sidebarSubmenuBg);
-  setColorVar(rootStyle, "--bs-app-sidebar-menu-header-color", normalized.sidebarSectionColor);
-  setColorVar(rootStyle, "--bs-app-sidebar-float-submenu-bg", normalized.sidebarSubmenuBg);
+  brandShades.forEach((shade, idx) => {
+    rootStyle.setProperty(`--mantine-color-brand-${idx}`, shade);
+  });
+  rootStyle.setProperty("--mantine-color-brand-light", lightBg);
+  rootStyle.setProperty("--mantine-color-brand-light-hover", lightHoverBg);
+  rootStyle.setProperty("--mantine-color-brand-light-color", accent);
+  rootStyle.setProperty("--mantine-color-brand-filled", accent);
+  rootStyle.setProperty("--mantine-color-brand-filled-hover", filledHover);
+  rootStyle.setProperty("--mantine-color-brand-outline", accent);
+  rootStyle.setProperty("--mantine-color-brand-outline-hover", lightBg);
+  // Mantine's primary-color aliases mirror the brand palette; pin them too
+  // so anything that resolves to the primary color (e.g. <Tabs>, <Indicator>
+  // defaults) picks up the same accent.
+  rootStyle.setProperty("--mantine-primary-color-filled", accent);
+  rootStyle.setProperty("--mantine-primary-color-filled-hover", filledHover);
+  rootStyle.setProperty("--mantine-primary-color-light", lightBg);
+  rootStyle.setProperty("--mantine-primary-color-light-hover", lightHoverBg);
+  rootStyle.setProperty("--mantine-primary-color-light-color", accent);
+  rootStyle.setProperty("--mantine-primary-color-contrast", accentText);
 
-  setColorVar(rootStyle, "--bs-body-bg", normalized.surfaceBg);
-  setRgbVar(rootStyle, "--bs-body-bg-rgb", normalized.surfaceBg);
-  setColorVar(rootStyle, "--bs-body-color", normalized.surfaceTextColor);
-  setRgbVar(rootStyle, "--bs-body-color-rgb", normalized.surfaceTextColor);
-  setColorVar(rootStyle, "--bs-component-bg", normalized.surfaceBg);
-  setRgbVar(rootStyle, "--bs-component-bg-rgb", normalized.surfaceBg);
-  setColorVar(rootStyle, "--bs-component-secondary-bg", normalized.surfaceSecondaryBg);
-  setRgbVar(rootStyle, "--bs-component-secondary-bg-rgb", normalized.surfaceSecondaryBg);
-  setColorVar(rootStyle, "--bs-component-color", normalized.surfaceTextColor);
-  setRgbVar(rootStyle, "--bs-component-color-rgb", normalized.surfaceTextColor);
-  setColorVar(rootStyle, "--bs-component-border-color", normalized.borderColor);
-  setRgbVar(rootStyle, "--bs-component-border-color-rgb", normalized.borderColor);
-  setColorVar(rootStyle, "--bs-border-color", normalized.borderColor);
-  setRgbVar(rootStyle, "--bs-border-color-rgb", normalized.borderColor);
-  setColorVar(rootStyle, "--bs-component-dropdown-bg", normalized.dropdownBg);
-  setRgbVar(rootStyle, "--bs-component-dropdown-bg-rgb", normalized.dropdownBg);
-  setColorVar(rootStyle, "--bs-component-dropdown-border-color", normalized.borderColor);
-  setRgbVar(rootStyle, "--bs-component-dropdown-border-color-rgb", normalized.borderColor);
-  setColorVar(rootStyle, "--bs-component-modal-bg", normalized.modalBg);
-  setRgbVar(rootStyle, "--bs-component-modal-bg-rgb", normalized.modalBg);
-  setColorVar(rootStyle, "--bs-component-modal-border-color", normalized.borderColor);
-  setRgbVar(rootStyle, "--bs-component-modal-border-color-rgb", normalized.borderColor);
-  setColorVar(rootStyle, "--bs-site-secondary-btn-bg", normalized.secondaryButtonBg);
-  setColorVar(rootStyle, "--bs-site-secondary-btn-color", normalized.secondaryButtonTextColor);
-  setColorVar(rootStyle, "--bs-site-secondary-btn-border-color", normalized.secondaryButtonBorderColor);
-  setColorVar(rootStyle, "--bs-site-secondary-btn-hover-bg", normalized.secondaryButtonHoverBg);
-  setColorVar(rootStyle, "--bs-site-secondary-btn-hover-color", normalized.secondaryButtonHoverTextColor);
-  setColorVar(rootStyle, "--bs-site-secondary-btn-hover-border-color", normalized.secondaryButtonHoverBg);
+  // Infer color scheme from surfaceBg luminance (Phase I; an explicit field on
+  // SiteAppearance can replace this later).
+  const scheme = inferColorScheme(normalized.surfaceBg);
+  doc.documentElement.setAttribute("data-mantine-color-scheme", scheme);
+}
+
+export function inferColorScheme(surfaceBg: string): "light" | "dark" {
+  const rgb = parseHex(surfaceBg) ?? parseHex(DEFAULT_SITE_APPEARANCE.surfaceBg)!;
+  const lum = relativeLuminance(rgb);
+  return lum < 0.4 ? "dark" : "light";
+}
+
+function relativeLuminance(rgb: Rgb): number {
+  const channel = (c: number) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
 }
 
 function normalizeRequiredText(value: string | null | undefined, fallback: string): string {
@@ -405,15 +411,6 @@ function toHex(value: number): string {
   return value.toString(16).padStart(2, "0");
 }
 
-function toRgbCss(value: string): string {
-  const rgb = parseHex(value) ?? parseHex("#000000")!;
-  return `${rgb.r}, ${rgb.g}, ${rgb.b}`;
-}
-
 function setColorVar(style: CSSStyleDeclaration, name: string, value: string): void {
   style.setProperty(name, value);
-}
-
-function setRgbVar(style: CSSStyleDeclaration, name: string, value: string): void {
-  style.setProperty(name, toRgbCss(value));
 }

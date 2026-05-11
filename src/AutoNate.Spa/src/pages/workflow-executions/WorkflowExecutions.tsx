@@ -1,6 +1,21 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ColumnDef } from "@tanstack/react-table";
+import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Group,
+  Modal,
+  SimpleGrid,
+  Stack,
+  Tabs,
+  Text,
+  ThemeIcon,
+  Title
+} from "@mantine/core";
 import { useBusConnection } from "@/hooks/useBusConnection";
 import {
   EXECUTIONS_QUERY_KEY,
@@ -35,7 +50,6 @@ import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { usePermissionChecks, permissionKey } from "@/hooks/usePermissionChecks";
 import { getCompletedAssigneesForActivity } from "@/api/executions";
 import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
-import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import {
   FlowableTaskSummary,
   WorkflowExecutionHistoryEvent,
@@ -221,14 +235,15 @@ export default function WorkflowExecutions() {
         id: "status",
         accessorKey: "status",
         header: "Status",
-        cell: ({ row }) => (
-          <span
-            className="badge rounded-pill"
-            style={statusBadgeStyle(row.original.status, statusAppearance)}
-          >
-            {row.original.status}
-          </span>
-        )
+        cell: ({ row }) => {
+          const bg = resolveStatusBadgeColor(row.original.status, statusAppearance);
+          const fg = badgeTextColor(bg);
+          return (
+            <Badge radius="xl" style={{ backgroundColor: bg, color: fg, border: 0 }}>
+              {row.original.status}
+            </Badge>
+          );
+        }
       },
       {
         id: "currentStep",
@@ -256,40 +271,42 @@ export default function WorkflowExecutions() {
             cancelExecution.isPending && cancelExecution.variables === execution.id;
           const displayName = execution.name ?? execution.id;
           return (
-            <div className="data-table-row-actions workflow-executions-actions-cell">
+            <Group gap="xs" wrap="nowrap">
               {isRunning && canCancel && (
-                <button
-                  type="button"
-                  className="btn btn-outline-warning btn-sm workflow-execution-cancel-button"
+                <Button
+                  size="xs"
+                  variant="outline"
+                  color="yellow"
                   title="Cancel execution"
                   aria-label={`Cancel execution ${displayName}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     requestCancel(execution);
                   }}
-                  disabled={cancelInFlight}
+                  loading={cancelInFlight}
                 >
-                  <span>Cancel</span>
-                </button>
+                  Cancel
+                </Button>
               )}
               {canDelete && (
-                <button
-                  type="button"
-                  className="btn btn-outline-danger btn-sm workflow-execution-delete-button"
+                <Button
+                  size="xs"
+                  variant="outline"
+                  color="red"
                   title="Delete execution"
                   aria-label={`Delete execution ${displayName}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     requestDelete(execution);
                   }}
-                  disabled={
+                  loading={
                     deleteExecution.isPending && deleteExecution.variables === execution.id
                   }
                 >
-                  <span>Delete</span>
-                </button>
+                  Delete
+                </Button>
               )}
-            </div>
+            </Group>
           );
         }
       }
@@ -305,83 +322,90 @@ export default function WorkflowExecutions() {
   );
 
   return (
-    <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Workflow Executions</h1>
-          <p className="page-head-copy workflow-executions-copy">
+    <Box py="md">
+      <Stack gap="lg">
+        <Stack gap={4}>
+          <Title order={1}>Workflow Executions</Title>
+          <Text size="sm" c="dimmed" maw={760}>
             View every execution in the system, with the newest runs first and live step details for
             anything still in progress.
-          </p>
-        </div>
-      </div>
+          </Text>
+        </Stack>
 
-      <div className="row g-3 mb-4">
-        <StatusStatCard
-          color="bg-blue"
-          icon="fa-circle-play"
-          title="RUNNING"
-          count={statusCounts.running}
-        />
-        <StatusStatCard
-          color="bg-teal"
-          icon="fa-circle-check"
-          title="COMPLETED"
-          count={statusCounts.complete}
-        />
-        <StatusStatCard
-          color="workflow-executions-stat-cancelled"
-          icon="fa-ban"
-          title="CANCELLED"
-          count={statusCounts.cancelled}
-        />
-        <StatusStatCard
-          color="bg-red"
-          icon="fa-triangle-exclamation"
-          title="ERRORED"
-          count={statusCounts.errored}
-        />
-      </div>
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
+          <StatusStatCard
+            color="indigo"
+            icon="fa-circle-play"
+            title="RUNNING"
+            count={statusCounts.running}
+          />
+          <StatusStatCard
+            color="teal"
+            icon="fa-circle-check"
+            title="COMPLETED"
+            count={statusCounts.complete}
+          />
+          <StatusStatCard
+            color="gray"
+            icon="fa-ban"
+            title="CANCELLED"
+            count={statusCounts.cancelled}
+          />
+          <StatusStatCard
+            color="red"
+            icon="fa-triangle-exclamation"
+            title="ERRORED"
+            count={statusCounts.errored}
+          />
+        </SimpleGrid>
 
-      {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
-          role={flash.kind === "success" ? "status" : "alert"}
-        >
-          {flash.message}
-        </div>
-      )}
-
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          {describeError(error)}
-        </div>
-      )}
-
-      <div className="workflow-executions-toolbar">
-        <span className={connectionBadgeClass(busStatus)}>{browserStatusLabel(busStatus)}</span>
-        <button
-          type="button"
-          className="btn btn-outline-primary"
-          onClick={() => refetch()}
-          disabled={isLoading}
-          title="Refresh executions"
-        >
-          Refresh
-        </button>
-        {isLoading && <span className="workflow-executions-loading">Loading executions...</span>}
-        {canDeleteAll && (
-          <button
-            type="button"
-            className="btn btn-outline-danger ms-auto workflow-executions-delete-all-button"
-            onClick={requestDeleteAll}
-            disabled={deleteAllExecutions.isPending || executions.length === 0}
-            title="Delete every execution from AutoNate and Flowable"
+        {flash && (
+          <Alert
+            color={flash.kind === "success" ? "green" : "red"}
+            variant="light"
+            role={flash.kind === "success" ? "status" : "alert"}
           >
-            Delete All Executions
-          </button>
+            {flash.message}
+          </Alert>
         )}
-      </div>
+
+        {error && (
+          <Alert color="red" variant="light" role="alert">
+            {describeError(error)}
+          </Alert>
+        )}
+
+        <Group gap="xs" wrap="wrap" align="center">
+          <Badge color={busStreamColor(busStatus)} variant="filled" radius="sm">
+            {browserStatusLabel(busStatus)}
+          </Badge>
+          <Button
+            variant="outline"
+            onClick={() => refetch()}
+            disabled={isLoading}
+            title="Refresh executions"
+          >
+            Refresh
+          </Button>
+          {isLoading && (
+            <Text size="sm" c="dimmed">
+              Loading executions...
+            </Text>
+          )}
+          {canDeleteAll && (
+            <Button
+              variant="outline"
+              color="red"
+              ml="auto"
+              onClick={requestDeleteAll}
+              loading={deleteAllExecutions.isPending}
+              disabled={executions.length === 0}
+              title="Delete every execution from AutoNate and Flowable"
+            >
+              Delete All Executions
+            </Button>
+          )}
+        </Group>
 
       <DataTable<WorkflowExecutionSummary>
         mode="auto"
@@ -406,26 +430,22 @@ export default function WorkflowExecutions() {
         }}
       />
 
-      {selectedId && (
-        <div
-          className="workflow-execution-modal-backdrop"
-          onClick={() => setSelectedId(null)}
+        <Modal
+          opened={!!selectedId}
+          onClose={() => setSelectedId(null)}
+          size="90%"
+          padding={0}
+          withCloseButton={false}
         >
-          <div
-            className="workflow-execution-modal"
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => e.stopPropagation()}
-          >
+          {selectedId && (
             <ExecutionContent
               processInstanceId={selectedId}
               onClose={() => setSelectedId(null)}
               onTaskCompleted={(message) => setFlash({ kind: "success", message })}
               onError={(message) => setFlash({ kind: "error", message })}
             />
-          </div>
-        </div>
-      )}
+          )}
+        </Modal>
 
       {pendingAction && (() => {
         if (pendingAction.kind === "delete-all") {
@@ -433,7 +453,7 @@ export default function WorkflowExecutions() {
             <ConfirmModal
               title="Delete every execution?"
               message={
-                <p className="mb-0">
+                <p style={{ margin: 0 }}>
                   Permanently delete <strong>every workflow execution</strong>{" "}
                   in the system? This removes all runs from AutoNate and
                   Flowable — running and historical, including variables and
@@ -456,14 +476,14 @@ export default function WorkflowExecutions() {
             title={pendingAction.kind === "delete" ? "Delete execution?" : "Cancel execution?"}
             message={
               pendingAction.kind === "delete" ? (
-                <p className="mb-0">
+                <p style={{ margin: 0 }}>
                   Permanently delete workflow execution{" "}
                   <strong>{label}</strong>? This removes it from AutoNate and
                   Flowable — the run, its history, variables, and tasks will
                   all be gone.
                 </p>
               ) : (
-                <p className="mb-0">
+                <p style={{ margin: 0 }}>
                   Cancel workflow execution <strong>{label}</strong>? Execution
                   stops immediately and the run is marked as cancelled. The
                   history is kept.
@@ -479,7 +499,8 @@ export default function WorkflowExecutions() {
           />
         );
       })()}
-    </>
+      </Stack>
+    </Box>
   );
 }
 
@@ -702,136 +723,102 @@ export function ExecutionContent({
 
   return (
     <>
-      <div className="workflow-execution-modal-header">
-        <h2>{detail?.name ?? `Execution ${processInstanceId}`}</h2>
+      <Group
+        justify="space-between"
+        align="center"
+        px="md"
+        py="sm"
+        style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
+      >
+        <Title order={3} m={0}>
+          {detail?.name ?? `Execution ${processInstanceId}`}
+        </Title>
         {onClose && (
-          <button type="button" className="btn btn-outline-secondary" onClick={onClose} title="Close">
+          <Button variant="default" onClick={onClose} title="Close">
             Close
-          </button>
+          </Button>
         )}
-      </div>
+      </Group>
 
-      <ul className="nav nav-tabs workflow-execution-modal-tabs">
-        <li className="nav-item">
-          <a
-            href="#workflow-execution-diagram-tab"
-            onClick={(e) => {
-              e.preventDefault();
-              setTab("diagram");
-            }}
-            className={`nav-link ${tab === "diagram" ? "active" : ""}`}
-          >
-            Diagram
-          </a>
-        </li>
-        <li className="nav-item">
-          <a
-            href="#workflow-execution-history-tab"
-            onClick={(e) => {
-              e.preventDefault();
-              setTab("history");
-            }}
-            className={`nav-link ${tab === "history" ? "active" : ""}`}
-          >
-            History
-          </a>
-        </li>
-        <li className="nav-item">
-          <a
-            href="#workflow-execution-log-tab"
-            onClick={(e) => {
-              e.preventDefault();
-              setTab("log");
-            }}
-            className={`nav-link ${tab === "log" ? "active" : ""}`}
-          >
-            Execution Log
-          </a>
-        </li>
-      </ul>
+      <Tabs value={tab} onChange={(value) => value && setTab(value as ExecutionTab)} keepMounted>
+        <Tabs.List px="md">
+          <Tabs.Tab value="diagram">Diagram</Tabs.Tab>
+          <Tabs.Tab value="history">History</Tabs.Tab>
+          <Tabs.Tab value="log">Execution Log</Tabs.Tab>
+        </Tabs.List>
 
-      <div className="workflow-execution-modal-body">
-        <div className="tab-content panel rounded-0 p-3 m-0">
-          {/* Diagram pane stays mounted so the BPMN viewer doesn't
-              reinitialize on every tab switch — Bootstrap's tab-pane
-              CSS hides the inactive pane via display:none. */}
-          <div
-            id="workflow-execution-diagram-tab"
-            className={`tab-pane fade ${tab === "diagram" ? "active show" : ""}`}
-          >
-            {errorMessage && (
-              <div className="alert alert-danger" role="alert">
-                {errorMessage}
+        {/* Each panel stays mounted (`keepMounted`) so the BPMN viewer
+            doesn't reinitialize on tab switch — same behavior as the
+            previous Bootstrap tab-pane setup. */}
+        <Tabs.Panel value="diagram" p="md" keepMounted>
+          {errorMessage && (
+            <Alert color="red" variant="light" mb="sm" role="alert">
+              {errorMessage}
+            </Alert>
+          )}
+
+          {detailLoading ? (
+            <Text size="sm" c="dimmed">
+              Loading execution diagram...
+            </Text>
+          ) : detail ? (
+            <>
+              <div className="workflow-execution-legend">
+                <span>
+                  <span className="workflow-execution-swatch workflow-execution-swatch-completed"></span>{" "}
+                  Completed
+                </span>
+                <span>
+                  <span className="workflow-execution-swatch workflow-execution-swatch-current"></span>{" "}
+                  Current
+                </span>
+                {hasCancelledActivities && (
+                  <span>
+                    <span className="workflow-execution-swatch workflow-execution-swatch-cancelled"></span>{" "}
+                    Cancelled
+                  </span>
+                )}
+                {hasFailedActivities && (
+                  <span>
+                    <span className="workflow-execution-swatch workflow-execution-swatch-failed"></span>{" "}
+                    Errored
+                  </span>
+                )}
+                <span>
+                  <span className="workflow-execution-swatch workflow-execution-swatch-future"></span>{" "}
+                  Future
+                </span>
               </div>
-            )}
 
-            {detailLoading ? (
-              <p className="workflow-executions-loading">Loading execution diagram...</p>
-            ) : detail ? (
-              <>
-                <div className="workflow-execution-legend">
-                  <span>
-                    <span className="workflow-execution-swatch workflow-execution-swatch-completed"></span>{" "}
-                    Completed
-                  </span>
-                  <span>
-                    <span className="workflow-execution-swatch workflow-execution-swatch-current"></span>{" "}
-                    Current
-                  </span>
-                  {hasCancelledActivities && (
-                    <span>
-                      <span className="workflow-execution-swatch workflow-execution-swatch-cancelled"></span>{" "}
-                      Cancelled
-                    </span>
-                  )}
-                  {hasFailedActivities && (
-                    <span>
-                      <span className="workflow-execution-swatch workflow-execution-swatch-failed"></span>{" "}
-                      Errored
-                    </span>
-                  )}
-                  <span>
-                    <span className="workflow-execution-swatch workflow-execution-swatch-future"></span>{" "}
-                    Future
-                  </span>
+              <div className="workflow-execution-body">
+                <div className="workflow-execution-viewer-shell">
+                  <div
+                    ref={containerRef}
+                    className="workflow-execution-viewer-canvas"
+                    aria-label="Read-only BPMN execution diagram"
+                  ></div>
                 </div>
 
-                <div className="workflow-execution-body">
-                  <div className="workflow-execution-viewer-shell">
-                    <div
-                      ref={containerRef}
-                      className="workflow-execution-viewer-canvas"
-                      aria-label="Read-only BPMN execution diagram"
-                    ></div>
-                  </div>
+                <ProcessVariablesPanel
+                  processInstanceId={processInstanceId}
+                  variables={detail.variables}
+                  canOverride={canOverride}
+                  onError={onError}
+                  onSaved={() => onTaskCompleted("Process variables updated.")}
+                />
+              </div>
+            </>
+          ) : null}
+        </Tabs.Panel>
 
-                  <ProcessVariablesPanel
-                    processInstanceId={processInstanceId}
-                    variables={detail.variables}
-                    canOverride={canOverride}
-                    onError={onError}
-                    onSaved={() => onTaskCompleted("Process variables updated.")}
-                  />
-                </div>
-              </>
-            ) : null}
-          </div>
+        <Tabs.Panel value="history" p="md">
+          {tab === "history" && <ExecutionHistory processInstanceId={processInstanceId} />}
+        </Tabs.Panel>
 
-          <div
-            id="workflow-execution-history-tab"
-            className={`tab-pane fade ${tab === "history" ? "active show" : ""}`}
-          >
-            {tab === "history" && <ExecutionHistory processInstanceId={processInstanceId} />}
-          </div>
-
-          <div
-            id="workflow-execution-log-tab"
-            className={`tab-pane fade ${tab === "log" ? "active show" : ""}`}
-          >
-            {tab === "log" && <ExecutionLog processInstanceId={processInstanceId} />}
-          </div>
-        </div>
-      </div>
+        <Tabs.Panel value="log" p="md">
+          {tab === "log" && <ExecutionLog processInstanceId={processInstanceId} />}
+        </Tabs.Panel>
+      </Tabs>
 
       {pendingTaskEdit?.kind === "reassign" && (
         <ReassignTaskModal
@@ -886,7 +873,7 @@ export function ExecutionContent({
                 Move the running execution to{" "}
                 <strong>{pendingMove.activityName ?? pendingMove.activityId}</strong>?
               </p>
-              <p className="mb-0">
+              <p style={{ margin: 0 }}>
                 Every currently active step on this run will be cancelled and
                 a fresh execution token will start at the selected node. Process
                 variables are preserved, but the new step may depend on values
@@ -954,36 +941,29 @@ type StatusStatCardProps = {
 
 function StatusStatCard({ color, icon, title, count }: StatusStatCardProps) {
   return (
-    <div className="col-xl-3 col-md-6">
-      <div className={`widget widget-stats workflow-executions-stat ${color}`}>
-        <div className="workflow-executions-stat-left">
-          <div className="stats-title">{title}</div>
-          <div className="stats-icon stats-icon-lg">
-            <i className={`fa ${icon} fa-fw`}></i>
-          </div>
-        </div>
-        <div className="stats-number">{count.toLocaleString()}</div>
-      </div>
-    </div>
+    <Card padding="lg" radius="md" bg={`${color}.7`} c="white" style={{ overflow: "hidden" }}>
+      <Group align="center" wrap="nowrap" gap="md">
+        <ThemeIcon variant="white" color={`${color}.7`} size={48} radius="md">
+          <i className={`fa ${icon} fa-fw`} style={{ fontSize: 22 }} />
+        </ThemeIcon>
+        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+          <Text size="xs" fw={700} style={{ letterSpacing: 0.5, opacity: 0.9 }}>
+            {title}
+          </Text>
+          <Text fw={700} size="xl" lh={1.1}>
+            {count.toLocaleString()}
+          </Text>
+        </Stack>
+      </Group>
+    </Card>
   );
 }
 
-function statusBadgeStyle(
-  status: string,
-  entries: StatusAppearanceEntry[]
-): React.CSSProperties {
-  const backgroundColor = resolveStatusBadgeColor(status, entries);
-  return {
-    backgroundColor,
-    color: badgeTextColor(backgroundColor)
-  };
-}
-
-function connectionBadgeClass(status: string): string {
+function busStreamColor(status: string): string {
   const lower = status.toLowerCase();
-  if (lower.includes("connected")) return "badge text-bg-success";
-  if (lower.includes("connecting") || lower.includes("reconnecting")) return "badge text-bg-warning";
-  return "badge text-bg-danger";
+  if (lower.includes("connected")) return "green";
+  if (lower.includes("connecting") || lower.includes("reconnecting")) return "yellow";
+  return "red";
 }
 
 function browserStatusLabel(status: string): string {

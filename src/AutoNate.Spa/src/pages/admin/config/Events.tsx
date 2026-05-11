@@ -1,3 +1,4 @@
+import { Alert, Box, Code, Paper, Stack, Table, Text, Title } from "@mantine/core";
 import { useEventCatalog } from "@/hooks/useEventCatalog";
 
 export default function Events() {
@@ -5,166 +6,172 @@ export default function Events() {
 
   if (isLoading) {
     return (
-      <>
-        <div className="page-head">
-          <h1 className="page-header mb-1">Events</h1>
-        </div>
-        <p className="text-muted">Loading event catalog…</p>
-      </>
+      <Box py="md">
+        <Title order={1} mb="sm">
+          Events
+        </Title>
+        <Text c="dimmed">Loading event catalog…</Text>
+      </Box>
     );
   }
 
   if (isError || !data) {
     return (
-      <>
-        <div className="page-head">
-          <h1 className="page-header mb-1">Events</h1>
-        </div>
-        <div className="alert alert-danger">
+      <Box py="md">
+        <Title order={1} mb="sm">
+          Events
+        </Title>
+        <Alert color="red" variant="light">
           {error instanceof Error ? error.message : "Failed to load the event catalog."}
-        </div>
-      </>
+        </Alert>
+      </Box>
     );
   }
 
   return (
-    <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Events</h1>
-        <p className="page-head-copy">
-          Reference for every event the application publishes to its message bus. Events are
-          delivered through Dapr pub/sub; a single live feed across all topics is available on
-          the <strong>Bus Watcher</strong> page.
-        </p>
-      </div>
+    <Box py="md">
+      <Stack gap="lg">
+        <Stack gap={4}>
+          <Title order={1}>Events</Title>
+          <Text size="sm" c="dimmed">
+            Reference for every event the application publishes to its message bus. Events are
+            delivered through Dapr pub/sub; a single live feed across all topics is available on
+            the <strong>Bus Watcher</strong> page.
+          </Text>
+        </Stack>
 
-      {data.transports.map((transport) => (
-        <div key={transport.topic} className="panel panel-inverse mb-3">
-          <div className="panel-heading">
-            <h4 className="panel-title">Transport — {transport.topic}</h4>
-          </div>
-          <div className="panel-body">
-            <dl className="row mb-0">
-              <dt className="col-sm-3">Topic</dt>
-              <dd className="col-sm-9">
-                <code>{transport.topic}</code>
-                <div className="text-muted small mt-1">
-                  Events on this topic share the schema documented in their category below. The
-                  specific kind of event is carried in the <code>eventType</code> field on the
-                  payload.
-                </div>
-              </dd>
+        {data.transports.map((transport) => (
+          <Paper key={transport.topic} withBorder radius="md" p="md">
+            <Stack gap="sm">
+              <Title order={4}>Transport — {transport.topic}</Title>
+              <Stack gap="xs">
+                <KeyValueRow label="Topic">
+                  <Code>{transport.topic}</Code>
+                  <Text size="xs" c="dimmed" mt={4}>
+                    Events on this topic share the schema documented in their category below. The
+                    specific kind of event is carried in the <Code>eventType</Code> field on the
+                    payload.
+                  </Text>
+                </KeyValueRow>
+                <KeyValueRow label="Broker">{transport.description}</KeyValueRow>
+                <KeyValueRow label="Source">{transport.source}</KeyValueRow>
+              </Stack>
+            </Stack>
+          </Paper>
+        ))}
 
-              <dt className="col-sm-3">Broker</dt>
-              <dd className="col-sm-9">{transport.description}</dd>
-
-              <dt className="col-sm-3">Source</dt>
-              <dd className="col-sm-9">{transport.source}</dd>
-            </dl>
-          </div>
-        </div>
-      ))}
-
-      <div className="panel panel-inverse mb-3">
-        <div className="panel-heading">
-          <h4 className="panel-title">Common envelope</h4>
-        </div>
-        <div className="panel-body">
-          <p className="text-muted mb-2">
-            Every event — regardless of category — carries this envelope. Category-specific
-            fields are documented per category below.
-          </p>
-          <div className="table-responsive">
-            <table className="table table-sm table-striped mb-0">
-              <thead>
-                <tr>
-                  <th style={{ width: "20%" }}>Field</th>
-                  <th style={{ width: "20%" }}>Type</th>
-                  <th>Description</th>
-                </tr>
-              </thead>
-              <tbody>
+        <Paper withBorder radius="md" p="md">
+          <Stack gap="sm">
+            <Title order={4}>Common envelope</Title>
+            <Text size="sm" c="dimmed">
+              Every event — regardless of category — carries this envelope. Category-specific
+              fields are documented per category below.
+            </Text>
+            <Table striped highlightOnHover withTableBorder>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th style={{ width: "20%" }}>Field</Table.Th>
+                  <Table.Th style={{ width: "20%" }}>Type</Table.Th>
+                  <Table.Th>Description</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                 {data.payloadFields.map((field) => (
-                  <tr key={field.name}>
-                    <td>
-                      <code>{field.name}</code>
-                    </td>
-                    <td className="text-muted">{field.type}</td>
-                    <td>{field.description}</td>
-                  </tr>
+                  <Table.Tr key={field.name}>
+                    <Table.Td>
+                      <Code>{field.name}</Code>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="dimmed">
+                        {field.type}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>{field.description}</Table.Td>
+                  </Table.Tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+              </Table.Tbody>
+            </Table>
+          </Stack>
+        </Paper>
 
-      {data.categories.map((category) => (
-        <div key={category.title} className="panel panel-inverse mb-3">
-          <div className="panel-heading">
-            <h4 className="panel-title">{category.title}</h4>
-          </div>
-          <div className="panel-body">
-            <p className="text-muted">{category.description}</p>
-            {category.payloadFields.length > 0 && (
-              <div className="table-responsive mb-3">
-                <table className="table table-sm table-striped mb-0">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "22%" }}>Field</th>
-                      <th style={{ width: "20%" }}>Type</th>
-                      <th>Description</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+        {data.categories.map((category) => (
+          <Paper key={category.title} withBorder radius="md" p="md">
+            <Stack gap="sm">
+              <Title order={4}>{category.title}</Title>
+              <Text size="sm" c="dimmed">
+                {category.description}
+              </Text>
+              {category.payloadFields.length > 0 && (
+                <Table striped highlightOnHover withTableBorder>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th style={{ width: "22%" }}>Field</Table.Th>
+                      <Table.Th style={{ width: "20%" }}>Type</Table.Th>
+                      <Table.Th>Description</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
                     {category.payloadFields.map((field) => (
-                      <tr key={field.name}>
-                        <td>
-                          <code>{field.name}</code>
-                        </td>
-                        <td className="text-muted">{field.type}</td>
-                        <td>{field.description}</td>
-                      </tr>
+                      <Table.Tr key={field.name}>
+                        <Table.Td>
+                          <Code>{field.name}</Code>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm" c="dimmed">
+                            {field.type}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>{field.description}</Table.Td>
+                      </Table.Tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div className="table-responsive">
-              <table className="table table-sm mb-0">
-                <thead>
-                  <tr>
-                    <th style={{ width: "22%" }}>Event</th>
-                    <th>What it means / when it fires</th>
-                  </tr>
-                </thead>
-                <tbody>
+                  </Table.Tbody>
+                </Table>
+              )}
+              <Table withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th style={{ width: "22%" }}>Event</Table.Th>
+                    <Table.Th>What it means / when it fires</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
                   {category.events.map((evt) => (
-                    <tr key={`${evt.topic}:${evt.eventType}`}>
-                      <td>
-                        <code>{evt.eventType}</code>
-                      </td>
-                      <td>
-                        <div>
-                          <strong>{evt.summary}</strong>
-                        </div>
-                        <div className="text-muted small mt-1">{evt.firesWhen}</div>
+                    <Table.Tr key={`${evt.topic}:${evt.eventType}`}>
+                      <Table.Td>
+                        <Code>{evt.eventType}</Code>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text fw={700}>{evt.summary}</Text>
+                        <Text size="xs" c="dimmed" mt={4}>
+                          {evt.firesWhen}
+                        </Text>
                         {evt.payloadHighlights.length > 0 && (
-                          <ul className="small mt-2 mb-0">
+                          <ul style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13 }}>
                             {evt.payloadHighlights.map((line, idx) => (
                               <li key={idx}>{line}</li>
                             ))}
                           </ul>
                         )}
-                      </td>
-                    </tr>
+                      </Table.Td>
+                    </Table.Tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      ))}
-    </>
+                </Table.Tbody>
+              </Table>
+            </Stack>
+          </Paper>
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
+function KeyValueRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 25%) 1fr", gap: 12 }}>
+      <Text fw={600} size="sm">
+        {label}
+      </Text>
+      <div>{children}</div>
+    </div>
   );
 }

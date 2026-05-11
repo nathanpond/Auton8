@@ -2,6 +2,16 @@ import { useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import {
+  Alert,
+  Box,
+  Button,
+  Group,
+  Input,
+  SimpleGrid,
+  Stack,
+  TextInput
+} from "@mantine/core";
 import { RecordTypeField } from "@/types/records";
 import AssigneePicker from "@/components/AssigneePicker";
 import { buildDefaultValues, buildRecordZodSchema, getRenderer } from "./fields/registry";
@@ -97,91 +107,97 @@ export default function RecordForm({
   });
 
   return (
-    <form onSubmit={submit} noValidate>
-      {topLevelError && <div className="alert alert-danger">{topLevelError}</div>}
+    <Box component="form" onSubmit={submit} noValidate>
+      <Stack gap="md">
+        {topLevelError && (
+          <Alert color="red" variant="light">
+            {topLevelError}
+          </Alert>
+        )}
 
-      <div className="mb-3">
-        <label className="form-label">Name</label>
-        <input
-          className={`form-control ${errors.__name ? "is-invalid" : ""}`}
+        <TextInput
+          label="Name"
+          error={(errors.__name as { message?: string } | undefined)?.message}
           {...register("__name")}
         />
-        {errors.__name && (
-          <div className="invalid-feedback">{(errors.__name as { message?: string }).message}</div>
-        )}
-      </div>
 
-      <div className="row g-3 mb-3">
-        <div className="col-md-6">
-          <label className="form-label">Status</label>
-          <input
-            type="text"
-            className={`form-control ${errors.__status ? "is-invalid" : ""}`}
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          <TextInput
+            label="Status"
             placeholder="e.g. Open, In progress"
+            error={(errors.__status as { message?: string } | undefined)?.message}
             {...register("__status")}
           />
-        </div>
-        <div className="col-md-6">
-          <label className="form-label">Due Date</label>
-          <input
+          <TextInput
+            label="Due Date"
             type="date"
-            className={`form-control ${errors.__dueDate ? "is-invalid" : ""}`}
+            error={(errors.__dueDate as { message?: string } | undefined)?.message}
             {...register("__dueDate")}
           />
-        </div>
-      </div>
+        </SimpleGrid>
 
-      <div className="mb-3">
-        <label className="form-label">Assignees</label>
-        <Controller
-          name="__assigneeIds"
-          control={control}
-          render={({ field: f }) => (
-            <AssigneePicker
-              value={(f.value as string[] | undefined) ?? []}
-              onChange={f.onChange}
-              disabled={busy}
-            />
-          )}
-        />
-      </div>
+        <Input.Wrapper label="Assignees">
+          <Controller
+            name="__assigneeIds"
+            control={control}
+            render={({ field: f }) => (
+              <AssigneePicker
+                value={(f.value as string[] | undefined) ?? []}
+                onChange={f.onChange}
+                disabled={busy}
+              />
+            )}
+          />
+        </Input.Wrapper>
 
-      <div className="row g-3">
-        {visibleFields.map((field) => {
-          const renderer = getRenderer(field.dataType);
-          if (!renderer) {
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          {visibleFields.map((field) => {
+            const renderer = getRenderer(field.dataType);
+            if (!renderer) {
+              return (
+                <Input.Wrapper
+                  key={field.id}
+                  label={
+                    <>
+                      {field.displayName}{" "}
+                      <span style={{ color: "var(--mantine-color-yellow-7)" }}>
+                        (unsupported type {field.dataType})
+                      </span>
+                    </>
+                  }
+                />
+              );
+            }
+            const FormImpl = renderer.Form;
             return (
-              <div key={field.id} className="col-12">
-                <label className="form-label">
-                  {field.displayName}
-                  <span className="text-warning ms-1">(unsupported type {field.dataType})</span>
-                </label>
-              </div>
+              <Input.Wrapper
+                key={field.id}
+                label={
+                  <>
+                    {field.displayName}
+                    {field.isRequired && (
+                      <span style={{ color: "var(--mantine-color-red-7)", marginLeft: 4 }}>*</span>
+                    )}
+                  </>
+                }
+              >
+                <FormImpl field={field} control={control as never} />
+              </Input.Wrapper>
             );
-          }
-          const FormImpl = renderer.Form;
-          return (
-            <div key={field.id} className="col-md-6">
-              <label className="form-label">
-                {field.displayName}
-                {field.isRequired && <span className="text-danger ms-1">*</span>}
-              </label>
-              <FormImpl field={field} control={control as never} />
-            </div>
-          );
-        })}
-      </div>
+          })}
+        </SimpleGrid>
 
-      <div className="mt-4 d-flex justify-content-end gap-2">
-        {onCancel && (
-          <button type="button" className="btn btn-outline-secondary" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
-        <button type="submit" className="btn btn-primary" disabled={busy || isSubmitting}>
-          {submitLabel}
-        </button>
-      </div>
-    </form>
+        <Group justify="flex-end" gap="xs" mt="md">
+          {onCancel && (
+            <Button variant="default" onClick={onCancel}>
+              Cancel
+            </Button>
+          )}
+          <Button type="submit" loading={busy || isSubmitting}>
+            {submitLabel}
+          </Button>
+        </Group>
+      </Stack>
+    </Box>
   );
 }

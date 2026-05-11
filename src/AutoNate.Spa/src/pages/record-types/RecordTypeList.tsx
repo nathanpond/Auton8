@@ -1,6 +1,22 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ColumnDef } from "@tanstack/react-table";
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Grid,
+  Group,
+  Input,
+  Modal,
+  Stack,
+  Switch,
+  TextInput,
+  Textarea
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { useCreateRecordType, useRestoreRecordType } from "@/hooks/useRecordTypes";
 import { listRecordTypes } from "@/api/recordTypes";
 import { CreateRecordTypeRequest, RecordType } from "@/types/records";
@@ -39,9 +55,9 @@ export default function RecordTypeList() {
         accessorKey: "name",
         header: "Name",
         cell: ({ row }) => (
-          <Link to={`/record-types/${row.original.id}`} className="fw-semibold">
+          <Anchor component={Link} to={`/record-types/${row.original.id}`} fw={600}>
             {row.original.name}
-          </Link>
+          </Anchor>
         )
       },
       {
@@ -62,11 +78,14 @@ export default function RecordTypeList() {
         header: "Status",
         cell: ({ row }) =>
           row.original.isArchived ? (
-            <>
-              <span className="badge bg-secondary me-2">Archived</span>
-              <button
+            <Group gap="xs">
+              <Badge color="gray" variant="filled">
+                Archived
+              </Badge>
+              <Anchor
+                component="button"
                 type="button"
-                className="btn btn-link btn-sm p-0"
+                size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
                   void onRestore(row.original);
@@ -74,10 +93,12 @@ export default function RecordTypeList() {
                 disabled={restore.isPending}
               >
                 Restore
-              </button>
-            </>
+              </Anchor>
+            </Group>
           ) : (
-            <span className="badge bg-success">Active</span>
+            <Badge color="green" variant="filled">
+              Active
+            </Badge>
           )
       },
       {
@@ -86,13 +107,15 @@ export default function RecordTypeList() {
         enableSorting: false,
         enableGlobalFilter: false,
         cell: ({ row }) => (
-          <Link
+          <Button
+            component={Link}
             to={`/records/${row.original.shortCode}`}
-            className="btn btn-outline-secondary btn-sm"
+            size="xs"
+            variant="default"
             onClick={(e) => e.stopPropagation()}
           >
             Records
-          </Link>
+          </Button>
         )
       }
     ],
@@ -101,23 +124,20 @@ export default function RecordTypeList() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1 className="page-header mb-1">Record Types</h1>
-          <p className="page-head-copy">
-            Define the records your app manages. Each record type has a short code (used as the key prefix)
-            and a set of fields that every record of that type will have.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Record Types"
+        description="Define the records your app manages. Each record type has a short code (used as the key prefix) and a set of fields that every record of that type will have."
+      />
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
+          mb="sm"
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
       <DataTable<RecordType>
@@ -139,27 +159,18 @@ export default function RecordTypeList() {
           return `${t.shortCode} ${t.name} ${t.description ?? ""}`.toLowerCase().includes(needle);
         }}
         toolbarLeft={
-          <div className="form-check form-switch ms-2">
-            <input
-              type="checkbox"
-              className="form-check-input"
-              id="include-archived-record-types"
-              checked={includeArchived}
-              onChange={(e) => setIncludeArchived(e.target.checked)}
-            />
-            <label className="form-check-label" htmlFor="include-archived-record-types">
-              Show archived
-            </label>
-          </div>
+          <Switch
+            id="include-archived-record-types"
+            ml="xs"
+            checked={includeArchived}
+            onChange={(e) => setIncludeArchived(e.currentTarget.checked)}
+            label="Show archived"
+          />
         }
         toolbarRight={
-          <button
-            type="button"
-            className="btn btn-add-user"
-            onClick={() => setModalOpen(true)}
-          >
-            <i className="fa fa-plus me-2"></i>New record type
-          </button>
+          <Button leftSection={<i className="fa fa-plus" />} onClick={() => setModalOpen(true)}>
+            New record type
+          </Button>
         }
       />
 
@@ -212,79 +223,64 @@ function CreateModal({
   };
 
   return (
-    <>
-      <div className="modal fade show d-block" role="dialog" aria-modal="true" tabIndex={-1}>
-        <div className="modal-dialog">
-          <div className="modal-content">
-            <form onSubmit={submit}>
-              <div className="modal-header">
-                <h5 className="modal-title">New Record Type</h5>
-                <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
-              </div>
-              <div className="modal-body">
-                <div className="mb-3">
-                  <label className="form-label">Short code</label>
-                  <input
-                    className="form-control text-uppercase"
-                    maxLength={8}
-                    placeholder="ACC"
-                    value={values.shortCode}
-                    onChange={(e) => setValues({ ...values, shortCode: e.target.value })}
-                    required
-                  />
-                  <div className="form-text">
-                    2-8 characters, used as the record-key prefix (e.g. <code>ACC-142</code>).
-                  </div>
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Name</label>
-                  <input
-                    className="form-control"
-                    value={values.name}
-                    onChange={(e) => setValues({ ...values, name: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    rows={3}
-                    value={values.description ?? ""}
-                    onChange={(e) => setValues({ ...values, description: e.target.value })}
-                  />
-                </div>
-                <div className="row g-2">
-                  <div className="col">
-                    <label className="form-label">Icon (FontAwesome)</label>
-                    <IconPicker
-                      value={values.icon ?? ""}
-                      onChange={(v) => setValues({ ...values, icon: v })}
-                    />
-                  </div>
-                  <div className="col">
-                    <label className="form-label">Color</label>
-                    <ColorPicker
-                      value={values.color ?? ""}
-                      onChange={(v) => setValues({ ...values, color: v })}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={create.isPending}>
-                  Create
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
+    <Modal opened onClose={onClose} title="New Record Type">
+      <Box component="form" onSubmit={submit}>
+        <Stack gap="md">
+          <TextInput
+            label="Short code"
+            maxLength={8}
+            placeholder="ACC"
+            value={values.shortCode}
+            onChange={(e) => setValues({ ...values, shortCode: e.currentTarget.value })}
+            required
+            styles={{ input: { textTransform: "uppercase" } }}
+            description={
+              <>
+                2-8 characters, used as the record-key prefix (e.g. <code>ACC-142</code>).
+              </>
+            }
+          />
+          <TextInput
+            label="Name"
+            value={values.name}
+            onChange={(e) => setValues({ ...values, name: e.currentTarget.value })}
+            required
+          />
+          <Textarea
+            label="Description"
+            rows={3}
+            value={values.description ?? ""}
+            onChange={(e) => setValues({ ...values, description: e.currentTarget.value })}
+          />
+          <Grid>
+            <Grid.Col span={6}>
+              <Input.Wrapper label="Icon (FontAwesome)">
+                <IconPicker
+                  value={values.icon ?? ""}
+                  onChange={(v) => setValues({ ...values, icon: v })}
+                />
+              </Input.Wrapper>
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <Input.Wrapper label="Color">
+                <ColorPicker
+                  value={values.color ?? ""}
+                  onChange={(v) => setValues({ ...values, color: v })}
+                />
+              </Input.Wrapper>
+            </Grid.Col>
+          </Grid>
+        </Stack>
+        <Group justify="flex-end" mt="md" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={create.isPending}>
+            Create
+          </Button>
+        </Group>
+      </Box>
+    </Modal>
   );
 }
 

@@ -1,4 +1,21 @@
 import { useState } from "react";
+import {
+  ActionIcon,
+  Alert,
+  Box,
+  Button,
+  Card,
+  Grid,
+  Group,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+  UnstyledButton
+} from "@mantine/core";
+import PageHeader from "@/components/PageHeader";
 import { useUsers } from "@/hooks/useUsers";
 import {
   useAddGroupMember,
@@ -31,58 +48,80 @@ export default function Groups() {
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Groups</h1>
-        <p className="page-head-copy">
-          Group users together so role assignments and permissions can target many people at once.
-        </p>
-      </div>
+      <PageHeader
+        title="Groups"
+        description="Group users together so role assignments and permissions can target many people at once."
+      />
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
 
-      <div className="row g-3">
-        <div className="col-lg-5">
-          <div className="panel panel-inverse">
-            <div className="panel-heading">
-              <h4 className="panel-title">All groups</h4>
-            </div>
-            <div className="panel-body">
-              <form onSubmit={submit} className="d-flex gap-2 mb-3">
-                <input
-                  className="form-control"
+      <Grid>
+        <Grid.Col span={{ base: 12, lg: 5 }}>
+          <Card withBorder shadow="sm">
+            <Title order={5} mb="md">
+              All groups
+            </Title>
+
+            <Box component="form" onSubmit={submit} mb="md">
+              <Group gap="xs">
+                <TextInput
                   placeholder="New group name"
                   value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
+                  onChange={(e) => setNewName(e.currentTarget.value)}
+                  style={{ flex: 1 }}
                 />
-                <button
+                <Button
                   type="submit"
-                  className="btn btn-primary"
-                  disabled={create.isPending || !newName.trim()}
+                  disabled={!newName.trim()}
+                  loading={create.isPending}
                 >
                   Create
-                </button>
-              </form>
+                </Button>
+              </Group>
+            </Box>
 
-              {isLoading && <div>Loading…</div>}
-              {!isLoading && groups.length === 0 && <div>No groups yet.</div>}
+            {isLoading && <Text>Loading…</Text>}
+            {!isLoading && groups.length === 0 && <Text c="dimmed">No groups yet.</Text>}
 
-              <ul className="list-group">
-                {groups.map((g) => (
-                  <li
+            <Stack gap={0}>
+              {groups.map((g) => {
+                const isActive = selected === g.id;
+                return (
+                  <UnstyledButton
                     key={g.id}
-                    className={`list-group-item d-flex justify-content-between align-items-center ${
-                      selected === g.id ? "active" : ""
-                    }`}
-                    style={{ cursor: "pointer" }}
                     onClick={() => setSelected(g.id)}
+                    p="sm"
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      borderBottom: "1px solid var(--mantine-color-default-border)",
+                      background: isActive ? "var(--mantine-primary-color-filled)" : "transparent",
+                      color: isActive ? "var(--mantine-primary-color-contrast)" : undefined,
+                      cursor: "pointer"
+                    }}
                   >
                     <span>
                       <strong>{g.name}</strong>
-                      {g.description && <small className="d-block text-muted">{g.description}</small>}
+                      {g.description && (
+                        <Text
+                          size="sm"
+                          c={isActive ? "var(--mantine-primary-color-contrast)" : "dimmed"}
+                          component="div"
+                        >
+                          {g.description}
+                        </Text>
+                      )}
                     </span>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-danger"
+                    <ActionIcon
+                      variant="outline"
+                      color={isActive ? "white" : "red"}
+                      size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (confirm(`Delete group '${g.name}'?`)) {
@@ -90,26 +129,27 @@ export default function Groups() {
                           if (selected === g.id) setSelected(null);
                         }
                       }}
+                      aria-label={`Delete ${g.name}`}
                     >
-                      Delete
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
+                      <i className="fa fa-trash" />
+                    </ActionIcon>
+                  </UnstyledButton>
+                );
+              })}
+            </Stack>
+          </Card>
+        </Grid.Col>
 
-        <div className="col-lg-7">
+        <Grid.Col span={{ base: 12, lg: 7 }}>
           {selected ? (
             <MembersPanel groupId={selected} />
           ) : (
-            <div className="panel panel-inverse">
-              <div className="panel-body text-muted">Select a group to manage members.</div>
-            </div>
+            <Card withBorder shadow="sm">
+              <Text c="dimmed">Select a group to manage members.</Text>
+            </Card>
           )}
-        </div>
-      </div>
+        </Grid.Col>
+      </Grid>
     </>
   );
 }
@@ -119,7 +159,7 @@ function MembersPanel({ groupId }: { groupId: string }) {
   const { data: users = [] } = useUsers();
   const add = useAddGroupMember();
   const remove = useRemoveGroupMember();
-  const [pickedUserId, setPickedUserId] = useState("");
+  const [pickedUserId, setPickedUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const memberIds = new Set(members.map((m) => m.userId));
@@ -131,84 +171,82 @@ function MembersPanel({ groupId }: { groupId: string }) {
     if (!pickedUserId) return;
     try {
       await add.mutateAsync({ groupId, userId: pickedUserId });
-      setPickedUserId("");
+      setPickedUserId(null);
     } catch (err) {
       setError(describeError(err));
     }
   };
 
   return (
-    <div className="panel panel-inverse">
-      <div className="panel-heading">
-        <h4 className="panel-title">Members</h4>
-      </div>
-      <div className="panel-body">
-        {error && <div className="alert alert-danger">{error}</div>}
+    <Card withBorder shadow="sm">
+      <Title order={5} mb="md">
+        Members
+      </Title>
 
-        <form onSubmit={submit} className="row g-2 mb-3">
-          <div className="col-sm-9">
-            <select
-              className="form-select"
+      {error && (
+        <Alert color="red" variant="light" mb="md">
+          {error}
+        </Alert>
+      )}
+
+      <Box component="form" onSubmit={submit} mb="md">
+        <Grid>
+          <Grid.Col span={{ base: 12, sm: 9 }}>
+            <Select
               value={pickedUserId}
-              onChange={(e) => setPickedUserId(e.target.value)}
-            >
-              <option value="">— pick a user to add —</option>
-              {candidates.map((u) => (
-                <option key={u.userId} value={u.userId}>
-                  {u.username}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="col-sm-3">
-            <button
-              type="submit"
-              className="btn btn-primary w-100"
-              disabled={add.isPending || !pickedUserId}
-            >
+              onChange={setPickedUserId}
+              placeholder="— pick a user to add —"
+              data={candidates.map((u) => ({ value: u.userId, label: u.username }))}
+              searchable
+              clearable
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 3 }}>
+            <Button type="submit" fullWidth disabled={!pickedUserId} loading={add.isPending}>
               Add
-            </button>
-          </div>
-        </form>
+            </Button>
+          </Grid.Col>
+        </Grid>
+      </Box>
 
-        {members.length === 0 ? (
-          <div className="text-muted">No members.</div>
-        ) : (
-          <table className="table table-sm">
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Added</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m) => {
-                const user = users.find((u) => u.userId === m.userId);
-                return (
-                  <tr key={m.userId}>
-                    <td>{user ? user.username : m.userId}</td>
-                    <td>{new Date(m.addedAtUtc).toLocaleString()}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-danger"
-                        onClick={() =>
-                          confirm("Remove member?") &&
-                          void remove.mutateAsync({ groupId, userId: m.userId })
-                        }
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+      {members.length === 0 ? (
+        <Text c="dimmed">No members.</Text>
+      ) : (
+        <Table verticalSpacing="xs">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>User</Table.Th>
+              <Table.Th>Added</Table.Th>
+              <Table.Th />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {members.map((m) => {
+              const user = users.find((u) => u.userId === m.userId);
+              return (
+                <Table.Tr key={m.userId}>
+                  <Table.Td>{user ? user.username : m.userId}</Table.Td>
+                  <Table.Td>{new Date(m.addedAtUtc).toLocaleString()}</Table.Td>
+                  <Table.Td>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      color="red"
+                      onClick={() =>
+                        confirm("Remove member?") &&
+                        void remove.mutateAsync({ groupId, userId: m.userId })
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
+          </Table.Tbody>
+        </Table>
+      )}
+    </Card>
   );
 }
 

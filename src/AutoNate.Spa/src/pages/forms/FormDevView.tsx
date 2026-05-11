@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { Alert, Box, Code, Text } from "@mantine/core";
 import { JsxFormHost } from "@/components/JsxFormHost";
 import { useFormDevSnapshot } from "@/hooks/useForms";
 
@@ -52,10 +53,12 @@ export default function FormDevView() {
 
   if (isLoading && !snapshot) {
     return (
-      <div className="p-4 text-muted">
-        <i className="fa fa-spinner fa-spin me-2" />
-        Loading form…
-      </div>
+      <Box p="md">
+        <Text c="dimmed">
+          <i className="fa fa-spinner fa-spin" style={{ marginRight: 8 }} />
+          Loading form…
+        </Text>
+      </Box>
     );
   }
 
@@ -63,47 +66,53 @@ export default function FormDevView() {
     const status = (error as { response?: { status?: number } }).response?.status;
     if (status === 403) {
       return (
-        <div className="p-4">
-          <div className="alert alert-danger">
-            You don't have permission to view forms (Form.View required).
-          </div>
-        </div>
+        <Box p="md">
+          <Alert color="red" variant="light">
+            You don&apos;t have permission to view forms (Form.View required).
+          </Alert>
+        </Box>
       );
     }
     return (
-      <div className="p-4">
-        <div className="alert alert-danger">
+      <Box p="md">
+        <Alert color="red" variant="light">
           Failed to load form: {(error as Error).message}
-        </div>
-      </div>
+        </Alert>
+      </Box>
     );
   }
 
   if (!snapshot) {
     return (
-      <div className="p-4">
-        <div className="alert alert-warning">
-          No form found with short code <code>{shortCode}</code>.
-        </div>
-      </div>
+      <Box p="md">
+        <Alert color="yellow" variant="light">
+          No form found with short code <Code>{shortCode}</Code>.
+        </Alert>
+      </Box>
     );
   }
 
   return (
     <div className="form-dev-view">
-      <div
-        className="px-3 py-2 d-flex justify-content-between align-items-center"
+      <Box
+        px="md"
+        py="xs"
         style={{
-          background: "var(--bs-warning-bg-subtle)",
-          borderBottom: "1px solid var(--bs-border-color)"
+          background: "var(--mantine-color-yellow-1)",
+          borderBottom: "1px solid var(--mantine-color-default-border)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
         }}
       >
         <div>
-          <strong>{snapshot.name}</strong> <code>{snapshot.shortCode}</code>
+          <strong>{snapshot.name}</strong> <Code>{snapshot.shortCode}</Code>
         </div>
-        <small className="text-body text-opacity-75">{headerNote}</small>
-      </div>
-      <div className="p-3">
+        <Text size="xs" c="dimmed">
+          {headerNote}
+        </Text>
+      </Box>
+      <Box p="md">
         <JsxFormHost
           source={snapshot.formCode}
           data={devProps.data}
@@ -111,7 +120,7 @@ export default function FormDevView() {
           context={(devProps.context as Record<string, unknown>) ?? {}}
           extras={devProps as Record<string, unknown>}
         />
-      </div>
+      </Box>
     </div>
   );
 }

@@ -1,3 +1,15 @@
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Grid,
+  Group,
+  NativeSelect,
+  Stack,
+  Switch,
+  Text,
+  TextInput
+} from "@mantine/core";
 import { FieldDataType, OptionChoice } from "@/types/records";
 
 type Props = {
@@ -17,16 +29,24 @@ export default function FieldConfigPanel({ dataType, config, onChange }: Props) 
     case "phone":
       return <PhoneConfig config={config} onChange={onChange} />;
     case "email":
-      return <p className="form-text mb-0">No additional configuration.</p>;
+      return (
+        <Text size="sm" c="dimmed">
+          No additional configuration.
+        </Text>
+      );
     case "option":
       return <OptionConfig config={config} onChange={onChange} />;
     case "boolean":
-      return <p className="form-text mb-0">No additional configuration.</p>;
+      return (
+        <Text size="sm" c="dimmed">
+          No additional configuration.
+        </Text>
+      );
     default:
       return (
-        <p className="form-text mb-0 text-warning">
+        <Text size="sm" c="yellow">
           Unknown data type; config will be sent as-is.
-        </p>
+        </Text>
       );
   }
 }
@@ -35,30 +55,25 @@ function TextConfig({ config, onChange }: Omit<Props, "dataType">) {
   const variant = (config.variant as string) ?? "single";
   const maxLength = Number(config.maxLength ?? 4000);
   return (
-    <>
-      <div className="mb-3">
-        <label className="form-label">Variant</label>
-        <select
-          className="form-select"
-          value={variant}
-          onChange={(e) => onChange({ ...config, variant: e.target.value })}
-        >
-          <option value="single">Single-line</option>
-          <option value="multi">Multi-line</option>
-        </select>
-      </div>
-      <div className="mb-3">
-        <label className="form-label">Max length</label>
-        <input
-          type="number"
-          className="form-control"
-          min={1}
-          max={65536}
-          value={maxLength}
-          onChange={(e) => onChange({ ...config, maxLength: Number(e.target.value) })}
-        />
-      </div>
-    </>
+    <Stack gap="md">
+      <NativeSelect
+        label="Variant"
+        value={variant}
+        onChange={(e) => onChange({ ...config, variant: e.currentTarget.value })}
+        data={[
+          { value: "single", label: "Single-line" },
+          { value: "multi", label: "Multi-line" }
+        ]}
+      />
+      <TextInput
+        label="Max length"
+        type="number"
+        min={1}
+        max={65536}
+        value={maxLength}
+        onChange={(e) => onChange({ ...config, maxLength: Number(e.currentTarget.value) })}
+      />
+    </Stack>
   );
 }
 
@@ -69,90 +84,84 @@ function NumberConfig({ config, onChange }: Omit<Props, "dataType">) {
   const max = config.max === null || config.max === undefined ? "" : String(config.max);
 
   return (
-    <>
-      <div className="mb-3">
-        <label className="form-label">Variant</label>
-        <select
-          className="form-select"
-          value={variant}
-          onChange={(e) => onChange({ ...config, variant: e.target.value })}
-        >
-          <option value="decimal">Decimal</option>
-          <option value="integer">Integer</option>
-        </select>
-      </div>
+    <Stack gap="md">
+      <NativeSelect
+        label="Variant"
+        value={variant}
+        onChange={(e) => onChange({ ...config, variant: e.currentTarget.value })}
+        data={[
+          { value: "decimal", label: "Decimal" },
+          { value: "integer", label: "Integer" }
+        ]}
+      />
       {variant === "decimal" && (
-        <div className="mb-3">
-          <label className="form-label">Precision (decimal places)</label>
-          <input
-            type="number"
-            className="form-control"
-            min={0}
-            max={12}
-            value={precision}
-            onChange={(e) => onChange({ ...config, precision: Number(e.target.value) })}
-          />
-        </div>
+        <TextInput
+          label="Precision (decimal places)"
+          type="number"
+          min={0}
+          max={12}
+          value={precision}
+          onChange={(e) => onChange({ ...config, precision: Number(e.currentTarget.value) })}
+        />
       )}
-      <div className="row g-2 mb-3">
-        <div className="col">
-          <label className="form-label">Min</label>
-          <input
+      <Grid>
+        <Grid.Col span={6}>
+          <TextInput
+            label="Min"
             type="number"
-            className="form-control"
             value={min}
             onChange={(e) =>
-              onChange({ ...config, min: e.target.value === "" ? null : Number(e.target.value) })
+              onChange({
+                ...config,
+                min: e.currentTarget.value === "" ? null : Number(e.currentTarget.value)
+              })
             }
           />
-        </div>
-        <div className="col">
-          <label className="form-label">Max</label>
-          <input
+        </Grid.Col>
+        <Grid.Col span={6}>
+          <TextInput
+            label="Max"
             type="number"
-            className="form-control"
             value={max}
             onChange={(e) =>
-              onChange({ ...config, max: e.target.value === "" ? null : Number(e.target.value) })
+              onChange({
+                ...config,
+                max: e.currentTarget.value === "" ? null : Number(e.currentTarget.value)
+              })
             }
           />
-        </div>
-      </div>
-    </>
+        </Grid.Col>
+      </Grid>
+    </Stack>
   );
 }
 
 function DateConfig({ config, onChange }: Omit<Props, "dataType">) {
   const variant = (config.variant as string) ?? "date";
   return (
-    <div className="mb-3">
-      <label className="form-label">Variant</label>
-      <select
-        className="form-select"
-        value={variant}
-        onChange={(e) => onChange({ ...config, variant: e.target.value })}
-      >
-        <option value="date">Date only</option>
-        <option value="datetime">Date &amp; time</option>
-        <option value="range">Date range</option>
-      </select>
-    </div>
+    <NativeSelect
+      label="Variant"
+      value={variant}
+      onChange={(e) => onChange({ ...config, variant: e.currentTarget.value })}
+      data={[
+        { value: "date", label: "Date only" },
+        { value: "datetime", label: "Date & time" },
+        { value: "range", label: "Date range" }
+      ]}
+    />
   );
 }
 
 function PhoneConfig({ config, onChange }: Omit<Props, "dataType">) {
   const region = (config.region as string) ?? "US";
   return (
-    <div className="mb-3">
-      <label className="form-label">Default region (ISO country code)</label>
-      <input
-        type="text"
-        className="form-control"
-        maxLength={3}
-        value={region}
-        onChange={(e) => onChange({ ...config, region: e.target.value.toUpperCase() })}
-      />
-    </div>
+    <TextInput
+      label="Default region (ISO country code)"
+      type="text"
+      maxLength={3}
+      value={region}
+      onChange={(e) => onChange({ ...config, region: e.currentTarget.value.toUpperCase() })}
+    />
   );
 }
 
@@ -166,7 +175,10 @@ function OptionConfig({ config, onChange }: Omit<Props, "dataType">) {
   };
 
   const addChoice = () => {
-    const next = [...choices, { value: `option_${choices.length + 1}`, label: `Option ${choices.length + 1}` }];
+    const next = [
+      ...choices,
+      { value: `option_${choices.length + 1}`, label: `Option ${choices.length + 1}` }
+    ];
     onChange({ ...config, choices: next });
   };
 
@@ -175,53 +187,56 @@ function OptionConfig({ config, onChange }: Omit<Props, "dataType">) {
   };
 
   return (
-    <>
-      <div className="form-check form-switch mb-3">
-        <input
-          type="checkbox"
-          className="form-check-input"
-          id="option-multi"
-          checked={multi}
-          onChange={(e) => onChange({ ...config, multi: e.target.checked })}
-        />
-        <label className="form-check-label" htmlFor="option-multi">
-          Allow multiple selections
-        </label>
-      </div>
-      <label className="form-label">Choices</label>
-      <div className="vstack gap-2 mb-2">
-        {choices.map((choice, index) => (
-          <div key={index} className="input-group">
-            <span className="input-group-text" style={{ minWidth: "4rem" }}>
-              value
-            </span>
-            <input
-              className="form-control"
-              value={choice.value}
-              onChange={(e) => updateChoice(index, { value: e.target.value })}
-            />
-            <span className="input-group-text" style={{ minWidth: "4rem" }}>
-              label
-            </span>
-            <input
-              className="form-control"
-              value={choice.label}
-              onChange={(e) => updateChoice(index, { label: e.target.value })}
-            />
-            <button
-              type="button"
-              className="btn btn-outline-danger"
-              onClick={() => removeChoice(index)}
-              aria-label="Remove choice"
-            >
-              <i className="fa fa-trash"></i>
-            </button>
-          </div>
-        ))}
-      </div>
-      <button type="button" className="btn btn-outline-secondary btn-sm" onClick={addChoice}>
-        <i className="fa fa-plus me-1"></i>Add choice
-      </button>
-    </>
+    <Stack gap="md">
+      <Switch
+        id="option-multi"
+        checked={multi}
+        onChange={(e) => onChange({ ...config, multi: e.currentTarget.checked })}
+        label="Allow multiple selections"
+      />
+      <Box>
+        <Text size="sm" fw={500} mb={4}>
+          Choices
+        </Text>
+        <Stack gap="xs">
+          {choices.map((choice, index) => (
+            <Group key={index} gap="xs" wrap="nowrap">
+              <TextInput
+                label="value"
+                size="xs"
+                style={{ flex: 1 }}
+                value={choice.value}
+                onChange={(e) => updateChoice(index, { value: e.currentTarget.value })}
+              />
+              <TextInput
+                label="label"
+                size="xs"
+                style={{ flex: 1 }}
+                value={choice.label}
+                onChange={(e) => updateChoice(index, { label: e.currentTarget.value })}
+              />
+              <ActionIcon
+                variant="outline"
+                color="red"
+                size="lg"
+                mt={20}
+                onClick={() => removeChoice(index)}
+                aria-label="Remove choice"
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </Group>
+          ))}
+        </Stack>
+      </Box>
+      <Button
+        size="xs"
+        variant="default"
+        leftSection={<i className="fa fa-plus" />}
+        onClick={addChoice}
+      >
+        Add choice
+      </Button>
+    </Stack>
   );
 }

@@ -8,6 +8,7 @@ import React, {
   useState
 } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Alert, Text } from "@mantine/core";
 import { api } from "@/api/client";
 
 type Sucrase = typeof import("sucrase");
@@ -45,9 +46,9 @@ class RuntimeBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="alert alert-danger">
+        <Alert color="red" variant="light">
           <strong>Page runtime error:</strong> {this.state.error.message}
-        </div>
+        </Alert>
       );
     }
     return this.props.children;
@@ -146,24 +147,24 @@ export function JsxPage({ source, props }: JsxPageProps) {
 
   if (loadError) {
     return (
-      <div className="alert alert-danger">
+      <Alert color="red" variant="light">
         <strong>Failed to load page renderer:</strong> {loadError}
-      </div>
+      </Alert>
     );
   }
   if (!compiled) {
     return (
-      <div className="text-muted">
-        <i className="fa fa-spinner fa-spin me-2" />
+      <Text c="dimmed">
+        <i className="fa fa-spinner fa-spin" style={{ marginRight: 8 }} />
         Loading page…
-      </div>
+      </Text>
     );
   }
   if (compiled.kind === "error") {
     return (
-      <div className="alert alert-danger">
+      <Alert color="red" variant="light">
         <strong>Page compile error:</strong> {compiled.message}
-      </div>
+      </Alert>
     );
   }
 

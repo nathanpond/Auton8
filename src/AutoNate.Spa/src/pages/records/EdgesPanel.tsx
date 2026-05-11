@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Alert, Button, Group, Stack, Table, Text, Title } from "@mantine/core";
 import { useDeleteEdge, useEdgeTypes, useRecordEdges } from "@/hooks/useRecordEdges";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { RecordModel } from "@/types/records";
@@ -30,73 +31,78 @@ export default function EdgesPanel({ record }: Props) {
   };
 
   return (
-    <>
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h5 className="mb-0">Edges</h5>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
+    <Stack gap="md">
+      <Group justify="space-between" align="center">
+        <Title order={5} m={0}>
+          Edges
+        </Title>
+        <Button
+          size="sm"
           onClick={() => setDialogOpen(true)}
           disabled={!recordType}
+          leftSection={<i className="fa fa-link" />}
         >
-          <i className="fa fa-link me-2"></i>New link
-        </button>
-      </div>
+          New link
+        </Button>
+      </Group>
 
       {flash && (
-        <div
-          className={`alert ${flash.kind === "success" ? "alert-success" : "alert-danger"}`}
+        <Alert
+          color={flash.kind === "success" ? "green" : "red"}
+          variant="light"
           role={flash.kind === "success" ? "status" : "alert"}
         >
           {flash.message}
-        </div>
+        </Alert>
       )}
 
-      {isLoading && <p className="text-body text-opacity-50 mb-0">Loading edges...</p>}
+      {isLoading && (
+        <Text size="sm" c="dimmed">
+          Loading edges...
+        </Text>
+      )}
 
       {!isLoading && edges.length === 0 && (
-        <p className="text-body text-opacity-50 mb-0">
-          No edges yet. Click "New link" to relate this record to another.
-        </p>
+        <Text size="sm" c="dimmed">
+          No edges yet. Click &quot;New link&quot; to relate this record to another.
+        </Text>
       )}
 
       {edges.length > 0 && (
-        <div className="table-responsive">
-          <table className="table table-sm table-bordered align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Relation</th>
-                <th>Other record</th>
-                <th>Data</th>
-                <th style={{ width: "4rem" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {edges.map((edge) => {
-                const edgeType = edgeTypes.find((et) => et.id === edge.edgeTypeId);
-                if (!edgeType) {
-                  return (
-                    <tr key={edge.id}>
-                      <td colSpan={4} className="text-warning">
-                        Unknown edge type {edge.edgeTypeId}
-                      </td>
-                    </tr>
-                  );
-                }
+        <Table withTableBorder striped highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Relation</Table.Th>
+              <Table.Th>Other record</Table.Th>
+              <Table.Th>Data</Table.Th>
+              <Table.Th style={{ width: "4rem" }} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {edges.map((edge) => {
+              const edgeType = edgeTypes.find((et) => et.id === edge.edgeTypeId);
+              if (!edgeType) {
                 return (
-                  <EdgeRow
-                    key={edge.id}
-                    edge={edge}
-                    edgeType={edgeType}
-                    thisRecordId={record.id}
-                    onDelete={onDelete}
-                    busy={del.isPending}
-                  />
+                  <Table.Tr key={edge.id}>
+                    <Table.Td colSpan={4}>
+                      <Text c="yellow">Unknown edge type {edge.edgeTypeId}</Text>
+                    </Table.Td>
+                  </Table.Tr>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
+              }
+              return (
+                <EdgeRow
+                  key={edge.id}
+                  edge={edge}
+                  edgeType={edgeType}
+                  thisRecordId={record.id}
+                  onDelete={onDelete}
+                  busy={del.isPending}
+                />
+              );
+            })}
+          </Table.Tbody>
+        </Table>
       )}
 
       {dialogOpen && recordType && (
@@ -111,7 +117,7 @@ export default function EdgesPanel({ record }: Props) {
           onError={(message) => setFlash({ kind: "error", message })}
         />
       )}
-    </>
+    </Stack>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useParams } from "react-router-dom";
+import { Alert, Box, Text } from "@mantine/core";
 import { JsxFormHost } from "@/components/JsxFormHost";
 import { useFormPublishedSnapshot } from "@/hooks/useForms";
 
@@ -14,36 +15,38 @@ export default function FormPublicView() {
 
   if (isLoading) {
     return (
-      <div className="p-4 text-muted">
-        <i className="fa fa-spinner fa-spin me-2" />
-        Loading form…
-      </div>
+      <Box p="md">
+        <Text c="dimmed">
+          <i className="fa fa-spinner fa-spin" style={{ marginRight: 8 }} />
+          Loading form…
+        </Text>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <div className="p-4">
-        <div className="alert alert-danger">
+      <Box p="md">
+        <Alert color="red" variant="light">
           Failed to load form: {(error as Error).message}
-        </div>
-      </div>
+        </Alert>
+      </Box>
     );
   }
 
   if (!snapshot) {
     return (
-      <div className="p-4">
-        <div className="alert alert-warning">
+      <Box p="md">
+        <Alert color="yellow" variant="light">
           No published form available at <code>/form/{shortCode}</code>.
-        </div>
-      </div>
+        </Alert>
+      </Box>
     );
   }
 
   return (
-    <div className="form-public-view p-3">
+    <Box className="form-public-view" p="md">
       <JsxFormHost source={snapshot.formCode} mode="edit" />
-    </div>
+    </Box>
   );
 }

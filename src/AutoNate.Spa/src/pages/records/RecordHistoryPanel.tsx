@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Badge, Text } from "@mantine/core";
 import { useRecordHistory } from "@/hooks/useRecords";
 import { RecordHistoryEntry, RecordTypeField } from "@/types/records";
 import { getRenderer } from "./fields/registry";
@@ -26,26 +27,44 @@ export default function RecordHistoryPanel({ recordId, fields }: Props) {
   const groups = useMemo(() => groupByChangeSet(entries), [entries]);
 
   if (isLoading) {
-    return <p className="text-body text-opacity-50 mb-0">Loading history...</p>;
+    return (
+      <Text size="sm" c="dimmed">
+        Loading history...
+      </Text>
+    );
   }
 
   if (entries.length === 0) {
-    return <p className="text-body text-opacity-50 mb-0">No history yet.</p>;
+    return (
+      <Text size="sm" c="dimmed">
+        No history yet.
+      </Text>
+    );
   }
 
   return (
-    <ol className="list-unstyled mb-0">
+    <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {groups.map((group) => (
-        <li key={group.groupKey} className="mb-3 pb-3 border-bottom">
-          <div className="small text-body text-opacity-75 mb-2">
+        <li
+          key={group.groupKey}
+          style={{
+            marginBottom: 16,
+            paddingBottom: 16,
+            borderBottom: "1px solid var(--mantine-color-default-border)"
+          }}
+        >
+          <Text size="sm" c="dimmed" mb={8}>
             <span>{formatWhen(group.changedAtUtc)}</span>
-            <span className="mx-2">·</span>
+            <span style={{ margin: "0 8px" }}>·</span>
             <UserBadge userId={group.changedBy} withByPrefix />
-          </div>
-          <ul className="list-unstyled mb-0 ps-3">
+          </Text>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, paddingLeft: 16 }}>
             {group.entries.map((entry) => (
-              <li key={entry.id} className="mb-1">
-                <ChangeLine entry={entry} field={entry.fieldKey ? fieldsByKey.get(entry.fieldKey) ?? null : null} />
+              <li key={entry.id} style={{ marginBottom: 4 }}>
+                <ChangeLine
+                  entry={entry}
+                  field={entry.fieldKey ? fieldsByKey.get(entry.fieldKey) ?? null : null}
+                />
               </li>
             ))}
           </ul>
@@ -64,7 +83,7 @@ function ChangeLine({
 }) {
   const renderer = field ? getRenderer(field.dataType) : null;
   const formatRaw = (raw: unknown) => {
-    if (raw === null || raw === undefined) return <em className="text-body text-opacity-50">empty</em>;
+    if (raw === null || raw === undefined) return <em style={{ color: "var(--mantine-color-dimmed)" }}>empty</em>;
     if (field && renderer) return renderer.formatValue(field, raw);
     if (typeof raw === "object") return <code>{JSON.stringify(raw)}</code>;
     return String(raw);
@@ -73,63 +92,95 @@ function ChangeLine({
   switch (entry.changeKind) {
     case "created":
       return (
-        <span>
-          <span className="badge bg-success me-2">Created</span>
-        </span>
+        <Badge color="green" variant="filled">
+          Created
+        </Badge>
       );
     case "value_changed":
       return (
         <span>
-          <code className="me-2">{field?.displayName ?? entry.fieldKey}</code>
-          <span className="text-body text-opacity-75">from</span> {formatRaw(entry.oldValue)}{" "}
-          <span className="text-body text-opacity-75">→</span> {formatRaw(entry.newValue)}
+          <code style={{ marginRight: 8 }}>{field?.displayName ?? entry.fieldKey}</code>
+          <Text component="span" size="xs" c="dimmed">
+            from
+          </Text>{" "}
+          {formatRaw(entry.oldValue)}{" "}
+          <Text component="span" size="xs" c="dimmed">
+            →
+          </Text>{" "}
+          {formatRaw(entry.newValue)}
         </span>
       );
     case "name_changed":
       return (
         <span>
-          <span className="badge bg-info text-dark me-2">Name</span>
-          {formatRaw(entry.oldValue)}
-          <span className="text-body text-opacity-75 mx-2">→</span>
+          <Badge color="cyan" variant="filled" mr={8}>
+            Name
+          </Badge>
+          {formatRaw(entry.oldValue)}{" "}
+          <Text component="span" size="xs" c="dimmed">
+            →
+          </Text>{" "}
           {formatRaw(entry.newValue)}
         </span>
       );
     case "assignees_changed":
       return (
         <span>
-          <span className="badge bg-info text-dark me-2">Assignees</span>
-          {formatAssigneeArray(entry.oldValue)}
-          <span className="text-body text-opacity-75 mx-2">→</span>
+          <Badge color="cyan" variant="filled" mr={8}>
+            Assignees
+          </Badge>
+          {formatAssigneeArray(entry.oldValue)}{" "}
+          <Text component="span" size="xs" c="dimmed">
+            →
+          </Text>{" "}
           {formatAssigneeArray(entry.newValue)}
         </span>
       );
     case "status_changed":
       return (
         <span>
-          <span className="badge bg-info text-dark me-2">Status</span>
-          {formatRaw(entry.oldValue)}
-          <span className="text-body text-opacity-75 mx-2">→</span>
+          <Badge color="cyan" variant="filled" mr={8}>
+            Status
+          </Badge>
+          {formatRaw(entry.oldValue)}{" "}
+          <Text component="span" size="xs" c="dimmed">
+            →
+          </Text>{" "}
           {formatRaw(entry.newValue)}
         </span>
       );
     case "due_date_changed":
       return (
         <span>
-          <span className="badge bg-info text-dark me-2">Due Date</span>
-          {formatRaw(entry.oldValue)}
-          <span className="text-body text-opacity-75 mx-2">→</span>
+          <Badge color="cyan" variant="filled" mr={8}>
+            Due Date
+          </Badge>
+          {formatRaw(entry.oldValue)}{" "}
+          <Text component="span" size="xs" c="dimmed">
+            →
+          </Text>{" "}
           {formatRaw(entry.newValue)}
         </span>
       );
     case "archived":
-      return <span className="badge bg-warning text-dark">Archived</span>;
+      return (
+        <Badge color="yellow" variant="filled">
+          Archived
+        </Badge>
+      );
     case "unarchived":
-      return <span className="badge bg-info text-dark">Restored</span>;
+      return (
+        <Badge color="cyan" variant="filled">
+          Restored
+        </Badge>
+      );
     default:
       return (
         <span>
-          <span className="badge bg-secondary me-2">{entry.changeKind}</span>
-          {entry.fieldKey && <code className="me-2">{entry.fieldKey}</code>}
+          <Badge color="gray" variant="filled" mr={8}>
+            {entry.changeKind}
+          </Badge>
+          {entry.fieldKey && <code>{entry.fieldKey}</code>}
         </span>
       );
   }
@@ -137,7 +188,7 @@ function ChangeLine({
 
 function formatAssigneeArray(raw: unknown): React.ReactNode {
   if (!Array.isArray(raw) || raw.length === 0) {
-    return <em className="text-body text-opacity-50">none</em>;
+    return <em style={{ color: "var(--mantine-color-dimmed)" }}>none</em>;
   }
   return (
     <span>
