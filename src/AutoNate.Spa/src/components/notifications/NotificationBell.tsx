@@ -53,7 +53,7 @@ export default function NotificationBell() {
   };
 
   return (
-    <Menu position="bottom-end" width={320} shadow="md" closeOnItemClick={false}>
+    <Menu position="bottom-end" width={320} shadow="md" closeOnItemClick={false} zIndex={1100}>
       <Menu.Target>
         <UnstyledButton
           aria-label="Notifications"

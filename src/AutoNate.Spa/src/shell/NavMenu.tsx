@@ -402,7 +402,7 @@ function IconMenuTopItem({
   if (item.itemType === "group") {
     const icon = item.icon ?? "fa fa-circle";
     return (
-      <Menu position="bottom-end" shadow="md">
+      <Menu position="bottom-end" shadow="md" zIndex={1100}>
         <Menu.Target>
           <UnstyledButton
             title={item.displayName}
@@ -516,7 +516,7 @@ function UserMenu({
   onOpenPreferences: () => void;
 }) {
   return (
-    <Menu position="bottom-end" shadow="md" width={220}>
+    <Menu position="bottom-end" shadow="md" width={220} zIndex={1100}>
       <Menu.Target>
         <UnstyledButton
           style={{
