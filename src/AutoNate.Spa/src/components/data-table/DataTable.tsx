@@ -1,6 +1,15 @@
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Box, Group, Select, Stack, TextInput, UnstyledButton } from "@mantine/core";
+import {
+  ActionIcon,
+  Badge,
+  Box,
+  Group,
+  Select,
+  Stack,
+  TextInput,
+  UnstyledButton
+} from "@mantine/core";
 import { DataTable as MantineDataTable, type DataTableSortStatus } from "mantine-datatable";
 
 // Column shape consumed by the wrapper. Modeled on the subset of
@@ -225,16 +234,6 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
 
-  // Debounce 400ms so typing doesn't refetch on every keystroke.
-  useEffect(() => {
-    if (searchInput === search) return;
-    const handle = window.setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-    }, 400);
-    return () => window.clearTimeout(handle);
-  }, [searchInput, search]);
-
   // Count probe — only fires in auto mode, decides client vs. server based on
   // total. Stale time keeps it from re-running on every interaction.
   const probe = useQuery({
@@ -251,6 +250,25 @@ export function DataTable<T>(props: DataTableProps<T>) {
     if (probe.isError && loadAll) return "client";
     return "loading";
   }, [mode, autoThreshold, probe.data, probe.isError, loadAll]);
+
+  // Client mode: apply search instantly since filtering is in-memory and free.
+  // Server mode: debounce 400ms so typing doesn't refetch on every keystroke.
+  // While auto-probe is still resolving ("loading") we debounce too — once it
+  // resolves the effect re-runs and either flushes immediately (client) or
+  // keeps the timer (server).
+  useEffect(() => {
+    if (searchInput === search) return;
+    if (effectiveMode === "client") {
+      setSearch(searchInput);
+      setPage(1);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [searchInput, search, effectiveMode]);
 
   // Client mode: one big fetch.
   const clientQuery = useQuery({
@@ -355,7 +373,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
     setPage(1);
   }, [resetPaginationKey]);
 
-  // Map resolved columns into mantine-datatable's column shape.
+  // Map resolved columns into mantine-datatable's column shape. `resizable`
+  // is on by default for all columns except action columns (where the
+  // narrow icon-button cell would just look weird with a drag handle).
   const mantineColumns = useMemo(
     () =>
       resolvedColumns.map((c) => ({
@@ -365,6 +385,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
         width: c.width,
         textAlign: c.textAlign,
         noWrap: c.noWrap,
+        resizable: !c.isActions,
         render: c.render
       })),
     [resolvedColumns]
@@ -453,6 +474,19 @@ export function DataTable<T>(props: DataTableProps<T>) {
               value={searchInput}
               onChange={(e) => setSearchInput(e.currentTarget.value)}
               leftSection={<i className="fa fa-magnifying-glass" />}
+              rightSection={
+                searchInput ? (
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="sm"
+                    aria-label="Clear search"
+                    onClick={() => setSearchInput("")}
+                  >
+                    <i className="fa fa-xmark" />
+                  </ActionIcon>
+                ) : null
+              }
               w={240}
             />
           )}
@@ -503,9 +537,6 @@ export function DataTable<T>(props: DataTableProps<T>) {
                     totalRecords
                   )} of ${totalRecords}`}
           </Box>
-          <Badge variant="light" color="gray" size="sm" title="Data loading mode">
-            {effectiveMode === "client" ? "client" : effectiveMode === "server" ? "server" : "…"}
-          </Badge>
         </Group>
       </Group>
 

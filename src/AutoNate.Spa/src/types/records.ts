@@ -26,6 +26,8 @@ export type RecordType = {
   createdBy: string;
   updatedAtUtc: string;
   updatedBy: string;
+  // Populated by the list endpoint only; single-resource fetches return 0.
+  fieldCount: number;
 };
 
 export type RecordTypeField = {
@@ -168,6 +170,8 @@ export type SearchRecordsRequest = {
   page: number;
   pageSize: number;
   sort?: string;
+  // Free-text search across the built-in key/name/status columns.
+  search?: string;
 };
 
 export type RecordHistoryEntry = {

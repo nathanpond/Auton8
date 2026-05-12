@@ -140,7 +140,7 @@ export default function EdgeTypeEditor() {
             )}
           </Group>
         }
-        description={<Link to="/record-edge-types">&larr; Back to edge types</Link>}
+        description={<Link to="/record-relationship-types">&larr; Back to relationship types</Link>}
         actions={
           <Button
             variant="outline"

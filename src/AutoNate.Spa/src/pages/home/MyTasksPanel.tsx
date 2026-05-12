@@ -261,10 +261,6 @@ export default function MyTasksPanel() {
   return (
     <Paper withBorder radius="md" p="md">
       <Stack gap="sm">
-        <Group gap="xs">
-          <i className="fa fa-user-check" />
-          <Title order={4}>My Tasks</Title>
-        </Group>
         {openError && (
           <Alert color="red" variant="light">
             {openError}
@@ -280,6 +276,12 @@ export default function MyTasksPanel() {
           searchPlaceholder="Search my tasks…"
           emptyMessage="Nothing is assigned to you right now."
           initialSort={[{ id: "lastUpdated", desc: true }]}
+          toolbarLeft={
+            <Group gap="xs">
+              <i className="fa fa-user-check" />
+              <Title order={4}>My Tasks</Title>
+            </Group>
+          }
         />
       </Stack>
 

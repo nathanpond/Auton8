@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
-import { Alert, Badge, Button, Code, Group, Text } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Button, Code, Group, Text, Tooltip } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import {
   useDeletePlugin,
@@ -164,13 +164,17 @@ export default function Plugins() {
           const needle = search.toLowerCase();
           return `${p.name} ${p.version}`.toLowerCase().includes(needle);
         }}
-        toolbarRight={
-          <Button
-            leftSection={<i className="fa fa-plus" />}
-            onClick={() => setShowUpload(true)}
-          >
-            Upload plugin
-          </Button>
+        toolbarBeforeSearch={
+          <Tooltip label="Upload plugin" withArrow>
+            <ActionIcon
+              size="lg"
+              variant="filled"
+              aria-label="Upload plugin"
+              onClick={() => setShowUpload(true)}
+            >
+              <i className="fa fa-plus" />
+            </ActionIcon>
+          </Tooltip>
         }
       />
 

@@ -28,7 +28,8 @@ public sealed record SearchRecordsRequest(
     bool IncludeArchived,
     int Page,
     int PageSize,
-    string? Sort);
+    string? Sort,
+    string? Search = null);
 
 public sealed record SearchFilterClause(string FieldKey, string Op, JsonElement Value);
 
@@ -366,7 +367,8 @@ public static class RecordEndpoints
                     IncludeArchived: request.IncludeArchived,
                     Page: request.Page,
                     PageSize: resolvedPageSize,
-                    Sort: request.Sort),
+                    Sort: request.Sort,
+                    Search: request.Search),
                     http.User,
                     cancellationToken);
 
@@ -375,7 +377,8 @@ public static class RecordEndpoints
                     request.Filters,
                     request.AssigneeId,
                     request.IncludeArchived,
-                    request.Sort
+                    request.Sort,
+                    request.Search
                 });
                 await auditPublisher.PublishAsync(
                     DaprRecordEventPublisher.TopicName,

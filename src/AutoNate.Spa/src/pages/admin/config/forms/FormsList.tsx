@@ -13,7 +13,8 @@ import {
   Stack,
   Switch,
   Text,
-  TextInput
+  TextInput,
+  Tooltip
 } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import { CreateFormRequest, FormSummary, listForms } from "@/api/forms";
@@ -157,16 +158,23 @@ export default function FormsList() {
         columnWidths={COLUMN_WIDTHS}
         initialSort={[{ id: "shortCode", desc: false }]}
         searchPlaceholder="Search forms…"
-        emptyMessage="No forms yet. Click 'New form' to create one."
+        emptyMessage="No forms yet. Click + to create one."
         loadingMessage="Loading forms…"
         globalFilterFn={(f, search) => {
           const needle = search.toLowerCase();
           return `${f.shortCode} ${f.name}`.toLowerCase().includes(needle);
         }}
-        toolbarRight={
-          <Button leftSection={<i className="fa fa-plus" />} onClick={() => setModalOpen(true)}>
-            New form
-          </Button>
+        toolbarBeforeSearch={
+          <Tooltip label="New form" withArrow>
+            <ActionIcon
+              size="lg"
+              variant="filled"
+              aria-label="New form"
+              onClick={() => setModalOpen(true)}
+            >
+              <i className="fa fa-plus" />
+            </ActionIcon>
+          </Tooltip>
         }
       />
 

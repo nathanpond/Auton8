@@ -12,7 +12,8 @@ import {
   Stack,
   Switch,
   Text,
-  TextInput
+  TextInput,
+  Tooltip
 } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import {
@@ -232,13 +233,17 @@ export default function ManageUsers() {
             .toLowerCase()
             .includes(needle);
         }}
-        toolbarRight={
-          <Button
-            leftSection={<i className="fa fa-plus" />}
-            onClick={() => setModal({ kind: "add" })}
-          >
-            Add user
-          </Button>
+        toolbarBeforeSearch={
+          <Tooltip label="Add user" withArrow>
+            <ActionIcon
+              size="lg"
+              variant="filled"
+              aria-label="Add user"
+              onClick={() => setModal({ kind: "add" })}
+            >
+              <i className="fa fa-plus" />
+            </ActionIcon>
+          </Tooltip>
         }
       />
 

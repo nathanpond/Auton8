@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -14,7 +15,8 @@ import {
   Stack,
   Switch,
   Text,
-  TextInput
+  TextInput,
+  Tooltip
 } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import { useCreateEdgeType, useRestoreEdgeType } from "@/hooks/useRecordEdges";
@@ -54,7 +56,7 @@ export default function EdgeTypeList() {
         header: "Forward / Inverse",
         cell: ({ row }) => (
           <>
-            <Anchor component={Link} to={`/record-edge-types/${row.original.id}`} fw={600}>
+            <Anchor component={Link} to={`/record-relationship-types/${row.original.id}`} fw={600}>
               {row.original.name}
             </Anchor>
             {row.original.inverseName && (
@@ -111,12 +113,12 @@ export default function EdgeTypeList() {
   return (
     <>
       <PageHeader
-        title="Edge Types"
+        title="Record Relationship Types"
         description={
           <>
-            Edge types describe how records can link together (e.g. <code>Account</code>{" "}
-            <em>has contact</em> <code>Contact</code>). Each edge type can carry its own
-            configurable data fields.
+            Record relationship types describe how records can link together (e.g.{" "}
+            <code>Account</code> <em>has contact</em> <code>Contact</code>). Each
+            relationship type can carry its own configurable data fields.
           </>
         }
       />
@@ -140,11 +142,11 @@ export default function EdgeTypeList() {
         rowKey={(t) => t.id}
         columnWidths={COLUMN_WIDTHS}
         initialSort={[{ id: "shortCode", desc: false }]}
-        searchPlaceholder="Search edge types…"
-        emptyMessage="No edge types yet. Create one to let records link to each other."
-        loadingMessage="Loading edge types…"
+        searchPlaceholder="Search relationship types…"
+        emptyMessage="No relationship types yet. Create one to let records link to each other."
+        loadingMessage="Loading relationship types…"
         getRowClassName={(t) => (t.isArchived ? "row-archived" : undefined)}
-        onRowClick={(t) => navigate(`/record-edge-types/${t.id}`)}
+        onRowClick={(t) => navigate(`/record-relationship-types/${t.id}`)}
         getRowAriaLabel={(t) => `Open ${t.shortCode}`}
         globalFilterFn={(t, search) => {
           const needle = search.toLowerCase();
@@ -159,10 +161,17 @@ export default function EdgeTypeList() {
             label="Show archived"
           />
         }
-        toolbarRight={
-          <Button leftSection={<i className="fa fa-plus" />} onClick={() => setModalOpen(true)}>
-            New edge type
-          </Button>
+        toolbarBeforeSearch={
+          <Tooltip label="New relationship type" withArrow>
+            <ActionIcon
+              size="lg"
+              variant="filled"
+              aria-label="New relationship type"
+              onClick={() => setModalOpen(true)}
+            >
+              <i className="fa fa-plus" />
+            </ActionIcon>
+          </Tooltip>
         }
       />
 
@@ -170,7 +179,7 @@ export default function EdgeTypeList() {
         <CreateModal
           onClose={() => setModalOpen(false)}
           onSuccess={(t) => {
-            setFlash({ kind: "success", message: `Created edge type ${t.shortCode}.` });
+            setFlash({ kind: "success", message: `Created relationship type ${t.shortCode}.` });
             setModalOpen(false);
           }}
           onError={(m) => setFlash({ kind: "error", message: m })}
@@ -217,7 +226,7 @@ function CreateModal({
   };
 
   return (
-    <Modal opened onClose={onClose} title="New Edge Type" size="lg">
+    <Modal opened onClose={onClose} title="New Relationship Type" size="lg">
       <Box component="form" onSubmit={submit}>
         <Stack gap="md">
           <Grid>

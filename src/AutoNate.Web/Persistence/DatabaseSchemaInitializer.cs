@@ -926,7 +926,7 @@ internal static class DatabaseSchemaInitializer
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), main_id, g, 0, 'Record Types', NULL, 'route', '{{"path":"/record-types"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), main_id, g, 1, 'Edge Types', NULL, 'route', '{{"path":"/record-edge-types"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), main_id, g, 1, 'Record Relationship Types', NULL, 'route', '{{"path":"/record-relationship-types"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)

@@ -52,7 +52,10 @@ public sealed record class RecordSearchInput(
     bool IncludeArchived,
     int Page,
     int PageSize,
-    string? Sort);
+    string? Sort,
+    // Free-text search applied across the built-in key/name/status columns
+    // (case-insensitive contains). Null/empty leaves the result set untouched.
+    string? Search = null);
 
 public sealed class RecordValidationException : Exception
 {

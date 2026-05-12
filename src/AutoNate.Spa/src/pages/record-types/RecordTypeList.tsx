@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
+  ActionIcon,
   Alert,
   Anchor,
-  Badge,
   Box,
   Button,
   Grid,
@@ -14,33 +14,24 @@ import {
   Stack,
   Switch,
   TextInput,
-  Textarea
+  Textarea,
+  Tooltip
 } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
-import { useCreateRecordType, useRestoreRecordType } from "@/hooks/useRecordTypes";
+import { useCreateRecordType } from "@/hooks/useRecordTypes";
 import { listRecordTypes } from "@/api/recordTypes";
 import { CreateRecordTypeRequest, RecordType } from "@/types/records";
 import IconPicker from "@/components/IconPicker";
 import ColorPicker from "@/components/ColorPicker";
 import { DataTable } from "@/components/data-table/DataTable";
 
-const COLUMN_WIDTHS = ["10%", "22%", "26%", "16%", "14%", "12%"];
+const COLUMN_WIDTHS = ["10%", "26%", "30%", "18%", "10%", "6%"];
 
 export default function RecordTypeList() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-  const restore = useRestoreRecordType();
-
-  const onRestore = async (type: RecordType) => {
-    try {
-      await restore.mutateAsync(type.id);
-      setFlash({ kind: "success", message: `Restored ${type.shortCode}.` });
-    } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
-    }
-  };
 
   const columns = useMemo<DataTableColumn<RecordType>[]>(
     () => [
@@ -70,56 +61,45 @@ export default function RecordTypeList() {
         id: "updatedAtUtc",
         accessorKey: "updatedAtUtc",
         header: "Updated",
-        cell: ({ row }) => formatWhen(row.original.updatedAtUtc)
+        cell: ({ row }) => {
+          const iso = row.original.updatedAtUtc;
+          const d = new Date(iso);
+          if (Number.isNaN(d.getTime())) return iso;
+          return (
+            <Tooltip label={d.toLocaleString()} withArrow>
+              <span>{d.toLocaleDateString()}</span>
+            </Tooltip>
+          );
+        }
       },
       {
-        id: "status",
-        accessorFn: (t) => (t.isArchived ? "Archived" : "Active"),
-        header: "Status",
-        cell: ({ row }) =>
-          row.original.isArchived ? (
-            <Group gap="xs">
-              <Badge color="gray" variant="filled">
-                Archived
-              </Badge>
-              <Anchor
-                component="button"
-                type="button"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void onRestore(row.original);
-                }}
-                disabled={restore.isPending}
-              >
-                Restore
-              </Anchor>
-            </Group>
-          ) : (
-            <Badge color="green" variant="filled">
-              Active
-            </Badge>
-          )
+        id: "fieldCount",
+        accessorKey: "fieldCount",
+        header: "# of Fields",
+        cell: ({ row }) => row.original.fieldCount
       },
       {
         id: "records",
-        header: "Records",
+        header: "",
         enableSorting: false,
         enableGlobalFilter: false,
         cell: ({ row }) => (
-          <Button
-            component={Link}
-            to={`/records/${row.original.shortCode}`}
-            size="xs"
-            variant="default"
-            onClick={(e) => e.stopPropagation()}
-          >
-            Records
-          </Button>
+          <Tooltip label="View records" withArrow>
+            <ActionIcon
+              component={Link}
+              to={`/records/${row.original.shortCode}`}
+              variant="subtle"
+              color="gray"
+              aria-label={`View ${row.original.shortCode} records`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <i className="fa fa-table-list" />
+            </ActionIcon>
+          </Tooltip>
         )
       }
     ],
-    [restore.isPending]
+    []
   );
 
   return (
@@ -167,10 +147,17 @@ export default function RecordTypeList() {
             label="Show archived"
           />
         }
-        toolbarRight={
-          <Button leftSection={<i className="fa fa-plus" />} onClick={() => setModalOpen(true)}>
-            New record type
-          </Button>
+        toolbarBeforeSearch={
+          <Tooltip label="New record type" withArrow>
+            <ActionIcon
+              size="lg"
+              variant="filled"
+              aria-label="New record type"
+              onClick={() => setModalOpen(true)}
+            >
+              <i className="fa fa-plus" />
+            </ActionIcon>
+          </Tooltip>
         }
       />
 
@@ -282,11 +269,6 @@ function CreateModal({
       </Box>
     </Modal>
   );
-}
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 function describeError(error: unknown): string {

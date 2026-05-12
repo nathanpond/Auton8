@@ -123,8 +123,9 @@ export default function EdgeLinkDialog({
     return (
       <Modal opened onClose={onClose} title="Link to another record" size="lg">
         <Text>
-          No edge types are configured for record type <Code>{thisRecordType.shortCode}</Code>.
-          Define one under <strong>Edge Types</strong> first.
+          No relationship types are configured for record type{" "}
+          <Code>{thisRecordType.shortCode}</Code>. Define one under{" "}
+          <strong>Record Relationship Types</strong> first.
         </Text>
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={onClose}>

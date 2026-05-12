@@ -2,16 +2,18 @@
  * The bpmn-js modeler bundle (with create-append-anything baked in) is served
  * as a static asset from the SPA's /vendor/bpmn-js/ prefix. We inject the tag
  * lazily and cache the load promise so multiple concurrent mounts share it.
+ *
+ * Paths are root-absolute (leading `/`) on purpose: this constant is evaluated
+ * once at module-eval time, and a path-relative URL would be resolved against
+ * `document.baseURI` — i.e. whatever route the SPA happened to boot on. Deep
+ * links like /records/<short>/<key> would then produce /records/<short>/vendor/...
  */
-const BPMN_JS_SRC = new URL(
-  "vendor/bpmn-js/bpmn-modeler.development.js",
-  document.baseURI
-).toString();
+const BPMN_JS_SRC = "/vendor/bpmn-js/bpmn-modeler.development.js";
 
 const BPMN_JS_CSS = [
-  new URL("vendor/bpmn-js/diagram-js.css", document.baseURI).toString(),
-  new URL("vendor/bpmn-js/bpmn-js.css", document.baseURI).toString(),
-  new URL("vendor/bpmn-js/bpmn-font/css/bpmn-embedded.css", document.baseURI).toString()
+  "/vendor/bpmn-js/diagram-js.css",
+  "/vendor/bpmn-js/bpmn-js.css",
+  "/vendor/bpmn-js/bpmn-font/css/bpmn-embedded.css"
 ];
 
 let loadPromise: Promise<typeof window.BpmnJS> | null = null;

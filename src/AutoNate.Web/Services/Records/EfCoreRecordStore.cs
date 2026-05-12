@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.Evaluator;
@@ -113,7 +114,10 @@ public sealed class EfCoreRecordStore(
     {
         ArgumentNullException.ThrowIfNull(input);
         var page = Math.Max(0, input.Page);
-        var pageSize = Math.Clamp(input.PageSize, 1, 200);
+        // 1000 is the SPA's auto-mode client/server cutoff — letting the search
+        // endpoint return up to that many rows lets the records table preload
+        // the full set when totalCount is small enough for in-memory handling.
+        var pageSize = Math.Clamp(input.PageSize, 1, 1000);
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -147,6 +151,19 @@ public sealed class EfCoreRecordStore(
             parameters.AddRange(filterParams);
         }
 
+        // Free-text search across key/name/status. Backed by ILIKE so it's
+        // case-insensitive contains; the SPA debounces input before hitting us.
+        var searchTerm = input.Search?.Trim();
+        if (!string.IsNullOrEmpty(searchTerm))
+        {
+            var pattern = "%" + EscapeLikePattern(searchTerm) + "%";
+            parameters.Add(pattern);
+            var idx = parameters.Count - 1;
+            where.Append(" AND (key ILIKE {").Append(idx).Append('}')
+                 .Append(" OR name ILIKE {").Append(idx).Append('}')
+                 .Append(" OR status ILIKE {").Append(idx).Append("})");
+        }
+
         // Authorization gate: append the actor's record-visibility SQL when
         // the caller hands us a ClaimsPrincipal. Tests that don't care
         // continue calling the no-actor overload and skip this entirely.
@@ -161,7 +178,7 @@ public sealed class EfCoreRecordStore(
             }
         }
 
-        var orderBy = ResolveOrderBy(input.Sort);
+        var orderBy = ResolveOrderByWithFields(input.Sort, fieldModels);
 
         var countSql = $"SELECT COUNT(*) AS \"Value\" FROM records WHERE {where}";
         var totalCount = await dbContext.Database
@@ -788,9 +805,81 @@ public sealed class EfCoreRecordStore(
         "status_desc" => "status DESC NULLS LAST",
         "due_date_asc" => "due_date ASC NULLS LAST",
         "due_date_desc" => "due_date DESC NULLS LAST",
+        "created_asc" => "created_at_utc ASC",
         "created_desc" => "created_at_utc DESC",
+        "updated_asc" => "updated_at_utc ASC",
         _ => "updated_at_utc DESC"
     };
+
+    // Like ResolveOrderBy, but additionally accepts `field:<fieldKey>:asc|desc`
+    // tokens that sort by a user-defined field on the record type. The fieldKey
+    // is validated against the record type's field list AND a snake_case regex
+    // before being interpolated into SQL. Casts numeric/boolean fields so they
+    // don't sort as text ("10" before "9"). Unsupported tokens fall through to
+    // the built-in resolver.
+    //
+    // Note: every sort scans the JSONB blob row-by-row; fine through low
+    // thousands of rows but a per-field functional index would be needed for
+    // larger record types.
+    private static string ResolveOrderByWithFields(
+        string? sort,
+        IReadOnlyList<RecordTypeField> fields)
+    {
+        if (sort is not null && sort.StartsWith("field:", StringComparison.Ordinal))
+        {
+            var rest = sort.AsSpan("field:".Length);
+            var sepIdx = rest.LastIndexOf(':');
+            if (sepIdx > 0)
+            {
+                var fieldKey = rest[..sepIdx].ToString();
+                var direction = rest[(sepIdx + 1)..].ToString();
+                if ((direction == "asc" || direction == "desc")
+                    && IsValidFieldKey(fieldKey))
+                {
+                    var field = fields.FirstOrDefault(f =>
+                        string.Equals(f.FieldKey, fieldKey, StringComparison.Ordinal));
+                    if (field is not null)
+                    {
+                        var dir = direction == "asc" ? "ASC" : "DESC";
+                        var expr = BuildJsonExtractExpr(fieldKey, field.DataType);
+                        return $"{expr} {dir} NULLS LAST";
+                    }
+                }
+            }
+        }
+        return ResolveOrderBy(sort);
+    }
+
+    // Defensive: keys come from a validated table (RecordFieldKey.IsValid),
+    // but this guards against any drift before string-interpolating into SQL.
+    private static readonly Regex FieldKeyRegex =
+        new("^[a-z][a-z0-9_]{0,63}$", RegexOptions.Compiled);
+    private static bool IsValidFieldKey(string s) => FieldKeyRegex.IsMatch(s);
+
+    // Map a field's data type to the SQL expression used for sorting. Numeric
+    // and boolean values get cast so they don't sort as text; everything else
+    // sorts as text (ISO 8601 dates sort lexically, which matches their
+    // natural order). NULLIF empties so casts don't blow up on blank values.
+    private static string BuildJsonExtractExpr(string fieldKey, string dataType) =>
+        dataType switch
+        {
+            "number" => $"NULLIF(values->>'{fieldKey}', '')::numeric",
+            "boolean" => $"NULLIF(values->>'{fieldKey}', '')::boolean",
+            _ => $"values->>'{fieldKey}'"
+        };
+
+    // ILIKE wildcard escape — back-slashes the % and _ literals so a user
+    // typing "50%" matches the literal string and not "50 anything".
+    private static string EscapeLikePattern(string input)
+    {
+        var sb = new StringBuilder(input.Length + 8);
+        foreach (var c in input)
+        {
+            if (c == '\\' || c == '%' || c == '_') sb.Append('\\');
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
 
     private record class CreateValidationResult(JsonElement NormalizedValues);
 

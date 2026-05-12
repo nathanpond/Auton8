@@ -1,5 +1,5 @@
 import { Fragment, ReactElement, ReactNode } from "react";
-import { Route, matchPath } from "react-router-dom";
+import { Navigate, Route, matchPath, useParams } from "react-router-dom";
 import ProtectedRoute from "@/shell/ProtectedRoute";
 
 import WorkflowExecutions from "@/pages/workflow-executions/WorkflowExecutions";
@@ -30,6 +30,16 @@ export type AppRoute = {
 };
 
 const protect = (node: ReactElement) => <ProtectedRoute>{node}</ProtectedRoute>;
+
+// Substitutes :param tokens in `to` with the current route's matched params,
+// then renders a replace-mode <Navigate>. Used to forward legacy URLs (e.g.
+// /record-edge-types/:id → /record-relationship-types/:id) without losing
+// the path parameter.
+function RedirectWithParams({ to }: { to: string }) {
+  const params = useParams();
+  const target = to.replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => params[key] ?? "");
+  return <Navigate to={target} replace />;
+}
 
 // (path, templateKey) pairs that mount a built-in page template at a fixed
 // URL inside `admin/config`. Each entry contributes one APP_ROUTE child below
@@ -102,9 +112,16 @@ export const APP_ROUTES: AppRoute[] = [
   { path: "record/:key", element: protect(<RecordDetail />) },
   { path: "records/:typeShortCode", element: protect(<RecordList />) },
 
-  // Record edge-types domain (mirrors record-types)
-  { path: "record-edge-types", element: protect(<EdgeTypeList />) },
-  { path: "record-edge-types/:id", element: protect(<EdgeTypeEditor />) },
+  // Record-relationship-types domain (mirrors record-types). The route was
+  // previously /record-edge-types — redirects below preserve old bookmarks
+  // and any existing menu items still pointing at the legacy path.
+  { path: "record-relationship-types", element: protect(<EdgeTypeList />) },
+  { path: "record-relationship-types/:id", element: protect(<EdgeTypeEditor />) },
+  { path: "record-edge-types", element: <Navigate to="/record-relationship-types" replace /> },
+  {
+    path: "record-edge-types/:id",
+    element: <RedirectWithParams to="/record-relationship-types/:id" />
+  },
 
   // Notifications inbox (per-user; not a configurable page template)
   { path: "notifications", element: protect(<Notifications />) },

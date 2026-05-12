@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Badge, Button, Group, Paper, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
 import { listTeamAssignedTasks } from "@/api/executions";
 import { useBusConnection } from "@/hooks/useBusConnection";
@@ -137,23 +137,23 @@ export default function TeamTasksPanel() {
 
   return (
     <Paper withBorder radius="md" p="md">
-      <Stack gap="sm">
-        <Group gap="xs">
-          <i className="fa fa-users" />
-          <Title order={4}>Team Tasks</Title>
-        </Group>
-        <DataTable<FlowableTaskSummary>
-          queryKey={QUERY_KEY}
-          mode="client"
-          loadAll={loadAll}
-          columns={columns}
-          columnWidths={COLUMN_WIDTHS}
-          rowKey={(t) => t.id}
-          searchPlaceholder="Search team tasks…"
-          emptyMessage="No tasks are assigned to anyone you supervise."
-          initialSort={[{ id: "createdAtUtc", desc: true }]}
-        />
-      </Stack>
+      <DataTable<FlowableTaskSummary>
+        queryKey={QUERY_KEY}
+        mode="client"
+        loadAll={loadAll}
+        columns={columns}
+        columnWidths={COLUMN_WIDTHS}
+        rowKey={(t) => t.id}
+        searchPlaceholder="Search team tasks…"
+        emptyMessage="No tasks are assigned to anyone you supervise."
+        initialSort={[{ id: "createdAtUtc", desc: true }]}
+        toolbarLeft={
+          <Group gap="xs">
+            <i className="fa fa-users" />
+            <Title order={4}>Team Tasks</Title>
+          </Group>
+        }
+      />
     </Paper>
   );
 }

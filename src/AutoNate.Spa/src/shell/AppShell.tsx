@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { AppShell as MantineAppShell } from "@mantine/core";
 import NavMenu from "./NavMenu";
@@ -9,6 +10,7 @@ import PreferencesModal from "@/preferences/PreferencesModal";
 import "./shell.css";
 
 export default function AppShell() {
+  const isScrollable = usePageIsScrollable();
   return (
     <UserPreferencesProvider>
       <PageContextRegistryProvider>
@@ -27,21 +29,48 @@ export default function AppShell() {
 
           <AgentSidebar />
 
-          <a
-            href="#"
-            className="btn-scroll-to-top"
-            onClick={(e) => {
-              e.preventDefault();
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}
-            aria-label="Scroll to top"
-          >
-            <i className="fa fa-angle-up"></i>
-          </a>
+          {isScrollable && (
+            <a
+              href="#"
+              className="btn-scroll-to-top"
+              onClick={(e) => {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              aria-label="Scroll to top"
+            >
+              <i className="fa fa-angle-up" />
+            </a>
+          )}
 
           <PreferencesModal />
         </AgentSidebarProvider>
       </PageContextRegistryProvider>
     </UserPreferencesProvider>
   );
+}
+
+// True when the document is tall enough to scroll AND the user has actually
+// scrolled away from the top. Watches viewport resizes, content-size changes
+// (route swaps, panels expanding, async data filling the page) via a
+// ResizeObserver on <body>, and window scroll.
+function usePageIsScrollable(): boolean {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const scrollable = document.documentElement.scrollHeight > window.innerHeight + 1;
+      setVisible(scrollable && window.scrollY > 0);
+    };
+    check();
+    window.addEventListener("resize", check);
+    window.addEventListener("scroll", check, { passive: true });
+    const observer = new ResizeObserver(check);
+    observer.observe(document.body);
+    return () => {
+      window.removeEventListener("resize", check);
+      window.removeEventListener("scroll", check);
+      observer.disconnect();
+    };
+  }, []);
+  return visible;
 }

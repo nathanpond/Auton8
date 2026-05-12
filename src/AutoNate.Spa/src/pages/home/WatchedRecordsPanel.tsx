@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { useQueryClient } from "@tanstack/react-query";
-import { Badge, Code, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Badge, Code, Group, Paper, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
 import { listWatchedRecords, WatchedRecord } from "@/api/records";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
@@ -119,24 +119,24 @@ export default function WatchedRecordsPanel() {
 
   return (
     <Paper withBorder radius="md" p="md">
-      <Stack gap="sm">
-        <Group gap="xs">
-          <i className="fa fa-eye" />
-          <Title order={4}>Watched Records</Title>
-        </Group>
-        <DataTable<WatchedRecord>
-          queryKey={QUERY_KEY}
-          mode="auto"
-          loadAll={loadAll}
-          loadPage={loadPage}
-          columns={columns}
-          columnWidths={COLUMN_WIDTHS}
-          rowKey={(r) => r.id}
-          searchPlaceholder="Search watched records…"
-          emptyMessage='You aren&apos;t watching any records yet. Open a record and click "Watch" to add it here.'
-          initialSort={[{ id: "name", desc: false }]}
-        />
-      </Stack>
+      <DataTable<WatchedRecord>
+        queryKey={QUERY_KEY}
+        mode="auto"
+        loadAll={loadAll}
+        loadPage={loadPage}
+        columns={columns}
+        columnWidths={COLUMN_WIDTHS}
+        rowKey={(r) => r.id}
+        searchPlaceholder="Search watched records…"
+        emptyMessage='You aren&apos;t watching any records yet. Open a record and click "Watch" to add it here.'
+        initialSort={[{ id: "name", desc: false }]}
+        toolbarLeft={
+          <Group gap="xs">
+            <i className="fa fa-eye" />
+            <Title order={4}>Watched Records</Title>
+          </Group>
+        }
+      />
     </Paper>
   );
 }

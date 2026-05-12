@@ -52,7 +52,10 @@ public sealed record RecordTypeDto(
     DateTimeOffset CreatedAtUtc,
     Guid CreatedBy,
     DateTimeOffset UpdatedAtUtc,
-    Guid UpdatedBy);
+    Guid UpdatedBy,
+    // Populated only by the list endpoint via a grouped query — single-resource
+    // endpoints leave it at 0 so the editor isn't tempted to read a stale value.
+    int FieldCount = 0);
 
 public sealed record RecordTypeFieldDto(
     Guid Id,
@@ -122,6 +125,16 @@ public static class RecordTypeEndpoints
 
             var types = entities.Select(t => t.ToModel()).ToList();
 
+            // One grouped count query covering every visible record type — keeps
+            // the list endpoint O(1) round-trips regardless of result size.
+            var typeIds = types.Select(t => t.Id).ToList();
+            var fieldCounts = await db.RecordTypeFields
+                .AsNoTracking()
+                .Where(f => typeIds.Contains(f.RecordTypeId) && !f.IsArchived)
+                .GroupBy(f => f.RecordTypeId)
+                .Select(g => new { RecordTypeId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.RecordTypeId, x => x.Count, cancellationToken);
+
             await auditPublisher.PublishAsync(
                 RecordSchemaEventTopic.TopicName,
                 RecordSchemaEventTypes.RecordTypeListViewed,
@@ -129,7 +142,9 @@ public static class RecordTypeEndpoints
                 resource: null,
                 details: new { resultCount = types.Count, includeArchived = includeArchived ?? false },
                 cancellationToken);
-            return Results.Ok(types.Select(ToDto).ToList());
+            return Results.Ok(types
+                .Select(t => ToDto(t) with { FieldCount = fieldCounts.GetValueOrDefault(t.Id, 0) })
+                .ToList());
         }).AuthorizedInHandler("filters via FilterQueryAsync(RecordType, View); empty grants -> empty list");
 
         group.MapGet("/{id:guid}", async (
