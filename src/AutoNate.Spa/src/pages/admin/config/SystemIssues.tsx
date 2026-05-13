@@ -80,6 +80,7 @@ export default function SystemIssues() {
         id: "title",
         accessorKey: "title",
         header: "Title",
+        meta: { wrap: true },
         cell: ({ row }) => (
           <>
             <Text fw={600}>{row.original.title}</Text>

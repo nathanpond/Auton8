@@ -3,9 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ActionIcon,
   Badge,
-  Box,
   Group,
-  Select,
   Stack,
   TextInput,
   UnstyledButton
@@ -416,13 +414,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
     },
     []
   );
-  const pageSizeOptionsAsStrings = useMemo(
-    () => pageSizeOptions.map((n) => ({ value: String(n), label: String(n) })),
-    [pageSizeOptions]
-  );
-  const handlePageSizeSelectChange = useCallback((v: string | null) => {
-    if (!v) return;
-    setPageSize(Number(v));
+  const handleRecordsPerPageChange = useCallback((next: number) => {
+    setPageSize(next);
     setPage(1);
   }, []);
   const onRowClickAdapter = useMemo(
@@ -508,6 +501,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
         onSortStatusChange={handleSortChange}
         totalRecords={totalRecords}
         recordsPerPage={pageSize}
+        recordsPerPageOptions={pageSizeOptions}
+        onRecordsPerPageChange={handleRecordsPerPageChange}
+        recordsPerPageLabel="Per page"
         page={page}
         onPageChange={setPage}
         noRecordsText={emptyMessage}
@@ -515,30 +511,6 @@ export function DataTable<T>(props: DataTableProps<T>) {
         onRowClick={onRowClickAdapter}
         rowClassName={rowClassNameAdapter}
       />
-
-      <Group justify="space-between" gap="sm" wrap="wrap">
-        <Group gap="sm" align="center">
-          <Select
-            data={pageSizeOptionsAsStrings}
-            value={String(pageSize)}
-            onChange={handlePageSizeSelectChange}
-            allowDeselect={false}
-            size="xs"
-            w={88}
-          />
-          <Box style={{ fontSize: 13, color: "var(--mantine-color-dimmed)" }}>per page</Box>
-          <Box style={{ fontSize: 13, color: "var(--mantine-color-dimmed)" }}>
-            {effectiveMode === "loading"
-              ? ""
-              : totalRecords === 0
-                ? "Showing 0"
-                : `Showing ${(page - 1) * pageSize + 1}–${Math.min(
-                    page * pageSize,
-                    totalRecords
-                  )} of ${totalRecords}`}
-          </Box>
-        </Group>
-      </Group>
 
       {/* getRowAriaLabel is accepted for API parity; mantine-datatable doesn't
           expose per-row aria props directly. Suppress unused-var by reading. */}

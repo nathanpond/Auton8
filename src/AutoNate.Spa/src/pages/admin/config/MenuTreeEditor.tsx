@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ActionIcon, Badge, Button, Group, Text, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Badge, Button, Group, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { Menu, MenuItem, MenuItemType, UpdateMenuItemRequest } from "@/types/menus";
 import {
   FlatMenuItem,
@@ -349,19 +349,23 @@ function SortableRow({
         <Badge color="gray" variant="light" tt="uppercase">
           separator
         </Badge>
-        <ActionIcon
-          size="sm"
-          variant={item.isVisible ? "default" : "filled"}
-          color={item.isVisible ? "gray" : "yellow"}
-          title={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
-          aria-pressed={item.isVisible}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleVisible();
-          }}
+        <Tooltip
+          label={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
+          withArrow
         >
-          <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
-        </ActionIcon>
+          <ActionIcon
+            size="sm"
+            variant="subtle"
+            color={item.isVisible ? "gray" : "yellow"}
+            aria-pressed={item.isVisible}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleVisible();
+            }}
+          >
+            <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
+          </ActionIcon>
+        </Tooltip>
         <UnstyledButton
           title="Delete"
           onClick={(e) => {
@@ -415,40 +419,49 @@ function SortableRow({
       <Badge color="gray" variant="light" tt="uppercase">
         {item.itemType}
       </Badge>
-      <ActionIcon
-        size="sm"
-        variant={item.isVisible ? "default" : "filled"}
-        color={item.isVisible ? "gray" : "yellow"}
-        title={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
-        aria-pressed={item.isVisible}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleVisible();
-        }}
+      <Tooltip
+        label={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
+        withArrow
       >
-        <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
-      </ActionIcon>
-      <ActionIcon
-        size="sm"
-        variant="default"
-        onClick={(e) => {
-          e.stopPropagation();
-          onEdit();
-        }}
-      >
-        <i className="fa fa-pen" />
-      </ActionIcon>
-      <ActionIcon
-        size="sm"
-        variant="outline"
-        color="red"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-      >
-        <i className="fa fa-trash" />
-      </ActionIcon>
+        <ActionIcon
+          size="sm"
+          variant="subtle"
+          color={item.isVisible ? "gray" : "yellow"}
+          aria-pressed={item.isVisible}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleVisible();
+          }}
+        >
+          <i className={`fa ${item.isVisible ? "fa-eye" : "fa-eye-slash"}`} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Edit" withArrow>
+        <ActionIcon
+          size="sm"
+          variant="subtle"
+          color="gray"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+        >
+          <i className="fa fa-pen" />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Delete" withArrow>
+        <ActionIcon
+          size="sm"
+          variant="subtle"
+          color="red"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <i className="fa fa-trash" />
+        </ActionIcon>
+      </Tooltip>
     </li>
   );
 }
