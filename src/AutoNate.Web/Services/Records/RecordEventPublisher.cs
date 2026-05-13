@@ -8,8 +8,14 @@ public static class RecordEventTypes
 {
     public const string Created = "record.created";
     public const string Updated = "record.updated";
+    // "Deleted" is the soft-delete / archive transition. Naming kept for
+    // backward compatibility with subscribers that already filter on it.
     public const string Deleted = "record.deleted";
     public const string Restored = "record.restored";
+    // Hard-delete: the row + all cascaded children (edges, comments, history,
+    // watches) are gone. Subscribers that maintained mirrors should drop their
+    // copies on this event.
+    public const string Purged = "record.purged";
     public const string StatusChanged = "record.status.changed";
     public const string AssigneesChanged = "record.assignees.changed";
 

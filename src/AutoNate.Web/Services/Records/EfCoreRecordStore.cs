@@ -709,6 +709,42 @@ public sealed class EfCoreRecordStore(
         return entity.ToModel();
     }
 
+    public async Task<Record> DeleteAsync(Guid id, Guid actorId, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.Records.SingleOrDefaultAsync(r => r.Id == id, cancellationToken)
+            ?? throw new RecordNotFoundException(id);
+
+        // Snapshot before delete so the event envelope carries the values that
+        // existed at deletion time. CASCADE handles record_edges,
+        // record_comments, record_field_changes, and record_watches.
+        var snapshot = entity.ToModel();
+        var now = DateTimeOffset.UtcNow;
+
+        await using var tx = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        dbContext.Records.Remove(entity);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        await eventPublisher.PublishAsync(new RecordEventEnvelope(
+            EventId: Guid.NewGuid(),
+            EventType: RecordEventTypes.Purged,
+            OccurredAtUtc: now,
+            RecordId: snapshot.Id,
+            Key: snapshot.Key,
+            RecordTypeId: snapshot.RecordTypeId,
+            Name: snapshot.Name,
+            Status: snapshot.Status,
+            PreviousStatus: null,
+            ChangedFields: Array.Empty<string>(),
+            AssigneeIds: snapshot.AssigneeIds,
+            IsArchived: snapshot.IsArchived,
+            ActorId: actorId,
+            SourceAppId: _sourceAppId), cancellationToken);
+
+        return snapshot;
+    }
+
     public async Task<Record> SetArchivedAsync(Guid id, bool archived, Guid actorId, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);

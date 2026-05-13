@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   archiveRecord,
   createRecord,
+  deleteRecord,
   getRecord,
   getRecordByKey,
   getWatchStatus,
@@ -122,6 +123,14 @@ export function useRestoreRecord() {
   const qc = useQueryClient();
   return useMutation<RecordModel, Error, string>({
     mutationFn: restoreRecord,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["records"] })
+  });
+}
+
+export function useDeleteRecord() {
+  const qc = useQueryClient();
+  return useMutation<RecordModel, Error, string>({
+    mutationFn: deleteRecord,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["records"] })
   });
 }

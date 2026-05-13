@@ -782,11 +782,38 @@ internal static class DatabaseSchemaInitializer
             id UUID PRIMARY KEY,
             status TEXT NOT NULL UNIQUE,
             color TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
             created_at_utc TIMESTAMPTZ NOT NULL,
             created_by UUID NOT NULL,
             updated_at_utc TIMESTAMPTZ NOT NULL,
             updated_by UUID NOT NULL
         );
+
+        ALTER TABLE status_appearance_entries
+            ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+        -- Backfill sort_order for existing rows that landed at the default 0:
+        -- give them a stable order based on creation time so prior layouts
+        -- don't get scrambled the first time the new sort kicks in.
+        WITH ordered AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (ORDER BY created_at_utc, status) AS rn
+              FROM status_appearance_entries
+             WHERE sort_order = 0
+        )
+        UPDATE status_appearance_entries s
+           SET sort_order = ordered.rn
+          FROM ordered
+         WHERE s.id = ordered.id;
+
+        -- Auto-seed Site_Default. Lookup is case-insensitive (see SPA's
+        -- lib/statusAppearance.ts) so any existing 'site_default' row counts.
+        INSERT INTO status_appearance_entries (id, status, color, sort_order, created_at_utc, created_by, updated_at_utc, updated_by)
+        SELECT gen_random_uuid(), 'Site_Default', '#6c757d', 0,
+               NOW(), '00000000-0000-0000-0000-000000000000',
+               NOW(), '00000000-0000-0000-0000-000000000000'
+         WHERE NOT EXISTS (
+            SELECT 1 FROM status_appearance_entries WHERE LOWER(status) = 'site_default'
+         );
 
         CREATE TABLE IF NOT EXISTS site_appearance_settings (
             id UUID PRIMARY KEY,

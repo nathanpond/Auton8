@@ -734,6 +734,7 @@ public partial class AutoNateDbContext : DbContext
                 .HasColumnName("id");
             entity.Property(e => e.Status).HasColumnName("status");
             entity.Property(e => e.Color).HasColumnName("color");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");

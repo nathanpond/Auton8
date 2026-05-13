@@ -296,6 +296,28 @@ public static class RecordEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.Record, Actions.Edit);
 
+        // Hard-delete: distinct from DELETE /{id} which is the archive path.
+        // Cascades clean up edges, comments, history, watches. Gated by the
+        // separate `Delete` action so admins can hand out routine archive
+        // without unlocking permanent removal.
+        group.MapDelete("/{id:guid}/permanent", async (
+            Guid id,
+            HttpContext http,
+            IRecordStore store,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var deleted = await store.DeleteAsync(id, http.GetActorId(), cancellationToken);
+                return Results.Ok(ToDto(deleted));
+            }
+            catch (RecordNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Record, Actions.Delete);
+
         group.MapPut("/{id:guid}/assignees", async (
             Guid id,
             Guid[] assigneeIds,

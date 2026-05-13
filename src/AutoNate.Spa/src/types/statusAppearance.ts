@@ -2,6 +2,7 @@ export type StatusAppearanceEntry = {
   id: string;
   status: string;
   color: string;
+  sortOrder: number;
   createdAtUtc: string;
   updatedAtUtc: string;
 };

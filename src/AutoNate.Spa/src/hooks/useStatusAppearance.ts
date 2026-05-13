@@ -3,6 +3,7 @@ import {
   createStatusAppearance,
   deleteStatusAppearance,
   listStatusAppearance,
+  reorderStatusAppearance,
   updateStatusAppearance
 } from "@/api/statusAppearance";
 import {
@@ -49,6 +50,16 @@ export function useDeleteStatusAppearance() {
   const qc = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: deleteStatusAppearance,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: STATUS_APPEARANCE_QUERY_KEY });
+    }
+  });
+}
+
+export function useReorderStatusAppearance() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string[]>({
+    mutationFn: reorderStatusAppearance,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: STATUS_APPEARANCE_QUERY_KEY });
     }

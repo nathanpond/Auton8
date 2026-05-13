@@ -70,7 +70,12 @@ public static class CoreEntityTypes
         actions: new[]
         {
             Actions.View, Actions.Create, Actions.Edit,
-            Actions.Assign, Actions.Comment, Actions.Archive
+            Actions.Assign, Actions.Comment, Actions.Archive,
+            // `Delete` is the hard-delete (record + cascaded edges/comments/
+            // history/watches) — distinct from `Archive` which is the soft
+            // tombstone. Granted separately so admins can hand out routine
+            // archive without unlocking irreversible purges.
+            Actions.Delete
         },
         tags: new[] { "recordtype", "status", "assignee", "creator" });
 

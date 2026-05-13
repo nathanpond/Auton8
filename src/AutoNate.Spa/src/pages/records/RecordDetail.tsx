@@ -1,11 +1,25 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Badge, Box, Button, Group, Paper, Stack, Tabs, Text, Title } from "@mantine/core";
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Code,
+  Group,
+  Modal,
+  Paper,
+  Stack,
+  Tabs,
+  Text,
+  Title,
+  Tooltip
+} from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import {
-  useArchiveRecord,
+  useDeleteRecord,
   useRecordByKey,
-  useRestoreRecord,
   useUnwatchRecord,
   useUpdateRecord,
   useWatchRecord,
@@ -33,14 +47,14 @@ export default function RecordDetail() {
   const { data: fields = [] } = useRecordTypeFields(type?.id ?? null, true);
 
   const update = useUpdateRecord(record?.id ?? "");
-  const archive = useArchiveRecord();
-  const restore = useRestoreRecord();
+  const deleteRecord = useDeleteRecord();
   const { data: isWatching = false } = useWatchStatus(record?.id ?? null);
   const watch = useWatchRecord(record?.id ?? "");
   const unwatch = useUnwatchRecord(record?.id ?? "");
 
   const [tab, setTab] = useState<Tab>("details");
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (isLoading || !type) {
     return (
@@ -79,16 +93,14 @@ export default function RecordDetail() {
     }
   };
 
-  const toggleArchived = async () => {
+  const confirmDelete = async () => {
     try {
-      if (record.isArchived) {
-        await restore.mutateAsync(record.id);
-        setFlash({ kind: "success", message: "Restored." });
-      } else {
-        await archive.mutateAsync(record.id);
-        setFlash({ kind: "success", message: "Archived." });
-      }
+      await deleteRecord.mutateAsync(record.id);
+      // Hop back to the list before the cached record query has a chance to
+      // refetch a 404 and crash the detail view.
+      navigate(`/records/${code}`);
     } catch (err) {
+      setDeleteOpen(false);
       setFlash({ kind: "error", message: describeError(err) });
     }
   };
@@ -112,25 +124,29 @@ export default function RecordDetail() {
         description={<Link to={`/records/${code}`}>&larr; Back to list</Link>}
         actions={
           <Group gap="xs">
-            <Button
-              variant={isWatching ? "filled" : "outline"}
-              leftSection={<i className={`fa ${isWatching ? "fa-eye-slash" : "fa-eye"}`} />}
-              onClick={toggleWatched}
-              loading={watch.isPending || unwatch.isPending}
-            >
-              {isWatching ? "Unwatch" : "Watch"}
-            </Button>
-            <Button
-              variant="outline"
-              color={record.isArchived ? "green" : "yellow"}
-              leftSection={
-                <i className={`fa ${record.isArchived ? "fa-box-open" : "fa-box-archive"}`} />
-              }
-              onClick={toggleArchived}
-              loading={archive.isPending || restore.isPending}
-            >
-              {record.isArchived ? "Restore" : "Archive"}
-            </Button>
+            <Tooltip label={isWatching ? "Unwatch" : "Watch"} withArrow>
+              <ActionIcon
+                size="lg"
+                variant="subtle"
+                color={isWatching ? "blue" : "gray"}
+                aria-label={isWatching ? "Unwatch" : "Watch"}
+                onClick={toggleWatched}
+                loading={watch.isPending || unwatch.isPending}
+              >
+                <i className={`fa ${isWatching ? "fa-eye-slash" : "fa-eye"}`} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Delete" withArrow>
+              <ActionIcon
+                size="lg"
+                variant="subtle"
+                color="red"
+                aria-label="Delete"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </Tooltip>
           </Group>
         }
       />
@@ -187,6 +203,41 @@ export default function RecordDetail() {
           <CommentsPanel recordId={record.id} />
         </Paper>
       </Stack>
+
+      <Modal
+        opened={deleteOpen}
+        onClose={() => (deleteRecord.isPending ? undefined : setDeleteOpen(false))}
+        title="Delete record"
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            Permanently delete <Code>{record.key}</Code>{" "}
+            <strong>{record.name}</strong>? This will also remove every comment, history
+            entry, edge, and watch attached to this record.
+          </Text>
+          <Text c="red" fw={600}>
+            This cannot be undone.
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button
+              variant="default"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleteRecord.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              leftSection={<i className="fa fa-trash" />}
+              onClick={confirmDelete}
+              loading={deleteRecord.isPending}
+            >
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Box>
   );
 }

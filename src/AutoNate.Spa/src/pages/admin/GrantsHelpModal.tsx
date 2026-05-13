@@ -235,6 +235,30 @@ Selector:       /record/*[recordtype=confidential]
 Effect:         deny`}</Code>
 
         <Text mb={4}>
+          <strong>
+            Editors can archive records, but only Admins can permanently delete them.
+          </strong>{" "}
+          On a record, <Code>archive</Code> hides the row from default reads but the data
+          (and history, comments, edges) stays intact and can be restored.{" "}
+          <Code>delete</Code> permanently removes the record and cascade-clears its
+          comments, history, edges, and watches — there's no undo. Treat them as separate
+          permissions and reserve <Code>delete</Code> for trusted roles.
+        </Text>
+        <Code block mb="sm">{`# Editors can archive
+Principal kind: role
+Principal:      Editors
+Action:         archive
+Selector:       /record/*
+Effect:         allow
+
+# Only Admins can permanently delete
+Principal kind: role
+Principal:      Admin
+Action:         delete
+Selector:       /record/*
+Effect:         allow`}</Code>
+
+        <Text mb={4}>
           <strong>QA group can complete only their own workflow tasks.</strong>
         </Text>
         <Code block mb="sm">{`Principal kind: group

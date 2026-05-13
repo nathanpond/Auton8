@@ -10,6 +10,8 @@ public partial class StatusAppearanceEntry
 
     public string Color { get; set; } = null!;
 
+    public int SortOrder { get; set; }
+
     public DateTime CreatedAtUtc { get; set; }
 
     public Guid CreatedBy { get; set; }

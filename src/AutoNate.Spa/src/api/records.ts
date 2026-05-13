@@ -116,6 +116,13 @@ export async function restoreRecord(id: string): Promise<RecordModel> {
   return data;
 }
 
+// Hard-delete (vs `archiveRecord` which is the soft tombstone). Server cascades
+// clean up edges, comments, history, and watches.
+export async function deleteRecord(id: string): Promise<RecordModel> {
+  const { data } = await api.delete<RecordModel>(`${BASE}/${id}/permanent`);
+  return data;
+}
+
 export async function listRecordHistory(
   recordId: string,
   options: { fieldKey?: string; take?: number } = {},

@@ -124,6 +124,11 @@ public interface IRecordStore
     Task<Record> UpdateAsync(Guid id, UpdateRecordInput input, Guid actorId, CancellationToken cancellationToken = default);
 
     Task<Record> SetArchivedAsync(Guid id, bool archived, Guid actorId, CancellationToken cancellationToken = default);
+
+    // Hard-delete: removes the record row and lets DB cascades clean up edges,
+    // comments, history, and watches. Returns the model snapshot taken just
+    // before deletion so callers can include it in audit/event payloads.
+    Task<Record> DeleteAsync(Guid id, Guid actorId, CancellationToken cancellationToken = default);
 }
 
 public interface IRecordHistoryStore

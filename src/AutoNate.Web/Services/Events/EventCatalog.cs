@@ -357,6 +357,16 @@ public static class EventCatalog
                     CarriesRecordType: true),
                 new EventCatalogEntry(
                     DaprRecordEventPublisher.TopicName,
+                    RecordEventTypes.Purged,
+                    "A record was permanently deleted.",
+                    "Fires from EfCoreRecordStore.DeleteAsync after the row is removed. Cascades clean up edges, comments, history, and watches; subscribers maintaining mirrors should drop their copies.",
+                    [
+                        "isArchived reflects the value at deletion time (often false).",
+                        "changedFields is empty."
+                    ],
+                    CarriesRecordType: true),
+                new EventCatalogEntry(
+                    DaprRecordEventPublisher.TopicName,
                     RecordEventTypes.AssigneesChanged,
                     "A record's assignee list changed.",
                     "Fires from EfCoreRecordStore.UpdateAsync after commit, in addition to `record.updated`, whenever the assigneeIds list differs from its previous value. Phase 3 of the audit-events plan made this a distinct event type.",
