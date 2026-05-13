@@ -60,6 +60,8 @@ public partial class SiteAppearanceSettings
 
     public string SurfaceTextColor { get; set; } = null!;
 
+    public string SurfaceDimmedColor { get; set; } = null!;
+
     public string BorderColor { get; set; } = null!;
 
     public string DropdownBg { get; set; } = null!;

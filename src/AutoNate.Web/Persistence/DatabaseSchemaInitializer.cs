@@ -817,6 +817,7 @@ internal static class DatabaseSchemaInitializer
             surface_bg TEXT NOT NULL,
             surface_secondary_bg TEXT NOT NULL,
             surface_text_color TEXT NOT NULL,
+            surface_dimmed_color TEXT NOT NULL DEFAULT '#6c757d',
             border_color TEXT NOT NULL,
             dropdown_bg TEXT NOT NULL,
             modal_bg TEXT NOT NULL,
@@ -841,6 +842,8 @@ internal static class DatabaseSchemaInitializer
             ADD COLUMN IF NOT EXISTS secondary_button_hover_bg TEXT NOT NULL DEFAULT '#f1f3f5';
         ALTER TABLE site_appearance_settings
             ADD COLUMN IF NOT EXISTS secondary_button_hover_text_color TEXT NOT NULL DEFAULT '#212529';
+        ALTER TABLE site_appearance_settings
+            ADD COLUMN IF NOT EXISTS surface_dimmed_color TEXT NOT NULL DEFAULT '#6c757d';
 
         DO $$
         DECLARE
@@ -862,8 +865,8 @@ internal static class DatabaseSchemaInitializer
                     sidebar_bg, sidebar_link_color, sidebar_link_hover_color,
                     sidebar_active_bg, sidebar_active_color, sidebar_icon_color,
                     sidebar_submenu_bg, sidebar_section_color, surface_bg,
-                    surface_secondary_bg, surface_text_color, border_color,
-                    dropdown_bg, modal_bg, secondary_button_bg,
+                    surface_secondary_bg, surface_text_color, surface_dimmed_color,
+                    border_color, dropdown_bg, modal_bg, secondary_button_bg,
                     secondary_button_text_color, secondary_button_border_color,
                     secondary_button_hover_bg, secondary_button_hover_text_color,
                     created_at_utc, created_by,
@@ -876,8 +879,8 @@ internal static class DatabaseSchemaInitializer
                     '#20252a', '#ffffff', '#20252a', '#ffffff',
                     '#ffffff', '#6c757d', '#212529', '#f1f3f5',
                     '#212529', '#212529', '#ffffff', '#adb5bd',
-                    '#ffffff', '#dee2e6', '#212529', '#ced4da',
-                    '#ffffff', '#ffffff', '#ffffff', '#495057',
+                    '#ffffff', '#dee2e6', '#212529', '#6c757d',
+                    '#ced4da', '#ffffff', '#ffffff', '#ffffff', '#495057',
                     '#6c757d', '#f1f3f5', '#212529',
                     NOW(), seed_actor, NOW(), seed_actor);
             END IF;
@@ -887,7 +890,8 @@ internal static class DatabaseSchemaInitializer
                 secondary_button_text_color = COALESCE(secondary_button_text_color, '#495057'),
                 secondary_button_border_color = COALESCE(secondary_button_border_color, '#6c757d'),
                 secondary_button_hover_bg = COALESCE(secondary_button_hover_bg, '#f1f3f5'),
-                secondary_button_hover_text_color = COALESCE(secondary_button_hover_text_color, '#212529')
+                secondary_button_hover_text_color = COALESCE(secondary_button_hover_text_color, '#212529'),
+                surface_dimmed_color = COALESCE(surface_dimmed_color, '#6c757d')
             WHERE id = appearance_id;
 
             UPDATE site_appearance_settings

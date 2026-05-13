@@ -32,6 +32,7 @@ export const DEFAULT_SITE_APPEARANCE: SiteAppearance = {
   surfaceBg: "#ffffff",
   surfaceSecondaryBg: "#dee2e6",
   surfaceTextColor: "#212529",
+  surfaceDimmedColor: "#6c757d",
   borderColor: "#ced4da",
   dropdownBg: "#ffffff",
   modalBg: "#ffffff",
@@ -139,6 +140,10 @@ export function coerceSiteAppearance(source: PartialSiteAppearance): SiteAppeara
       appearance.surfaceTextColor,
       DEFAULT_SITE_APPEARANCE.surfaceTextColor
     ),
+    surfaceDimmedColor: normalizeHexOrDefault(
+      appearance.surfaceDimmedColor,
+      DEFAULT_SITE_APPEARANCE.surfaceDimmedColor
+    ),
     borderColor: normalizeHexOrDefault(appearance.borderColor, DEFAULT_SITE_APPEARANCE.borderColor),
     dropdownBg: normalizeHexOrDefault(appearance.dropdownBg, DEFAULT_SITE_APPEARANCE.dropdownBg),
     modalBg: normalizeHexOrDefault(appearance.modalBg, DEFAULT_SITE_APPEARANCE.modalBg),
@@ -210,6 +215,7 @@ export function validateSiteAppearance(appearance: SiteAppearance): Partial<Reco
     | "surfaceBg"
     | "surfaceSecondaryBg"
     | "surfaceTextColor"
+    | "surfaceDimmedColor"
     | "borderColor"
     | "dropdownBg"
     | "modalBg"
@@ -239,6 +245,7 @@ export function validateSiteAppearance(appearance: SiteAppearance): Partial<Reco
     "surfaceBg",
     "surfaceSecondaryBg",
     "surfaceTextColor",
+    "surfaceDimmedColor",
     "borderColor",
     "dropdownBg",
     "modalBg",
@@ -310,7 +317,11 @@ export function applySiteAppearanceToDocument(
   setColorVar(rootStyle, "--mantine-color-default-hover", normalized.surfaceSecondaryBg);
   setColorVar(rootStyle, "--mantine-color-default-color", normalized.surfaceTextColor);
   setColorVar(rootStyle, "--mantine-color-default-border", normalized.borderColor);
-  setColorVar(rootStyle, "--mantine-color-dimmed", normalized.sidebarSectionColor);
+  // Dimmed surface text (Mantine `c="dimmed"`, `Text c="dimmed"`, etc.) is its
+  // own knob in the appearance editor so admins can pick contrast directly.
+  // The sidebar group-label color is a separate concern and stays bound to
+  // --app-sidebar-section-color.
+  setColorVar(rootStyle, "--mantine-color-dimmed", normalized.surfaceDimmedColor);
 
   // Live brand palette. The MantineProvider's static theme establishes that
   // `brand` is the primary color; here we overwrite the 10-shade tuple at

@@ -66,6 +66,7 @@ type ColorFieldKey =
   | "surfaceBg"
   | "surfaceSecondaryBg"
   | "surfaceTextColor"
+  | "surfaceDimmedColor"
   | "borderColor";
 
 type TextFieldConfig = {
@@ -117,6 +118,7 @@ const SURFACE_FIELDS: ColorFieldConfig[] = [
   { key: "surfaceBg", label: "Page background" },
   { key: "surfaceSecondaryBg", label: "Secondary surface" },
   { key: "surfaceTextColor", label: "Body text" },
+  { key: "surfaceDimmedColor", label: "Secondary text" },
   { key: "borderColor", label: "Border color" }
 ];
 

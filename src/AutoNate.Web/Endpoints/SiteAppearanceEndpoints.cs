@@ -117,6 +117,7 @@ public static partial class SiteAppearanceEndpoints
         entity.SurfaceBg = NormalizeColor(request.SurfaceBg);
         entity.SurfaceSecondaryBg = NormalizeColor(request.SurfaceSecondaryBg);
         entity.SurfaceTextColor = NormalizeColor(request.SurfaceTextColor);
+        entity.SurfaceDimmedColor = NormalizeColor(request.SurfaceDimmedColor);
         entity.BorderColor = NormalizeColor(request.BorderColor);
         entity.DropdownBg = NormalizeColor(request.DropdownBg);
         entity.ModalBg = NormalizeColor(request.ModalBg);
@@ -160,6 +161,7 @@ public static partial class SiteAppearanceEndpoints
             SurfaceBg = "#ffffff",
             SurfaceSecondaryBg = "#dee2e6",
             SurfaceTextColor = "#212529",
+            SurfaceDimmedColor = "#6c757d",
             BorderColor = "#ced4da",
             DropdownBg = "#ffffff",
             ModalBg = "#ffffff",
@@ -203,6 +205,7 @@ public static partial class SiteAppearanceEndpoints
             entity.SurfaceBg,
             entity.SurfaceSecondaryBg,
             entity.SurfaceTextColor,
+            entity.SurfaceDimmedColor,
             entity.BorderColor,
             entity.DropdownBg,
             entity.ModalBg,
@@ -240,6 +243,7 @@ public static partial class SiteAppearanceEndpoints
                      request.SurfaceBg,
                      request.SurfaceSecondaryBg,
                      request.SurfaceTextColor,
+                     request.SurfaceDimmedColor,
                      request.BorderColor,
                      request.DropdownBg,
                      request.ModalBg,
@@ -298,6 +302,7 @@ public sealed record SiteAppearanceDto(
     string SurfaceBg,
     string SurfaceSecondaryBg,
     string SurfaceTextColor,
+    string SurfaceDimmedColor,
     string BorderColor,
     string DropdownBg,
     string ModalBg,
@@ -335,6 +340,7 @@ public sealed record UpdateSiteAppearanceRequest(
     string SurfaceBg,
     string SurfaceSecondaryBg,
     string SurfaceTextColor,
+    string SurfaceDimmedColor,
     string BorderColor,
     string DropdownBg,
     string ModalBg,

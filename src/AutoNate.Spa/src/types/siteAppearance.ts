@@ -28,6 +28,7 @@ export type SiteAppearance = {
   surfaceBg: string;
   surfaceSecondaryBg: string;
   surfaceTextColor: string;
+  surfaceDimmedColor: string;
   borderColor: string;
   dropdownBg: string;
   modalBg: string;

@@ -706,6 +706,7 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.SurfaceBg).HasColumnName("surface_bg");
             entity.Property(e => e.SurfaceSecondaryBg).HasColumnName("surface_secondary_bg");
             entity.Property(e => e.SurfaceTextColor).HasColumnName("surface_text_color");
+            entity.Property(e => e.SurfaceDimmedColor).HasColumnName("surface_dimmed_color");
             entity.Property(e => e.BorderColor).HasColumnName("border_color");
             entity.Property(e => e.DropdownBg).HasColumnName("dropdown_bg");
             entity.Property(e => e.ModalBg).HasColumnName("modal_bg");
