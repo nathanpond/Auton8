@@ -113,6 +113,7 @@ function ConfigLeaf({
       <NavLink
         to={path}
         end
+        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         className={({ isActive }) =>
           `config-nav-item ${isActive ? "active" : ""}`
         }

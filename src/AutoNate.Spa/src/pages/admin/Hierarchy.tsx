@@ -1,7 +1,15 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
-import { Alert, NativeSelect, Text } from "@mantine/core";
+import {
+  Alert,
+  Combobox,
+  InputBase,
+  Loader,
+  Text,
+  useCombobox
+} from "@mantine/core";
+import { useDebouncedValue } from "@mantine/hooks";
 import PageHeader from "@/components/PageHeader";
 import { fetchSupervisorHierarchy, listUsers, listUsersPage } from "@/api/users";
 import { useUsers, useSetUserSupervisor } from "@/hooks/useUsers";
@@ -13,12 +21,12 @@ import {
 
 const COLUMN_WIDTHS = ["28%", "32%", "40%"];
 
-// Hierarchy management. One row per user with an inline dropdown to pick
+// Hierarchy management. One row per user with an inline picker to pick
 // (or clear) their supervisor. Saves on change. The supervisor edges drive
 // multi-hop selectors like /record/*[assignee=user[supervisor=user]].
 export default function Hierarchy() {
-  // useUsers() fetches the full user list; the supervisor dropdown needs every
-  // user (not just the current page) so we can offer them all as options.
+  // useUsers() backs the "Currently set to" column's id→username lookup.
+  // The supervisor picker itself searches users server-side on demand.
   const { data: allUsers = [] } = useUsers();
   const { data: pairs = [] } = useQuery({
     queryKey: ["hierarchy", "supervisors"],
@@ -94,20 +102,14 @@ export default function Hierarchy() {
         cell: ({ row }) => {
           const user = row.original;
           const currentId = supervisorByUserId.get(user.userId) ?? "";
-          const saving = savingFor === user.userId;
+          const currentLabel = currentId ? userByGuid.get(currentId)?.username ?? null : null;
           return (
-            <NativeSelect
-              size="xs"
-              value={currentId}
-              disabled={saving}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => void onChange(user, e.currentTarget.value)}
-              data={[
-                { value: "", label: "— none —" },
-                ...allUsers
-                  .filter((other) => other.userId !== user.userId)
-                  .map((other) => ({ value: other.userId, label: other.username }))
-              ]}
+            <SupervisorPicker
+              userId={user.userId}
+              currentSupervisorId={currentId}
+              currentSupervisorLabel={currentLabel}
+              disabled={savingFor === user.userId}
+              onSelect={(value) => void onChange(user, value)}
             />
           );
         }
@@ -134,7 +136,7 @@ export default function Hierarchy() {
         }
       }
     ],
-    [allUsers, supervisorByUserId, userByGuid, savingFor]
+    [supervisorByUserId, userByGuid, savingFor]
   );
 
   return (
@@ -177,6 +179,121 @@ export default function Hierarchy() {
         }}
       />
     </>
+  );
+}
+
+type SupervisorPickerProps = {
+  userId: string;
+  currentSupervisorId: string;
+  currentSupervisorLabel: string | null;
+  disabled: boolean;
+  onSelect: (value: string) => void;
+};
+
+// Server-search picker for a row's supervisor. The dropdown lazily calls
+// /api/users/page with a debounced query so we never materialize the full
+// user list per row — important when there are thousands of users.
+function SupervisorPicker({
+  userId,
+  currentSupervisorId,
+  currentSupervisorLabel,
+  disabled,
+  onSelect
+}: SupervisorPickerProps) {
+  const combobox = useCombobox({
+    onDropdownClose: () => combobox.resetSelectedOption(),
+    onDropdownOpen: () => combobox.selectFirstOption()
+  });
+
+  const [search, setSearch] = useState("");
+  const [debouncedSearch] = useDebouncedValue(search.trim(), 200);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["users", "page", "supervisorPicker", debouncedSearch],
+    queryFn: ({ signal }) =>
+      listUsersPage(
+        {
+          page: 0,
+          pageSize: 20,
+          search: debouncedSearch || undefined,
+          sort: "username",
+          sortDir: "asc"
+        },
+        signal
+      ),
+    enabled: combobox.dropdownOpened,
+    staleTime: 30_000,
+    placeholderData: (prev) => prev
+  });
+
+  const candidates = (data?.items ?? []).filter((u) => u.userId !== userId);
+
+  return (
+    <Combobox
+      store={combobox}
+      withinPortal
+      onOptionSubmit={(val) => {
+        onSelect(val);
+        setSearch("");
+        combobox.closeDropdown();
+      }}
+    >
+      <Combobox.Target>
+        <InputBase
+          size="xs"
+          disabled={disabled}
+          value={search}
+          placeholder={currentSupervisorLabel ?? "— none —"}
+          rightSection={
+            isFetching ? <Loader size={12} /> : <Combobox.Chevron />
+          }
+          rightSectionPointerEvents="none"
+          onClick={(e) => {
+            e.stopPropagation();
+            combobox.openDropdown();
+          }}
+          onFocus={() => combobox.openDropdown()}
+          onBlur={() => {
+            combobox.closeDropdown();
+            setSearch("");
+          }}
+          onChange={(e) => {
+            combobox.openDropdown();
+            combobox.updateSelectedOptionIndex();
+            setSearch(e.currentTarget.value);
+          }}
+        />
+      </Combobox.Target>
+      <Combobox.Dropdown>
+        <Combobox.Options>
+          <Combobox.Option value="" key="__none" active={currentSupervisorId === ""}>
+            <Text size="sm" c="dimmed">— none —</Text>
+          </Combobox.Option>
+          {candidates.map((u) => {
+            const fullName = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim();
+            return (
+              <Combobox.Option
+                value={u.userId}
+                key={u.userId}
+                active={u.userId === currentSupervisorId}
+              >
+                <Text size="sm" fw={u.userId === currentSupervisorId ? 600 : 400}>
+                  {u.username}
+                </Text>
+                {fullName && (
+                  <Text size="xs" c="dimmed">
+                    {fullName}
+                  </Text>
+                )}
+              </Combobox.Option>
+            );
+          })}
+          {!isFetching && candidates.length === 0 && (
+            <Combobox.Empty>No users found</Combobox.Empty>
+          )}
+        </Combobox.Options>
+      </Combobox.Dropdown>
+    </Combobox>
   );
 }
 

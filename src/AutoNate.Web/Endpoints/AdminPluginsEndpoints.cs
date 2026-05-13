@@ -84,6 +84,33 @@ public static class AdminPluginsEndpoints
             .DisableAntiforgery()
             .RequireKindPermission(EntityKinds.Plugin, Actions.Manage);
 
+        group.MapPost("/{id:guid}/update", async (
+                Guid id,
+                HttpContext http,
+                IFormFile file,
+                IPluginManagementService svc,
+                CancellationToken ct) =>
+            {
+                if (file is null || file.Length == 0)
+                {
+                    return Results.BadRequest(new { error = "file is required" });
+                }
+                await using var stream = file.OpenReadStream();
+                var outcome = await svc.UpdateAsync(id, stream, http.GetActorId(), ct);
+                if (outcome.ErrorCode == "not_found") return Results.NotFound();
+                if (!outcome.Success)
+                {
+                    return outcome.ErrorCode switch
+                    {
+                        "uncompressed_too_large" => Results.StatusCode(StatusCodes.Status413PayloadTooLarge),
+                        _ => Results.BadRequest(new { error = outcome.ErrorMessage, code = outcome.ErrorCode }),
+                    };
+                }
+                return Results.Ok(outcome.Plugin);
+            })
+            .DisableAntiforgery()
+            .RequireKindPermission(EntityKinds.Plugin, Actions.Manage);
+
         group.MapPost("/{id:guid}/enable", async (
                 Guid id,
                 HttpContext http,

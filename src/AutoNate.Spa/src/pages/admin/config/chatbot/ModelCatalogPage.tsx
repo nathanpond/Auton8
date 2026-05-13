@@ -5,12 +5,14 @@ import {
   ActionIcon,
   Alert,
   Anchor,
+  Badge,
   Box,
   Button,
   Code,
   Grid,
   Group,
   Modal,
+  Switch,
   Text,
   TextInput,
   Textarea,
@@ -128,13 +130,13 @@ export default function ModelCatalogPage() {
         const m = row.original;
         return (
           <>
-            <div className="fw-semibold">
-              {m.displayName}
+            <Group gap="xs" wrap="nowrap">
+              <Text fw={600} size="sm">{m.displayName}</Text>
               {m.isDefault && (
-                <span className="badge bg-success ms-2">Default</span>
+                <Badge color="green" variant="filled" size="sm">Default</Badge>
               )}
-            </div>
-            <div className="small text-muted"><code>{m.modelId}</code></div>
+            </Group>
+            <Text size="xs" c="dimmed"><code>{m.modelId}</code></Text>
           </>
         );
       }
@@ -200,34 +202,29 @@ export default function ModelCatalogPage() {
         const busy = busyId === m.id;
         if (!m.providerHasConnection) {
           return (
-            <span
-              className="badge bg-light text-dark border"
+            <Badge
+              color="gray"
+              variant="light"
               title={`No External Connection configured for ${m.provider} — model can't be used by the chatbot`}
             >
               N/A
-            </span>
+            </Badge>
           );
         }
-        const switchId = `agent-use-${m.id}`;
         return (
-          <div className="form-check form-switch mb-0" onClick={(e) => e.stopPropagation()}>
-            <input
-              id={switchId}
-              type="checkbox"
-              role="switch"
-              className="form-check-input"
-              checked={m.isAvailable}
-              disabled={busy}
-              onChange={(e) => {
-                const next = e.target.checked;
-                void runAction(
-                  m.id,
-                  () => next ? setAgentModelAvailable(m.id) : setAgentModelUnavailable(m.id)
-                );
-              }}
-              aria-label={m.isAvailable ? "Disable agent use" : "Enable agent use"}
-            />
-          </div>
+          <Switch
+            checked={m.isAvailable}
+            disabled={busy}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const next = e.currentTarget.checked;
+              void runAction(
+                m.id,
+                () => next ? setAgentModelAvailable(m.id) : setAgentModelUnavailable(m.id)
+              );
+            }}
+            aria-label={m.isAvailable ? "Disable agent use" : "Enable agent use"}
+          />
         );
       }
     },

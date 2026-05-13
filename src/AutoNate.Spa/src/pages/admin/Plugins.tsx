@@ -11,13 +11,14 @@ import { Plugin, listPlugins } from "@/api/plugins";
 import { DataTable } from "@/components/data-table/DataTable";
 import UploadPluginModal from "./UploadPluginModal";
 
-const COLUMN_WIDTHS = ["32%", "14%", "14%", "22%", "18%"];
+const COLUMN_WIDTHS = ["28%", "12%", "12%", "20%", "28%"];
 
 export default function Plugins() {
   const enable = useEnablePlugin();
   const disable = useDisablePlugin();
   const remove = useDeletePlugin();
   const [showUpload, setShowUpload] = useState(false);
+  const [updateTarget, setUpdateTarget] = useState<Plugin | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,6 +114,18 @@ export default function Plugins() {
               <Button
                 size="xs"
                 variant="outline"
+                disabled={busyId === p.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setError(null);
+                  setUpdateTarget(p);
+                }}
+              >
+                Update
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
                 color="red"
                 disabled={busyId === p.id}
                 onClick={(e) => {
@@ -179,6 +192,12 @@ export default function Plugins() {
       />
 
       {showUpload && <UploadPluginModal onClose={() => setShowUpload(false)} />}
+      {updateTarget && (
+        <UploadPluginModal
+          updateTarget={updateTarget}
+          onClose={() => setUpdateTarget(null)}
+        />
+      )}
     </>
   );
 }

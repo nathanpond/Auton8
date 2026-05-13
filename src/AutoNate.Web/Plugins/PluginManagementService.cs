@@ -149,6 +149,158 @@ internal sealed class PluginManagementService : IPluginManagementService
         }
     }
 
+    public async Task<PluginUploadOutcome> UpdateAsync(
+        Guid id, Stream zipStream, Guid actorUserId, CancellationToken ct = default)
+    {
+        // Snapshot the existing row up-front so we know what to roll back to
+        // if the swap fails. The row carries the id, code, role password, and
+        // current enable state — all of which we want to preserve.
+        Plugin existing;
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        {
+            var row = await db.Plugins.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (row is null) return new(false, null, "not_found", "Plugin not found.");
+            if (row.Status == (int)PluginStatus.DeletedPending)
+            {
+                return new(false, null, "deleted", "Plugin is pending deletion.");
+            }
+            existing = row;
+        }
+
+        // Same staging dance as UploadAsync: copy the upload to a temp file
+        // so the validator can scan it without slurping into memory.
+        var tempZip = Path.Combine(_dataPaths.TempRoot, $"autonate-plugin-update-{Guid.NewGuid():N}.zip");
+        try
+        {
+            await using (var fs = File.Create(tempZip))
+            {
+                await zipStream.CopyToAsync(fs, ct);
+            }
+
+            var validation = PluginUploadValidator.Validate(tempZip, _options.MaxUploadBytes);
+            if (!validation.Success)
+            {
+                return new(false, null, validation.ErrorCode, validation.ErrorMessage);
+            }
+            var manifest = validation.Manifest!;
+
+            var wasEnabled = existing.Status == (int)PluginStatus.Enabled;
+
+            // Drop hooks + menu items + data source so the assembly stops being
+            // referenced and the old folder can be swapped. The schema and role
+            // stay intact — disable is purely a code-side operation.
+            if (wasEnabled)
+            {
+                await _runtime.DisableAsync(id, ct);
+                if (!string.IsNullOrEmpty(existing.Code))
+                {
+                    await _runtime.ReleaseDataSourceAsync(existing.Code);
+                }
+                await _runtime.DeletePluginMenuItemsAsync(id, ct);
+            }
+
+            var folder = Path.Combine(_runtime.PluginRoot, id.ToString("D"));
+            var backupFolder = $"{folder}.old-{Guid.NewGuid():N}";
+
+            try
+            {
+                if (Directory.Exists(folder))
+                {
+                    Directory.Move(folder, backupFolder);
+                }
+                Directory.CreateDirectory(folder);
+                ZipFile.ExtractToDirectory(tempZip, folder, overwriteFiles: true);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Failed to swap plugin files for {Id}; rolling back.", id);
+                try
+                {
+                    if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+                    if (Directory.Exists(backupFolder)) Directory.Move(backupFolder, folder);
+                }
+                catch (Exception restoreEx)
+                {
+                    _log.LogError(restoreEx, "Plugin {Id} update rollback also failed; folder may be in an inconsistent state.", id);
+                }
+                if (wasEnabled)
+                {
+                    var rollbackEnable = await _runtime.EnableAsync(existing, ct);
+                    if (!rollbackEnable.Success)
+                    {
+                        _log.LogWarning("Re-enable after update rollback failed for {Id}: {Err}", id, rollbackEnable.ErrorMessage);
+                    }
+                }
+                return new(false, null, "extract_failed", ex.Message);
+            }
+
+            // Persist the new manifest fields. Keep id, code, role password,
+            // and uploadedBy-history fields preserved through the swap; status
+            // resets to Disabled so the re-enable below is what flips it back.
+            Plugin updated;
+            await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+            {
+                var tracked = await db.Plugins.FirstOrDefaultAsync(p => p.Id == id, ct);
+                if (tracked is null)
+                {
+                    _log.LogError("Plugin row vanished mid-update for {Id}; cannot persist new manifest.", id);
+                    return new(false, null, "not_found", "Plugin row vanished during update.");
+                }
+                tracked.Name = manifest.Name;
+                tracked.Version = manifest.Version;
+                tracked.EntryAssembly = manifest.EntryAssembly;
+                tracked.EntryType = manifest.EntryType;
+                tracked.UploadedAt = DateTime.UtcNow;
+                tracked.UploadedBy = actorUserId;
+                tracked.LastError = null;
+                tracked.Status = (int)PluginStatus.Disabled;
+                await db.SaveChangesAsync(ct);
+                updated = tracked;
+            }
+
+            // If the plugin was running before the update, re-enable so the new
+            // code's Configure() registers menus + page templates and any new
+            // SQL migrations run against the preserved plg_<code> schema. On
+            // failure we leave the row Disabled with LastError populated —
+            // same shape as a normal Enable failure.
+            string? enableError = null;
+            if (wasEnabled)
+            {
+                var enableResult = await _runtime.EnableAsync(updated, ct);
+                await using var db = await _dbFactory.CreateDbContextAsync(ct);
+                var tracked = await db.Plugins.FirstAsync(p => p.Id == id, ct);
+                if (enableResult.Success)
+                {
+                    tracked.Status = (int)PluginStatus.Enabled;
+                    tracked.LastEnabledAt = DateTime.UtcNow;
+                    tracked.LastError = null;
+                }
+                else
+                {
+                    tracked.LastError = enableResult.ErrorMessage;
+                    enableError = enableResult.ErrorMessage;
+                }
+                await db.SaveChangesAsync(ct);
+                updated = tracked;
+            }
+
+            // Best-effort sweep of the backup folder. If the move-old step
+            // failed because of file locks, this delete will too — log and
+            // move on; the next startup can sweep stray .old-* folders.
+            if (Directory.Exists(backupFolder))
+            {
+                TryDeleteFolder(backupFolder);
+            }
+
+            await PublishAsync(ApplicationEventTypes.PluginUpdated, updated, actorUserId, enableError, ct);
+            return new(true, ToDto(updated), null, null);
+        }
+        finally
+        {
+            TryDeleteFile(tempZip);
+        }
+    }
+
     public async Task<PluginActionOutcome> EnableAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
         Plugin? row;

@@ -5,6 +5,7 @@ import {
   disablePlugin,
   enablePlugin,
   listPlugins,
+  updatePlugin,
   uploadPlugin,
 } from "@/api/plugins";
 
@@ -36,6 +37,14 @@ export function useUploadPlugin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (file: File) => uploadPlugin(file),
+    onSuccess: () => invalidatePluginAndMenus(qc),
+  });
+}
+
+export function useUpdatePlugin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => updatePlugin(id, file),
     onSuccess: () => invalidatePluginAndMenus(qc),
   });
 }

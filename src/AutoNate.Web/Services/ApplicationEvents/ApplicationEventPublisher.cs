@@ -7,6 +7,7 @@ namespace AutoNate.Web.Services.ApplicationEvents;
 public static class ApplicationEventTypes
 {
     public const string PluginUploaded = "plugin.uploaded";
+    public const string PluginUpdated = "plugin.updated";
     public const string PluginEnabled = "plugin.enabled";
     public const string PluginDisabled = "plugin.disabled";
     public const string PluginDeleted = "plugin.deleted";

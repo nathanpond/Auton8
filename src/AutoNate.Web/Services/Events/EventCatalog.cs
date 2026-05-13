@@ -389,6 +389,12 @@ public static class EventCatalog
                     ["errorMessage is null."]),
                 new EventCatalogEntry(
                     DaprApplicationEventPublisher.TopicName,
+                    ApplicationEventTypes.PluginUpdated,
+                    "An existing plugin's files have been replaced with a new upload; per-plugin schema/data preserved.",
+                    "Fires from PluginManagementService.UpdateAsync after the file swap, manifest fields, and (if it was enabled) re-enable commit. The plugin's id, code, role, and plg_<code> schema are unchanged.",
+                    ["errorMessage is null on a clean update; populated when the post-update re-enable failed."]),
+                new EventCatalogEntry(
+                    DaprApplicationEventPublisher.TopicName,
                     ApplicationEventTypes.PluginEnabled,
                     "A plugin has been enabled and its hooks are now live.",
                     "Fires from PluginManagementService.EnableAsync after PluginRuntime successfully loads the assembly and Configure() returns.",

@@ -11,6 +11,7 @@ import { MantineRoot } from "./providers/MantineRoot";
 
 import "@fortawesome/fontawesome-free/css/all.css";
 import "@mantine/core/styles.layer.css";
+import "@mantine/dropzone/styles.layer.css";
 import "@mantine/notifications/styles.layer.css";
 import "mantine-datatable/styles.layer.css";
 import "./index.css";

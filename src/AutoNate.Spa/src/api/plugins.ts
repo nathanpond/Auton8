@@ -49,6 +49,16 @@ export async function uploadPlugin(file: File): Promise<Plugin> {
   return normalize(data);
 }
 
+export async function updatePlugin(id: string, file: File): Promise<Plugin> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<Plugin & { status: PluginStatus | number }>(
+    `/api/admin/plugins/${id}/update`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  return normalize(data);
+}
+
 export async function enablePlugin(id: string): Promise<Plugin> {
   const { data } = await api.post<Plugin & { status: PluginStatus | number }>(
     `/api/admin/plugins/${id}/enable`);
