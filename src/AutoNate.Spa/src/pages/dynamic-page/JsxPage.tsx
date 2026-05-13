@@ -8,8 +8,73 @@ import React, {
   useState
 } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Alert, Text } from "@mantine/core";
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Checkbox,
+  Code,
+  Divider,
+  Grid,
+  Group,
+  Loader,
+  NumberInput,
+  PasswordInput,
+  Radio,
+  Select,
+  Stack,
+  Switch,
+  Table,
+  Tabs,
+  Text,
+  Textarea,
+  TextInput,
+  Title,
+  Tooltip
+} from "@mantine/core";
 import { api } from "@/api/client";
+import { DataTable } from "@/components/data-table/DataTable";
+
+// Bag of Mantine primitives + project wrappers forwarded into the JSX runtime
+// so admin-authored pages can use the design system directly (e.g. <Button>,
+// <DataTable>, <Switch>) instead of falling back to raw HTML with no styles.
+// Add new components here as plugin authors need them — bundle cost is paid
+// once, since this module is only imported when a JSX page actually renders.
+const mantineBindings = {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Checkbox,
+  Code,
+  DataTable,
+  Divider,
+  Grid,
+  Group,
+  Loader,
+  NumberInput,
+  PasswordInput,
+  Radio,
+  Select,
+  Stack,
+  Switch,
+  Table,
+  Tabs,
+  Text,
+  Textarea,
+  TextInput,
+  Title,
+  Tooltip
+};
+const MANTINE_BINDING_NAMES = Object.keys(mantineBindings) as (keyof typeof mantineBindings)[];
+const MANTINE_DESTRUCTURE = `const { ${MANTINE_BINDING_NAMES.join(", ")} } = Mantine;`;
 
 type Sucrase = typeof import("sucrase");
 
@@ -109,7 +174,8 @@ export function JsxPage({ source, props }: JsxPageProps) {
         "NavLink",
         "api",
         "logout",
-        `${code}\n;return typeof Page === "function" ? Page : null;`
+        "Mantine",
+        `${MANTINE_DESTRUCTURE}\n${code}\n;return typeof Page === "function" ? Page : null;`
       );
       const Page = factory(
         React,
@@ -122,7 +188,8 @@ export function JsxPage({ source, props }: JsxPageProps) {
         Link,
         NavLink,
         api,
-        logout
+        logout,
+        mantineBindings
       );
       if (typeof Page !== "function") {
         return {

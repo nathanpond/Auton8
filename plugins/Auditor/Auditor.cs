@@ -567,109 +567,74 @@ public sealed class Auditor : IAutoNatePlugin
           }, [code, collect, retentionDays, trackUnsuccessful]);
 
           return (
-            <>
-              <div className="page-head">
-                <h1 className="page-header mb-1">Auditor Settings</h1>
-                <p className="page-head-copy">
+            <Stack gap="md">
+              <Box>
+                <Title order={2} mb={4}>Auditor Settings</Title>
+                <Text c="dimmed">
                   Capture every audit-grade event the host publishes (data access, denials,
                   mutations) into the plugin's own log table. Off by default — flip
                   <em> Collect Audit Logs </em> on to start recording.
-                </p>
-              </div>
+                </Text>
+              </Box>
 
               {error && (
-                <div className="alert alert-danger" role="alert">
+                <Alert color="red" variant="light">
                   <strong>Error:</strong> {error}
-                </div>
+                </Alert>
               )}
 
               {loading ? (
-                <div className="text-muted">
-                  <i className="fa fa-spinner fa-spin me-2" /> Loading settings…
-                </div>
+                <Group gap="xs" align="center">
+                  <Loader size="sm" />
+                  <Text c="dimmed">Loading settings…</Text>
+                </Group>
               ) : (
-                <div className="panel panel-inverse">
-                  <div className="panel-heading">
-                    <h4 className="panel-title">Configuration</h4>
-                  </div>
-                  <div className="panel-body">
+                <Card withBorder shadow="sm">
+                  <Stack gap="lg">
+                    <Title order={5} m={0}>Configuration</Title>
 
-                    <div className="form-check form-switch mb-3">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        role="switch"
-                        id="auditor-collect"
-                        checked={collect}
-                        onChange={(e) => setCollect(e.target.checked)}
-                      />
-                      <label className="form-check-label" htmlFor="auditor-collect">
-                        <strong>Collect Audit Logs</strong>
-                      </label>
-                      <div className="form-text">
-                        When off, no events are written. The hook still fires but the
-                        Auditor short-circuits before touching the database.
-                      </div>
-                    </div>
+                    <Switch
+                      label="Collect Audit Logs"
+                      description="When off, no events are written. The hook still fires but the Auditor short-circuits before touching the database."
+                      checked={collect}
+                      onChange={(e) => setCollect(e.currentTarget.checked)}
+                    />
 
-                    <div className="form-check form-switch mb-3">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        role="switch"
-                        id="auditor-unsuccessful"
-                        checked={trackUnsuccessful}
-                        onChange={(e) => setTrackUnsuccessful(e.target.checked)}
-                      />
-                      <label className="form-check-label" htmlFor="auditor-unsuccessful">
-                        <strong>Track unsuccessful data requests</strong>
-                      </label>
-                      <div className="form-text">
-                        Includes denied and anonymous events. Off keeps only events the
-                        authorization layer allowed.
-                      </div>
-                    </div>
+                    <Switch
+                      label="Track unsuccessful data requests"
+                      description="Includes denied and anonymous events. Off keeps only events the authorization layer allowed."
+                      checked={trackUnsuccessful}
+                      onChange={(e) => setTrackUnsuccessful(e.currentTarget.checked)}
+                    />
 
-                    <div className="mb-3" style={{ maxWidth: "16rem" }}>
-                      <label htmlFor="auditor-retention" className="form-label">
-                        <strong>History retention (days)</strong>
-                      </label>
-                      <input
-                        id="auditor-retention"
-                        type="number"
-                        min="1"
-                        className="form-control form-control-sm"
-                        value={retentionDays}
-                        onChange={(e) => setRetentionDays(e.target.value)}
-                      />
-                      <div className="form-text">
-                        Rows older than this many days are pruned opportunistically as
-                        new events arrive.
-                      </div>
-                    </div>
+                    <NumberInput
+                      label="History retention (days)"
+                      description="Rows older than this many days are pruned opportunistically as new events arrive."
+                      min={1}
+                      value={retentionDays}
+                      onChange={(v) => setRetentionDays(typeof v === "number" ? v : Number(v) || 7)}
+                      w={240}
+                    />
 
-                    <div className="d-flex align-items-center gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-primary"
+                    <Group gap="sm" align="center">
+                      <Button
                         onClick={save}
-                        disabled={saving || !code}
+                        loading={saving}
+                        disabled={!code}
                       >
-                        {saving ? (
-                          <><i className="fa fa-spinner fa-spin me-2" /> Saving…</>
-                        ) : "Save settings"}
-                      </button>
+                        Save settings
+                      </Button>
                       {savedAt && !saving && (
-                        <span className="text-success small">
-                          <i className="fa fa-check me-1" /> Saved at {savedAt}
-                        </span>
+                        <Text size="sm" c="green">
+                          <i className="fa fa-check" style={{ marginRight: 4 }} />
+                          Saved at {savedAt}
+                        </Text>
                       )}
-                    </div>
-
-                  </div>
-                </div>
+                    </Group>
+                  </Stack>
+                </Card>
               )}
-            </>
+            </Stack>
           );
         }
         """;

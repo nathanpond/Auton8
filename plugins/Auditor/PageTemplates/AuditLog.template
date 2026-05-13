@@ -6,40 +6,7 @@
 // JSX can address the host's per-plugin data endpoint without knowing its
 // own code at build time.
 function Page() {
-  const PAGE_SIZE = 50;
-  const [rows, setRows] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const fetchPage = useCallback((nextOffset) => {
-    setLoading(true);
-    setError(null);
-    api
-      .get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log", {
-        params: { limit: PAGE_SIZE, offset: nextOffset }
-      })
-      .then((res) => {
-        const body = (res && res.data) || {};
-        setRows(Array.isArray(body.rows) ? body.rows : []);
-        setTotal(typeof body.total === "number" ? body.total : 0);
-      })
-      .catch((err) => {
-        const message =
-          (err && err.response && err.response.data && err.response.data.error) ||
-          (err && err.message) ||
-          String(err);
-        setError(message);
-        setRows([]);
-        setTotal(0);
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    fetchPage(offset);
-  }, [fetchPage, offset]);
+  const PLUGIN_CODE = "{{pluginCode}}";
 
   const formatTimestamp = (value) => {
     if (!value) return "";
@@ -50,128 +17,114 @@ function Page() {
     }
   };
 
-  const showingFrom = total === 0 ? 0 : offset + 1;
-  const showingTo = Math.min(offset + rows.length, total);
+  const loadPage = useCallback(async ({ page, pageSize }) => {
+    const res = await api.get(
+      "/api/admin/plugins/by-code/" + PLUGIN_CODE + "/data/audit-log",
+      { params: { limit: pageSize, offset: page * pageSize } }
+    );
+    const body = (res && res.data) || {};
+    return {
+      items: Array.isArray(body.rows) ? body.rows : [],
+      totalCount: typeof body.total === "number" ? body.total : 0
+    };
+  }, []);
+
+  const columns = useMemo(() => [
+    {
+      id: "occurredAt",
+      accessorKey: "occurredAt",
+      header: "Time",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <Text size="sm" component="span">{formatTimestamp(row.original.occurredAt)}</Text>
+      )
+    },
+    {
+      id: "eventType",
+      accessorKey: "eventType",
+      header: "Event",
+      enableSorting: false,
+      cell: ({ row }) => <Code>{row.original.eventType}</Code>
+    },
+    {
+      id: "resourceKind",
+      accessorKey: "resourceKind",
+      header: "Resource",
+      enableSorting: false
+    },
+    {
+      id: "resourceLabel",
+      accessorKey: "resourceLabel",
+      header: "Name",
+      enableSorting: false,
+      meta: { wrap: true },
+      cell: ({ row }) =>
+        row.original.resourceLabel ? (
+          <Text fw={600} component="span">{row.original.resourceLabel}</Text>
+        ) : (
+          <Text c="dimmed" component="span">—</Text>
+        )
+    },
+    {
+      id: "actorUserName",
+      accessorKey: "actorUserName",
+      header: "Actor",
+      enableSorting: false,
+      cell: ({ row }) =>
+        row.original.actorUserName ? (
+          <Text component="span">{row.original.actorUserName}</Text>
+        ) : (
+          <Text c="dimmed" component="span">(system)</Text>
+        )
+    },
+    {
+      id: "authOutcome",
+      accessorKey: "authOutcome",
+      header: "Outcome",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const o = row.original.authOutcome;
+        const color = o === "Allowed" ? "green" : o === "Denied" ? "red" : "gray";
+        return <Badge color={color} variant="filled">{o}</Badge>;
+      }
+    },
+    {
+      id: "routePath",
+      accessorKey: "routePath",
+      header: "Route",
+      enableSorting: false,
+      meta: { wrap: true },
+      cell: ({ row }) => (
+        <Text size="sm" c="dimmed" component="span">
+          <span style={{ marginRight: 8 }}>{row.original.httpMethod}</span>
+          <Code>{row.original.routePath}</Code>
+        </Text>
+      )
+    }
+  ], []);
 
   return (
-    <>
-      <div className="page-head">
-        <h1 className="page-header mb-1">Audit Log</h1>
-        <p className="page-head-copy">
+    <Stack gap="md">
+      <Box>
+        <Title order={2} mb={4}>Audit Log</Title>
+        <Text c="dimmed">
           Audit-grade events captured by the Auditor plugin. Collection is
           driven by the plugin's settings page; rows older than the retention
           window are pruned opportunistically as new events arrive.
-        </p>
-      </div>
+        </Text>
+      </Box>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <strong>Error:</strong> {error}
-        </div>
-      )}
-
-      <div className="panel panel-inverse">
-        <div className="panel-heading d-flex align-items-center justify-content-between">
-          <h4 className="panel-title">Recorded events</h4>
-          <div className="text-muted small">
-            {loading ? (
-              <>
-                <i className="fa fa-spinner fa-spin me-2" /> Loading…
-              </>
-            ) : (
-              <>
-                Showing <strong>{showingFrom}</strong>–<strong>{showingTo}</strong> of{" "}
-                <strong>{total}</strong>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="panel-body p-0">
-          <div className="table-responsive">
-            <table className="table table-sm table-hover mb-0">
-              <thead className="table-light">
-                <tr>
-                  <th style={{ width: "12rem" }}>Time</th>
-                  <th>Event</th>
-                  <th>Resource</th>
-                  <th>Name</th>
-                  <th>Actor</th>
-                  <th style={{ width: "5rem" }}>Outcome</th>
-                  <th>Route</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={7} className="text-muted text-center py-4">
-                      No audit log entries yet. Enable collection on the
-                      Auditor Settings page to start recording.
-                    </td>
-                  </tr>
-                )}
-                {rows.map((row) => (
-                  <tr key={row.id}>
-                    <td className="text-nowrap small">{formatTimestamp(row.occurredAt)}</td>
-                    <td className="small">
-                      <code>{row.eventType}</code>
-                    </td>
-                    <td className="small">{row.resourceKind}</td>
-                    <td className="small">
-                      {row.resourceLabel ? (
-                        <strong>{row.resourceLabel}</strong>
-                      ) : (
-                        <span className="text-muted">—</span>
-                      )}
-                    </td>
-                    <td className="small">
-                      {row.actorUserName ? (
-                        row.actorUserName
-                      ) : (
-                        <span className="text-muted">(system)</span>
-                      )}
-                    </td>
-                    <td className="small">
-                      <span
-                        className={
-                          row.authOutcome === "Allowed"
-                            ? "badge bg-success"
-                            : row.authOutcome === "Denied"
-                              ? "badge bg-danger"
-                              : "badge bg-secondary"
-                        }
-                      >
-                        {row.authOutcome}
-                      </span>
-                    </td>
-                    <td className="small text-muted">
-                      <span className="me-2">{row.httpMethod}</span>
-                      <code>{row.routePath}</code>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="panel-footer d-flex justify-content-between align-items-center">
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            disabled={loading || offset === 0}
-          >
-            <i className="fa fa-chevron-left me-1" /> Newer
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
-            onClick={() => setOffset(offset + PAGE_SIZE)}
-            disabled={loading || offset + rows.length >= total}
-          >
-            Older <i className="fa fa-chevron-right ms-1" />
-          </button>
-        </div>
-      </div>
-    </>
+      <DataTable
+        mode="server"
+        loadPage={loadPage}
+        queryKey={["audit-log", PLUGIN_CODE]}
+        columns={columns}
+        rowKey={(r) => String(r.id)}
+        columnWidths={["12rem", "auto", "10%", "auto", "12%", "8%", "auto"]}
+        searchEnabled={false}
+        emptyMessage="No audit log entries yet. Enable collection on the Auditor Settings page to start recording."
+        loadingMessage="Loading audit log…"
+      />
+    </Stack>
   );
 }
