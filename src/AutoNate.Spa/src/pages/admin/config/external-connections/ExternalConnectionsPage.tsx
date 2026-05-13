@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ActionIcon,
   Alert,
   Badge,
   Box,
@@ -12,11 +13,15 @@ import {
   NativeSelect,
   Stack,
   Switch,
-  Table,
   Text,
   TextInput,
-  Title
+  Title,
+  Tooltip
 } from "@mantine/core";
+import {
+  DataTable,
+  type DataTableColumn
+} from "@/components/data-table/DataTable";
 import {
   ExternalConnection,
   ExternalConnectionMetadata,
@@ -24,7 +29,6 @@ import {
   createExternalConnection,
   deleteExternalConnection,
   listExternalConnections,
-  setDefaultExternalConnection,
   testExternalConnection,
   updateExternalConnection
 } from "@/api/externalConnections";
@@ -90,6 +94,9 @@ const KINDS: ConnectionKindDef[] = [
   }
 ];
 
+const COLUMN_WIDTHS = ["38%", "28%", "12%", "22%"];
+const QUERY_KEY = ["external-connections", "list"] as const;
+
 type FormState = {
   id: string | null;
   kind: string;
@@ -131,13 +138,14 @@ export function ExternalConnectionsPage() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<FormState | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestConnectionResult>>({});
+  const [pendingDelete, setPendingDelete] = useState<ExternalConnection | null>(null);
 
   const listQuery = useQuery({
-    queryKey: ["external-connections", "list"],
+    queryKey: QUERY_KEY,
     queryFn: ({ signal }) => listExternalConnections(undefined, signal)
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["external-connections", "list"] });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: QUERY_KEY });
 
   const createMutation = useMutation({
     mutationFn: createExternalConnection,
@@ -152,12 +160,10 @@ export function ExternalConnectionsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: deleteExternalConnection,
-    onSuccess: invalidate
-  });
-
-  const setDefaultMutation = useMutation({
-    mutationFn: setDefaultExternalConnection,
-    onSuccess: invalidate
+    onSuccess: () => {
+      invalidate();
+      setPendingDelete(null);
+    }
   });
 
   const testMutation = useMutation({
@@ -224,138 +230,155 @@ export function ExternalConnectionsPage() {
     }
   };
 
+  const loadAll = useMemo(
+    () => async (): Promise<ExternalConnection[]> => listExternalConnections(),
+    []
+  );
+
+  const columns = useMemo<DataTableColumn<ExternalConnection>[]>(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <>
+            <Text fw={600}>{row.original.name}</Text>
+            {row.original.description && (
+              <Text size="sm" c="dimmed">
+                {row.original.description}
+              </Text>
+            )}
+          </>
+        )
+      },
+      {
+        id: "kind",
+        accessorKey: "kind",
+        header: "Kind",
+        cell: ({ row }) => <Code>{row.original.kind}</Code>
+      },
+      {
+        id: "isEnabled",
+        accessorFn: (r) => (r.isEnabled ? "Enabled" : "Disabled"),
+        header: "Enabled",
+        cell: ({ row }) =>
+          row.original.isEnabled ? (
+            <Badge color="blue" variant="filled">
+              Enabled
+            </Badge>
+          ) : (
+            <Badge color="gray" variant="filled">
+              Disabled
+            </Badge>
+          )
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const result = testResults[row.original.id];
+          return (
+            <>
+              <Group gap={4} wrap="nowrap" justify="flex-end">
+                <Tooltip label="Edit" withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="blue"
+                    aria-label={`Edit ${row.original.name}`}
+                    onClick={() => startEdit(row.original)}
+                  >
+                    <i className="fa fa-pen" />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="Test" withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    aria-label={`Test ${row.original.name}`}
+                    onClick={() => testMutation.mutate(row.original.id)}
+                    loading={
+                      testMutation.isPending && testMutation.variables === row.original.id
+                    }
+                  >
+                    <i className="fa fa-plug" />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="Delete" withArrow>
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    aria-label={`Delete ${row.original.name}`}
+                    onClick={() => setPendingDelete(row.original)}
+                  >
+                    <i className="fa fa-trash" />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+              {result && (
+                <Text size="sm" c={result.ok ? "green" : "red"} mt={4} ta="right">
+                  {result.ok
+                    ? `OK (${result.latencyMs}ms${result.modelEcho ? `, ${result.modelEcho}` : ""})`
+                    : `Error: ${result.error}`}
+                </Text>
+              )}
+            </>
+          );
+        }
+      }
+    ],
+    [testResults, testMutation]
+  );
+
   return (
     <Card withBorder shadow="sm">
       <Group justify="space-between" align="center" mb="md">
         <Title order={5} m={0}>
           External Connections
         </Title>
-        <Button size="xs" leftSection={<i className="fa fa-plus" />} onClick={startNew}>
-          New connection
-        </Button>
       </Group>
 
-      {listQuery.isLoading && <Text>Loading…</Text>}
-      {listQuery.isError && <Text c="red">Failed to load connections.</Text>}
-      {listQuery.data && listQuery.data.length === 0 && (
-        <Text c="dimmed">
-          No external connections yet. Add one to wire an LLM or search provider into the agent.
-        </Text>
+      {listQuery.isError && (
+        <Alert color="red" variant="light" mb="md">
+          Failed to load connections.
+        </Alert>
       )}
-      {listQuery.data && listQuery.data.length > 0 && (
-        <Table withTableBorder striped verticalSpacing="xs">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Kind</Table.Th>
-              <Table.Th>Name</Table.Th>
-              <Table.Th>Default</Table.Th>
-              <Table.Th>Enabled</Table.Th>
-              <Table.Th>Secret</Table.Th>
-              <Table.Th>Actions</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {listQuery.data.map((row) => (
-              <Table.Tr key={row.id}>
-                <Table.Td>
-                  <Code>{row.kind}</Code>
-                </Table.Td>
-                <Table.Td>
-                  <Text fw={600}>{row.name}</Text>
-                  {row.description && (
-                    <Text size="sm" c="dimmed">
-                      {row.description}
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  {row.isDefault ? (
-                    <Badge color="green" variant="filled">
-                      Default
-                    </Badge>
-                  ) : (
-                    <Button
-                      size="xs"
-                      variant="default"
-                      onClick={() => setDefaultMutation.mutate(row.id)}
-                      disabled={setDefaultMutation.isPending}
-                    >
-                      Set default
-                    </Button>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  {row.isEnabled ? (
-                    <Badge color="blue" variant="filled">
-                      Enabled
-                    </Badge>
-                  ) : (
-                    <Badge color="gray" variant="filled">
-                      Disabled
-                    </Badge>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  {row.secretFingerprint ? (
-                    <Code>{row.secretFingerprint}</Code>
-                  ) : (
-                    <Text size="sm" c="yellow">
-                      No secret
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Button.Group>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      color="blue"
-                      onClick={() => startEdit(row)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="default"
-                      onClick={() => testMutation.mutate(row.id)}
-                      disabled={testMutation.isPending && testMutation.variables === row.id}
-                    >
-                      Test
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      color="red"
-                      onClick={() => {
-                        if (window.confirm(`Delete "${row.name}"?`)) {
-                          deleteMutation.mutate(row.id);
-                        }
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </Button.Group>
-                  {testResults[row.id] && (
-                    <Text
-                      size="sm"
-                      c={testResults[row.id].ok ? "green" : "red"}
-                      mt={4}
-                    >
-                      {testResults[row.id].ok
-                        ? `OK (${testResults[row.id].latencyMs}ms${
-                            testResults[row.id].modelEcho
-                              ? `, ${testResults[row.id].modelEcho}`
-                              : ""
-                          })`
-                        : `Error: ${testResults[row.id].error}`}
-                    </Text>
-                  )}
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
+
+      <DataTable<ExternalConnection>
+        mode="client"
+        loadAll={loadAll}
+        queryKey={QUERY_KEY}
+        columns={columns}
+        rowKey={(r) => r.id}
+        columnWidths={COLUMN_WIDTHS}
+        searchPlaceholder="Search connections…"
+        emptyMessage="No external connections yet. Add one to wire an LLM or search provider into the agent."
+        loadingMessage="Loading connections…"
+        initialSort={[{ id: "kind", desc: false }]}
+        // Match against fields that aren't all in column accessors (description
+        // would otherwise be ignored by the default scan).
+        globalFilterFn={(r, search) => {
+          const needle = search.toLowerCase();
+          return (
+            r.name.toLowerCase().includes(needle) ||
+            r.kind.toLowerCase().includes(needle) ||
+            (r.description ?? "").toLowerCase().includes(needle)
+          );
+        }}
+        toolbarBeforeSearch={
+          <Tooltip label="New connection" withArrow>
+            <ActionIcon
+              size="lg"
+              variant="filled"
+              aria-label="New connection"
+              onClick={startNew}
+            >
+              <i className="fa fa-plus" />
+            </ActionIcon>
+          </Tooltip>
+        }
+      />
 
       {editing && (
         <ConnectionFormModal
@@ -367,6 +390,38 @@ export function ExternalConnectionsPage() {
           submitError={(createMutation.error ?? updateMutation.error) as Error | null}
         />
       )}
+
+      <Modal
+        opened={pendingDelete !== null}
+        onClose={() => (deleteMutation.isPending ? undefined : setPendingDelete(null))}
+        title="Delete connection"
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            Delete <strong>{pendingDelete?.name}</strong>? Any agent or skill that resolves
+            to this connection will fall back to its default — or fail if no other connection
+            of kind <Code>{pendingDelete?.kind}</Code> is available.
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button
+              variant="default"
+              onClick={() => setPendingDelete(null)}
+              disabled={deleteMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              leftSection={<i className="fa fa-trash" />}
+              loading={deleteMutation.isPending}
+              onClick={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
+            >
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Card>
   );
 }
