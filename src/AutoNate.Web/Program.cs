@@ -260,6 +260,21 @@ builder.Services.AddScoped<IInstanceAuthorizer, UserInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, ExternalConnectionInstanceAuthorizer>();
 
 builder.Services.AddScoped<IAuthorizer, Authorizer>();
+// Content hierarchy — separate authorization path (project-role baseline +
+// closest-ancestor overrides + deletions_locked enforcement). RequirePermission
+// filter dispatches to this for project/cabinet/notebook/page kinds.
+builder.Services.AddScoped<AutoNate.Web.Services.Content.IContentAuthorizer,
+    AutoNate.Web.Services.Content.ContentAuthorizer>();
+builder.Services.AddScoped<AutoNate.Web.Services.Content.IContentTreeService,
+    AutoNate.Web.Services.Content.ContentTreeService>();
+builder.Services.AddScoped<AutoNate.Web.Services.Content.IProjectMembershipService,
+    AutoNate.Web.Services.Content.ProjectMembershipService>();
+builder.Services.AddScoped<AutoNate.Web.Services.Content.IContentVersionService,
+    AutoNate.Web.Services.Content.ContentVersionService>();
+builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentAttachmentOptions>()
+    .BindConfiguration("ContentAttachments");
+builder.Services.AddSingleton<AutoNate.Web.Services.Content.IContentAttachmentStore,
+    AutoNate.Web.Services.Content.FilesystemContentAttachmentStore>();
 builder.Services.AddScoped<AuthCacheBumper>();
 builder.Services.AddScoped<EntityEdgeReconciler>();
 builder.Services.AddScoped<IRoleStore, EfCoreRoleStore>();
@@ -876,6 +891,20 @@ app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
 app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
+
+// Content hierarchy endpoints (Projects → Cabinets → Notebooks → Pages →
+// Notes plus per-page versions and binary attachments). All routed through
+// IContentAuthorizer; nothing here is gated by SiteConfig.
+app.MapProjectEndpoints();
+app.MapProjectMemberEndpoints();
+app.MapCabinetEndpoints();
+app.MapNotebookEndpoints();
+app.MapContentPageEndpoints();
+app.MapPageVersionEndpoints();
+app.MapPageAttachmentEndpoints();
+app.MapNoteEndpoints();
+app.MapNoteVersionEndpoints();
+app.MapContentLocatorEndpoints();
 
 // Runtime-mutable public assets live under /data/wwwroot and are served at the
 // configured prefix (default /files). MapStaticAssets only handles compile-time

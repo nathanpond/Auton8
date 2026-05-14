@@ -6,6 +6,10 @@ using WorkflowModelModel = AutoNate.Web.Models.WorkflowModel;
 using FormModel = AutoNate.Web.Models.Forms.Form;
 using ExternalConnectionModel = AutoNate.Web.Persistence.Scaffolded.ExternalConnection;
 using SystemIssueModel = AutoNate.Web.Services.SystemIssues.SystemIssue;
+using ProjectModel = AutoNate.Web.Persistence.Scaffolded.Project;
+using CabinetModel = AutoNate.Web.Persistence.Scaffolded.Cabinet;
+using NotebookModel = AutoNate.Web.Persistence.Scaffolded.Notebook;
+using PageModel = AutoNate.Web.Persistence.Scaffolded.Page;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
@@ -21,7 +25,8 @@ public static class CoreEntityTypes
         {
             User!, Group!, Role!, RecordType!, Record!,
             WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
-            Form!, ExternalConnection!, SystemIssue!, SiteConfig!
+            Form!, ExternalConnection!, SystemIssue!, SiteConfig!,
+            Project!, Cabinet!, Notebook!, Page!
         });
 
     public static EntityTypeDefinition User { get; } = new(
@@ -173,5 +178,42 @@ public static class CoreEntityTypes
         clrType: typeof(object),
         idClrType: typeof(Guid),
         actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
+        tags: Array.Empty<string>());
+
+    // Content hierarchy kinds. Authorization for these is handled by
+    // IContentAuthorizer (project-role baseline + closest-ancestor override
+    // through content_ancestors). Registering them here makes their (kind,
+    // action) pairs grantable through the standard Grants admin page; the
+    // grants themselves are still stored in permission_grants. Selector
+    // predicates / tags are not supported in this phase — selectors must be
+    // path-only (e.g. /cabinet/{id}). Project intentionally omits Create:
+    // project creation is gated by authentication alone (the creator becomes
+    // Owner). Note is intentionally absent — notes inherit their page's gate.
+    public static EntityTypeDefinition Project { get; } = new(
+        kind: EntityKinds.Project,
+        clrType: typeof(ProjectModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Edit, Actions.Delete, Actions.Archive },
+        tags: Array.Empty<string>());
+
+    public static EntityTypeDefinition Cabinet { get; } = new(
+        kind: EntityKinds.Cabinet,
+        clrType: typeof(CabinetModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Archive },
+        tags: Array.Empty<string>());
+
+    public static EntityTypeDefinition Notebook { get; } = new(
+        kind: EntityKinds.Notebook,
+        clrType: typeof(NotebookModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Archive },
+        tags: Array.Empty<string>());
+
+    public static EntityTypeDefinition Page { get; } = new(
+        kind: EntityKinds.Page,
+        clrType: typeof(PageModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Archive },
         tags: Array.Empty<string>());
 }

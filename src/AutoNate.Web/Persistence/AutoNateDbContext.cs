@@ -90,6 +90,26 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<AgentModel> AgentModels { get; set; }
 
+    public virtual DbSet<Project> Projects { get; set; }
+
+    public virtual DbSet<ProjectMember> ProjectMembers { get; set; }
+
+    public virtual DbSet<Cabinet> Cabinets { get; set; }
+
+    public virtual DbSet<Notebook> Notebooks { get; set; }
+
+    public virtual DbSet<Page> Pages { get; set; }
+
+    public virtual DbSet<PageVersion> PageVersions { get; set; }
+
+    public virtual DbSet<PageAttachment> PageAttachments { get; set; }
+
+    public virtual DbSet<Note> Notes { get; set; }
+
+    public virtual DbSet<NoteVersion> NoteVersions { get; set; }
+
+    public virtual DbSet<ContentAncestor> ContentAncestors { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -1099,6 +1119,265 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.SortOrder).HasColumnName("sort_order").HasDefaultValue(0);
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("projects_pkey");
+            entity.ToTable("projects");
+            entity.HasIndex(e => e.UpdatedAtUtc, "ix_projects_updated_at_utc").IsDescending();
+            entity.HasIndex(e => e.Locator, "projects_locator_key").IsUnique();
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.DeletionsLocked).HasColumnName("deletions_locked");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<ProjectMember>(entity =>
+        {
+            entity.HasKey(e => new { e.ProjectId, e.UserId }).HasName("project_members_pkey");
+            entity.ToTable("project_members");
+            entity.HasIndex(e => e.UserId, "ix_project_members_user_id");
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.ProjectId).HasColumnName("project_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Role).HasColumnName("role");
+            entity.Property(e => e.AddedAtUtc).HasColumnName("added_at_utc");
+            entity.Property(e => e.AddedBy).HasColumnName("added_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Cabinet>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("cabinets_pkey");
+            entity.ToTable("cabinets");
+            entity.HasIndex(e => e.ProjectId, "ix_cabinets_project_id");
+            entity.HasIndex(e => e.Locator, "cabinets_locator_key").IsUnique();
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.ProjectId).HasColumnName("project_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Icon).HasColumnName("icon");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Notebook>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("notebooks_pkey");
+            entity.ToTable("notebooks");
+            entity.HasIndex(e => e.CabinetId, "ix_notebooks_cabinet_id");
+            entity.HasIndex(e => e.Locator, "notebooks_locator_key").IsUnique();
+
+            entity.HasOne<Cabinet>()
+                .WithMany()
+                .HasForeignKey(e => e.CabinetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.CabinetId).HasColumnName("cabinet_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Icon).HasColumnName("icon");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Page>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("pages_pkey");
+            entity.ToTable("pages");
+            entity.HasIndex(e => e.NotebookId, "ix_pages_notebook_id");
+            entity.HasIndex(e => e.ParentPageId, "ix_pages_parent_page_id");
+            entity.HasIndex(e => e.Locator, "pages_locator_key").IsUnique();
+
+            entity.HasOne<Notebook>()
+                .WithMany()
+                .HasForeignKey(e => e.NotebookId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Self-referential FK for parent_page_id. OnDelete cascade matches
+            // the SQL schema (deleting a page deletes its descendant pages).
+            entity.HasOne<Page>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentPageId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.NotebookId).HasColumnName("notebook_id");
+            entity.Property(e => e.ParentPageId).HasColumnName("parent_page_id");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.BodyJsonb).HasColumnName("body_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.CurrentVersionNumber).HasColumnName("current_version_number");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<PageVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("page_versions_pkey");
+            entity.ToTable("page_versions");
+            entity.HasIndex(e => new { e.PageId, e.VersionNumber },
+                "page_versions_page_id_version_number_key").IsUnique();
+            entity.HasIndex(e => e.PageId, "ix_page_versions_page_id");
+
+            entity.HasOne<Page>()
+                .WithMany()
+                .HasForeignKey(e => e.PageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.PageId).HasColumnName("page_id");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.BodyJsonb).HasColumnName("body_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<PageAttachment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("page_attachments_pkey");
+            entity.ToTable("page_attachments");
+            entity.HasIndex(e => e.PageId, "ix_page_attachments_page_id");
+            entity.HasIndex(e => e.Sha256Hex, "ix_page_attachments_sha256");
+
+            entity.HasOne<Page>()
+                .WithMany()
+                .HasForeignKey(e => e.PageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.PageId).HasColumnName("page_id");
+            entity.Property(e => e.FileName).HasColumnName("file_name");
+            entity.Property(e => e.ContentType).HasColumnName("content_type");
+            entity.Property(e => e.ByteSize).HasColumnName("byte_size");
+            entity.Property(e => e.Sha256Hex).HasColumnName("sha256_hex");
+            entity.Property(e => e.StorageKey).HasColumnName("storage_key");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Note>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("notes_pkey");
+            entity.ToTable("notes");
+            entity.HasIndex(e => e.PageId, "ix_notes_page_id");
+            entity.HasIndex(e => e.Locator, "notes_locator_key").IsUnique();
+
+            entity.HasOne<Page>()
+                .WithMany()
+                .HasForeignKey(e => e.PageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.PageId).HasColumnName("page_id");
+            entity.Property(e => e.NoteKind).HasColumnName("note_kind");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.ContentJsonb).HasColumnName("content_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.CurrentVersionNumber).HasColumnName("current_version_number");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<NoteVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("note_versions_pkey");
+            entity.ToTable("note_versions");
+            entity.HasIndex(e => new { e.NoteId, e.VersionNumber },
+                "note_versions_note_id_version_number_key").IsUnique();
+            entity.HasIndex(e => e.NoteId, "ix_note_versions_note_id");
+
+            entity.HasOne<Note>()
+                .WithMany()
+                .HasForeignKey(e => e.NoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.NoteId).HasColumnName("note_id");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.NoteKind).HasColumnName("note_kind");
+            entity.Property(e => e.ContentJsonb).HasColumnName("content_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<ContentAncestor>(entity =>
+        {
+            entity.HasKey(e => new { e.DescendantKind, e.DescendantId, e.AncestorKind, e.AncestorId })
+                .HasName("content_ancestors_pkey");
+            entity.ToTable("content_ancestors");
+            entity.HasIndex(e => new { e.DescendantKind, e.DescendantId }, "ix_content_ancestors_desc");
+            entity.HasIndex(e => new { e.AncestorKind, e.AncestorId }, "ix_content_ancestors_anc");
+
+            entity.Property(e => e.DescendantKind).HasColumnName("descendant_kind");
+            entity.Property(e => e.DescendantId).HasColumnName("descendant_id");
+            entity.Property(e => e.AncestorKind).HasColumnName("ancestor_kind");
+            entity.Property(e => e.AncestorId).HasColumnName("ancestor_id");
+            entity.Property(e => e.Depth).HasColumnName("depth");
         });
 
         OnModelCreatingPartial(modelBuilder);

@@ -26,4 +26,15 @@ public static class EntityKinds
     // keys today, future SMTP/S3/IdP). Single coarse Manage action gates
     // create/edit/delete/test/set-default; View gates list+read.
     public const string ExternalConnection = "externalconnection";
+
+    // Content hierarchy: Project → Cabinet → Notebook → Page → Note. Permission
+    // checks for these kinds are routed through IContentAuthorizer rather than
+    // the generic IAuthorizer because effective access combines a project-role
+    // baseline (project_members table) with closest-ancestor overrides from
+    // permission_grants. Notes are intentionally not a permissionable kind —
+    // they inherit their page's access.
+    public const string Project = "project";
+    public const string Cabinet = "cabinet";
+    public const string Notebook = "notebook";
+    public const string Page = "page";
 }

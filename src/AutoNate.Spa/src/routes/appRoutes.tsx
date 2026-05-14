@@ -19,6 +19,7 @@ import FormDevView from "@/pages/forms/FormDevView";
 import FormPublicView from "@/pages/forms/FormPublicView";
 import TaskFormPage from "@/pages/workflow-tasks/TaskFormPage";
 import Notifications from "@/pages/notifications/Notifications";
+import NotesPage from "@/pages/notes/NotesPage";
 import DynamicPageRoute from "@/pages/dynamic-page/DynamicPageRoute";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
 
@@ -125,6 +126,16 @@ export const APP_ROUTES: AppRoute[] = [
 
   // Notifications inbox (per-user; not a configurable page template)
   { path: "notifications", element: protect(<Notifications />) },
+
+  // Content hierarchy: project → cabinet → notebook → page → note. Full-bleed
+  // layout (project picker + cabinet rail + explorer + tab strip + editors)
+  // that fills <AppShell.Main>; the page itself cancels the shell's default
+  // padding via `.app-shell-content-edge` on the outer container. The optional
+  // `:locator` param identifies the currently-open entity (project / cabinet
+  // / notebook / page / note) by its shared numeric locator — see
+  // /api/content/locator/{n} for resolution.
+  { path: "notes", element: protect(<NotesPage />) },
+  { path: "notes/:locator", element: protect(<NotesPage />) },
 
   // Forms feature: dev preview (draft) and runtime render (published).
   // Both require an authenticated user; the runtime render is additionally

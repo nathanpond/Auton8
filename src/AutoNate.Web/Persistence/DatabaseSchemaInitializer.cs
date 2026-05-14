@@ -2433,6 +2433,271 @@ internal static class DatabaseSchemaInitializer
             WHERE kind = 'summary';
         """;
 
+    // Content hierarchy: projects → cabinets → notebooks → pages → notes.
+    // Pages are self-nesting (parent_page_id). Notes are leaves with one of
+    // three content kinds (richtext / drawing / diagram). Pages and notes
+    // are versioned via append-only *_versions tables modelled on form_versions.
+    // Pages may carry binary attachments (metadata here, bytes on disk via
+    // IContentAttachmentStore). content_ancestors materialises the closure
+    // across the four permissionable kinds so IContentAuthorizer can resolve
+    // inheritance in a single indexed lookup; maintained by ContentTreeService.
+    private const string ContentHierarchySchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS projects (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            deletions_locked BOOLEAN NOT NULL DEFAULT FALSE,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_projects_updated_at_utc
+            ON projects (updated_at_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS project_members (
+            project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            user_id UUID NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('owner','contributor','viewer')),
+            added_at_utc TIMESTAMPTZ NOT NULL,
+            added_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL,
+            PRIMARY KEY (project_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_project_members_user_id
+            ON project_members (user_id);
+
+        CREATE TABLE IF NOT EXISTS cabinets (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            icon TEXT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_cabinets_project_id ON cabinets (project_id);
+
+        CREATE TABLE IF NOT EXISTS notebooks (
+            id UUID PRIMARY KEY,
+            cabinet_id UUID NOT NULL REFERENCES cabinets (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            icon TEXT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_notebooks_cabinet_id ON notebooks (cabinet_id);
+
+        CREATE TABLE IF NOT EXISTS pages (
+            id UUID PRIMARY KEY,
+            notebook_id UUID NOT NULL REFERENCES notebooks (id) ON DELETE CASCADE,
+            parent_page_id UUID NULL REFERENCES pages (id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            body_jsonb JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            current_version_number INT NOT NULL DEFAULT 1,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL,
+            CONSTRAINT ck_pages_no_self_parent
+                CHECK (parent_page_id IS NULL OR parent_page_id <> id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_pages_notebook_id ON pages (notebook_id);
+        CREATE INDEX IF NOT EXISTS ix_pages_parent_page_id ON pages (parent_page_id);
+
+        CREATE TABLE IF NOT EXISTS page_versions (
+            id UUID PRIMARY KEY,
+            page_id UUID NOT NULL REFERENCES pages (id) ON DELETE CASCADE,
+            version_number INT NOT NULL,
+            title TEXT NOT NULL,
+            body_jsonb JSONB NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('autosave','manual','restore')),
+            note TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS page_versions_page_id_version_number_key
+            ON page_versions (page_id, version_number);
+        CREATE INDEX IF NOT EXISTS ix_page_versions_page_id
+            ON page_versions (page_id);
+
+        CREATE TABLE IF NOT EXISTS page_attachments (
+            id UUID PRIMARY KEY,
+            page_id UUID NOT NULL REFERENCES pages (id) ON DELETE CASCADE,
+            file_name TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            byte_size BIGINT NOT NULL,
+            sha256_hex TEXT NOT NULL,
+            storage_key TEXT NOT NULL,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_page_attachments_page_id
+            ON page_attachments (page_id);
+        CREATE INDEX IF NOT EXISTS ix_page_attachments_sha256
+            ON page_attachments (sha256_hex);
+
+        CREATE TABLE IF NOT EXISTS notes (
+            id UUID PRIMARY KEY,
+            page_id UUID NOT NULL REFERENCES pages (id) ON DELETE CASCADE,
+            note_kind TEXT NOT NULL CHECK (note_kind IN ('richtext','drawing','diagram')),
+            title TEXT NULL,
+            content_jsonb JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            current_version_number INT NOT NULL DEFAULT 1,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_notes_page_id ON notes (page_id);
+
+        CREATE TABLE IF NOT EXISTS note_versions (
+            id UUID PRIMARY KEY,
+            note_id UUID NOT NULL REFERENCES notes (id) ON DELETE CASCADE,
+            version_number INT NOT NULL,
+            title TEXT NULL,
+            note_kind TEXT NOT NULL,
+            content_jsonb JSONB NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('autosave','manual','restore')),
+            note TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS note_versions_note_id_version_number_key
+            ON note_versions (note_id, version_number);
+        CREATE INDEX IF NOT EXISTS ix_note_versions_note_id
+            ON note_versions (note_id);
+
+        CREATE TABLE IF NOT EXISTS content_ancestors (
+            descendant_kind TEXT NOT NULL,
+            descendant_id UUID NOT NULL,
+            ancestor_kind TEXT NOT NULL,
+            ancestor_id UUID NOT NULL,
+            depth INT NOT NULL,
+            PRIMARY KEY (descendant_kind, descendant_id, ancestor_kind, ancestor_id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_content_ancestors_desc
+            ON content_ancestors (descendant_kind, descendant_id);
+        CREATE INDEX IF NOT EXISTS ix_content_ancestors_anc
+            ON content_ancestors (ancestor_kind, ancestor_id);
+        """;
+
+    // Short, human-friendly locator id shared across every content kind. We
+    // keep it numeric for v1 (e.g. /notes/42) — slugs can layer on later. A
+    // single sequence backs every table so locators are globally unique and
+    // we don't need a discriminator in the URL. ADD COLUMN IF NOT EXISTS +
+    // DEFAULT nextval(...) ensures pre-existing rows pick up a locator on
+    // first run without bespoke backfill SQL.
+    private const string ContentLocatorSchemaSql =
+        """
+        CREATE SEQUENCE IF NOT EXISTS content_locator_seq START 1;
+
+        ALTER TABLE projects
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS projects_locator_key
+            ON projects (locator);
+
+        ALTER TABLE cabinets
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS cabinets_locator_key
+            ON cabinets (locator);
+
+        ALTER TABLE notebooks
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS notebooks_locator_key
+            ON notebooks (locator);
+
+        ALTER TABLE pages
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS pages_locator_key
+            ON pages (locator);
+
+        ALTER TABLE notes
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS notes_locator_key
+            ON notes (locator);
+        """;
+
+    // Inserts a single starter project so the Notes UI has something to open
+    // on first launch. Idempotent: keyed off a fixed project id, so re-running
+    // the initializer never duplicates the row. Skipped if no local_users
+    // exist yet (the seed needs a real user to assign as Owner + created_by).
+    // The first local_users row (oldest by created_date) is the owner — on a
+    // greenfield install that's the bootstrap admin.
+    private const string ContentSampleProjectSeedSql =
+        """
+        DO $$
+        DECLARE
+            seed_user_id UUID;
+            seed_project_id UUID := '00000000-0000-0000-0000-000000010001'::uuid;
+        BEGIN
+            IF EXISTS (SELECT 1 FROM projects WHERE id = seed_project_id) THEN
+                RETURN;
+            END IF;
+
+            SELECT user_id INTO seed_user_id
+            FROM local_users
+            ORDER BY created_date ASC
+            LIMIT 1;
+
+            IF seed_user_id IS NULL THEN
+                RETURN;
+            END IF;
+
+            INSERT INTO projects (
+                id, name, description, deletions_locked, is_archived,
+                created_at_utc, updated_at_utc, created_by, updated_by
+            )
+            VALUES (
+                seed_project_id,
+                'Sample Project',
+                'Default seed project to get you started with content authoring.',
+                FALSE, FALSE, NOW(), NOW(), seed_user_id, seed_user_id
+            );
+
+            INSERT INTO project_members (
+                project_id, user_id, role,
+                added_at_utc, added_by, updated_at_utc, updated_by
+            )
+            VALUES (
+                seed_project_id, seed_user_id, 'owner',
+                NOW(), seed_user_id, NOW(), seed_user_id
+            );
+
+            INSERT INTO content_ancestors (
+                descendant_kind, descendant_id, ancestor_kind, ancestor_id, depth
+            )
+            VALUES (
+                'project', seed_project_id, 'project', seed_project_id, 0
+            )
+            ON CONFLICT DO NOTHING;
+        END $$;
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -2482,6 +2747,9 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(AgentModelCatalogSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(AgentModelDefaultAvailableColumnsSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotModelsMenuSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ContentHierarchySchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ContentLocatorSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

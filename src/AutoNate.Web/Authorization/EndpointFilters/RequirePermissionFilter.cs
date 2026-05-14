@@ -1,5 +1,6 @@
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Services.Auth;
+using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Events;
 using Microsoft.AspNetCore.Http;
 
@@ -30,7 +31,6 @@ public sealed class RequirePermissionFilter : IEndpointFilter
         EndpointFilterDelegate next)
     {
         var http = invocation.HttpContext;
-        var authorizer = http.RequestServices.GetRequiredService<IAuthorizer>();
         var auditPublisher = http.RequestServices.GetRequiredService<IAuditEventPublisher>();
 
         var id = _idFrom(invocation);
@@ -43,11 +43,30 @@ public sealed class RequirePermissionFilter : IEndpointFilter
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var decision = await authorizer.AuthorizeAsync(
-            http.User,
-            _action,
-            new EntityRef(_kind, id),
-            http.RequestAborted);
+        AuthDecision decision;
+        if (ContentKinds.IsContentKind(_kind))
+        {
+            // Content kinds (project/cabinet/notebook/page) route through
+            // IContentAuthorizer for closest-ancestor inheritance + role
+            // baseline + deletions_locked enforcement.
+            var contentAuthorizer = http.RequestServices.GetRequiredService<IContentAuthorizer>();
+            if (!Guid.TryParse(id, out var resourceId))
+            {
+                await PublishDenied(auditPublisher, id, "invalid_resource_id", http.RequestAborted);
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            decision = await contentAuthorizer.AuthorizeAsync(
+                http.User, _kind, resourceId, _action, http.RequestAborted);
+        }
+        else
+        {
+            var authorizer = http.RequestServices.GetRequiredService<IAuthorizer>();
+            decision = await authorizer.AuthorizeAsync(
+                http.User,
+                _action,
+                new EntityRef(_kind, id),
+                http.RequestAborted);
+        }
 
         if (!decision.IsAllowed)
         {
