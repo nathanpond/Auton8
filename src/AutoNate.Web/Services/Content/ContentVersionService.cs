@@ -1,15 +1,46 @@
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace AutoNate.Web.Services.Content;
 
 public sealed class ContentVersionService : IContentVersionService
 {
-    public async Task<int> SnapshotPageBeforeChangeAsync(
+    private readonly IOptions<ContentVersioningOptions> _options;
+
+    public ContentVersionService(IOptions<ContentVersioningOptions> options)
+    {
+        _options = options;
+    }
+
+    public async Task<int?> SnapshotPageBeforeChangeAsync(
         AutoNateDbContext db, Guid pageId, string priorTitle, string priorBodyJsonb,
         string kind, string? note, Guid actorId, DateTime nowUtc, CancellationToken ct)
     {
+        // Session rollup: an autosave PATCH inside an active editing session
+        // does NOT write a new row — the previous session-start row stays
+        // put (it already captures the pre-session state) and the live page
+        // row absorbs the change. A new row is only written when the most
+        // recent row is from a different session: different author, different
+        // kind (e.g. 'manual' from initial create or 'restore'), or stale by
+        // more than ContentVersioning:SessionGapMinutes.
+        if (kind == ContentVersionKinds.Autosave)
+        {
+            var mostRecent = await db.PageVersions.AsNoTracking()
+                .Where(v => v.PageId == pageId)
+                .OrderByDescending(v => v.VersionNumber)
+                .Select(v => new { v.Kind, v.CreatedBy, v.CreatedAtUtc })
+                .FirstOrDefaultAsync(ct);
+            if (mostRecent != null
+                && mostRecent.Kind == ContentVersionKinds.Autosave
+                && mostRecent.CreatedBy == actorId
+                && (nowUtc - mostRecent.CreatedAtUtc) < _options.Value.SessionGap)
+            {
+                return null;
+            }
+        }
+
         var page = await db.Pages.FirstAsync(p => p.Id == pageId, ct);
         var versionNumber = page.CurrentVersionNumber;
         db.PageVersions.Add(new PageVersion
@@ -99,11 +130,29 @@ public sealed class ContentVersionService : IContentVersionService
         db.PageVersions.Remove(target);
     }
 
-    public async Task<int> SnapshotNoteBeforeChangeAsync(
+    public async Task<int?> SnapshotNoteBeforeChangeAsync(
         AutoNateDbContext db, Guid noteId, string? priorTitle, string priorNoteKind,
         string priorContentJsonb, string kind, string? note, Guid actorId, DateTime nowUtc,
         CancellationToken ct)
     {
+        // Mirror of the page rollup. See SnapshotPageBeforeChangeAsync above
+        // for the design rationale; the criteria and effects are identical.
+        if (kind == ContentVersionKinds.Autosave)
+        {
+            var mostRecent = await db.NoteVersions.AsNoTracking()
+                .Where(v => v.NoteId == noteId)
+                .OrderByDescending(v => v.VersionNumber)
+                .Select(v => new { v.Kind, v.CreatedBy, v.CreatedAtUtc })
+                .FirstOrDefaultAsync(ct);
+            if (mostRecent != null
+                && mostRecent.Kind == ContentVersionKinds.Autosave
+                && mostRecent.CreatedBy == actorId
+                && (nowUtc - mostRecent.CreatedAtUtc) < _options.Value.SessionGap)
+            {
+                return null;
+            }
+        }
+
         var n = await db.Notes.FirstAsync(x => x.Id == noteId, ct);
         var versionNumber = n.CurrentVersionNumber;
         db.NoteVersions.Add(new NoteVersion

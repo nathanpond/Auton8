@@ -39,13 +39,21 @@ public static class NoteVersionEndpoints
             var totalCount = await query.CountAsync(ct);
             var pg = page.GetValueOrDefault(0);
             var ps = Math.Clamp(pageSize.GetValueOrDefault(25), 1, 200);
-            var items = await query
+            var rows = await query
                 .OrderByDescending(v => v.VersionNumber)
                 .Skip(pg * ps).Take(ps)
-                .Select(v => new NoteVersionSummaryDto(
+                .Select(v => new
+                {
                     v.Id, v.NoteId, v.VersionNumber, v.Title, v.NoteKind, v.Kind, v.Note,
-                    v.CreatedAtUtc, v.CreatedBy))
+                    v.CreatedAtUtc, v.CreatedBy
+                })
                 .ToListAsync(ct);
+            var names = await UserDisplayName.ResolveAsync(
+                db, rows.Select(r => r.CreatedBy), ct);
+            var items = rows.Select(r => new NoteVersionSummaryDto(
+                r.Id, r.NoteId, r.VersionNumber, r.Title, r.NoteKind, r.Kind, r.Note,
+                r.CreatedAtUtc, r.CreatedBy,
+                names.TryGetValue(r.CreatedBy, out var n) ? n : null)).ToList();
 
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
@@ -76,6 +84,7 @@ public static class NoteVersionEndpoints
             var version = await db.NoteVersions.AsNoTracking()
                 .FirstOrDefaultAsync(v => v.NoteId == noteId && v.VersionNumber == n, ct);
             if (version is null) return Results.NotFound();
+            var names = await UserDisplayName.ResolveAsync(db, new[] { version.CreatedBy }, ct);
 
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
@@ -88,7 +97,8 @@ public static class NoteVersionEndpoints
             return Results.Ok(new NoteVersionDto(
                 version.Id, version.NoteId, version.VersionNumber,
                 version.Title, version.NoteKind, version.ContentJsonb,
-                version.Kind, version.Note, version.CreatedAtUtc, version.CreatedBy));
+                version.Kind, version.Note, version.CreatedAtUtc, version.CreatedBy,
+                names.TryGetValue(version.CreatedBy, out var n2) ? n2 : null));
         });
 
         group.MapPost("/{n:int}/restore", async (
@@ -203,12 +213,13 @@ public static class NoteVersionEndpoints
 
     public sealed record NoteVersionSummaryDto(
         Guid Id, Guid NoteId, int VersionNumber, string? Title, string NoteKind,
-        string Kind, string? Note, DateTime CreatedAtUtc, Guid CreatedBy);
+        string Kind, string? Note, DateTime CreatedAtUtc, Guid CreatedBy,
+        string? CreatedByName);
 
     public sealed record NoteVersionDto(
         Guid Id, Guid NoteId, int VersionNumber, string? Title, string NoteKind,
         string ContentJsonb, string Kind, string? Note,
-        DateTime CreatedAtUtc, Guid CreatedBy);
+        DateTime CreatedAtUtc, Guid CreatedBy, string? CreatedByName);
 
     public sealed record NoteVersionPageResponse(
         List<NoteVersionSummaryDto> Items, int TotalCount);

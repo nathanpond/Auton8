@@ -7,3 +7,8 @@ dist-ssr
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Vendored drawio webapp — fetched on demand via `npm run fetch:drawio`.
+# Not committed (hundreds of MB of stencil libraries + JS).
+public/drawio/
+.drawio-staging/

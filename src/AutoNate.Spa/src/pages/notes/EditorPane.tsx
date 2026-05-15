@@ -1,11 +1,28 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Tooltip } from "@mantine/core";
 import { CabinetDto, NoteDto, PageDto } from "@/api/content";
+import {
+  useNoteVersion,
+  usePageVersion,
+  useRestoreNoteVersion,
+  useRestorePageVersion,
+  useToggleFavoritePage
+} from "@/hooks/useContent";
 import { NOTE_KIND_META, cabinetColorFor, defaultCabinetIcon, notesTheme } from "./notesTheme";
 import { EditorTab, NotebookWithPages, PageTreeNode } from "./types";
 import { PageOverview } from "./PageOverview";
 import { VisualTextEditor } from "./VisualTextEditor";
 import { NapkinEditor } from "./NapkinEditor";
 import { DiagramEditor } from "./DiagramEditor";
+import { HistoryModal } from "./HistoryModal";
+
+// Identity of a revision the user is browsing. Scoped to a specific page or
+// note id so switching tabs/pages clears it. The content fetch lives in a
+// react-query hook keyed off (kind, id, versionNumber), so a row click in
+// the modal just sets this state and lets Suspense/loading happen below.
+type RevisionRef =
+  | { kind: "page"; pageId: string; versionNumber: number }
+  | { kind: "note"; noteId: string; versionNumber: number };
 
 type Props = {
   page: PageDto | null;
@@ -39,7 +56,16 @@ export function EditorPane({
   // missing".
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const onPageTab = activeTab?.kind === "page";
+  const activeNoteId =
+    activeTab && activeTab.kind !== "page"
+      ? (activeTab as Extract<EditorTab, { noteId: string }>).noteId
+      : null;
   const [pageEditMode, setPageEditMode] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [revision, setRevision] = useState<RevisionRef | null>(null);
+  const toggleFavorite = useToggleFavoritePage();
+  const restorePageVersion = useRestorePageVersion();
+  const restoreNoteVersion = useRestoreNoteVersion(page?.id ?? null);
 
   // Reset to view mode when the active page changes or when the user navigates
   // away from the page tab — otherwise "edit mode" would silently persist
@@ -47,6 +73,61 @@ export function EditorPane({
   useEffect(() => {
     setPageEditMode(false);
   }, [page?.id, onPageTab]);
+
+  // Clear revision state on any context shift (different page, different
+  // note tab) so a banner from one document can't carry over to another.
+  useEffect(() => {
+    setRevision(null);
+    setHistoryOpen(false);
+  }, [page?.id, activeNoteId, onPageTab]);
+
+  // Fetch the revision's full payload once the user picks a row. Each hook
+  // is gated by the current `revision.kind` so only one query is live at a
+  // time. staleTime: Infinity inside the hooks keeps the result cached.
+  const pageRevisionQuery = usePageVersion(
+    revision?.kind === "page" ? revision.pageId : null,
+    revision?.kind === "page" ? revision.versionNumber : null
+  );
+  const noteRevisionQuery = useNoteVersion(
+    revision?.kind === "note" ? revision.noteId : null,
+    revision?.kind === "note" ? revision.versionNumber : null
+  );
+
+  const pageRevisionOverride = useMemo(() => {
+    if (revision?.kind !== "page" || !pageRevisionQuery.data) return null;
+    return {
+      versionNumber: pageRevisionQuery.data.versionNumber,
+      title: pageRevisionQuery.data.title,
+      bodyJsonb: pageRevisionQuery.data.bodyJsonb
+    };
+  }, [revision, pageRevisionQuery.data]);
+
+  const noteRevisionOverride = useMemo(() => {
+    if (revision?.kind !== "note" || !noteRevisionQuery.data) return null;
+    return {
+      versionNumber: noteRevisionQuery.data.versionNumber,
+      title: noteRevisionQuery.data.title,
+      contentJsonb: noteRevisionQuery.data.contentJsonb
+    };
+  }, [revision, noteRevisionQuery.data]);
+
+  const revisionCreatedAtUtc =
+    revision?.kind === "page"
+      ? pageRevisionQuery.data?.createdAtUtc ?? null
+      : revision?.kind === "note"
+        ? noteRevisionQuery.data?.createdAtUtc ?? null
+        : null;
+  const revisionAuthorName =
+    revision?.kind === "page"
+      ? pageRevisionQuery.data?.createdByName ?? null
+      : revision?.kind === "note"
+        ? noteRevisionQuery.data?.createdByName ?? null
+        : null;
+  const revisionLoading =
+    (revision?.kind === "page" && pageRevisionQuery.isLoading) ||
+    (revision?.kind === "note" && noteRevisionQuery.isLoading);
+  const restoreBusy =
+    restorePageVersion.isPending || restoreNoteVersion.isPending;
 
   if (!page || !cabinet || !notebook) {
     return (
@@ -84,6 +165,44 @@ export function EditorPane({
     activeTab && activeTab.kind !== "page"
       ? notes.find((n) => n.id === (activeTab as Extract<EditorTab, { noteId: string }>).noteId) ?? null
       : null;
+
+  // History is contextual: on the page tab → page versions; on any note
+  // tab → that note's versions. Disabled when there's no valid target
+  // (note tab with no resolved note row yet) — see button disabled prop.
+  const onHistoryClick = () => setHistoryOpen(true);
+
+  const onRestoreClick = () => {
+    if (!revision) return;
+    if (revision.kind === "page") {
+      restorePageVersion.mutate(
+        { pageId: revision.pageId, versionNumber: revision.versionNumber },
+        {
+          onSuccess: () => {
+            setRevision(null);
+          }
+        }
+      );
+    } else {
+      restoreNoteVersion.mutate(
+        { noteId: revision.noteId, versionNumber: revision.versionNumber },
+        {
+          onSuccess: () => {
+            setRevision(null);
+          }
+        }
+      );
+    }
+  };
+
+  // Which kind of editor is rendered for the active tab determines whose
+  // revision (if any) is overlaid. Computed once for readability below.
+  const showPageOverride =
+    revision?.kind === "page" && onPageTab && pageRevisionOverride != null;
+  const showNoteOverride =
+    revision?.kind === "note" &&
+    activeNote != null &&
+    revision.noteId === activeNote.id &&
+    noteRevisionOverride != null;
 
   return (
     <main
@@ -126,7 +245,7 @@ export function EditorPane({
           <strong style={{ color: notesTheme.dark, fontWeight: 700 }}>{page.title}</strong>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          {onPageTab && (
+          {onPageTab && !revision && (
             <HBtn
               icon="fa-pen"
               title={pageEditMode ? "Stop editing" : "Edit page"}
@@ -134,9 +253,23 @@ export function EditorPane({
               onClick={() => setPageEditMode((m) => !m)}
             />
           )}
-          <HBtn icon="fa-star" title="Pin page" />
+          <HBtn
+            icon={page.isFavorited ? "fa-solid fa-star" : "fa-regular fa-star"}
+            iconColor={page.isFavorited ? "#f59e0b" : undefined}
+            title={page.isFavorited ? "Remove from favorites" : "Add to favorites"}
+            disabled={toggleFavorite.isPending}
+            onClick={() =>
+              toggleFavorite.mutate({ id: page.id, favorited: !page.isFavorited })
+            }
+          />
           <HBtn icon="fa-share-nodes" title="Share" />
-          <HBtn icon="fa-clock-rotate-left" title="History" />
+          <HBtn
+            icon="fa-clock-rotate-left"
+            title={onPageTab ? "Page history" : "Note history"}
+            active={historyOpen || revision != null}
+            disabled={!onPageTab && !activeNote}
+            onClick={onHistoryClick}
+          />
           <HBtn icon="fa-ellipsis" title="More" />
         </div>
       </div>
@@ -149,19 +282,183 @@ export function EditorPane({
         onNewNote={onNewNote}
       />
 
+      {revision != null && (
+        <RevisionBanner
+          versionNumber={revision.versionNumber}
+          createdAtUtc={revisionCreatedAtUtc}
+          authorName={revisionAuthorName}
+          loading={revisionLoading}
+          restoreBusy={restoreBusy}
+          onRestore={onRestoreClick}
+          onExit={() => setRevision(null)}
+        />
+      )}
+
       {activeTab?.kind === "page" && (
-        <PageOverview page={page} mode={pageEditMode ? "edit" : "view"} />
+        <PageOverview
+          page={page}
+          mode={pageEditMode ? "edit" : "view"}
+          revisionOverride={showPageOverride ? pageRevisionOverride : null}
+        />
       )}
       {activeTab?.kind === "richtext" && (
-        <VisualTextEditor note={activeNote} noteName={activeTab.name} />
+        <VisualTextEditor
+          note={activeNote}
+          noteName={activeTab.name}
+          revisionOverride={showNoteOverride ? noteRevisionOverride : null}
+        />
       )}
       {activeTab?.kind === "drawing" && (
-        <NapkinEditor note={activeNote} noteName={activeTab.name} />
+        <NapkinEditor
+          note={activeNote}
+          noteName={activeTab.name}
+          revisionOverride={showNoteOverride ? noteRevisionOverride : null}
+        />
       )}
       {activeTab?.kind === "diagram" && (
-        <DiagramEditor note={activeNote} noteName={activeTab.name} />
+        <DiagramEditor
+          note={activeNote}
+          noteName={activeTab.name}
+          revisionOverride={showNoteOverride ? noteRevisionOverride : null}
+        />
+      )}
+
+      {historyOpen && onPageTab && (
+        <HistoryModal
+          kind="page"
+          pageId={page.id}
+          currentTitle={page.title}
+          currentUpdatedAtUtc={page.updatedAtUtc}
+          onSelect={(versionNumber) => {
+            setRevision({ kind: "page", pageId: page.id, versionNumber });
+            setHistoryOpen(false);
+          }}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
+      {historyOpen && !onPageTab && activeNote && (
+        <HistoryModal
+          kind="note"
+          noteId={activeNote.id}
+          currentTitle={activeNote.title ?? activeTab?.name ?? "Note"}
+          currentUpdatedAtUtc={activeNote.updatedAtUtc}
+          onSelect={(versionNumber) => {
+            setRevision({
+              kind: "note",
+              noteId: activeNote.id,
+              versionNumber
+            });
+            setHistoryOpen(false);
+          }}
+          onClose={() => setHistoryOpen(false)}
+        />
       )}
     </main>
+  );
+}
+
+function RevisionBanner({
+  versionNumber,
+  createdAtUtc,
+  authorName,
+  loading,
+  restoreBusy,
+  onRestore,
+  onExit
+}: {
+  versionNumber: number;
+  createdAtUtc: string | null;
+  authorName: string | null;
+  loading: boolean;
+  restoreBusy: boolean;
+  onRestore: () => void;
+  onExit: () => void;
+}) {
+  const dateLabel = createdAtUtc
+    ? new Date(createdAtUtc).toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      })
+    : null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 18px",
+        background: "#fff8e1",
+        borderBottom: `1px solid ${notesTheme.warning}`,
+        color: "#7a5a00",
+        fontSize: 12.5,
+        flexShrink: 0
+      }}
+    >
+      <i className="fa fa-clock-rotate-left" style={{ color: notesTheme.warning }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <strong style={{ fontWeight: 700, color: "#5e4500" }}>
+          Viewing revision v{versionNumber}
+        </strong>
+        {dateLabel && (
+          <span style={{ marginLeft: 8, color: "#7a5a00" }}>
+            from {dateLabel}
+          </span>
+        )}
+        {authorName && (
+          <span style={{ marginLeft: 8, color: "#7a5a00" }}>
+            by <strong style={{ fontWeight: 700, color: "#5e4500" }}>{authorName}</strong>
+          </span>
+        )}
+        {loading && !dateLabel && (
+          <span style={{ marginLeft: 8 }}>
+            <i className="fa fa-spinner fa-spin" style={{ marginRight: 4 }} />
+            loading…
+          </span>
+        )}
+        <span style={{ marginLeft: 12, color: "#9c7600" }}>
+          Read-only — click Restore to make this the current version.
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onExit}
+        title="Return to current"
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "#7a5a00",
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+          padding: "4px 8px",
+          borderRadius: 3
+        }}
+      >
+        <i className="fa fa-xmark" style={{ marginRight: 4 }} /> Exit
+      </button>
+      <button
+        type="button"
+        onClick={onRestore}
+        disabled={loading || restoreBusy}
+        style={{
+          background: notesTheme.warning,
+          border: "none",
+          borderRadius: 4,
+          color: "#fff",
+          fontWeight: 700,
+          fontSize: 12,
+          padding: "6px 14px",
+          cursor: loading || restoreBusy ? "default" : "pointer",
+          opacity: loading || restoreBusy ? 0.7 : 1,
+          fontFamily: "inherit"
+        }}
+      >
+        {restoreBusy ? "Restoring…" : "Restore"}
+      </button>
+    </div>
   );
 }
 
@@ -169,24 +466,33 @@ function HBtn({
   icon,
   title,
   active,
+  disabled,
+  iconColor,
   onClick
 }: {
+  // Accepts either a single FA name (e.g. "fa-pen", treated as solid via the
+  // default "fa" prefix) or a full FA class string (e.g. "fa-regular fa-star")
+  // when a non-default style is needed.
   icon: string;
   title: string;
   active?: boolean;
+  disabled?: boolean;
+  iconColor?: string;
   onClick?: () => void;
 }) {
   const [hover, setHover] = useState(false);
   const background = active
     ? notesTheme.selected
-    : hover
+    : hover && !disabled
       ? notesTheme.rowHover
       : "transparent";
+  const isStyledClass = icon.includes(" ");
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
+      disabled={disabled}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
@@ -196,11 +502,12 @@ function HBtn({
         borderRadius: 3,
         background,
         color: active ? notesTheme.primary : notesTheme.dark,
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.6 : 1,
         fontSize: 12
       }}
     >
-      <i className={`fa ${icon}`} />
+      <i className={isStyledClass ? icon : `fa ${icon}`} style={iconColor ? { color: iconColor } : undefined} />
     </button>
   );
 }
@@ -218,6 +525,82 @@ function TabStrip({
   onCloseTab: (tabId: string) => void;
   onNewNote: () => void;
 }) {
+  // The page tab is always present and always first. We pin it outside the
+  // scroller so it stays visible even when the user has so many note tabs
+  // open that the rest have to scroll horizontally.
+  const pageTab = tabs.find((t) => t.kind === "page") ?? null;
+  const noteTabs = tabs.filter((t) => t.kind !== "page");
+
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  // `hasOverflow` gates whether arrows are rendered at all — once they
+  // appear they stay in the layout, even when one direction is exhausted
+  // (we just disable that side). The toggle would otherwise shift the
+  // tab strip horizontally and could make the user click a tab's close
+  // button by mistake.
+  const [hasOverflow, setHasOverflow] = useState(false);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  // Snapshot the scroller's overflow state. Called after every scroll, every
+  // resize (own or window), and any time the tab set changes.
+  const updateCanScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) {
+      setHasOverflow(false);
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+    // 2px tolerance handles sub-pixel rounding — without it the right
+    // arrow stays "enabled" at ~99.9% scrolled and the left arrow
+    // enables for a single sub-pixel of forward scroll on first click.
+    setHasOverflow(el.scrollWidth > el.clientWidth + 1);
+    setCanScrollLeft(el.scrollLeft > 1);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }, []);
+
+  useEffect(() => {
+    updateCanScroll();
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", updateCanScroll, { passive: true });
+    const ro = new ResizeObserver(updateCanScroll);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", updateCanScroll);
+      ro.disconnect();
+    };
+  }, [updateCanScroll, noteTabs.length]);
+
+  // Keep the active note tab in view when the user switches to it via the
+  // explorer or a deep-link — otherwise an offscreen tab activates but the
+  // strip leaves them looking at a different segment.
+  useEffect(() => {
+    if (!activeTabId) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    const target = el.querySelector(
+      `[data-tab-id="${CSS.escape(activeTabId)}"]`
+    ) as HTMLElement | null;
+    if (!target) return; // page tab lives outside the scroller — nothing to do
+    const tRect = target.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    if (tRect.left < eRect.left) {
+      el.scrollBy({ left: tRect.left - eRect.left - 8, behavior: "smooth" });
+    } else if (tRect.right > eRect.right) {
+      el.scrollBy({ left: tRect.right - eRect.right + 8, behavior: "smooth" });
+    }
+  }, [activeTabId]);
+
+  const stepScroll = (direction: -1 | 1) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    // Scroll roughly the visible portion so one arrow click reveals a fresh
+    // batch of tabs without skipping past adjacent ones.
+    const step = Math.max(160, el.clientWidth * 0.6);
+    el.scrollBy({ left: direction * step, behavior: "smooth" });
+  };
+
   return (
     <div
       style={{
@@ -228,42 +611,147 @@ function TabStrip({
         borderBottom: `1px solid ${notesTheme.border}`,
         background: notesTheme.hover,
         height: 38,
-        flexShrink: 0
+        flexShrink: 0,
+        // Hard cap height so a long row can't push the editor down.
+        minWidth: 0
       }}
     >
-      {tabs.map((t) => (
+      {pageTab && (
         <Tab
-          key={t.id}
-          tab={t}
-          active={t.id === activeTabId}
-          onSwitch={() => onSwitchTab(t.id)}
-          onClose={() => onCloseTab(t.id)}
+          key={pageTab.id}
+          tab={pageTab}
+          active={pageTab.id === activeTabId}
+          onSwitch={() => onSwitchTab(pageTab.id)}
+          onClose={() => onCloseTab(pageTab.id)}
         />
-      ))}
+      )}
+      {hasOverflow && (
+        <ScrollArrow
+          direction="left"
+          disabled={!canScrollLeft}
+          onClick={() => stepScroll(-1)}
+        />
+      )}
+      <div
+        ref={scrollerRef}
+        className="notes-tab-scroller"
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          gap: 2,
+          flex: 1,
+          minWidth: 0,
+          overflowX: "auto",
+          overflowY: "hidden"
+        }}
+      >
+        {noteTabs.map((t) => (
+          <div
+            key={t.id}
+            data-tab-id={t.id}
+            style={{ flexShrink: 0, display: "inline-flex", alignItems: "flex-end" }}
+          >
+            <Tab
+              tab={t}
+              active={t.id === activeTabId}
+              onSwitch={() => onSwitchTab(t.id)}
+              onClose={() => onCloseTab(t.id)}
+            />
+          </div>
+        ))}
+      </div>
+      {hasOverflow && (
+        <ScrollArrow
+          direction="right"
+          disabled={!canScrollRight}
+          onClick={() => stepScroll(1)}
+        />
+      )}
+      <Tooltip label="New Note" withArrow position="bottom">
+        <button
+          type="button"
+          onClick={onNewNote}
+          aria-label="New Note"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "transparent",
+            border: "none",
+            // Row is 38px tall; leave a 3px breathing strip top/bottom.
+            width: 32,
+            height: 32,
+            marginBottom: 3,
+            marginLeft: 4,
+            marginRight: 4,
+            borderRadius: 4,
+            color: notesTheme.muted,
+            cursor: "pointer",
+            fontSize: 16,
+            fontFamily: "inherit",
+            flexShrink: 0
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = notesTheme.rowHover;
+            e.currentTarget.style.color = notesTheme.dark;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.color = notesTheme.muted;
+          }}
+        >
+          <i className="fa fa-plus" />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+function ScrollArrow({
+  direction,
+  disabled,
+  onClick
+}: {
+  direction: "left" | "right";
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const label = direction === "left" ? "Scroll tabs left" : "Scroll tabs right";
+  const showHover = hover && !disabled;
+  return (
+    <Tooltip label={label} withArrow position="bottom" disabled={disabled}>
       <button
         type="button"
-        onClick={onNewNote}
-        title="New note"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
         style={{
           display: "inline-flex",
           alignItems: "center",
-          gap: 6,
-          background: "transparent",
-          border: "none",
-          padding: "0 12px",
+          justifyContent: "center",
+          width: 24,
           height: 28,
-          marginBottom: 0,
-          color: notesTheme.muted,
-          cursor: "pointer",
-          fontSize: 11.5,
-          fontWeight: 700,
-          fontFamily: "inherit"
+          marginBottom: 3,
+          background: showHover ? notesTheme.rowHover : "transparent",
+          color: disabled
+            ? notesTheme.border
+            : showHover
+              ? notesTheme.dark
+              : notesTheme.muted,
+          border: "none",
+          borderRadius: 4,
+          cursor: disabled ? "default" : "pointer",
+          opacity: disabled ? 0.5 : 1,
+          fontSize: 11,
+          flexShrink: 0
         }}
       >
-        <i className="fa fa-plus" style={{ fontSize: 10 }} />
-        New note
+        <i className={`fa fa-chevron-${direction}`} />
       </button>
-    </div>
+    </Tooltip>
   );
 }
 

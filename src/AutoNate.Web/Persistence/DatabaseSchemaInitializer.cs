@@ -2642,6 +2642,53 @@ internal static class DatabaseSchemaInitializer
             ON notes (locator);
         """;
 
+    // Notes get a per-page sequential index so the SPA can encode them as a
+    // short second URL segment (/notes/{pageLocator}/{pageNoteIndex}). The
+    // global locator on notes still exists for cross-table uniqueness; this
+    // is a friendlier short ref scoped to one page. Idempotent: ADD COLUMN
+    // IF NOT EXISTS + the WHERE clause on the backfill UPDATE keeps re-runs
+    // a no-op.
+    private const string ContentNotePageIndexSql =
+        """
+        ALTER TABLE notes
+            ADD COLUMN IF NOT EXISTS page_note_index INTEGER NULL;
+
+        WITH numbered AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY page_id
+                       ORDER BY created_at_utc, id
+                   ) AS rn
+            FROM notes
+            WHERE page_note_index IS NULL
+        )
+        UPDATE notes n
+        SET page_note_index = numbered.rn
+        FROM numbered
+        WHERE n.id = numbered.id;
+
+        ALTER TABLE notes
+            ALTER COLUMN page_note_index SET NOT NULL;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS notes_page_id_page_note_index_key
+            ON notes (page_id, page_note_index);
+        """;
+
+    // Per-user page favorites. Composite PK (page_id, user_id) makes
+    // PUT idempotent via ON CONFLICT DO NOTHING. Cascade on page delete so
+    // favorites disappear with the page they pointed at.
+    private const string PageFavoritesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS page_favorites (
+            page_id UUID NOT NULL REFERENCES pages (id) ON DELETE CASCADE,
+            user_id UUID NOT NULL,
+            favorited_at_utc TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (page_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_page_favorites_user_id
+            ON page_favorites (user_id);
+        """;
+
     // Inserts a single starter project so the Notes UI has something to open
     // on first launch. Idempotent: keyed off a fixed project id, so re-running
     // the initializer never duplicates the row. Skipped if no local_users
@@ -2749,6 +2796,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotModelsMenuSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentHierarchySchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentLocatorSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ContentNotePageIndexSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PageFavoritesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider

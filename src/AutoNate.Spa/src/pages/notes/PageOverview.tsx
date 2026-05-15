@@ -17,6 +17,16 @@ import { notesTheme } from "./notesTheme";
 type Props = {
   page: PageDto;
   mode: "view" | "edit";
+  // When set, the editor renders this historical revision's content instead
+  // of the current page body. Edit mode is implicitly disabled (the banner +
+  // Restore button handle promotion back to current). `versionNumber` is
+  // part of the editor's identity so React tears down + re-creates tiptap
+  // when the user navigates between revisions.
+  revisionOverride?: {
+    versionNumber: number;
+    title: string;
+    bodyJsonb: string;
+  } | null;
 };
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
@@ -32,7 +42,11 @@ const AUTOSAVE_DEBOUNCE_MS = 600;
 // Intentionally minimal: no breadcrumb, no notes grid, no child-page list —
 // those live elsewhere (or are deferred features). The page is just title +
 // body here.
-export function PageOverview({ page, mode }: Props) {
+export function PageOverview({ page, mode, revisionOverride }: Props) {
+  const viewingRevision = revisionOverride != null;
+  const effectiveMode: "view" | "edit" = viewingRevision ? "view" : mode;
+  const effectiveTitle = revisionOverride?.title ?? page.title;
+  const effectiveBody = revisionOverride?.bodyJsonb ?? page.bodyJsonb;
   const [titleDraft, setTitleDraft] = useState(page.title);
   const updatePage = useUpdatePage();
   const bodyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,10 +77,13 @@ export function PageOverview({ page, mode }: Props) {
         TaskItem.configure({ nested: true }),
         Placeholder.configure({ placeholder: "Type to start writing…" })
       ],
-      content: parseDoc(page.bodyJsonb),
+      content: parseDoc(effectiveBody),
       editable: false, // toggled on entering edit mode
       onUpdate: ({ editor: ed }) => {
-        if (mode !== "edit") return;
+        // Never autosave a revision view — those edits would silently
+        // overwrite current with the revision's text. The user must hit
+        // Restore explicitly.
+        if (viewingRevision || effectiveMode !== "edit") return;
         if (bodyTimer.current) clearTimeout(bodyTimer.current);
         bodyTimer.current = setTimeout(() => {
           const json = JSON.stringify(ed.getJSON());
@@ -76,13 +93,15 @@ export function PageOverview({ page, mode }: Props) {
         }, AUTOSAVE_DEBOUNCE_MS);
       }
     },
-    [page.id]
+    // Recreate when navigating between pages OR between current/revision
+    // views — the new content goes through useEditor's `content` field.
+    [page.id, revisionOverride?.versionNumber ?? null]
   );
 
-  // Sync editable flag whenever mode flips.
+  // Sync editable flag whenever mode flips. Revision view is always read-only.
   useEffect(() => {
-    editor?.setEditable(mode === "edit");
-  }, [editor, mode]);
+    editor?.setEditable(effectiveMode === "edit");
+  }, [editor, effectiveMode]);
 
   // Reset title draft + saved-content bookkeeping only when the user navigates
   // to a different page. Including page.bodyJsonb / page.title here would re-
@@ -99,7 +118,8 @@ export function PageOverview({ page, mode }: Props) {
   // When the parent flips out of edit mode, flush any pending saves so the
   // user's last keystroke can't be dropped by the editor losing focus.
   useEffect(() => {
-    if (mode !== "view") return;
+    if (viewingRevision) return; // revision views never had pending saves
+    if (effectiveMode !== "view") return;
     if (bodyTimer.current && editor) {
       clearTimeout(bodyTimer.current);
       bodyTimer.current = null;
@@ -118,7 +138,7 @@ export function PageOverview({ page, mode }: Props) {
         updatePage.mutate({ id: page.id, body: { title: trimmed } });
       }
     }
-  }, [mode, editor, page.id, titleDraft, updatePage]);
+  }, [effectiveMode, editor, page.id, titleDraft, updatePage, viewingRevision]);
 
   // Flush any pending saves on unmount so the last keystroke isn't lost.
   useEffect(() => {
@@ -141,7 +161,7 @@ export function PageOverview({ page, mode }: Props) {
   };
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
+    <div className="notes-editor-bleed" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
       <RichTextEditor
         editor={editor}
         styles={{
@@ -157,7 +177,7 @@ export function PageOverview({ page, mode }: Props) {
           content: { flex: 1, overflowY: "auto", background: "#fff" }
         }}
       >
-        {mode === "edit" && (
+        {effectiveMode === "edit" && (
           <RichTextEditor.Toolbar sticky stickyOffset={0}>
             <RichTextEditor.ControlsGroup>
               <RichTextEditor.H1 />
@@ -213,9 +233,9 @@ export function PageOverview({ page, mode }: Props) {
           </RichTextEditor.Toolbar>
         )}
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "32px 40px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "32px 0 32px 40px" }}>
           <div style={{ width: "100%" }}>
-            {mode === "view" ? (
+            {effectiveMode === "view" ? (
               <h1
                 style={{
                   margin: "0 0 18px",
@@ -226,7 +246,7 @@ export function PageOverview({ page, mode }: Props) {
                   overflowWrap: "break-word"
                 }}
               >
-                {page.title}
+                {effectiveTitle}
               </h1>
             ) : (
               <input

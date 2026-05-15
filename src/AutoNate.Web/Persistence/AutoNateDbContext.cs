@@ -110,6 +110,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<ContentAncestor> ContentAncestors { get; set; }
 
+    public virtual DbSet<PageFavorite> PageFavorites { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<LocalUser>(entity =>
@@ -1316,6 +1318,8 @@ public partial class AutoNateDbContext : DbContext
             entity.ToTable("notes");
             entity.HasIndex(e => e.PageId, "ix_notes_page_id");
             entity.HasIndex(e => e.Locator, "notes_locator_key").IsUnique();
+            entity.HasIndex(e => new { e.PageId, e.PageNoteIndex },
+                "notes_page_id_page_note_index_key").IsUnique();
 
             entity.HasOne<Page>()
                 .WithMany()
@@ -1328,6 +1332,7 @@ public partial class AutoNateDbContext : DbContext
                 .HasDefaultValueSql("nextval('content_locator_seq')")
                 .ValueGeneratedOnAdd();
             entity.Property(e => e.PageId).HasColumnName("page_id");
+            entity.Property(e => e.PageNoteIndex).HasColumnName("page_note_index");
             entity.Property(e => e.NoteKind).HasColumnName("note_kind");
             entity.Property(e => e.Title).HasColumnName("title");
             entity.Property(e => e.ContentJsonb).HasColumnName("content_jsonb").HasColumnType("jsonb");
@@ -1378,6 +1383,22 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.AncestorKind).HasColumnName("ancestor_kind");
             entity.Property(e => e.AncestorId).HasColumnName("ancestor_id");
             entity.Property(e => e.Depth).HasColumnName("depth");
+        });
+
+        modelBuilder.Entity<PageFavorite>(entity =>
+        {
+            entity.HasKey(e => new { e.PageId, e.UserId }).HasName("page_favorites_pkey");
+            entity.ToTable("page_favorites");
+            entity.HasIndex(e => e.UserId, "ix_page_favorites_user_id");
+
+            entity.HasOne<Page>()
+                .WithMany()
+                .HasForeignKey(e => e.PageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.PageId).HasColumnName("page_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.FavoritedAtUtc).HasColumnName("favorited_at_utc");
         });
 
         OnModelCreatingPartial(modelBuilder);

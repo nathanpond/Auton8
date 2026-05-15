@@ -14,6 +14,7 @@ import "@mantine/core/styles.layer.css";
 import "@mantine/dropzone/styles.layer.css";
 import "@mantine/notifications/styles.layer.css";
 import "@mantine/tiptap/styles.layer.css";
+import "@excalidraw/excalidraw/index.css";
 import "mantine-datatable/styles.layer.css";
 import "./index.css";
 import "./widgets.css"; // ManageUsers identity/avatar/status, .row-archived, .notification-unread

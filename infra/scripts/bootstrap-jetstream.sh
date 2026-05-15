@@ -9,7 +9,7 @@ STREAM_NAME="workflow-execution"
 # narrow the filter back to just `workflow.execution.>`. When that
 # happened, publishes to `record.*` / `application.*` started failing with
 # `nats: no response from stream` because no stream covered the subject.
-SUBJECTS="workflow.execution.> record.> application.>"
+SUBJECTS="workflow.execution.> record.> application.> content.>"
 
 until nc -z nats 4222 >/dev/null 2>&1; do
   sleep 1

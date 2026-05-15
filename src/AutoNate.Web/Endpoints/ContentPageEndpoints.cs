@@ -58,6 +58,7 @@ public static class ContentPageEndpoints
 
         pages.MapGet("/{id:guid}", async (
             Guid id,
+            HttpContext http,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
@@ -65,6 +66,7 @@ public static class ContentPageEndpoints
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var page = await db.Pages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
             if (page is null) return Results.NotFound();
+            var isFavorited = await IsFavoritedAsync(db, id, http.GetActorId(), ct);
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
                 ContentEventTypes.PageViewed,
@@ -72,7 +74,7 @@ public static class ContentPageEndpoints
                 resource: new { id = page.Id, title = page.Title },
                 details: null,
                 ct);
-            return Results.Ok(MapDto(page));
+            return Results.Ok(MapDto(page, isFavorited));
         }).RequirePermission(EntityKinds.Page, Actions.View);
 
         pages.MapPost("/", async (
@@ -198,9 +200,14 @@ public static class ContentPageEndpoints
                 || (request.BodyJsonb is not null && request.BodyJsonb != page.BodyJsonb);
             if (contentChanging)
             {
+                // Autosave kind drives the session-rollup path: when the most
+                // recent row is a same-author autosave within the session
+                // gap, no new version is written and newVersionNumber stays
+                // null. The PageVersionCreated audit event below is gated on
+                // a non-null result.
                 newVersionNumber = await versions.SnapshotPageBeforeChangeAsync(
                     db, page.Id, priorTitle, priorBody,
-                    ContentVersionKinds.Manual, null, actorId, DateTime.UtcNow, ct);
+                    ContentVersionKinds.Autosave, null, actorId, DateTime.UtcNow, ct);
             }
 
             if (request.Title is not null)
@@ -272,7 +279,8 @@ public static class ContentPageEndpoints
             if (fields.Count == 0)
             {
                 await tx.RollbackAsync(ct);
-                return Results.Ok(MapDto(page));
+                var isFavoritedNoop = await IsFavoritedAsync(db, page.Id, actorId, ct);
+                return Results.Ok(MapDto(page, isFavoritedNoop));
             }
 
             page.UpdatedAtUtc = DateTime.UtcNow;
@@ -290,7 +298,7 @@ public static class ContentPageEndpoints
                     ContentEventTopic.TopicName,
                     ContentEventTypes.PageVersionCreated,
                     ContentResourceKinds.PageVersion,
-                    resource: new { pageId = page.Id, versionNumber = vn - 1, kind = ContentVersionKinds.Manual },
+                    resource: new { pageId = page.Id, versionNumber = vn - 1, kind = ContentVersionKinds.Autosave },
                     details: null,
                     ct);
             }
@@ -318,7 +326,8 @@ public static class ContentPageEndpoints
                 details: new { fields, newVersionNumber },
                 ct);
 
-            return Results.Ok(MapDto(page));
+            var isFavorited = await IsFavoritedAsync(db, page.Id, http.GetActorId(), ct);
+            return Results.Ok(MapDto(page, isFavorited));
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.Page, Actions.Edit);
 
@@ -350,12 +359,82 @@ public static class ContentPageEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.Page, Actions.Delete);
 
+        // Favorite/unfavorite a page for the current user. Per-user state, so
+        // the row is keyed (page_id, user_id). PUT is idempotent via ON
+        // CONFLICT DO NOTHING; DELETE silently no-ops when the row is absent.
+        // View permission is the gate — if you can read the page, you can
+        // bookmark it for your own dashboard.
+        pages.MapPut("/{id:guid}/favorite", async (
+            Guid id,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var page = await db.Pages.AsNoTracking()
+                .Where(p => p.Id == id)
+                .Select(p => new { p.Id, p.Title })
+                .FirstOrDefaultAsync(ct);
+            if (page is null) return Results.NotFound();
+            var actorId = http.GetActorId();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"INSERT INTO page_favorites (page_id, user_id, favorited_at_utc)
+                   VALUES ({id}, {actorId}, {DateTime.UtcNow})
+                   ON CONFLICT (page_id, user_id) DO NOTHING",
+                ct);
+            await auditPublisher.PublishAsync(
+                ContentEventTopic.TopicName,
+                ContentEventTypes.PageFavorited,
+                ContentResourceKinds.Page,
+                resource: new { id = page.Id, title = page.Title },
+                details: null,
+                ct);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Page, Actions.View);
+
+        pages.MapDelete("/{id:guid}/favorite", async (
+            Guid id,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var page = await db.Pages.AsNoTracking()
+                .Where(p => p.Id == id)
+                .Select(p => new { p.Id, p.Title })
+                .FirstOrDefaultAsync(ct);
+            if (page is null) return Results.NotFound();
+            var actorId = http.GetActorId();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $@"DELETE FROM page_favorites
+                   WHERE page_id = {id} AND user_id = {actorId}",
+                ct);
+            await auditPublisher.PublishAsync(
+                ContentEventTopic.TopicName,
+                ContentEventTypes.PageUnfavorited,
+                ContentResourceKinds.Page,
+                resource: new { id = page.Id, title = page.Title },
+                details: null,
+                ct);
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Page, Actions.View);
+
         return app;
     }
 
-    internal static PageDto MapDto(Page p) => new(
+    private static Task<bool> IsFavoritedAsync(AutoNateDbContext db, Guid pageId, Guid userId, CancellationToken ct) =>
+        userId == Guid.Empty
+            ? Task.FromResult(false)
+            : db.PageFavorites.AsNoTracking()
+                .AnyAsync(f => f.PageId == pageId && f.UserId == userId, ct);
+
+    internal static PageDto MapDto(Page p, bool isFavorited = false) => new(
         p.Id, p.Locator, p.NotebookId, p.ParentPageId, p.Title, p.BodyJsonb,
-        p.CurrentVersionNumber, p.SortOrder, p.IsArchived,
+        p.CurrentVersionNumber, p.SortOrder, p.IsArchived, isFavorited,
         p.CreatedAtUtc, p.UpdatedAtUtc, p.CreatedBy, p.UpdatedBy);
 
     public sealed record CreatePageRequest(
@@ -377,6 +456,7 @@ public static class ContentPageEndpoints
     public sealed record PageDto(
         Guid Id, long Locator, Guid NotebookId, Guid? ParentPageId, string Title,
         string BodyJsonb, int CurrentVersionNumber, int SortOrder, bool IsArchived,
+        bool IsFavorited,
         DateTime CreatedAtUtc, DateTime UpdatedAtUtc, Guid CreatedBy, Guid UpdatedBy);
 
     public sealed record PageTreeNodeDto(

@@ -8,10 +8,14 @@ namespace AutoNate.Web.Services.Content;
 // body has changed but the version row is missing (or vice versa).
 public interface IContentVersionService
 {
-    // Snapshots the *prior* state of the page into page_versions, then expects
-    // the caller to update the live row's title/body and current_version_number.
-    // Returns the new version_number that should be written onto the page.
-    Task<int> SnapshotPageBeforeChangeAsync(
+    // Snapshots the *prior* state of the page into page_versions when the
+    // change qualifies as a new editing session, otherwise rolls the autosave
+    // into the existing session row and returns null. Returns the new
+    // version_number that was written, or null when the autosave was rolled
+    // into the previous session (no row written, current_version_number not
+    // bumped). Callers should skip the PageVersionCreated audit event when
+    // the result is null.
+    Task<int?> SnapshotPageBeforeChangeAsync(
         AutoNateDbContext db,
         Guid pageId,
         string priorTitle,
@@ -43,8 +47,9 @@ public interface IContentVersionService
         int versionNumber,
         CancellationToken ct);
 
-    // Same shape as the Page methods, scoped to a note.
-    Task<int> SnapshotNoteBeforeChangeAsync(
+    // Same shape as the Page methods, scoped to a note. Returns null when
+    // the autosave was rolled into the previous session row.
+    Task<int?> SnapshotNoteBeforeChangeAsync(
         AutoNateDbContext db,
         Guid noteId,
         string? priorTitle,

@@ -1,17 +1,219 @@
+import { useEffect, useMemo, useRef } from "react";
 import { NoteDto } from "@/api/content";
+import { useUpdateNote } from "@/hooks/useContent";
+import { EditableNoteTitle } from "./EditableNoteTitle";
 import { notesTheme } from "./notesTheme";
 
 type Props = {
   note: NoteDto | null;
   noteName: string;
+  // When set, the embed loads this historical revision's XML and runs in a
+  // view-only flavor — autosave is disabled in the load action and any
+  // incoming autosave/save events are ignored. versionNumber feeds the
+  // iframe key so drawio remounts cleanly between revisions.
+  revisionOverride?: {
+    versionNumber: number;
+    title: string | null;
+    contentJsonb: string;
+  } | null;
 };
 
-// Diagram = Draw.io / diagrams.net. Like Napkin, this is the visual chrome
-// (top toolbar, left shape palette, right format panel) with a grid-paper
-// placeholder canvas. The real Draw.io integration plugs into the canvas
-// region via the embed iframe in a follow-up; the toolbar layout here is
-// already what the design demands.
-export function DiagramEditor({ note, noteName }: Props) {
+const AUTOSAVE_DEBOUNCE_MS = 600;
+
+// drawio is vendored under public/drawio/ (fetched via `npm run fetch:drawio`)
+// and served by Vite from the SPA's own origin at /drawio/. The iframe is
+// therefore same-origin, and we identify messages by checking `e.source`
+// against the iframe's contentWindow rather than `e.origin` against a hard-
+// coded URL — that way we don't have to know the dev / prod origin at
+// compile time and we still ignore messages coming from anywhere else.
+//
+// Embed URL parameters — see https://www.drawio.com/doc/faq/embed-mode for
+// the full list. NOTE: `autosave=1` here is informational only — the flag
+// that actually enables autosave events is sent through the `load` action
+// message below (`autosave: 1`). See viewer.min.js: `t = 1 == I.autosave`
+// inside the "load"==I.action branch. Without that, drawio never attaches
+// its CHANGE → postMessage("autosave") listener and edits silently vanish.
+//   embed=1        | drives the embed protocol instead of standalone UI
+//   ui=atlas       | compact toolbar layout suited for an inline editor
+//   proto=json     | exchange messages as JSON instead of legacy XML
+//   libraries=1    | enable the side-panel shape libraries
+//   noSaveBtn=1    | hide the Save button; we autosave on every change
+//   saveAndExit=0  | hide the "Save & exit" button too
+//   spin=1         | show a spinner while the editor is initialising
+// We point at `/drawio/index.html` instead of `/drawio/` because Vite's SPA
+// fallback catches the directory-style URL and serves the AutoNate SPA shell
+// (which then auth-redirects us). Explicit filename → Vite's static-asset
+// middleware matches first and serves drawio's own index.html out of public/.
+const EMBED_URL =
+  `/drawio/index.html?` +
+  new URLSearchParams({
+    embed: "1",
+    ui: "atlas",
+    proto: "json",
+    libraries: "1",
+    noSaveBtn: "1",
+    saveAndExit: "0",
+    spin: "1"
+  }).toString();
+
+// Diagram editor backed by the diagrams.net (draw.io) iframe embed. The XML
+// mxGraphModel is the canonical save format; we wrap it in JSONB so the
+// notes.content_jsonb column shape stays uniform with the other note kinds.
+//
+// Communication is purely via postMessage:
+//   draw.io → parent  { event: "init" | "autosave" | "save" | ... }
+//   parent  → draw.io { action: "load", xml: "...", autosave: 1 }
+//
+// On `init` we push the existing XML in AND set `autosave: 1` so drawio
+// starts emitting autosave events on every graph CHANGE. On `autosave`
+// we debounce-write back to our backend.
+export function DiagramEditor({ note, noteName, revisionOverride }: Props) {
+  const viewingRevision = revisionOverride != null;
+  const effectiveTitle = revisionOverride?.title ?? note?.title ?? noteName;
+  const updateNote = useUpdateNote(note?.pageId ?? null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef<string | null>(null);
+  const pendingXmlRef = useRef<string | null>(null);
+  const noteIdRef = useRef<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const initialXml = useMemo(
+    () => parseXml(revisionOverride?.contentJsonb ?? note?.contentJsonb),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [note?.id, revisionOverride?.versionNumber ?? null]
+  );
+
+  // Reset the saved-content tracker when switching notes so an unrelated
+  // autosave can't false-skip against another note's payload.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    lastSavedRef.current = note?.contentJsonb ?? null;
+    pendingXmlRef.current = null;
+    noteIdRef.current = note?.id ?? null;
+  }, [note?.id]);
+
+  // Flush any pending save on unmount.
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
+
+  // Flush pending debounced save when the tab is about to unload. The
+  // 600ms debounce window means a quick edit-then-refresh would otherwise
+  // lose the last keystrokes; fetch+keepalive makes the browser send the
+  // PATCH even as the page unloads. pagehide fires more reliably than
+  // beforeunload (especially on mobile / bfcache transitions).
+  useEffect(() => {
+    const onPageHide = () => {
+      const xml = pendingXmlRef.current;
+      const id = noteIdRef.current;
+      if (!xml || !id) return;
+      const payload = { type: "drawio", version: 1, xml };
+      const body = JSON.stringify({ contentJsonb: JSON.stringify(payload) });
+      try {
+        fetch(`/api/content/notes/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body,
+          keepalive: true
+        }).catch(() => {});
+      } catch {
+        // keepalive can throw on very large bodies; nothing more we can do
+        // here. The autosave debounce will have caught most edits already.
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
+  // postMessage listener for the iframe. Re-subscribed when the active note
+  // changes so the `load` handler ships the correct initial XML.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const target = iframeRef.current?.contentWindow;
+      // Only accept messages from our own iframe — same-origin, but other
+      // iframes (chatbot, etc.) could be present on the page.
+      if (!target || e.source !== target) return;
+      let data: Record<string, unknown>;
+      try {
+        data = typeof e.data === "string" ? JSON.parse(e.data) : (e.data as Record<string, unknown>);
+      } catch {
+        return;
+      }
+      if (!data || typeof data.event !== "string") return;
+
+      switch (data.event) {
+        case "init":
+        case "configure": {
+          // Load the diagram. autosave is enabled only in the live editor —
+          // for revision views we omit it so drawio doesn't fire change
+          // events we'd have to suppress. The user can't accidentally save
+          // a stale revision back to current.
+          target.postMessage(
+            JSON.stringify({
+              action: "load",
+              xml: initialXml ?? "",
+              autosave: viewingRevision ? 0 : 1
+            }),
+            "*"
+          );
+          // We manage save state ourselves and ack autosave events back to
+          // our backend, so drawio's internal beforeunload guard (which
+          // shows "All changes will be lost" when its modified flag is on)
+          // is redundant noise — disable it. Same-origin iframe, so direct
+          // property assignment works. We re-null on each autosave too as
+          // a belt-and-braces measure in case drawio reinstalls it.
+          try {
+            target.onbeforeunload = null;
+          } catch {
+            // cross-origin guard — shouldn't happen for /drawio/
+          }
+          break;
+        }
+        case "autosave":
+        case "save": {
+          if (!note || viewingRevision) return;
+          try {
+            target.onbeforeunload = null;
+          } catch {
+            // ignore
+          }
+          const xml = typeof data.xml === "string" ? data.xml : "";
+          queueSave(xml);
+          break;
+        }
+        default:
+          // Other events (e.g. "exit", "exportComplete") are ignored —
+          // we disabled the save/exit buttons so they shouldn't fire.
+          break;
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+    // queueSave reads `note` via closure; rebind whenever the note or
+    // revision changes (so the load action sends the right XML + flag).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialXml, note?.id, viewingRevision]);
+
+  const queueSave = (xml: string) => {
+    if (!note) return;
+    pendingXmlRef.current = xml;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const payload = { type: "drawio", version: 1, xml };
+      const json = JSON.stringify(payload);
+      if (json === lastSavedRef.current) {
+        pendingXmlRef.current = null;
+        return;
+      }
+      lastSavedRef.current = json;
+      pendingXmlRef.current = null;
+      updateNote.mutate({ id: note.id, body: { contentJsonb: json } });
+    }, AUTOSAVE_DEBOUNCE_MS);
+  };
+
   return (
     <div
       style={{
@@ -22,339 +224,89 @@ export function DiagramEditor({ note, noteName }: Props) {
         background: "#fff"
       }}
     >
-      <DiagramToolbar />
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <ShapePalette />
-        <DiagramCanvas title={note?.title ?? noteName} />
-        <FormatPanel />
-      </div>
-    </div>
-  );
-}
-
-function DiagramToolbar() {
-  const Div = () => (
-    <div style={{ width: 1, height: 18, background: notesTheme.border, margin: "0 4px" }} />
-  );
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 1,
-        padding: "5px 10px",
-        borderBottom: `1px solid ${notesTheme.border}`,
-        background: notesTheme.hover,
-        minHeight: 36,
-        flexShrink: 0
-      }}
-    >
-      <Btn icon="fa-clock-rotate-left" />
-      <Btn icon="fa-rotate-right" />
-      <Div />
-      <Btn icon="fa-cut" />
-      <Btn icon="fa-copy" />
-      <Btn icon="fa-paste" />
-      <Div />
-      <Btn icon="fa-magnifying-glass-plus" />
-      <Btn icon="fa-magnifying-glass-minus" />
-      <span style={{ fontSize: 11, color: notesTheme.muted, margin: "0 6px", minWidth: 34 }}>
-        100%
-      </span>
-      <Btn icon="fa-expand" />
-      <Div />
-      <Btn icon="fa-square" active />
-      <Btn icon="fa-circle" />
-      <Btn icon="fa-diamond" />
-      <Btn icon="fa-arrow-right" />
-      <Btn icon="fa-font" />
-      <Div />
-      <Btn icon="fa-align-left" />
-      <Btn icon="fa-align-center" />
-      <Btn icon="fa-align-right" />
-      <Div />
-      <Btn icon="fa-bold" />
-      <Btn icon="fa-italic" />
-      <Btn icon="fa-underline" />
-      <Div />
-      <Btn icon="fa-layer-group" />
-      <Btn icon="fa-clone" />
-      <Btn icon="fa-trash" />
-
-      <div style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: 11, color: notesTheme.muted }}>Page 1 of 1</span>
-        <Btn icon="fa-plus" />
-      </div>
-    </div>
-  );
-}
-
-function Btn({ icon, active }: { icon: string; active?: boolean }) {
-  return (
-    <button
-      type="button"
-      style={{
-        width: 28,
-        height: 26,
-        border: "none",
-        background: active ? notesTheme.selected : "transparent",
-        borderRadius: 3,
-        color: active ? notesTheme.primary : notesTheme.dark,
-        cursor: "pointer",
-        fontSize: 11
-      }}
-    >
-      <i className={`fa ${icon}`} />
-    </button>
-  );
-}
-
-function ShapePalette() {
-  const flowchart = [
-    { label: "Process" },
-    { label: "Terminal" },
-    { label: "Decision" },
-    { label: "Data" },
-    { label: "Document" },
-    { label: "Conn." },
-    { label: "Database" },
-    { label: "Note" }
-  ];
-  return (
-    <aside
-      style={{
-        width: 180,
-        flexShrink: 0,
-        borderRight: `1px solid ${notesTheme.border}`,
-        background: "#fff",
-        overflowY: "auto",
-        padding: "10px 8px"
-      }}
-    >
-      <SectionTitle>Flowchart</SectionTitle>
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 6,
-          marginBottom: 14
-        }}
-      >
-        {flowchart.map((s) => (
-          <ShapeTile key={s.label} label={s.label} />
-        ))}
-      </div>
-
-      <SectionTitle>UML</SectionTitle>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 6,
-          marginBottom: 14
-        }}
-      >
-        {["Class", "Actor", "Use case", "Package"].map((label) => (
-          <ShapeTile key={label} label={label} />
-        ))}
-      </div>
-
-      <SectionTitle>AWS</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-        {["VPC", "EC2", "RDS", "S3"].map((label) => (
-          <ShapeTile key={label} label={label} />
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 10.5,
-        fontWeight: 700,
-        color: notesTheme.muted,
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        margin: "6px 4px"
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function ShapeTile({ label }: { label: string }) {
-  return (
-    <button
-      type="button"
-      style={{
-        background: "#fafbfc",
-        border: `1px solid ${notesTheme.border}`,
-        borderRadius: 4,
-        padding: "10px 4px",
-        cursor: "grab",
-        fontSize: 10.5,
-        fontWeight: 600,
-        color: notesTheme.dark,
-        fontFamily: "inherit",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 6
-      }}
-    >
-      <div
-        style={{
-          width: 28,
-          height: 22,
-          background: "#fff",
-          border: `1px solid ${notesTheme.border}`,
-          borderRadius: 3
-        }}
-      />
-      <span>{label}</span>
-    </button>
-  );
-}
-
-function DiagramCanvas({ title }: { title: string }) {
-  return (
-    <div
-      style={{
-        flex: 1,
-        position: "relative",
-        overflow: "hidden",
-        background:
-          "repeating-linear-gradient(0deg, transparent 0 19px, #eef0f2 19px 20px), " +
-          "repeating-linear-gradient(90deg, transparent 0 19px, #eef0f2 19px 20px), #fff"
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          color: notesTheme.muted,
-          textAlign: "center"
+          gap: 12,
+          padding: "8px 40px",
+          borderBottom: `1px solid ${notesTheme.border}`,
+          background: "#fff",
+          flexShrink: 0
         }}
       >
-        <div style={{ maxWidth: 360 }}>
-          <i
-            className="fa fa-diagram-project"
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <EditableNoteTitle
+            value={effectiveTitle}
+            readOnly={viewingRevision || !note}
+            onSave={(next) => {
+              if (!note) return;
+              updateNote.mutate({ id: note.id, body: { title: next } });
+            }}
             style={{
-              fontSize: 36,
-              color: "#7950f2",
-              display: "block",
-              marginBottom: 12
+              fontSize: 18,
+              fontWeight: 700,
+              color: notesTheme.dark
             }}
           />
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: notesTheme.dark,
-              marginBottom: 4
-            }}
-          >
-            {title}
-          </div>
-          <div style={{ fontSize: 12 }}>
-            Draw.io canvas will mount here. XML/JSON is persisted to{" "}
-            <code>notes.content_jsonb</code>.
-          </div>
         </div>
+        <span style={savedStyle}>
+          {updateNote.isPending ? (
+            <>
+              <i className="fa fa-cloud-arrow-up" style={{ marginRight: 5 }} />
+              Saving…
+            </>
+          ) : (
+            <>
+              <i className="fa fa-check" style={{ marginRight: 5 }} />
+              Auto-saved
+            </>
+          )}
+        </span>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        {/* `key` forces a remount on note swap so the iframe reloads and
+            draw.io re-sends `init`, prompting our listener to push the new
+            note's XML. Without it, the iframe would keep the previous
+            note's diagram on-screen until the user manually reloaded. */}
+        <iframe
+          key={`${note?.id ?? "empty"}:${revisionOverride?.versionNumber ?? "current"}`}
+          ref={iframeRef}
+          src={EMBED_URL}
+          title="Draw.io diagram editor"
+          style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+          // We intentionally don't set sandbox: the embed protocol relies on
+          // postMessage from same-origin scripts inside the iframe, which
+          // doesn't fit cleanly into a strict sandbox. embed.diagrams.net is
+          // a trusted origin; the only thing it can interact with is the
+          // message channel we explicitly listen to.
+        />
       </div>
     </div>
   );
 }
 
-function FormatPanel() {
-  return (
-    <aside
-      style={{
-        width: 240,
-        flexShrink: 0,
-        borderLeft: `1px solid ${notesTheme.border}`,
-        background: "#fff",
-        padding: "12px 14px",
-        overflowY: "auto"
-      }}
-    >
-      <SectionTitle>Style</SectionTitle>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-        {["Fill", "Border", "Shadow"].map((label) => (
-          <div
-            key={label}
-            style={{
-              flex: 1,
-              padding: "6px 8px",
-              border: `1px solid ${notesTheme.border}`,
-              borderRadius: 4,
-              fontSize: 11,
-              textAlign: "center",
-              color: notesTheme.dark,
-              fontWeight: 600
-            }}
-          >
-            {label}
-          </div>
-        ))}
-      </div>
-
-      <SectionTitle>Arrange</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 12 }}>
-        {["Width", "Height", "X", "Y"].map((label) => (
-          <label
-            key={label}
-            style={{ fontSize: 10.5, color: notesTheme.muted, fontWeight: 600 }}
-          >
-            {label}
-            <input
-              defaultValue=""
-              placeholder="—"
-              style={{
-                width: "100%",
-                marginTop: 2,
-                padding: "5px 6px",
-                fontSize: 11,
-                border: `1px solid ${notesTheme.border}`,
-                borderRadius: 3,
-                background: "#fff",
-                outline: "none",
-                fontFamily: "inherit"
-              }}
-            />
-          </label>
-        ))}
-      </div>
-
-      <SectionTitle>Line</SectionTitle>
-      <div style={{ display: "flex", gap: 6 }}>
-        {["Solid", "Dashed", "Dotted"].map((l) => (
-          <button
-            key={l}
-            type="button"
-            style={{
-              flex: 1,
-              padding: "5px 8px",
-              border: `1px solid ${notesTheme.border}`,
-              borderRadius: 3,
-              fontSize: 11,
-              background: "#fff",
-              color: notesTheme.dark,
-              cursor: "pointer",
-              fontFamily: "inherit"
-            }}
-          >
-            {l}
-          </button>
-        ))}
-      </div>
-    </aside>
-  );
+// Stored value shape: `{ "type": "drawio", "version": 1, "xml": "..." }`
+// wrapped in JSONB. parseXml extracts the XML string, tolerating the empty
+// "{}" placeholder a freshly-created note carries and the corner case of a
+// raw XML string from a legacy save path.
+function parseXml(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && typeof parsed.xml === "string") {
+      return parsed.xml;
+    }
+  } catch {
+    // Not JSON — accept raw XML as a fallback.
+    if (raw.trimStart().startsWith("<")) return raw;
+  }
+  return null;
 }
+
+const savedStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: notesTheme.muted,
+  fontWeight: 600
+};

@@ -130,12 +130,16 @@ export const APP_ROUTES: AppRoute[] = [
   // Content hierarchy: project → cabinet → notebook → page → note. Full-bleed
   // layout (project picker + cabinet rail + explorer + tab strip + editors)
   // that fills <AppShell.Main>; the page itself cancels the shell's default
-  // padding via `.app-shell-content-edge` on the outer container. The optional
-  // `:locator` param identifies the currently-open entity (project / cabinet
-  // / notebook / page / note) by its shared numeric locator — see
-  // /api/content/locator/{n} for resolution.
-  { path: "notes", element: protect(<NotesPage />) },
-  { path: "notes/:locator", element: protect(<NotesPage />) },
+  // padding via `.app-shell-content-edge` on the outer container.
+  //
+  // Single splat route so NotesPage stays mounted across every /notes/...
+  // URL. Three sibling routes (one per segment count) would unmount + remount
+  // the page on every page-tab ↔ note-tab transition, throwing away state
+  // and triggering nav cascades that React 19's "call ref on every change"
+  // semantics turn into setState loops in Mantine's ref-merging utilities.
+  // The first splat segment is the entity locator (any kind) and the optional
+  // second segment is the page-scoped note index.
+  { path: "notes/*", element: protect(<NotesPage />) },
 
   // Forms feature: dev preview (draft) and runtime render (published).
   // Both require an authenticated user; the runtime render is additionally

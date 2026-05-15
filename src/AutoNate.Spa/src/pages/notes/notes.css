@@ -21,3 +21,29 @@
         transform: scale(1) translateY(0);
     }
 }
+
+/* Mantine's RichTextEditor wraps the tiptap document in .ProseMirror and
+   ships a default `padding: var(--mantine-spacing-md)` (~16px) on every
+   side. The notes editor pane already owns its outer scroll-container
+   padding (32px / 20px top, 40px left, 0 right); the inner ProseMirror
+   padding adds an extra ~16px on the right that the editor can't reach
+   past. Scoped class on the editor wrapper zeroes the ProseMirror padding
+   so content can bleed all the way to the right edge of <AppShell.Main>.
+   Outer container padding compensates for the lost left/top. */
+.notes-editor-bleed .ProseMirror {
+    padding: 0 !important;
+}
+
+/* Horizontal scroller for note tabs in the tab strip. Hides the visible
+   scrollbar so the only scroll affordances are the left/right arrow
+   buttons rendered alongside it — the strip stays visually clean even when
+   many notes are open. Wheel / touchpad / trackpad horizontal scroll still
+   work natively. */
+.notes-tab-scroller {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.notes-tab-scroller::-webkit-scrollbar {
+    display: none;
+}

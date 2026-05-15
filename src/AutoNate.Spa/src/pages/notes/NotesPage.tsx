@@ -15,6 +15,7 @@ import {
   useCreateNotebook,
   useCreatePage,
   useDeleteCabinet,
+  useDeleteNote,
   useDeleteNotebook,
   useDeletePage,
   useLocator,
@@ -52,9 +53,18 @@ export default function NotesPage() {
   // identifies whatever the user has open (project / cabinet / notebook /
   // page / note). On cold-load we hit /api/content/locator/{n} once to
   // hydrate the full ancestor chain; from there the SPA owns the state.
-  const params = useParams<{ locator?: string }>();
+  // Single splat route (`notes/*`) so NotesPage stays mounted across every
+  // segment count. We split `params["*"]` into [locator, noteIndex] manually.
+  const params = useParams();
   const navigate = useNavigate();
-  const urlLocator = parseLocator(params.locator);
+  const urlSegments = useMemo(
+    () => (params["*"] ?? "").split("/").filter(Boolean),
+    [params]
+  );
+  const urlLocator = parseLocator(urlSegments[0]);
+  // Per-page note index from the second URL segment. Silently ignored if the
+  // first segment doesn't resolve to a page or no note in the page matches.
+  const urlNoteIndex = parseLocator(urlSegments[1]);
   const locatorQuery = useLocator(urlLocator);
   const resolved = locatorQuery.data ?? null;
 
@@ -98,21 +108,39 @@ export default function NotesPage() {
   const [editPage, setEditPage] = useState<PageTreeNodeDto | null>(null);
   const [deletePageNode, setDeletePageNode] = useState<PageTreeNodeDto | null>(null);
   const [deletePageError, setDeletePageError] = useState<string | null>(null);
+  // Confirm-then-delete target for the tab strip's close (×) button.
+  // Stores the tab id (so we can remove it from tabs state on success) and
+  // the resolved note id + display name (powering the mutation + dialog).
+  const [deleteNoteTab, setDeleteNoteTab] = useState<{
+    tabId: string;
+    noteId: string;
+    noteName: string;
+  } | null>(null);
+  const [deleteNoteError, setDeleteNoteError] = useState<string | null>(null);
   const [newPageTarget, setNewPageTarget] = useState<NewPageTarget | null>(null);
   // Ids of nodes the user has asked to expand (e.g. after creating a child
   // inside them). Stays additive — manual collapses are preserved because
   // PageRow / NotebookRow only force-open when their id is in this set.
   const [forceExpandIds, setForceExpandIds] = useState<ReadonlySet<string>>(new Set());
 
+  // When the URL has a locator we haven't resolved yet, the default-select
+  // and URL-writeback effects must hold off — otherwise the queries that
+  // arrive before the resolve (projects, then cabinets) trigger
+  // setActiveProjectId/setActiveCabinetId on stale state, the URL writeback
+  // fires with the wrong locator, and the page selection from the URL is
+  // overwritten before the resolve even completes.
+  const urlPending = urlLocator != null && !resolved && !locatorQuery.isError;
+
   // Default-select the first project once it loads (or if the URL-supplied
   // project id is no longer in the user's accessible set — silently fall
   // through to the first instead of leaving the rail empty).
   useEffect(() => {
+    if (urlPending) return;
     if (projects.length === 0) return;
     if (!activeProjectId || !projects.find((p) => p.id === activeProjectId)) {
       setActiveProjectId(projects[0].id);
     }
-  }, [projects, activeProjectId]);
+  }, [projects, activeProjectId, urlPending]);
 
   const cabinetsQuery = useCabinets(activeProjectId);
   const cabinets = cabinetsQuery.data ?? [];
@@ -120,6 +148,7 @@ export default function NotesPage() {
   // Default-select the first cabinet whenever the project / cabinet list
   // changes — otherwise the rail has nothing highlighted.
   useEffect(() => {
+    if (urlPending) return;
     if (!cabinets.length) {
       setActiveCabinetId(null);
       return;
@@ -127,7 +156,7 @@ export default function NotesPage() {
     if (!activeCabinetId || !cabinets.find((c) => c.id === activeCabinetId)) {
       setActiveCabinetId(cabinets[0].id);
     }
-  }, [cabinets, activeCabinetId]);
+  }, [cabinets, activeCabinetId, urlPending]);
 
   const notebooksQuery = useNotebooks(activeCabinetId);
   const notebooks = notebooksQuery.data ?? [];
@@ -156,19 +185,32 @@ export default function NotesPage() {
   const pageQuery = usePage(activePageId);
   const notesQuery = useNotes(activePageId);
 
-  // Sync tab state when the active page or its notes list changes.
+  // Sync tab state when the active page or its notes list changes. When the
+  // URL specifies a note index, prefer that note as the default active tab —
+  // refreshes on /notes/{page}/{note} land directly on the note tab. If the
+  // index doesn't match any note we silently fall through to the page tab.
   useEffect(() => {
     if (!activePageId || !pageQuery.data || !notesQuery.data) return;
     setTabsByPage((prev) => {
       const tabs = tabsForPage(activePageId, pageQuery.data!.title, notesQuery.data!);
       const existing = prev[activePageId];
-      const activeTabId =
-        existing?.activeTabId && tabs.find((t) => t.id === existing.activeTabId)
-          ? existing.activeTabId
-          : tabs[0]?.id;
+      let activeTabId: string | undefined;
+      // Existing user-selected tab wins if still valid (don't yank the user
+      // back to the URL's tab when they've already clicked elsewhere).
+      if (existing?.activeTabId && tabs.find((t) => t.id === existing.activeTabId)) {
+        activeTabId = existing.activeTabId;
+      }
+      // First-time hydration: honor the URL's note index if provided.
+      if (!activeTabId && urlNoteIndex != null) {
+        const match = notesQuery.data!.find((n) => n.pageNoteIndex === urlNoteIndex);
+        if (match) {
+          activeTabId = `${activePageId}::${match.id}`;
+        }
+      }
+      activeTabId ??= tabs[0]?.id;
       return { ...prev, [activePageId]: { tabs, activeTabId: activeTabId ?? "" } };
     });
-  }, [activePageId, pageQuery.data, notesQuery.data]);
+  }, [activePageId, pageQuery.data, notesQuery.data, urlNoteIndex]);
 
   const createCabinet = useCreateCabinet(activeProjectId);
   const updateCabinetMutation = useUpdateCabinet(activeProjectId);
@@ -180,6 +222,7 @@ export default function NotesPage() {
   const deletePageMutation = useDeletePage();
   const createPageMutation = useCreatePage();
   const createNote = useCreateNote(activePageId);
+  const deleteNoteMutation = useDeleteNote(activePageId);
 
   const activeCabinet = cabinets.find((c) => c.id === activeCabinetId) ?? null;
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -192,23 +235,82 @@ export default function NotesPage() {
     : null;
   const pageState = activePageId ? tabsByPage[activePageId] : undefined;
 
-  // Deepest available locator becomes the URL. Preference order is the same
-  // as the entity hierarchy: page > notebook > cabinet > project. Using
-  // `replace` so every click doesn't push a history entry — refresh restores
-  // exactly where you were, back-button still navigates between SPA routes.
-  const deepestLocator = useMemo(() => {
-    if (activePageTreeNode) return activePageTreeNode.locator;
-    if (activeNotebook) return activeNotebook.locator;
-    if (activeCabinet) return activeCabinet.locator;
-    if (activeProject) return activeProject.locator;
-    return null;
-  }, [activePageTreeNode, activeNotebook, activeCabinet, activeProject]);
+  // Active note's pageNoteIndex drives the second URL segment. Computed from
+  // the active tab id (a string like `${pageId}::${noteId}` or
+  // `${pageId}::page`) and the loaded notes list. Memoised on the SCALAR
+  // inputs (activeTabId + notes data ref) so the value's reference stays
+  // stable across renders that don't actually change it — without that, the
+  // URL writeback effect re-fires every render and downstream Mantine
+  // components see new prop refs, which has been observed to trip
+  // `useMergedRef` setState loops.
+  const activeNoteId = useMemo(() => {
+    if (!pageState?.activeTabId) return null;
+    const sep = "::";
+    const idx = pageState.activeTabId.indexOf(sep);
+    if (idx < 0) return null;
+    const tail = pageState.activeTabId.slice(idx + sep.length);
+    return tail === "page" ? null : tail;
+  }, [pageState?.activeTabId]);
+
+  const activeNotePageIndex = useMemo(() => {
+    if (!activeNoteId || !notesQuery.data) return null;
+    return notesQuery.data.find((n) => n.id === activeNoteId)?.pageNoteIndex ?? null;
+  }, [activeNoteId, notesQuery.data]);
+
+  // Desired URL: /notes/{deepestLocator}[/{pageNoteIndex}]. Page tab or no
+  // note → single segment. Note tab → two segments. Defined as a string so
+  // the writeback can compare against the current location verbatim.
+  const desiredPath = useMemo(() => {
+    let base: string | null = null;
+    if (activePageTreeNode) base = `/notes/${activePageTreeNode.locator}`;
+    else if (activeNotebook) base = `/notes/${activeNotebook.locator}`;
+    else if (activeCabinet) base = `/notes/${activeCabinet.locator}`;
+    else if (activeProject) base = `/notes/${activeProject.locator}`;
+    if (base && activePageTreeNode && activeNotePageIndex != null) {
+      base = `${base}/${activeNotePageIndex}`;
+    }
+    return base;
+  }, [
+    activePageTreeNode,
+    activeNotebook,
+    activeCabinet,
+    activeProject,
+    activeNotePageIndex
+  ]);
+
+  const currentPath = useMemo(() => {
+    if (urlLocator == null) return null;
+    return urlNoteIndex != null
+      ? `/notes/${urlLocator}/${urlNoteIndex}`
+      : `/notes/${urlLocator}`;
+  }, [urlLocator, urlNoteIndex]);
 
   useEffect(() => {
-    if (deepestLocator == null) return;
-    if (urlLocator === deepestLocator) return;
-    navigate(`/notes/${deepestLocator}`, { replace: true });
-  }, [deepestLocator, urlLocator, navigate]);
+    // Wait until the URL's locator has resolved before touching the URL.
+    if (urlPending) return;
+    // Page in flight: activePageId is set but its tree node hasn't loaded
+    // yet (page-tree query still pending). Without this gate the URL would
+    // briefly overwrite a /notes/{page} URL with /notes/{cabinet} during
+    // the load window. Hits both cold-load and same-cabinet navigation.
+    if (activePageId && !activePageTreeNode) return;
+    // Notes for the active page haven't loaded yet — hold off so the
+    // writeback can't drop the /{noteIndex} segment briefly while the
+    // notes query settles. activeTabId would default to the page tab in
+    // that window otherwise, and we'd write /notes/{page} over the
+    // /notes/{page}/{n} URL the user came in on.
+    if (activePageId && notesQuery.data === undefined) return;
+    if (desiredPath == null) return;
+    if (desiredPath === currentPath) return;
+    navigate(desiredPath, { replace: true });
+  }, [
+    desiredPath,
+    currentPath,
+    navigate,
+    urlPending,
+    activePageId,
+    activePageTreeNode,
+    notesQuery.data
+  ]);
 
   const onPagePick = (pageId: string) => {
     setActivePageId(pageId);
@@ -223,7 +325,27 @@ export default function NotesPage() {
     });
   };
 
+  // Closing a note tab deletes the underlying note (no "close without
+  // delete" — closing == deleting per design). Always confirms first so
+  // users don't lose work to a misclick on the small × button. Page tabs
+  // can't be closed (Tab renders no × for them), so we only ever land here
+  // for note tabs and just guard defensively.
   const onCloseTab = (tabId: string) => {
+    if (!activePageId) return;
+    const cur = tabsByPage[activePageId];
+    const tab = cur?.tabs.find((t) => t.id === tabId);
+    if (!tab || tab.kind === "page") return;
+    const noteId = tab.noteId;
+    if (!noteId) return;
+    setDeleteNoteTab({ tabId, noteId, noteName: tab.name });
+    setDeleteNoteError(null);
+  };
+
+  // Remove a tab from local state and pick a successor active tab if the
+  // closed one was active. Called from the confirm-dialog onConfirm AFTER
+  // the server delete succeeds (so the server is authoritative — we never
+  // remove the tab on a failed delete).
+  const removeTabLocally = (tabId: string) => {
     if (!activePageId) return;
     setTabsByPage((prev) => {
       const cur = prev[activePageId];
@@ -262,7 +384,13 @@ export default function NotesPage() {
       className="app-shell-content-edge"
       style={{
         display: "flex",
-        width: "100%",
+        // No explicit width: the `.app-shell-content-edge` rule applies a
+        // negative -1.5rem margin to cancel the shell's 24px padding. With
+        // `width: 100%`, the element would be locked to the parent's
+        // content width (1235px on a 1283px viewport) and the negative
+        // margins would only shift its position — leaving a 48px gap on
+        // the right. Letting width default to `auto` lets the negative
+        // margins actually grow the box so it spans the full viewport.
         height: "calc(100vh - 56px)",
         background: "#fff",
         fontFamily: "'Open Sans', system-ui, sans-serif",
@@ -557,6 +685,39 @@ export default function NotesPage() {
               }
             } catch (err) {
               setDeletePageError(describeError(err));
+            }
+          }}
+        />
+      )}
+
+      {deleteNoteTab && (
+        <ConfirmDialog
+          icon="fa-trash"
+          title={`Delete “${deleteNoteTab.noteName}”?`}
+          destructive
+          body={
+            <>
+              This permanently deletes the note and all of its content. This
+              cannot be undone.
+            </>
+          }
+          confirmLabel="Delete note"
+          busy={deleteNoteMutation.isPending}
+          error={deleteNoteError}
+          onCancel={() => {
+            if (deleteNoteMutation.isPending) return;
+            setDeleteNoteTab(null);
+            setDeleteNoteError(null);
+          }}
+          onConfirm={async () => {
+            const target = deleteNoteTab;
+            try {
+              await deleteNoteMutation.mutateAsync(target.noteId);
+              removeTabLocally(target.tabId);
+              setDeleteNoteTab(null);
+              setDeleteNoteError(null);
+            } catch (err) {
+              setDeleteNoteError(describeError(err));
             }
           }}
         />

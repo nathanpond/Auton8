@@ -12,11 +12,19 @@ import { StarterKit } from "@tiptap/starter-kit";
 import { Link, RichTextEditor } from "@mantine/tiptap";
 import { useUpdateNote } from "@/hooks/useContent";
 import { NoteDto } from "@/api/content";
+import { EditableNoteTitle } from "./EditableNoteTitle";
 import { notesTheme } from "./notesTheme";
 
 type Props = {
   note: NoteDto | null;
   noteName: string;
+  // When set, renders this historical revision's content (read-only) instead
+  // of the live note. versionNumber is part of the editor's recreate-key.
+  revisionOverride?: {
+    versionNumber: number;
+    title: string | null;
+    contentJsonb: string;
+  } | null;
 };
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
@@ -24,7 +32,10 @@ const AUTOSAVE_DEBOUNCE_MS = 600;
 // Visual Text note editor — Mantine's @mantine/tiptap with the full toolbar
 // shown in the design (headings, marks, lists, blockquote, align, links,
 // inserts, undo/redo). Body is persisted as the tiptap JSON document.
-export function VisualTextEditor({ note, noteName }: Props) {
+export function VisualTextEditor({ note, noteName, revisionOverride }: Props) {
+  const viewingRevision = revisionOverride != null;
+  const effectiveContent = revisionOverride?.contentJsonb ?? note?.contentJsonb;
+  const effectiveTitle = revisionOverride?.title ?? note?.title ?? noteName;
   const updateNote = useUpdateNote(note?.pageId ?? null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string | null>(null);
@@ -52,9 +63,10 @@ export function VisualTextEditor({ note, noteName }: Props) {
         TaskItem.configure({ nested: true }),
         Placeholder.configure({ placeholder: "Type to start writing…" })
       ],
-      content: parseDoc(note?.contentJsonb),
+      content: parseDoc(effectiveContent),
+      editable: !viewingRevision,
       onUpdate: ({ editor: ed }) => {
-        if (!note) return;
+        if (!note || viewingRevision) return;
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
           const json = JSON.stringify(ed.getJSON());
@@ -64,10 +76,17 @@ export function VisualTextEditor({ note, noteName }: Props) {
         }, AUTOSAVE_DEBOUNCE_MS);
       }
     },
-    // Re-mount the editor when switching between notes so the content state
-    // doesn't bleed from the previous note's document into the new one.
-    [note?.id]
+    // Re-mount on note swap AND on revision swap so the new content goes
+    // through useEditor's `content` field cleanly.
+    [note?.id, revisionOverride?.versionNumber ?? null]
   );
+
+  // Toolbar still renders for revisions but the buttons would be inert
+  // visually; flipping `editable` explicitly keeps tiptap's selection /
+  // caret out of the doc.
+  useEffect(() => {
+    editor?.setEditable(!viewingRevision);
+  }, [editor, viewingRevision]);
 
   // Reset the saved-content tracker when the note swaps so an unrelated
   // autosave can't compare against a stale ref.
@@ -85,6 +104,7 @@ export function VisualTextEditor({ note, noteName }: Props) {
 
   return (
     <div
+      className="notes-editor-bleed"
       style={{
         flex: 1,
         display: "flex",
@@ -155,9 +175,15 @@ export function VisualTextEditor({ note, noteName }: Props) {
           </div>
         </RichTextEditor.Toolbar>
 
-        <div style={{ padding: "20px 40px", flex: 1, overflowY: "auto" }}>
+        <div style={{ padding: "20px 0 20px 40px", flex: 1, overflowY: "auto" }}>
           <div style={{ width: "100%" }}>
-            <h1
+            <EditableNoteTitle
+              value={effectiveTitle}
+              readOnly={viewingRevision || !note}
+              onSave={(next) => {
+                if (!note) return;
+                updateNote.mutate({ id: note.id, body: { title: next } });
+              }}
               style={{
                 margin: "0 0 18px",
                 fontSize: 28,
@@ -165,9 +191,7 @@ export function VisualTextEditor({ note, noteName }: Props) {
                 letterSpacing: "-0.02em",
                 color: notesTheme.dark
               }}
-            >
-              {note?.title ?? noteName}
-            </h1>
+            />
             <EditorContent editor={editor} />
           </div>
         </div>

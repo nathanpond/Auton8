@@ -72,6 +72,8 @@ public static class ContentEventTypes
     public const string PageDeleted = "content.page.deleted";
     public const string PageTreeViewed = "content.page.tree.viewed";
     public const string PageViewed = "content.page.viewed";
+    public const string PageFavorited = "content.page.favorited";
+    public const string PageUnfavorited = "content.page.unfavorited";
 
     // Page versions
     public const string PageVersionCreated = "content.page.version.created";

@@ -271,6 +271,8 @@ builder.Services.AddScoped<AutoNate.Web.Services.Content.IProjectMembershipServi
     AutoNate.Web.Services.Content.ProjectMembershipService>();
 builder.Services.AddScoped<AutoNate.Web.Services.Content.IContentVersionService,
     AutoNate.Web.Services.Content.ContentVersionService>();
+builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentVersioningOptions>()
+    .BindConfiguration(AutoNate.Web.Services.Content.ContentVersioningOptions.SectionName);
 builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentAttachmentOptions>()
     .BindConfiguration("ContentAttachments");
 builder.Services.AddSingleton<AutoNate.Web.Services.Content.IContentAttachmentStore,

@@ -4,9 +4,13 @@ import {
   LocatorResponse,
   NoteDto,
   NoteKind,
+  NoteVersionDetail,
+  NoteVersionsResponse,
   NotebookDto,
   PageDto,
   PageTreeNodeDto,
+  PageVersionDetail,
+  PageVersionsResponse,
   ProjectDto,
   UpdateCabinetRequest,
   UpdateNotebookRequest,
@@ -19,8 +23,16 @@ import {
   deleteNote,
   deleteNotebook,
   deletePage,
+  favoritePage,
+  fetchNoteVersion,
   fetchPage,
   fetchPageTree,
+  fetchPageVersion,
+  listNoteVersions,
+  listPageVersions,
+  restoreNoteVersion,
+  restorePageVersion,
+  unfavoritePage,
   listCabinetsPage,
   listNotebooksPage,
   listNotes,
@@ -55,6 +67,14 @@ export const pageTreeKey = (notebookId: string) =>
   ["content", "page-tree", notebookId] as const;
 export const pageKey = (pageId: string) => ["content", "page", pageId] as const;
 export const notesKey = (pageId: string) => ["content", "notes", pageId] as const;
+export const pageVersionsKey = (pageId: string) =>
+  ["content", "page-versions", pageId] as const;
+export const pageVersionKey = (pageId: string, versionNumber: number) =>
+  ["content", "page-version", pageId, versionNumber] as const;
+export const noteVersionsKey = (noteId: string) =>
+  ["content", "note-versions", noteId] as const;
+export const noteVersionKey = (noteId: string, versionNumber: number) =>
+  ["content", "note-version", noteId, versionNumber] as const;
 
 export function useProjects() {
   return useQuery<ProjectDto[]>({
@@ -217,6 +237,34 @@ export function useUpdatePage() {
   });
 }
 
+// Toggles the current user's favorite flag on a page. Optimistically flips
+// the cached PageDto's isFavorited so the star icon swaps state instantly;
+// on error the previous value is restored.
+export function useToggleFavoritePage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; favorited: boolean }) =>
+      vars.favorited ? favoritePage(vars.id) : unfavoritePage(vars.id),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: pageKey(vars.id) });
+      const previous = qc.getQueryData<PageDto>(pageKey(vars.id));
+      if (previous) {
+        qc.setQueryData<PageDto>(pageKey(vars.id), {
+          ...previous,
+          isFavorited: vars.favorited
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(pageKey(vars.id), ctx.previous);
+    },
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: pageKey(vars.id) });
+    }
+  });
+}
+
 export function useDeletePage() {
   const qc = useQueryClient();
   return useMutation({
@@ -267,6 +315,78 @@ export function useDeleteNote(pageId: string | null) {
   return useMutation({
     mutationFn: (id: string) => deleteNote(id),
     onSuccess: () => {
+      if (pageId) qc.invalidateQueries({ queryKey: notesKey(pageId) });
+    }
+  });
+}
+
+// ── Version history ───────────────────────────────────────────────────────
+
+export function usePageVersions(pageId: string | null, enabled = true) {
+  return useQuery<PageVersionsResponse>({
+    queryKey: pageId ? pageVersionsKey(pageId) : ["content", "page-versions", "none"],
+    enabled: !!pageId && enabled,
+    queryFn: ({ signal }) => listPageVersions(pageId!, { pageSize: 100 }, signal)
+  });
+}
+
+export function usePageVersion(pageId: string | null, versionNumber: number | null) {
+  return useQuery<PageVersionDetail>({
+    queryKey:
+      pageId && versionNumber != null
+        ? pageVersionKey(pageId, versionNumber)
+        : ["content", "page-version", "none"],
+    enabled: !!pageId && versionNumber != null,
+    queryFn: ({ signal }) => fetchPageVersion(pageId!, versionNumber!, signal),
+    // Historical revision bodies are immutable so we can cache forever.
+    staleTime: Infinity
+  });
+}
+
+// Restores a page version. After the server creates the snapshot + replaces
+// current, the cached page + tree + versions list all need refreshing so the
+// editor reads the new current body and the history modal shows the new
+// kind='restore' entry.
+export function useRestorePageVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { pageId: string; versionNumber: number; note?: string }) =>
+      restorePageVersion(vars.pageId, vars.versionNumber, vars.note),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: pageKey(vars.pageId) });
+      qc.invalidateQueries({ queryKey: pageVersionsKey(vars.pageId) });
+      qc.invalidateQueries({ queryKey: ["content", "page-tree"] });
+    }
+  });
+}
+
+export function useNoteVersions(noteId: string | null, enabled = true) {
+  return useQuery<NoteVersionsResponse>({
+    queryKey: noteId ? noteVersionsKey(noteId) : ["content", "note-versions", "none"],
+    enabled: !!noteId && enabled,
+    queryFn: ({ signal }) => listNoteVersions(noteId!, { pageSize: 100 }, signal)
+  });
+}
+
+export function useNoteVersion(noteId: string | null, versionNumber: number | null) {
+  return useQuery<NoteVersionDetail>({
+    queryKey:
+      noteId && versionNumber != null
+        ? noteVersionKey(noteId, versionNumber)
+        : ["content", "note-version", "none"],
+    enabled: !!noteId && versionNumber != null,
+    queryFn: ({ signal }) => fetchNoteVersion(noteId!, versionNumber!, signal),
+    staleTime: Infinity
+  });
+}
+
+export function useRestoreNoteVersion(pageId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { noteId: string; versionNumber: number; note?: string }) =>
+      restoreNoteVersion(vars.noteId, vars.versionNumber, vars.note),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: noteVersionsKey(vars.noteId) });
       if (pageId) qc.invalidateQueries({ queryKey: notesKey(pageId) });
     }
   });

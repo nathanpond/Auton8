@@ -27,13 +27,21 @@ public static class PageVersionEndpoints
             var totalCount = await query.CountAsync(ct);
             var pg = page.GetValueOrDefault(0);
             var ps = Math.Clamp(pageSize.GetValueOrDefault(25), 1, 200);
-            var items = await query
+            var rows = await query
                 .OrderByDescending(v => v.VersionNumber)
                 .Skip(pg * ps).Take(ps)
-                .Select(v => new PageVersionSummaryDto(
+                .Select(v => new
+                {
                     v.Id, v.PageId, v.VersionNumber, v.Title, v.Kind, v.Note,
-                    v.CreatedAtUtc, v.CreatedBy))
+                    v.CreatedAtUtc, v.CreatedBy
+                })
                 .ToListAsync(ct);
+            var names = await UserDisplayName.ResolveAsync(
+                db, rows.Select(r => r.CreatedBy), ct);
+            var items = rows.Select(r => new PageVersionSummaryDto(
+                r.Id, r.PageId, r.VersionNumber, r.Title, r.Kind, r.Note,
+                r.CreatedAtUtc, r.CreatedBy,
+                names.TryGetValue(r.CreatedBy, out var n) ? n : null)).ToList();
 
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
@@ -57,6 +65,7 @@ public static class PageVersionEndpoints
             var version = await db.PageVersions.AsNoTracking()
                 .FirstOrDefaultAsync(v => v.PageId == pageId && v.VersionNumber == n, ct);
             if (version is null) return Results.NotFound();
+            var names = await UserDisplayName.ResolveAsync(db, new[] { version.CreatedBy }, ct);
 
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
@@ -69,7 +78,8 @@ public static class PageVersionEndpoints
             return Results.Ok(new PageVersionDto(
                 version.Id, version.PageId, version.VersionNumber,
                 version.Title, version.BodyJsonb, version.Kind, version.Note,
-                version.CreatedAtUtc, version.CreatedBy));
+                version.CreatedAtUtc, version.CreatedBy,
+                names.TryGetValue(version.CreatedBy, out var n2) ? n2 : null));
         }).RequirePermission(EntityKinds.Page, Actions.View, "pageId");
 
         group.MapPost("/{n:int}/restore", async (
@@ -158,11 +168,11 @@ public static class PageVersionEndpoints
 
     public sealed record PageVersionSummaryDto(
         Guid Id, Guid PageId, int VersionNumber, string Title, string Kind, string? Note,
-        DateTime CreatedAtUtc, Guid CreatedBy);
+        DateTime CreatedAtUtc, Guid CreatedBy, string? CreatedByName);
 
     public sealed record PageVersionDto(
         Guid Id, Guid PageId, int VersionNumber, string Title, string BodyJsonb,
-        string Kind, string? Note, DateTime CreatedAtUtc, Guid CreatedBy);
+        string Kind, string? Note, DateTime CreatedAtUtc, Guid CreatedBy, string? CreatedByName);
 
     public sealed record PageVersionPageResponse(
         List<PageVersionSummaryDto> Items, int TotalCount);

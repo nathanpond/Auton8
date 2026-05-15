@@ -1393,7 +1393,15 @@ public static class EventCatalog
                 new EventCatalogEntry(ContentEventTopic.TopicName, ContentEventTypes.PageTreeViewed,
                     "Caller fetched the page tree for a notebook.",
                     "Fires from GET /api/content/notebooks/{id}/page-tree on the success path.",
-                    ["resource: { notebookId }. details: { pageCount }."])
+                    ["resource: { notebookId }. details: { pageCount }."]),
+                new EventCatalogEntry(ContentEventTopic.TopicName, ContentEventTypes.PageFavorited,
+                    "Caller marked a page as a favorite for themselves.",
+                    "Fires from PUT /api/content/pages/{id}/favorite. Idempotent — re-marking an already-favorited page still publishes.",
+                    ["resource: { id, title }. details: null."]),
+                new EventCatalogEntry(ContentEventTopic.TopicName, ContentEventTypes.PageUnfavorited,
+                    "Caller removed a page from their favorites.",
+                    "Fires from DELETE /api/content/pages/{id}/favorite. Idempotent — removing a non-favorited page still publishes.",
+                    ["resource: { id, title }. details: null."])
             ])
     ];
 

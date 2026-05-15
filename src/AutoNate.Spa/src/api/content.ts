@@ -57,6 +57,7 @@ export type PageDto = {
   currentVersionNumber: number;
   sortOrder: number;
   isArchived: boolean;
+  isFavorited: boolean;
   createdAtUtc: string;
   updatedAtUtc: string;
   createdBy: string;
@@ -80,6 +81,9 @@ export type NoteKind = "richtext" | "drawing" | "diagram";
 export type NoteDto = {
   id: string;
   locator: number;
+  // 1-based index within the parent page. Stable across deletes (gaps are
+  // fine). Used as the second URL segment: /notes/{pageLocator}/{pageNoteIndex}.
+  pageNoteIndex: number;
   pageId: string;
   noteKind: NoteKind;
   title: string | null;
@@ -300,6 +304,145 @@ export async function updatePage(id: string, req: UpdatePageRequest): Promise<Pa
 
 export async function deletePage(id: string): Promise<void> {
   await api.delete(`/api/content/pages/${id}`);
+}
+
+export async function favoritePage(id: string): Promise<void> {
+  await api.put(`/api/content/pages/${id}/favorite`);
+}
+
+export async function unfavoritePage(id: string): Promise<void> {
+  await api.delete(`/api/content/pages/${id}/favorite`);
+}
+
+// ── Page versions ──────────────────────────────────────────────────────────
+
+// kind is 'autosave' | 'manual' | 'restore' — typed as string here to mirror
+// the backend record and tolerate future kinds without a SPA change.
+export type PageVersionSummary = {
+  id: string;
+  pageId: string;
+  versionNumber: number;
+  title: string;
+  kind: string;
+  note: string | null;
+  createdAtUtc: string;
+  createdBy: string;
+  // Resolved display name for createdBy ("First Last" or username), or null
+  // when the user row is gone (e.g. externally-provisioned actor since deleted).
+  createdByName: string | null;
+};
+
+export type PageVersionDetail = PageVersionSummary & {
+  bodyJsonb: string;
+};
+
+export type PageVersionsResponse = {
+  items: PageVersionSummary[];
+  totalCount: number;
+};
+
+export async function listPageVersions(
+  pageId: string,
+  params: { page?: number; pageSize?: number } = {},
+  signal?: AbortSignal
+): Promise<PageVersionsResponse> {
+  const { data } = await api.get<PageVersionsResponse>(
+    `/api/content/pages/${pageId}/versions/`,
+    {
+      params: {
+        page: params.page ?? 0,
+        pageSize: params.pageSize ?? 50
+      },
+      signal
+    }
+  );
+  return data;
+}
+
+export async function fetchPageVersion(
+  pageId: string,
+  versionNumber: number,
+  signal?: AbortSignal
+): Promise<PageVersionDetail> {
+  const { data } = await api.get<PageVersionDetail>(
+    `/api/content/pages/${pageId}/versions/${versionNumber}`,
+    { signal }
+  );
+  return data;
+}
+
+export async function restorePageVersion(
+  pageId: string,
+  versionNumber: number,
+  note?: string
+): Promise<void> {
+  await api.post(`/api/content/pages/${pageId}/versions/${versionNumber}/restore`, {
+    note: note ?? null
+  });
+}
+
+// ── Note versions ──────────────────────────────────────────────────────────
+
+export type NoteVersionSummary = {
+  id: string;
+  noteId: string;
+  versionNumber: number;
+  title: string | null;
+  noteKind: NoteKind;
+  kind: string;
+  note: string | null;
+  createdAtUtc: string;
+  createdBy: string;
+  createdByName: string | null;
+};
+
+export type NoteVersionDetail = NoteVersionSummary & {
+  contentJsonb: string;
+};
+
+export type NoteVersionsResponse = {
+  items: NoteVersionSummary[];
+  totalCount: number;
+};
+
+export async function listNoteVersions(
+  noteId: string,
+  params: { page?: number; pageSize?: number } = {},
+  signal?: AbortSignal
+): Promise<NoteVersionsResponse> {
+  const { data } = await api.get<NoteVersionsResponse>(
+    `/api/content/notes/${noteId}/versions/`,
+    {
+      params: {
+        page: params.page ?? 0,
+        pageSize: params.pageSize ?? 50
+      },
+      signal
+    }
+  );
+  return data;
+}
+
+export async function fetchNoteVersion(
+  noteId: string,
+  versionNumber: number,
+  signal?: AbortSignal
+): Promise<NoteVersionDetail> {
+  const { data } = await api.get<NoteVersionDetail>(
+    `/api/content/notes/${noteId}/versions/${versionNumber}`,
+    { signal }
+  );
+  return data;
+}
+
+export async function restoreNoteVersion(
+  noteId: string,
+  versionNumber: number,
+  note?: string
+): Promise<void> {
+  await api.post(`/api/content/notes/${noteId}/versions/${versionNumber}/restore`, {
+    note: note ?? null
+  });
 }
 
 // ── Notes ──────────────────────────────────────────────────────────────────

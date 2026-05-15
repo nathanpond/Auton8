@@ -57,6 +57,17 @@ public static class NoteEndpoints
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             var now = DateTime.UtcNow;
             var content = string.IsNullOrWhiteSpace(request.ContentJsonb) ? "{}" : request.ContentJsonb;
+
+            // Per-page note index = MAX existing index for this page + 1.
+            // Unique (page_id, page_note_index) constraint protects against
+            // the rare concurrent-insert race; the second writer fails with
+            // a 23505 and the user can retry.
+            var nextNoteIndex = await db.Notes.AsNoTracking()
+                .Where(n => n.PageId == pageId)
+                .Select(n => (int?)n.PageNoteIndex)
+                .MaxAsync(ct) ?? 0;
+            nextNoteIndex++;
+
             var note = new Note
             {
                 Id = Guid.NewGuid(),
@@ -65,6 +76,7 @@ public static class NoteEndpoints
                 Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim(),
                 ContentJsonb = content,
                 CurrentVersionNumber = 2, // v1 written below; next is v2.
+                PageNoteIndex = nextNoteIndex,
                 SortOrder = request.SortOrder ?? 0,
                 IsArchived = false,
                 CreatedAtUtc = now,
@@ -129,9 +141,12 @@ public static class NoteEndpoints
                 || (request.ContentJsonb is not null && request.ContentJsonb != note.ContentJsonb);
             if (contentChanging)
             {
+                // Autosave kind enables session rollup — see ContentVersionService.
+                // newVersionNumber stays null when the change folds into the
+                // most recent same-author autosave row.
                 newVersionNumber = await versions.SnapshotNoteBeforeChangeAsync(
                     db, note.Id, note.Title, note.NoteKind, note.ContentJsonb,
-                    ContentVersionKinds.Manual, null, actorId, DateTime.UtcNow, ct);
+                    ContentVersionKinds.Autosave, null, actorId, DateTime.UtcNow, ct);
             }
 
             if (request.Title is not null)
@@ -158,7 +173,7 @@ public static class NoteEndpoints
                     ContentEventTopic.TopicName,
                     ContentEventTypes.NoteVersionCreated,
                     ContentResourceKinds.NoteVersion,
-                    resource: new { noteId = note.Id, versionNumber = vn - 1, kind = ContentVersionKinds.Manual },
+                    resource: new { noteId = note.Id, versionNumber = vn - 1, kind = ContentVersionKinds.Autosave },
                     details: null,
                     ct);
             }
@@ -212,7 +227,7 @@ public static class NoteEndpoints
         kind == "richtext" || kind == "drawing" || kind == "diagram";
 
     internal static NoteDto MapDto(Note n) => new(
-        n.Id, n.Locator, n.PageId, n.NoteKind, n.Title, n.ContentJsonb,
+        n.Id, n.Locator, n.PageNoteIndex, n.PageId, n.NoteKind, n.Title, n.ContentJsonb,
         n.CurrentVersionNumber, n.SortOrder, n.IsArchived,
         n.CreatedAtUtc, n.UpdatedAtUtc, n.CreatedBy, n.UpdatedBy);
 
@@ -223,7 +238,8 @@ public static class NoteEndpoints
         string? Title, string? ContentJsonb, int? SortOrder);
 
     public sealed record NoteDto(
-        Guid Id, long Locator, Guid PageId, string NoteKind, string? Title,
-        string ContentJsonb, int CurrentVersionNumber, int SortOrder, bool IsArchived,
+        Guid Id, long Locator, int PageNoteIndex, Guid PageId, string NoteKind,
+        string? Title, string ContentJsonb, int CurrentVersionNumber, int SortOrder,
+        bool IsArchived,
         DateTime CreatedAtUtc, DateTime UpdatedAtUtc, Guid CreatedBy, Guid UpdatedBy);
 }
