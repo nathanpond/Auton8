@@ -6,7 +6,7 @@ import {
   createUser,
   deleteUser,
   fetchUserSupervisor,
-  listUsers,
+  listUserDirectory,
   resetUserPassword,
   setUserSupervisor,
   unlockUser,
@@ -16,10 +16,15 @@ import { LocalUser } from "@/types/flowable";
 
 export const USERS_QUERY_KEY = ["users"] as const;
 
+// Calls the authenticated-only /api/users/directory variant so collab
+// surfaces (Yjs cursor names, comment authors, project-member pickers) work
+// for any project member, not just admins with User.View. Admin tables that
+// need email / lock state / last-login keep calling listUsers / listUsersPage
+// directly — those still hit /api/users and require User.View.
 export function useUsers() {
   return useQuery<LocalUser[]>({
     queryKey: USERS_QUERY_KEY,
-    queryFn: ({ signal }) => listUsers(signal)
+    queryFn: ({ signal }) => listUserDirectory(signal)
   });
 }
 

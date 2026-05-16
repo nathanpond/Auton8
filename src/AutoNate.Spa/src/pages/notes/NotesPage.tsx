@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   CabinetDto,
   NotebookDto,
+  NoteDto,
   PageTreeNodeDto,
   fetchPageTree
 } from "@/api/content";
 import {
+  notesKey,
   pageTreeKey,
   useCabinets,
   useCreateCabinet,
@@ -39,7 +41,9 @@ import { NewCabinetModal } from "./NewCabinetModal";
 import { NewNotebookModal } from "./NewNotebookModal";
 import { NewNoteModal } from "./NewNoteModal";
 import { NewPageModal } from "./NewPageModal";
+import { ProjectSettingsModal } from "./ProjectSettingsModal";
 import { EditorTab, NotebookWithPages, flattenToTree, tabsForPage } from "./types";
+import { useYjsNotesList } from "@/lib/yjs/useYjsNotesList";
 import { WireNoteKind, notesTheme } from "./notesTheme";
 import "./notes.css";
 
@@ -118,6 +122,7 @@ export default function NotesPage() {
   } | null>(null);
   const [deleteNoteError, setDeleteNoteError] = useState<string | null>(null);
   const [newPageTarget, setNewPageTarget] = useState<NewPageTarget | null>(null);
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   // Ids of nodes the user has asked to expand (e.g. after creating a child
   // inside them). Stays additive — manual collapses are preserved because
   // PageRow / NotebookRow only force-open when their id is in this set.
@@ -182,17 +187,61 @@ export default function NotesPage() {
 
   const anyTreeLoading = pageTreeQueries.some((q) => q.isLoading);
 
+  const qc = useQueryClient();
   const pageQuery = usePage(activePageId);
   const notesQuery = useNotes(activePageId);
+
+  // Live notes list — a Y.Doc per page mirrors the `notes` table so users
+  // viewing the same page see new tabs appear as soon as another user
+  // creates a note. The REST data is passed in as a seed; editors push
+  // any REST entries the Y.Map is missing.
+  const notesYjs = useYjsNotesList(activePageId, notesQuery.data);
+
+  // Back-propagate Yjs metadata into React-Query so consumers that still
+  // read `notesQuery.data` (EditorPane → activeNote → EditableNoteTitle)
+  // pick up cross-user title renames. We match by id and only overwrite
+  // when the Y.Map's updatedAtUtc is strictly newer than what's in cache
+  // — guards against an in-flight REST refetch clobbering a fresh Yjs
+  // edit. ContentJsonb and other DTO fields not in pagemeta are left
+  // untouched (the note's body lives in a different Y.Doc).
+  useEffect(() => {
+    if (!activePageId || notesYjs.notes.length === 0) return;
+    qc.setQueryData<NoteDto[]>(notesKey(activePageId), (prev) => {
+      if (!prev) return prev;
+      let mutated = false;
+      const next = prev.map((existing) => {
+        const yEntry = notesYjs.notes.find((n) => n.id === existing.id);
+        if (!yEntry) return existing;
+        if (yEntry.updatedAtUtc <= existing.updatedAtUtc) return existing;
+        mutated = true;
+        return {
+          ...existing,
+          title: yEntry.title,
+          sortOrder: yEntry.sortOrder,
+          pageNoteIndex: yEntry.pageNoteIndex,
+          isArchived: yEntry.isArchived,
+          updatedAtUtc: yEntry.updatedAtUtc,
+          updatedBy: yEntry.updatedBy
+        };
+      });
+      return mutated ? next : prev;
+    });
+  }, [activePageId, notesYjs.notes, qc]);
+
+  // Cold-start fallback: before the pagemeta Y.Doc has been seeded for
+  // the first time, show REST data so the tab strip renders immediately.
+  // After seed (one tick later), notesYjs.notes takes over.
+  const liveNotes =
+    notesYjs.notes.length > 0 ? notesYjs.notes : (notesQuery.data ?? []);
 
   // Sync tab state when the active page or its notes list changes. When the
   // URL specifies a note index, prefer that note as the default active tab —
   // refreshes on /notes/{page}/{note} land directly on the note tab. If the
   // index doesn't match any note we silently fall through to the page tab.
   useEffect(() => {
-    if (!activePageId || !pageQuery.data || !notesQuery.data) return;
+    if (!activePageId || !pageQuery.data) return;
     setTabsByPage((prev) => {
-      const tabs = tabsForPage(activePageId, pageQuery.data!.title, notesQuery.data!);
+      const tabs = tabsForPage(activePageId, pageQuery.data!.title, liveNotes);
       const existing = prev[activePageId];
       let activeTabId: string | undefined;
       // Existing user-selected tab wins if still valid (don't yank the user
@@ -202,7 +251,7 @@ export default function NotesPage() {
       }
       // First-time hydration: honor the URL's note index if provided.
       if (!activeTabId && urlNoteIndex != null) {
-        const match = notesQuery.data!.find((n) => n.pageNoteIndex === urlNoteIndex);
+        const match = liveNotes.find((n) => n.pageNoteIndex === urlNoteIndex);
         if (match) {
           activeTabId = `${activePageId}::${match.id}`;
         }
@@ -210,7 +259,7 @@ export default function NotesPage() {
       activeTabId ??= tabs[0]?.id;
       return { ...prev, [activePageId]: { tabs, activeTabId: activeTabId ?? "" } };
     });
-  }, [activePageId, pageQuery.data, notesQuery.data, urlNoteIndex]);
+  }, [activePageId, pageQuery.data, liveNotes, urlNoteIndex]);
 
   const createCabinet = useCreateCabinet(activeProjectId);
   const updateCabinetMutation = useUpdateCabinet(activeProjectId);
@@ -253,9 +302,9 @@ export default function NotesPage() {
   }, [pageState?.activeTabId]);
 
   const activeNotePageIndex = useMemo(() => {
-    if (!activeNoteId || !notesQuery.data) return null;
-    return notesQuery.data.find((n) => n.id === activeNoteId)?.pageNoteIndex ?? null;
-  }, [activeNoteId, notesQuery.data]);
+    if (!activeNoteId) return null;
+    return liveNotes.find((n) => n.id === activeNoteId)?.pageNoteIndex ?? null;
+  }, [activeNoteId, liveNotes]);
 
   // Desired URL: /notes/{deepestLocator}[/{pageNoteIndex}]. Page tab or no
   // note → single segment. Note tab → two segments. Defined as a string so
@@ -363,6 +412,11 @@ export default function NotesPage() {
       noteKind: vars.kind,
       title: vars.name
     });
+    // Mirror into the pagemeta Y.Doc so other connected users see the new
+    // tab appear without needing to refetch. The REST mutation already
+    // invalidates React-Query on this client; the Yjs write is the
+    // cross-client signal.
+    notesYjs.upsertNote(note);
     setModalOpen(false);
     setTabsByPage((prev) => {
       const cur = prev[activePageId] ?? { tabs: [], activeTabId: "" };
@@ -441,6 +495,8 @@ export default function NotesPage() {
             }}
             onNew={() => setCabinetModalOpen(true)}
             canCreate={!!activeProjectId}
+            onOpenSettings={() => setProjectSettingsOpen(true)}
+            canOpenSettings={!!activeProject}
           />
           <Explorer
             cabinet={activeCabinet}
@@ -713,6 +769,10 @@ export default function NotesPage() {
             const target = deleteNoteTab;
             try {
               await deleteNoteMutation.mutateAsync(target.noteId);
+              // Mirror the delete to pagemeta so other connected users'
+              // tab strips drop this note. The local tab close happens
+              // unconditionally next.
+              notesYjs.removeNote(target.noteId);
               removeTabLocally(target.tabId);
               setDeleteNoteTab(null);
               setDeleteNoteError(null);
@@ -750,6 +810,12 @@ export default function NotesPage() {
           submitting={createPageMutation.isPending}
         />
       )}
+
+      <ProjectSettingsModal
+        project={activeProject}
+        opened={projectSettingsOpen}
+        onClose={() => setProjectSettingsOpen(false)}
+      />
     </div>
   );
 }

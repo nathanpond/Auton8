@@ -14,6 +14,7 @@ REDIS_PORT="${AUTONATE_REDIS_PORT:-6379}"
 NATS_PORT="${AUTONATE_NATS_PORT:-4222}"
 DAPR_PLACEMENT_PORT="${AUTONATE_DAPR_PLACEMENT_PORT:-50006}"
 DAPR_SCHEDULER_PORT="${AUTONATE_DAPR_SCHEDULER_PORT:-50007}"
+HOCUSPOCUS_PORT="${AUTONATE_HOCUSPOCUS_PORT:-1234}"
 WAIT_TIMEOUT_SECONDS="${AUTONATE_INFRA_WAIT_TIMEOUT_SECONDS:-120}"
 POLL_INTERVAL_SECONDS=2
 
@@ -26,6 +27,7 @@ REQUIRED_SERVICES=(
   nats-init
   dapr-placement
   dapr-scheduler
+  hocuspocus
 )
 
 log() {
@@ -139,6 +141,12 @@ service_ready() {
     nats-init)
       [[ "$(container_health_or_status "$container_id")" == "exited" ]]
       ;;
+    hocuspocus)
+      # The sidecar has no docker healthcheck; an open TCP socket on the
+      # WebSocket port is the cheapest "actually accepting connections"
+      # signal we have.
+      tcp_reachable "$HOCUSPOCUS_PORT"
+      ;;
     *)
       [[ "$(container_health_or_status "$container_id")" == "running" ]]
       ;;
@@ -212,6 +220,13 @@ print_status_snapshot() {
         ;;
       nats-init)
         log "$service: $(container_health_or_status "$container_id")"
+        ;;
+      hocuspocus)
+        if tcp_reachable "$HOCUSPOCUS_PORT"; then
+          log "$service: reachable on 127.0.0.1:${HOCUSPOCUS_PORT}"
+        else
+          log "$service: container present, port ${HOCUSPOCUS_PORT} not ready"
+        fi
         ;;
     esac
   done

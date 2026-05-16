@@ -2,18 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import type { PartialBlock } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
+import { ActionIcon, Tooltip } from "@mantine/core";
 import { PageDto } from "@/api/content";
 import { useUpdatePage } from "@/hooks/useContent";
+import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
+import { YjsEditor } from "@/lib/yjs/YjsEditor";
+import { ConnectionStatusPill } from "@/lib/yjs/ConnectionStatusPill";
 import { notesTheme } from "./notesTheme";
 
 type Props = {
   page: PageDto;
   mode: "view" | "edit";
-  // When set, the editor renders this historical revision's content instead
-  // of the current page body. Edit mode is implicitly disabled (the banner +
-  // Restore button handle promotion back to current). `versionNumber` is
-  // part of the editor's identity so React tears down + re-creates BlockNote
-  // when the user navigates between revisions.
   revisionOverride?: {
     versionNumber: number;
     title: string;
@@ -21,91 +20,70 @@ type Props = {
   } | null;
 };
 
-const AUTOSAVE_DEBOUNCE_MS = 600;
+const TITLE_AUTOSAVE_DEBOUNCE_MS = 600;
 
 export function PageOverview({ page, mode, revisionOverride }: Props) {
   const viewingRevision = revisionOverride != null;
-  const effectiveMode: "view" | "edit" = viewingRevision ? "view" : mode;
-  const effectiveTitle = revisionOverride?.title ?? page.title;
-  const effectiveBody = revisionOverride?.bodyJsonb ?? page.bodyJsonb;
+
+  if (viewingRevision && revisionOverride) {
+    return (
+      <PageShell
+        title={revisionOverride.title}
+        editableTitle={false}
+        onTitleChange={() => {}}
+        rightSlot={null}
+      >
+        <RevisionEditor
+          key={revisionOverride.versionNumber}
+          rawContent={revisionOverride.bodyJsonb}
+        />
+      </PageShell>
+    );
+  }
+
+  return (
+    <LivePageEditor
+      // Re-mount on page swap so the Yjs handle teardown + recreate runs
+      // cleanly.
+      key={page.id}
+      page={page}
+      mode={mode}
+    />
+  );
+}
+
+function LivePageEditor({ page, mode }: { page: PageDto; mode: "view" | "edit" }) {
   const [titleDraft, setTitleDraft] = useState(page.title);
+  const [showSidebar, setShowSidebar] = useState(false);
   const updatePage = useUpdatePage();
-  const bodyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedBodyRef = useRef<string | null>(null);
-  const lastSavedTitleRef = useRef<string | null>(null);
+  const lastSavedTitleRef = useRef<string | null>(page.title);
+  const { handle, status, role } = useYjsDocument(`page:${page.id}`);
 
-  const editor = useCreateBlockNote({
-    initialContent: parseInitialContent(effectiveBody),
-    placeholders: { default: "Type to start writing…" }
-  });
-
-  // Sync editable flag whenever mode flips. Revision view is always read-only.
-  useEffect(() => {
-    editor.isEditable = effectiveMode === "edit";
-  }, [editor, effectiveMode]);
-
-  // Reset title draft + saved-content bookkeeping only when the user navigates
-  // to a different page. Including page.bodyJsonb / page.title here would re-
-  // run on every save-triggered refetch and stomp the user's in-progress
-  // typing — bug we fixed when keystrokes were "disappearing after a few
-  // seconds" mid-edit.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Reset title bookkeeping when the user navigates to a different page.
+  // Page id is stable inside LivePageEditor (the parent re-keys on swap),
+  // so this is a one-time setup; left as a useEffect for future safety.
   useEffect(() => {
     setTitleDraft(page.title);
-    lastSavedBodyRef.current = page.bodyJsonb ?? null;
     lastSavedTitleRef.current = page.title;
-  }, [page.id]);
+  }, [page.id, page.title]);
 
-  // Body autosave subscription. Detaches on re-mount / dep change so we never
-  // stack listeners that would double-save.
+  // On leaving edit mode, flush the pending title save so a fast tab-out
+  // doesn't drop the last keystroke.
   useEffect(() => {
-    if (viewingRevision) return;
-    const unsubscribe = editor.onChange((ed) => {
-      // Never autosave a revision view or a read-only render; the editable
-      // check below is belt-and-suspenders against an edge case where the
-      // user toggles mode mid-keystroke.
-      if (effectiveMode !== "edit") return;
-      if (bodyTimer.current) clearTimeout(bodyTimer.current);
-      bodyTimer.current = setTimeout(() => {
-        const json = JSON.stringify(ed.document);
-        if (json === lastSavedBodyRef.current) return;
-        lastSavedBodyRef.current = json;
-        updatePage.mutate({ id: page.id, body: { bodyJsonb: json } });
-      }, AUTOSAVE_DEBOUNCE_MS);
-    });
-    return unsubscribe;
-  }, [editor, effectiveMode, page.id, updatePage, viewingRevision]);
-
-  // When the parent flips out of edit mode, flush any pending saves so the
-  // user's last keystroke can't be dropped by the editor losing focus.
-  useEffect(() => {
-    if (viewingRevision) return;
-    if (effectiveMode !== "view") return;
-    if (bodyTimer.current) {
-      clearTimeout(bodyTimer.current);
-      bodyTimer.current = null;
-      const json = JSON.stringify(editor.document);
-      if (json !== lastSavedBodyRef.current) {
-        lastSavedBodyRef.current = json;
-        updatePage.mutate({ id: page.id, body: { bodyJsonb: json } });
-      }
+    if (mode !== "view") return;
+    if (!titleTimer.current) return;
+    clearTimeout(titleTimer.current);
+    titleTimer.current = null;
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== lastSavedTitleRef.current) {
+      lastSavedTitleRef.current = trimmed;
+      updatePage.mutate({ id: page.id, body: { title: trimmed } });
     }
-    if (titleTimer.current) {
-      clearTimeout(titleTimer.current);
-      titleTimer.current = null;
-      const trimmed = titleDraft.trim();
-      if (trimmed && trimmed !== lastSavedTitleRef.current) {
-        lastSavedTitleRef.current = trimmed;
-        updatePage.mutate({ id: page.id, body: { title: trimmed } });
-      }
-    }
-  }, [effectiveMode, editor, page.id, titleDraft, updatePage, viewingRevision]);
+  }, [mode, page.id, titleDraft, updatePage]);
 
-  // Flush any pending saves on unmount so the last keystroke isn't lost.
   useEffect(() => {
     return () => {
-      if (bodyTimer.current) clearTimeout(bodyTimer.current);
       if (titleTimer.current) clearTimeout(titleTimer.current);
     };
   }, []);
@@ -115,16 +93,103 @@ export function PageOverview({ page, mode, revisionOverride }: Props) {
     if (titleTimer.current) clearTimeout(titleTimer.current);
     titleTimer.current = setTimeout(() => {
       const trimmed = next.trim();
-      if (!trimmed) return; // never persist an empty title
+      if (!trimmed) return;
       if (trimmed === lastSavedTitleRef.current) return;
       lastSavedTitleRef.current = trimmed;
       updatePage.mutate({ id: page.id, body: { title: trimmed } });
-    }, AUTOSAVE_DEBOUNCE_MS);
+    }, TITLE_AUTOSAVE_DEBOUNCE_MS);
   };
 
+  const sidebarToggle = (
+    <Tooltip label={showSidebar ? "Hide comments" : "Show comments"}>
+      <ActionIcon
+        variant={showSidebar ? "filled" : "subtle"}
+        color="gray"
+        size="sm"
+        onClick={() => setShowSidebar((v) => !v)}
+        aria-label="Toggle threads sidebar"
+      >
+        <i className="fa fa-comments" />
+      </ActionIcon>
+    </Tooltip>
+  );
+
   return (
-    <div className="notes-editor-bleed" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, background: "#fff" }}>
-      {effectiveMode === "edit" && (
+    <PageShell
+      title={titleDraft}
+      editableTitle={mode === "edit"}
+      onTitleChange={onTitleChange}
+      rightSlot={
+        mode === "edit" ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <ConnectionStatusPill status={status} role={role} />
+            {sidebarToggle}
+          </div>
+        ) : null
+      }
+      // View mode has no header strip; pin the toggle to the upper-right of
+      // the editor area so readers can still surface the threads list.
+      floatingSlot={mode === "view" ? sidebarToggle : null}
+    >
+      {handle ? (
+        <YjsEditor
+          handle={handle}
+          // Edit mode AND role allows writes. A viewer in "edit mode"
+          // still renders read-only — the role gate is the authoritative
+          // check.
+          editable={mode === "edit" && role === "editor"}
+          role={role}
+          // Threads sidebar can be open in either mode now — in view mode the
+          // editor is non-editable, but the sidebar still shows the
+          // thread list for read-along.
+          showSidebar={showSidebar}
+        />
+      ) : null}
+    </PageShell>
+  );
+}
+
+function RevisionEditor({ rawContent }: { rawContent: string }) {
+  const initialContent = parseInitialContent(rawContent);
+  const editor = useCreateBlockNote({
+    initialContent,
+    placeholders: { default: "Type to start writing…" }
+  });
+  editor.isEditable = false;
+  return <BlockNoteView editor={editor} editable={false} theme="light" />;
+}
+
+function PageShell({
+  title,
+  editableTitle,
+  onTitleChange,
+  rightSlot,
+  floatingSlot,
+  children
+}: {
+  title: string;
+  editableTitle: boolean;
+  onTitleChange: (next: string) => void;
+  rightSlot: React.ReactNode;
+  // Rendered absolutely positioned in the upper-right of the editor area.
+  // Used in view mode where the header strip isn't shown but we still want
+  // the threads-sidebar toggle visible.
+  floatingSlot?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="notes-editor-bleed"
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        background: "#fff",
+        position: "relative"
+      }}
+    >
+      {rightSlot && (
         <div
           style={{
             display: "flex",
@@ -135,38 +200,28 @@ export function PageOverview({ page, mode, revisionOverride }: Props) {
             minHeight: 32
           }}
         >
-          {updatePage.isPending ? (
-            <span style={savedStyle}>
-              <i className="fa fa-cloud-arrow-up" style={{ marginRight: 5 }} />
-              Saving…
-            </span>
-          ) : (
-            <span style={savedStyle}>
-              <i className="fa fa-check" style={{ marginRight: 5 }} />
-              Auto-saved
-            </span>
-          )}
+          {rightSlot}
+        </div>
+      )}
+
+      {floatingSlot && (
+        <div
+          style={{
+            position: "absolute",
+            top: 16,
+            right: 16,
+            zIndex: 10
+          }}
+        >
+          {floatingSlot}
         </div>
       )}
 
       <div style={{ flex: 1, overflowY: "auto", padding: "32px 0 32px 40px" }}>
         <div style={{ width: "100%" }}>
-          {effectiveMode === "view" ? (
-            <h1
-              style={{
-                margin: "0 0 18px",
-                fontSize: 30,
-                fontWeight: 700,
-                letterSpacing: "-0.02em",
-                color: notesTheme.dark,
-                overflowWrap: "break-word"
-              }}
-            >
-              {effectiveTitle}
-            </h1>
-          ) : (
+          {editableTitle ? (
             <input
-              value={titleDraft}
+              value={title}
               onChange={(e) => onTitleChange(e.target.value)}
               placeholder="Untitled page"
               style={{
@@ -183,8 +238,21 @@ export function PageOverview({ page, mode, revisionOverride }: Props) {
                 padding: 0
               }}
             />
+          ) : (
+            <h1
+              style={{
+                margin: "0 0 18px",
+                fontSize: 30,
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
+                color: notesTheme.dark,
+                overflowWrap: "break-word"
+              }}
+            >
+              {title}
+            </h1>
           )}
-          <BlockNoteView editor={editor} editable={effectiveMode === "edit"} theme="light" />
+          {children}
         </div>
       </div>
     </div>
@@ -203,9 +271,3 @@ function parseInitialContent(raw: string | null | undefined): PartialBlock[] | u
     return undefined;
   }
 }
-
-const savedStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: notesTheme.muted,
-  fontWeight: 600
-};

@@ -12,6 +12,8 @@ import {
   PageVersionDetail,
   PageVersionsResponse,
   ProjectDto,
+  ProjectMemberDto,
+  ProjectRoleWire,
   UpdateCabinetRequest,
   UpdateNotebookRequest,
   createCabinet,
@@ -30,8 +32,11 @@ import {
   fetchPageVersion,
   listNoteVersions,
   listPageVersions,
+  listProjectMembers,
+  removeProjectMember,
   restoreNoteVersion,
   restorePageVersion,
+  setProjectMemberRole,
   unfavoritePage,
   listCabinetsPage,
   listNotebooksPage,
@@ -388,6 +393,38 @@ export function useRestoreNoteVersion(pageId: string | null) {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: noteVersionsKey(vars.noteId) });
       if (pageId) qc.invalidateQueries({ queryKey: notesKey(pageId) });
+    }
+  });
+}
+
+export const projectMembersKey = (projectId: string) =>
+  ["content", "project-members", projectId] as const;
+
+export function useProjectMembers(projectId: string | null) {
+  return useQuery<ProjectMemberDto[]>({
+    queryKey: projectId ? projectMembersKey(projectId) : ["content", "project-members", "none"],
+    enabled: !!projectId,
+    queryFn: ({ signal }) => listProjectMembers(projectId!, signal)
+  });
+}
+
+export function useSetProjectMemberRole(projectId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { userId: string; role: ProjectRoleWire }) =>
+      setProjectMemberRole(projectId!, vars.userId, vars.role),
+    onSuccess: () => {
+      if (projectId) qc.invalidateQueries({ queryKey: projectMembersKey(projectId) });
+    }
+  });
+}
+
+export function useRemoveProjectMember(projectId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => removeProjectMember(projectId!, userId),
+    onSuccess: () => {
+      if (projectId) qc.invalidateQueries({ queryKey: projectMembersKey(projectId) });
     }
   });
 }

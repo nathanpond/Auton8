@@ -2689,6 +2689,22 @@ internal static class DatabaseSchemaInitializer
             ON page_favorites (user_id);
         """;
 
+    // Owned by the Hocuspocus sidecar. `name` is the document identifier
+    // (e.g. "page:<guid>", "note:<guid>"); `data` is the encoded Y.Doc state
+    // produced by Yjs (Uint8Array). Hocuspocus's @hocuspocus/extension-database
+    // calls `fetch` on load and `store` on debounced save against this table.
+    // .NET never reads or writes it during normal operation — content reads
+    // continue to go through the `body_jsonb` / `content_jsonb` mirror that
+    // the webhook handler keeps current.
+    private const string YjsDocumentsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS yjs_documents (
+            name TEXT PRIMARY KEY,
+            data BYTEA NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """;
+
     // Inserts a single starter project so the Notes UI has something to open
     // on first launch. Idempotent: keyed off a fixed project id, so re-running
     // the initializer never duplicates the row. Skipped if no local_users
@@ -2798,6 +2814,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(ContentLocatorSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentNotePageIndexSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageFavoritesSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(YjsDocumentsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider

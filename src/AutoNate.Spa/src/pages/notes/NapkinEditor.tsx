@@ -1,12 +1,18 @@
-import { Suspense, lazy, useEffect, useMemo, useRef } from "react";
-import type { ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
+import { Suspense, lazy, useMemo, useRef } from "react";
+import type {
+  ExcalidrawImperativeAPI,
+  ExcalidrawInitialDataState
+} from "@excalidraw/excalidraw/types";
 import { NoteDto } from "@/api/content";
 import { useUpdateNote } from "@/hooks/useContent";
+import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
+import { useYjsExcalidraw } from "@/lib/yjs/useYjsExcalidraw";
+import { ConnectionStatusPill } from "@/lib/yjs/ConnectionStatusPill";
 import { EditableNoteTitle } from "./EditableNoteTitle";
 import { notesTheme } from "./notesTheme";
 
-// Excalidraw ships ~1MB of CSS+JS. Code-split via React.lazy so the chunk only
-// loads when a drawing note tab is actually opened.
+// Excalidraw ships ~1MB of CSS+JS. Code-split via React.lazy so the chunk
+// only loads when a drawing note tab is actually opened.
 const Excalidraw = lazy(() =>
   import("@excalidraw/excalidraw").then((mod) => ({ default: mod.Excalidraw }))
 );
@@ -15,8 +21,9 @@ type Props = {
   note: NoteDto | null;
   noteName: string;
   // When set, the canvas displays this revision's scene in view-only mode.
-  // versionNumber feeds the iframe key so Excalidraw remounts cleanly when
-  // the user navigates between revisions.
+  // versionNumber feeds Excalidraw's key so it remounts cleanly when the
+  // user navigates between revisions. Revisions bypass Yjs entirely — they
+  // are non-live historical snapshots.
   revisionOverride?: {
     versionNumber: number;
     title: string | null;
@@ -24,64 +31,191 @@ type Props = {
   } | null;
 };
 
-const AUTOSAVE_DEBOUNCE_MS = 600;
-
-// Napkin = Excalidraw-backed sketch surface. The drawing scene is persisted
-// as JSON (Excalidraw's standard local-export shape) to notes.content_jsonb
-// and round-trips through the same debounced-autosave pattern as the rich-
-// text and page editors.
+// Napkin = Excalidraw-backed sketch surface. Phase 4 puts the scene under
+// Yjs collab: elements live in a Y.Array<Y.Map> and the persisted appState
+// in a Y.Map; Hocuspocus syncs the lot. The previous autosave-by-debounce
+// path is gone — durability is owned by Hocuspocus (server) + y-indexeddb
+// (local). What remains here is the editor chrome and the revision-view
+// branch that bypasses Yjs.
 export function NapkinEditor({ note, noteName, revisionOverride }: Props) {
   const viewingRevision = revisionOverride != null;
   const effectiveTitle = revisionOverride?.title ?? note?.title ?? noteName;
   const updateNote = useUpdateNote(note?.pageId ?? null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedRef = useRef<string | null>(null);
-  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
 
-  // Recompute initialData when the note swaps OR when navigating between
-  // revisions so the Excalidraw instance we mount can't show a stale scene.
-  const initialData = useMemo<ExcalidrawInitialDataState | null>(
-    () => parseScene(revisionOverride?.contentJsonb ?? note?.contentJsonb),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [note?.id, revisionOverride?.versionNumber ?? null]
+  if (viewingRevision && revisionOverride) {
+    return (
+      <NapkinShell
+        title={effectiveTitle}
+        readOnlyTitle
+        onTitleSave={() => {}}
+        rightSlot={null}
+      >
+        <RevisionScene
+          // Re-mount on version swap so Excalidraw re-applies the new
+          // initialData (it only reads it at mount).
+          key={revisionOverride.versionNumber}
+          rawContent={revisionOverride.contentJsonb}
+        />
+      </NapkinShell>
+    );
+  }
+
+  if (!note) {
+    return (
+      <NapkinShell
+        title={noteName}
+        readOnlyTitle
+        onTitleSave={() => {}}
+        rightSlot={null}
+      >
+        <div style={{ color: notesTheme.muted, fontSize: 13, padding: 24 }}>
+          Select a note to start drawing.
+        </div>
+      </NapkinShell>
+    );
+  }
+
+  return (
+    <LiveNapkin
+      // Re-mount on note swap so the Yjs handle teardown + recreate runs
+      // through useEffect cleanly.
+      key={note.id}
+      note={note}
+      title={effectiveTitle}
+      onTitleSave={(next) => updateNote.mutate({ id: note.id, body: { title: next } })}
+    />
   );
+}
 
-  // Reset the saved-content tracker when switching notes so an unrelated
-  // autosave can't false-skip against another note's payload.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    lastSavedRef.current = note?.contentJsonb ?? null;
-  }, [note?.id]);
+function LiveNapkin({
+  note,
+  title,
+  onTitleSave
+}: {
+  note: NoteDto;
+  title: string;
+  onTitleSave: (next: string) => void;
+}) {
+  const { handle, status, role } = useYjsDocument(`napkin:${note.id}`);
 
-  // Flush any pending save on unmount.
-  useEffect(() => {
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
-  }, []);
+  return (
+    <NapkinShell
+      title={title}
+      readOnlyTitle={false}
+      onTitleSave={onTitleSave}
+      rightSlot={<ConnectionStatusPill status={status} role={role} />}
+    >
+      {handle ? <CollabScene handle={handle} viewer={role === "viewer"} /> : null}
+    </NapkinShell>
+  );
+}
 
-  const queueSave = (elements: readonly unknown[], appState: unknown) => {
-    if (!note || viewingRevision) return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      // Excalidraw's appState is huge and includes ephemeral fields (cursor
-      // positions, collaborators, etc). Keep only the bits that matter for
-      // re-opening the document: the canvas chrome the user chose.
-      const slimAppState = pickPersistedAppState(appState);
-      const payload = {
-        type: "excalidraw",
-        version: 2,
-        source: "autonate",
-        elements,
-        appState: slimAppState
-      };
-      const json = JSON.stringify(payload);
-      if (json === lastSavedRef.current) return;
-      lastSavedRef.current = json;
-      updateNote.mutate({ id: note.id, body: { contentJsonb: json } });
-    }, AUTOSAVE_DEBOUNCE_MS);
-  };
+function CollabScene({
+  handle,
+  viewer
+}: {
+  handle: NonNullable<ReturnType<typeof useYjsDocument>["handle"]>;
+  viewer: boolean;
+}) {
+  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  const { initialData, onChange } = useYjsExcalidraw({
+    doc: handle.doc,
+    provider: handle.provider,
+    excalidrawAPI: apiRef.current
+  });
 
+  return (
+    <ExcalidrawCanvas
+      initialData={initialData}
+      onChange={(elements, appState, files) =>
+        onChange(elements as readonly { id: string; version?: number }[], appState, files)
+      }
+      onApiReady={(api) => {
+        apiRef.current = api;
+      }}
+      // Viewer connections render the canvas non-editable. The server-side
+      // readOnly enforcement is the actual security boundary — this just
+      // hides the editing tools so users don't try.
+      viewModeEnabled={viewer}
+    />
+  );
+}
+
+function RevisionScene({ rawContent }: { rawContent: string }) {
+  const initialData = useMemo(() => parseScene(rawContent), [rawContent]);
+  return (
+    <ExcalidrawCanvas
+      initialData={initialData}
+      onChange={() => {}}
+      onApiReady={() => {}}
+      viewModeEnabled
+    />
+  );
+}
+
+function ExcalidrawCanvas({
+  initialData,
+  onChange,
+  onApiReady,
+  viewModeEnabled
+}: {
+  initialData: ExcalidrawInitialDataState | null;
+  // Excalidraw types `onChange` with the strict element discriminated
+  // union; we treat elements opaquely in our binding, so accept the
+  // strict shape and forward it.
+  onChange: (
+    elements: NonNullable<ExcalidrawInitialDataState["elements"]>,
+    appState: unknown,
+    files: unknown
+  ) => void;
+  onApiReady: (api: ExcalidrawImperativeAPI) => void;
+  viewModeEnabled: boolean;
+}) {
+  return (
+    <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <Suspense
+        fallback={
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "grid",
+              placeItems: "center",
+              color: notesTheme.muted,
+              fontSize: 12
+            }}
+          >
+            <span>
+              <i className="fa fa-spinner fa-spin" style={{ marginRight: 6 }} />
+              Loading drawing surface…
+            </span>
+          </div>
+        }
+      >
+        <Excalidraw
+          initialData={initialData}
+          viewModeEnabled={viewModeEnabled}
+          excalidrawAPI={onApiReady}
+          onChange={onChange}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+function NapkinShell({
+  title,
+  readOnlyTitle,
+  onTitleSave,
+  rightSlot,
+  children
+}: {
+  title: string;
+  readOnlyTitle: boolean;
+  onTitleSave: (next: string) => void;
+  rightSlot: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
@@ -105,80 +239,27 @@ export function NapkinEditor({ note, noteName, revisionOverride }: Props) {
       >
         <div style={{ flex: 1, minWidth: 0 }}>
           <EditableNoteTitle
-            value={effectiveTitle}
-            readOnly={viewingRevision || !note}
-            onSave={(next) => {
-              if (!note) return;
-              updateNote.mutate({ id: note.id, body: { title: next } });
-            }}
-            style={{
-              fontSize: 18,
-              fontWeight: 700,
-              color: notesTheme.dark
-            }}
+            value={title}
+            readOnly={readOnlyTitle}
+            onSave={onTitleSave}
+            style={{ fontSize: 18, fontWeight: 700, color: notesTheme.dark }}
           />
         </div>
-        <span style={savedStyle}>
-          {updateNote.isPending ? (
-            <>
-              <i className="fa fa-cloud-arrow-up" style={{ marginRight: 5 }} />
-              Saving…
-            </>
-          ) : (
-            <>
-              <i className="fa fa-check" style={{ marginRight: 5 }} />
-              Auto-saved
-            </>
-          )}
-        </span>
+        {rightSlot}
       </div>
-
-      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        <Suspense
-          fallback={
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "grid",
-                placeItems: "center",
-                color: notesTheme.muted,
-                fontSize: 12
-              }}
-            >
-              <span>
-                <i className="fa fa-spinner fa-spin" style={{ marginRight: 6 }} />
-                Loading drawing surface…
-              </span>
-            </div>
-          }
-        >
-          {/* `key` forces a remount on note swap so Excalidraw re-applies the
-              new initialData. Without it Excalidraw treats `initialData` as
-              mount-time only and our scene wouldn't change when the active
-              note changes. */}
-          <Excalidraw
-            key={`${note?.id ?? "empty"}:${revisionOverride?.versionNumber ?? "current"}`}
-            initialData={initialData}
-            viewModeEnabled={viewingRevision}
-            excalidrawAPI={(api) => {
-              apiRef.current = api;
-            }}
-            onChange={queueSave}
-          />
-        </Suspense>
-      </div>
+      {children}
     </div>
   );
 }
 
+// Used only by RevisionScene to bootstrap a read-only historical view from
+// the stored snapshot. The live editor's initialData comes from the Y.Doc
+// (via useYjsExcalidraw).
 function parseScene(raw: string | null | undefined): ExcalidrawInitialDataState | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
-      // Tolerate the "{}" placeholder that newly-created notes get on the
-      // server before any draw event has fired.
       if (Array.isArray(parsed.elements) || parsed.appState) {
         return {
           elements: parsed.elements ?? [],
@@ -192,44 +273,3 @@ function parseScene(raw: string | null | undefined): ExcalidrawInitialDataState 
     return null;
   }
 }
-
-// Strip ephemeral / non-serializable fields from Excalidraw's appState before
-// persisting. Excalidraw's own serializeAsJSON does similar pruning under the
-// hood; we open-code a small subset because importing the helper would mean
-// the chunk loads on app boot instead of lazily inside Suspense.
-function pickPersistedAppState(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== "object") return {};
-  const state = raw as Record<string, unknown>;
-  const keep: (keyof typeof state)[] = [
-    "viewBackgroundColor",
-    "gridSize",
-    "gridModeEnabled",
-    "theme",
-    "currentItemStrokeColor",
-    "currentItemBackgroundColor",
-    "currentItemFillStyle",
-    "currentItemStrokeWidth",
-    "currentItemStrokeStyle",
-    "currentItemRoughness",
-    "currentItemOpacity",
-    "currentItemFontFamily",
-    "currentItemFontSize",
-    "currentItemTextAlign",
-    "currentItemStartArrowhead",
-    "currentItemEndArrowhead",
-    "scrollX",
-    "scrollY",
-    "zoom"
-  ];
-  const out: Record<string, unknown> = {};
-  for (const key of keep) {
-    if (key in state) out[key] = state[key];
-  }
-  return out;
-}
-
-const savedStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: notesTheme.muted,
-  fontWeight: 600
-};

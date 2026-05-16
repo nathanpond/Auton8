@@ -417,6 +417,18 @@ builder.Services.AddSingleton<IWorkflowBehavior, UnlockAccountBehavior>();
 builder.Services.AddSingleton<IWorkflowBehaviorRegistry, WorkflowBehaviorRegistry>();
 builder.Services.AddSingleton<SharedSecretEndpointFilter>();
 
+// Yjs / Hocuspocus sidecar integration. The shared secret is required in
+// non-Development environments (mirrors the workflow-behavior pattern):
+// without it, no internal callbacks would be accepted, and Hocuspocus would
+// fail to authenticate any browser connections.
+builder.Services.AddOptions<AutoNate.Web.Services.Yjs.YjsServerOptions>()
+    .BindConfiguration(AutoNate.Web.Services.Yjs.YjsServerOptions.SectionName)
+    .Validate(
+        opts => builder.Environment.IsDevelopment() || !string.IsNullOrWhiteSpace(opts.InternalSharedSecret),
+        $"{AutoNate.Web.Services.Yjs.YjsServerOptions.SectionName}:InternalSharedSecret must be set outside Development.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<YjsInternalSecretEndpointFilter>();
+
 builder.Services.AddSingleton<IRecordEventPublisher, DaprRecordEventPublisher>();
 builder.Services.AddSingleton<IApplicationEventPublisher, DaprApplicationEventPublisher>();
 builder.Services.AddSingleton<INotificationEventPublisher, DaprNotificationEventPublisher>();
@@ -907,6 +919,7 @@ app.MapPageAttachmentEndpoints();
 app.MapNoteEndpoints();
 app.MapNoteVersionEndpoints();
 app.MapContentLocatorEndpoints();
+app.MapYjsEndpoints();
 
 // Runtime-mutable public assets live under /data/wwwroot and are served at the
 // configured prefix (default /files). MapStaticAssets only handles compile-time

@@ -1,9 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useState } from "react";
 import type { PartialBlock } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
+import { ActionIcon, Tooltip } from "@mantine/core";
 import { useUpdateNote } from "@/hooks/useContent";
 import { NoteDto } from "@/api/content";
+import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
+import { YjsEditor } from "@/lib/yjs/YjsEditor";
+import { ConnectionStatusPill } from "@/lib/yjs/ConnectionStatusPill";
 import { EditableNoteTitle } from "./EditableNoteTitle";
 import { notesTheme } from "./notesTheme";
 
@@ -11,7 +15,8 @@ type Props = {
   note: NoteDto | null;
   noteName: string;
   // When set, renders this historical revision's content (read-only) instead
-  // of the live note. versionNumber is part of the editor's recreate-key.
+  // of the live note. Revision viewing bypasses Yjs entirely — a non-live
+  // snapshot doesn't belong on the sync edge.
   revisionOverride?: {
     versionNumber: number;
     title: string | null;
@@ -19,60 +24,127 @@ type Props = {
   } | null;
 };
 
-const AUTOSAVE_DEBOUNCE_MS = 600;
-
 export function VisualTextEditor({ note, noteName, revisionOverride }: Props) {
   const viewingRevision = revisionOverride != null;
-  const effectiveContent = revisionOverride?.contentJsonb ?? note?.contentJsonb;
   const effectiveTitle = revisionOverride?.title ?? note?.title ?? noteName;
   const updateNote = useUpdateNote(note?.pageId ?? null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedRef = useRef<string | null>(null);
 
+  if (viewingRevision && revisionOverride) {
+    return (
+      <NotesEditorShell
+        title={effectiveTitle}
+        readOnlyTitle
+        onTitleSave={() => {}}
+        rightSlot={null}
+      >
+        <RevisionEditor
+          // Re-mount on version swap so the new content goes through
+          // useCreateBlockNote's `initialContent` cleanly.
+          key={revisionOverride.versionNumber}
+          rawContent={revisionOverride.contentJsonb}
+        />
+      </NotesEditorShell>
+    );
+  }
+
+  if (!note) {
+    return (
+      <NotesEditorShell
+        title={noteName}
+        readOnlyTitle
+        onTitleSave={() => {}}
+        rightSlot={null}
+      >
+        <div style={{ color: notesTheme.muted, fontSize: 13 }}>
+          Select a note to start editing.
+        </div>
+      </NotesEditorShell>
+    );
+  }
+
+  return (
+    <LiveNoteEditor
+      // Re-mount on note swap so the Yjs handle teardown + recreate runs
+      // through useEffect cleanly.
+      key={note.id}
+      note={note}
+      title={effectiveTitle}
+      onTitleSave={(next) => updateNote.mutate({ id: note.id, body: { title: next } })}
+    />
+  );
+}
+
+function LiveNoteEditor({
+  note,
+  title,
+  onTitleSave
+}: {
+  note: NoteDto;
+  title: string;
+  onTitleSave: (next: string) => void;
+}) {
+  const { handle, status, role } = useYjsDocument(`note:${note.id}`);
+  const [showSidebar, setShowSidebar] = useState(false);
+
+  return (
+    <NotesEditorShell
+      title={title}
+      readOnlyTitle={false}
+      onTitleSave={onTitleSave}
+      rightSlot={
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ConnectionStatusPill status={status} role={role} />
+          <Tooltip label={showSidebar ? "Hide comments" : "Show comments"}>
+            <ActionIcon
+              variant={showSidebar ? "filled" : "subtle"}
+              color="gray"
+              size="sm"
+              onClick={() => setShowSidebar((v) => !v)}
+              aria-label="Toggle threads sidebar"
+            >
+              <i className="fa fa-comments" />
+            </ActionIcon>
+          </Tooltip>
+        </div>
+      }
+    >
+      {handle ? (
+        <YjsEditor
+          handle={handle}
+          editable={role === "editor"}
+          showSidebar={showSidebar}
+          role={role}
+        />
+      ) : null}
+    </NotesEditorShell>
+  );
+}
+
+function RevisionEditor({ rawContent }: { rawContent: string }) {
+  const initialContent = parseInitialContent(rawContent);
   const editor = useCreateBlockNote({
-    initialContent: parseInitialContent(effectiveContent),
+    initialContent,
     placeholders: { default: "Type to start writing…" }
   });
+  // Revisions are immutable historical snapshots; the editor is non-Yjs
+  // and never editable.
+  editor.isEditable = false;
+  return <BlockNoteView editor={editor} editable={false} theme="light" />;
+}
 
-  // Reset autosave bookkeeping when the note (or revision) swaps. Without
-  // this, an autosave on a fresh note could compare against the previous
-  // note's saved-JSON ref and skip a real first save.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    lastSavedRef.current = effectiveContent ?? null;
-  }, [note?.id, revisionOverride?.versionNumber ?? null]);
-
-  // Mirror the editable flag onto the editor instance. BlockNoteView's
-  // `editable` prop controls the view; setting the property keeps the
-  // editor's own command surface aligned too.
-  useEffect(() => {
-    editor.isEditable = !viewingRevision;
-  }, [editor, viewingRevision]);
-
-  // Subscribe to changes for debounced autosave. onChange returns a cleanup
-  // function that detaches the listener — important to avoid double-saves
-  // across re-mounts.
-  useEffect(() => {
-    if (viewingRevision || !note) return;
-    const unsubscribe = editor.onChange((ed) => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        const json = JSON.stringify(ed.document);
-        if (json === lastSavedRef.current) return;
-        lastSavedRef.current = json;
-        updateNote.mutate({ id: note.id, body: { contentJsonb: json } });
-      }, AUTOSAVE_DEBOUNCE_MS);
-    });
-    return unsubscribe;
-  }, [editor, note, viewingRevision, updateNote]);
-
-  // Flush any pending save on unmount so we don't lose the last keystroke.
-  useEffect(() => {
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
-  }, []);
-
+function NotesEditorShell({
+  title,
+  readOnlyTitle,
+  onTitleSave,
+  rightSlot,
+  children
+}: {
+  title: string;
+  readOnlyTitle: boolean;
+  onTitleSave: (next: string) => void;
+  rightSlot: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div
       className="notes-editor-bleed"
@@ -94,28 +166,15 @@ export function VisualTextEditor({ note, noteName, revisionOverride }: Props) {
           minHeight: 32
         }}
       >
-        {updateNote.isPending ? (
-          <span style={savedStyle}>
-            <i className="fa fa-cloud-arrow-up" style={{ marginRight: 5 }} />
-            Saving…
-          </span>
-        ) : (
-          <span style={savedStyle}>
-            <i className="fa fa-check" style={{ marginRight: 5 }} />
-            Auto-saved
-          </span>
-        )}
+        {rightSlot}
       </div>
 
       <div style={{ padding: "20px 0 20px 40px", flex: 1, overflowY: "auto" }}>
         <div style={{ width: "100%" }}>
           <EditableNoteTitle
-            value={effectiveTitle}
-            readOnly={viewingRevision || !note}
-            onSave={(next) => {
-              if (!note) return;
-              updateNote.mutate({ id: note.id, body: { title: next } });
-            }}
+            value={title}
+            readOnly={readOnlyTitle}
+            onSave={onTitleSave}
             style={{
               margin: "0 0 18px",
               fontSize: 28,
@@ -124,7 +183,7 @@ export function VisualTextEditor({ note, noteName, revisionOverride }: Props) {
               color: notesTheme.dark
             }}
           />
-          <BlockNoteView editor={editor} editable={!viewingRevision} theme="light" />
+          {children}
         </div>
       </div>
     </div>
@@ -143,9 +202,3 @@ function parseInitialContent(raw: string | null | undefined): PartialBlock[] | u
     return undefined;
   }
 }
-
-const savedStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: notesTheme.muted,
-  fontWeight: 600
-};

@@ -103,3 +103,19 @@
 .notification-unread td {
     font-weight: 600;
 }
+
+/* ─── BlockNote comments — hide redundant Add-Reaction badge ───
+   BlockNote renders two "Add reaction" affordances inside a comment:
+     1. An icon button in the hover toolbar (top-right of the comment).
+     2. A "+" badge next to existing reactions when any are present.
+   Affordance #2 is rendered with Mantine's <Chip>, which collides with
+   BlockNote's EmojiPicker popover trigger — the first user click toggles
+   the picker open and back closed in the same gesture, so it takes two
+   clicks to actually open.
+
+   The two affordances open the exact same picker with the exact same
+   handlers. Hiding the badge variant leaves the hover-toolbar icon as
+   the single, working path for adding reactions. */
+.bn-comment-add-reaction {
+    display: none !important;
+}

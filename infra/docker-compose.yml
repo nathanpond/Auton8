@@ -159,6 +159,33 @@ services:
     volumes:
       - ./mounts/dapr-scheduler/data:/data
 
+  hocuspocus:
+    build:
+      context: ../services/hocuspocus
+      dockerfile: Dockerfile
+    container_name: autonate-hocuspocus
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HOCUSPOCUS_PORT: "1234"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: AutoNate
+      POSTGRES_USER: ${AUTONATE_POSTGRES_USER:-autonate}
+      POSTGRES_PASSWORD: ${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
+      # .NET reachable from inside the container at host.docker.internal.
+      # Override AUTONATE_WEB_URL in deployments where the .NET app is a
+      # peer container instead of the dev-host process.
+      AUTONATE_WEB_URL: ${AUTONATE_WEB_URL:-http://host.docker.internal:5108}
+      YJS_INTERNAL_SHARED_SECRET: ${YJS_INTERNAL_SHARED_SECRET:-dev-only-yjs-internal-secret-change-me}
+    ports:
+      - "${AUTONATE_HOCUSPOCUS_PORT:-1234}:1234"
+    extra_hosts:
+      # Needed on Linux hosts so host.docker.internal resolves; harmless
+      # on macOS / Docker Desktop where the entry is provided by default.
+      - "host.docker.internal:host-gateway"
+
   dapr-dashboard:
     image: daprio/dashboard:0.15.0
     container_name: autonate-dapr-dashboard

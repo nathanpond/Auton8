@@ -181,6 +181,12 @@ public static class ContentPageEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
+            // Page bodies are Yjs-managed in Phase 1; reject any direct
+            // bodyJsonb write so a stray REST caller can't race the
+            // Hocuspocus webhook snapshot.
+            if (YjsManagedContentGuard.RejectPageBodyWrite(request.BodyJsonb) is { } reject)
+                return reject;
+
             var actorId = http.GetActorId();
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             await using var tx = await db.Database.BeginTransactionAsync(ct);

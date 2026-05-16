@@ -132,6 +132,14 @@ public static class NoteEndpoints
                 http.User, ContentKinds.Page, note.PageId, Actions.Edit, ct);
             if (!pageDecision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
 
+            // All three note kinds are Yjs-managed (richtext/Phase 1,
+            // drawing+diagram/Phase 4) — reject contentJsonb writes here
+            // so a stray REST caller can't race the Hocuspocus webhook
+            // snapshot.
+            if (YjsManagedContentGuard.RejectYjsManagedNoteContentWrite(
+                    note.NoteKind, request.ContentJsonb) is { } reject)
+                return reject;
+
             var actorId = http.GetActorId();
             var fields = new List<string>();
             int? newVersionNumber = null;

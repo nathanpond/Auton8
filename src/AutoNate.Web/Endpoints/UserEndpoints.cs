@@ -34,6 +34,28 @@ public static class UserEndpoints
             return Results.Ok(users);
         }).RequireKindPermission(EntityKinds.User, Actions.View);
 
+        // Authenticated-only minimal user directory. Returns the same LocalUser
+        // shape as GET / above but with admin-only fields (email, idp key,
+        // last login, lock state) blanked. Powers collab features (Yjs cursor
+        // names, comment authors, project-member pickers) that must work for
+        // any project member, not just admins with User.View. Intentionally
+        // not audited — called on every editor mount, would flood the log.
+        group.MapGet("/directory", async (
+            ILocalUserStore store,
+            CancellationToken cancellationToken) =>
+        {
+            var users = await store.ListAsync(cancellationToken);
+            return Results.Ok(users.Select(u => u with
+            {
+                Email = string.Empty,
+                IdpKey = string.Empty,
+                LastLoginDate = null,
+                FailedLoginAttempts = 0,
+                IsLocked = false,
+                LockedAtUtc = null
+            }));
+        });
+
         // Paged variant of GET /api/users for tables that fetch one screen at
         // a time. Returns { items, totalCount } and supports search, status
         // filter, and sort by username/fullName/lastName/lastLogin/status.

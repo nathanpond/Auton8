@@ -471,3 +471,43 @@ export async function updateNote(
 export async function deleteNote(id: string): Promise<void> {
   await api.delete(`/api/content/notes/${id}`);
 }
+
+// ── Project members ────────────────────────────────────────────────────────
+
+export type ProjectRoleWire = "owner" | "contributor" | "viewer";
+
+export type ProjectMemberDto = {
+  projectId: string;
+  userId: string;
+  role: ProjectRoleWire;
+  addedAtUtc: string;
+  addedBy: string;
+  updatedAtUtc: string;
+  updatedBy: string;
+};
+
+export async function listProjectMembers(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<ProjectMemberDto[]> {
+  const { data } = await api.get<ProjectMemberDto[]>(
+    `/api/content/projects/${projectId}/members`,
+    { signal }
+  );
+  return data;
+}
+
+export async function setProjectMemberRole(
+  projectId: string,
+  userId: string,
+  role: ProjectRoleWire
+): Promise<void> {
+  await api.put(`/api/content/projects/${projectId}/members/${userId}`, { role });
+}
+
+export async function removeProjectMember(
+  projectId: string,
+  userId: string
+): Promise<void> {
+  await api.delete(`/api/content/projects/${projectId}/members/${userId}`);
+}

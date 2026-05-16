@@ -21,6 +21,15 @@ export async function listUsers(signal?: AbortSignal): Promise<LocalUser[]> {
   return data;
 }
 
+// Authenticated-only minimal user directory. Same LocalUser shape but with
+// admin-only fields blanked server-side. Use for collab/display contexts
+// (cursor names, comment authors, member pickers) where the caller may not
+// hold User.View — admin pages should keep using listUsers / listUsersPage.
+export async function listUserDirectory(signal?: AbortSignal): Promise<LocalUser[]> {
+  const { data } = await api.get<LocalUser[]>("/api/users/directory", { signal });
+  return data;
+}
+
 export type ListUsersPageRequest = {
   page: number;
   pageSize: number;

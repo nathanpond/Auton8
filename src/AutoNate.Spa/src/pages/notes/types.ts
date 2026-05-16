@@ -43,10 +43,14 @@ export function flattenToTree(rows: PageTreeNodeDto[]): PageTreeNode[] {
   return roots;
 }
 
+// Minimal shape needed for the tab strip + URL routing. Both NoteDto
+// (REST) and PageNoteMetadata (Yjs `useYjsNotesList`) satisfy it.
+type NoteTabSource = Pick<NoteDto, "id" | "noteKind" | "title" | "pageNoteIndex">;
+
 export function tabsForPage(
   pageId: string,
   pageName: string,
-  notes: NoteDto[]
+  notes: readonly NoteTabSource[]
 ): EditorTab[] {
   const pageTab: EditorTab = { id: `${pageId}::page`, kind: "page", name: pageName };
   const noteTabs: EditorTab[] = notes.map((n) => ({
