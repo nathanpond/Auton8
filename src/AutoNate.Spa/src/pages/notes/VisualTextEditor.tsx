@@ -1,15 +1,7 @@
 import { useEffect, useRef } from "react";
-import { Highlight } from "@tiptap/extension-highlight";
-import { Subscript } from "@tiptap/extension-subscript";
-import { Superscript } from "@tiptap/extension-superscript";
-import { TextAlign } from "@tiptap/extension-text-align";
-import { Underline } from "@tiptap/extension-underline";
-import { TaskList } from "@tiptap/extension-task-list";
-import { TaskItem } from "@tiptap/extension-task-item";
-import { Placeholder } from "@tiptap/extension-placeholder";
-import { useEditor, EditorContent } from "@tiptap/react";
-import { StarterKit } from "@tiptap/starter-kit";
-import { Link, RichTextEditor } from "@mantine/tiptap";
+import type { PartialBlock } from "@blocknote/core";
+import { useCreateBlockNote } from "@blocknote/react";
+import { BlockNoteView } from "@blocknote/mantine";
 import { useUpdateNote } from "@/hooks/useContent";
 import { NoteDto } from "@/api/content";
 import { EditableNoteTitle } from "./EditableNoteTitle";
@@ -29,9 +21,6 @@ type Props = {
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
-// Visual Text note editor — Mantine's @mantine/tiptap with the full toolbar
-// shown in the design (headings, marks, lists, blockquote, align, links,
-// inserts, undo/redo). Body is persisted as the tiptap JSON document.
 export function VisualTextEditor({ note, noteName, revisionOverride }: Props) {
   const viewingRevision = revisionOverride != null;
   const effectiveContent = revisionOverride?.contentJsonb ?? note?.contentJsonb;
@@ -40,60 +29,42 @@ export function VisualTextEditor({ note, noteName, revisionOverride }: Props) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string | null>(null);
 
-  // useEditor's [note?.id] deps recreate the editor with the new note's
-  // content. We deliberately do NOT call editor.commands.setContent() in a
-  // follow-up effect: during the teardown of the previous editor instance,
-  // `editor.commands` returns null even while the editor reference is still
-  // truthy, which crashes when notes switch (e.g. the moment a freshly-
-  // created note becomes the active tab).
-  const editor = useEditor(
-    {
-      extensions: [
-        // StarterKit v3 bundles Link + Underline. Disable them so the
-        // Mantine Link (with its URL modal) and the standalone Underline can
-        // layer back on without "duplicate extension" warnings.
-        StarterKit.configure({ link: false, underline: false }),
-        Underline,
-        Link.configure({ openOnClick: false }),
-        Superscript,
-        Subscript,
-        Highlight,
-        TextAlign.configure({ types: ["heading", "paragraph"] }),
-        TaskList,
-        TaskItem.configure({ nested: true }),
-        Placeholder.configure({ placeholder: "Type to start writing…" })
-      ],
-      content: parseDoc(effectiveContent),
-      editable: !viewingRevision,
-      onUpdate: ({ editor: ed }) => {
-        if (!note || viewingRevision) return;
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
-          const json = JSON.stringify(ed.getJSON());
-          if (json === lastSavedRef.current) return;
-          lastSavedRef.current = json;
-          updateNote.mutate({ id: note.id, body: { contentJsonb: json } });
-        }, AUTOSAVE_DEBOUNCE_MS);
-      }
-    },
-    // Re-mount on note swap AND on revision swap so the new content goes
-    // through useEditor's `content` field cleanly.
-    [note?.id, revisionOverride?.versionNumber ?? null]
-  );
+  const editor = useCreateBlockNote({
+    initialContent: parseInitialContent(effectiveContent),
+    placeholders: { default: "Type to start writing…" }
+  });
 
-  // Toolbar still renders for revisions but the buttons would be inert
-  // visually; flipping `editable` explicitly keeps tiptap's selection /
-  // caret out of the doc.
-  useEffect(() => {
-    editor?.setEditable(!viewingRevision);
-  }, [editor, viewingRevision]);
-
-  // Reset the saved-content tracker when the note swaps so an unrelated
-  // autosave can't compare against a stale ref.
+  // Reset autosave bookkeeping when the note (or revision) swaps. Without
+  // this, an autosave on a fresh note could compare against the previous
+  // note's saved-JSON ref and skip a real first save.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    lastSavedRef.current = note?.contentJsonb ?? null;
-  }, [note?.id]);
+    lastSavedRef.current = effectiveContent ?? null;
+  }, [note?.id, revisionOverride?.versionNumber ?? null]);
+
+  // Mirror the editable flag onto the editor instance. BlockNoteView's
+  // `editable` prop controls the view; setting the property keeps the
+  // editor's own command surface aligned too.
+  useEffect(() => {
+    editor.isEditable = !viewingRevision;
+  }, [editor, viewingRevision]);
+
+  // Subscribe to changes for debounced autosave. onChange returns a cleanup
+  // function that detaches the listener — important to avoid double-saves
+  // across re-mounts.
+  useEffect(() => {
+    if (viewingRevision || !note) return;
+    const unsubscribe = editor.onChange((ed) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        const json = JSON.stringify(ed.document);
+        if (json === lastSavedRef.current) return;
+        lastSavedRef.current = json;
+        updateNote.mutate({ id: note.id, body: { contentJsonb: json } });
+      }, AUTOSAVE_DEBOUNCE_MS);
+    });
+    return unsubscribe;
+  }, [editor, note, viewingRevision, updateNote]);
 
   // Flush any pending save on unmount so we don't lose the last keystroke.
   useEffect(() => {
@@ -113,104 +84,63 @@ export function VisualTextEditor({ note, noteName, revisionOverride }: Props) {
         background: "#fff"
       }}
     >
-      <RichTextEditor
-        editor={editor}
-        styles={{
-          root: { border: "none", borderRadius: 0, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 },
-          toolbar: { borderBottom: `1px solid ${notesTheme.border}`, padding: "5px 10px" },
-          content: { flex: 1, overflowY: "auto", background: "#fff" }
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          padding: "6px 14px",
+          borderBottom: `1px solid ${notesTheme.border}`,
+          minHeight: 32
         }}
       >
-        <RichTextEditor.Toolbar sticky stickyOffset={0}>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.H1 />
-            <RichTextEditor.H2 />
-            <RichTextEditor.H3 />
-            <RichTextEditor.H4 />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Bold />
-            <RichTextEditor.Italic />
-            <RichTextEditor.Underline />
-            <RichTextEditor.Strikethrough />
-            <RichTextEditor.Highlight />
-            <RichTextEditor.Code />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.BulletList />
-            <RichTextEditor.OrderedList />
-            <RichTextEditor.TaskList />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Blockquote />
-            <RichTextEditor.Hr />
-            <RichTextEditor.CodeBlock />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.AlignLeft />
-            <RichTextEditor.AlignCenter />
-            <RichTextEditor.AlignJustify />
-            <RichTextEditor.AlignRight />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Link />
-            <RichTextEditor.Unlink />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Undo />
-            <RichTextEditor.Redo />
-          </RichTextEditor.ControlsGroup>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center" }}>
-            {updateNote.isPending ? (
-              <span style={savedStyle}>
-                <i className="fa fa-cloud-arrow-up" style={{ marginRight: 5 }} />
-                Saving…
-              </span>
-            ) : (
-              <span style={savedStyle}>
-                <i className="fa fa-check" style={{ marginRight: 5 }} />
-                Auto-saved
-              </span>
-            )}
-          </div>
-        </RichTextEditor.Toolbar>
+        {updateNote.isPending ? (
+          <span style={savedStyle}>
+            <i className="fa fa-cloud-arrow-up" style={{ marginRight: 5 }} />
+            Saving…
+          </span>
+        ) : (
+          <span style={savedStyle}>
+            <i className="fa fa-check" style={{ marginRight: 5 }} />
+            Auto-saved
+          </span>
+        )}
+      </div>
 
-        <div style={{ padding: "20px 0 20px 40px", flex: 1, overflowY: "auto" }}>
-          <div style={{ width: "100%" }}>
-            <EditableNoteTitle
-              value={effectiveTitle}
-              readOnly={viewingRevision || !note}
-              onSave={(next) => {
-                if (!note) return;
-                updateNote.mutate({ id: note.id, body: { title: next } });
-              }}
-              style={{
-                margin: "0 0 18px",
-                fontSize: 28,
-                fontWeight: 700,
-                letterSpacing: "-0.02em",
-                color: notesTheme.dark
-              }}
-            />
-            <EditorContent editor={editor} />
-          </div>
+      <div style={{ padding: "20px 0 20px 40px", flex: 1, overflowY: "auto" }}>
+        <div style={{ width: "100%" }}>
+          <EditableNoteTitle
+            value={effectiveTitle}
+            readOnly={viewingRevision || !note}
+            onSave={(next) => {
+              if (!note) return;
+              updateNote.mutate({ id: note.id, body: { title: next } });
+            }}
+            style={{
+              margin: "0 0 18px",
+              fontSize: 28,
+              fontWeight: 700,
+              letterSpacing: "-0.02em",
+              color: notesTheme.dark
+            }}
+          />
+          <BlockNoteView editor={editor} editable={!viewingRevision} theme="light" />
         </div>
-      </RichTextEditor>
+      </div>
     </div>
   );
 }
 
-function parseDoc(raw: string | null | undefined): object | string {
-  if (!raw) return "";
+function parseInitialContent(raw: string | null | undefined): PartialBlock[] | undefined {
+  if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && "type" in parsed) {
-      return parsed as object;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed as PartialBlock[];
     }
-    return "";
+    return undefined;
   } catch {
-    // Tolerate legacy / placeholder values like "{}" by initialising empty.
-    return "";
+    return undefined;
   }
 }
 
