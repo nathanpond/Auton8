@@ -919,6 +919,7 @@ app.MapPageAttachmentEndpoints();
 app.MapNoteEndpoints();
 app.MapNoteVersionEndpoints();
 app.MapContentLocatorEndpoints();
+app.MapContentShareEndpoints();
 app.MapYjsEndpoints();
 
 // Runtime-mutable public assets live under /data/wwwroot and are served at the

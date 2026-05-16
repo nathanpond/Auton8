@@ -57,26 +57,32 @@ export function CabinetRail({
           />
         ))}
 
-        <button
-          type="button"
-          title={canCreate ? "New cabinet" : "Select a project to add cabinets"}
-          onClick={onNew}
-          disabled={!canCreate || !onNew}
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 6,
-            marginTop: 4,
-            background: "#fff",
-            color: notesTheme.muted,
-            border: `1px dashed ${notesTheme.border}`,
-            cursor: canCreate && onNew ? "pointer" : "not-allowed",
-            fontSize: 12,
-            opacity: canCreate && onNew ? 1 : 0.5
-          }}
+        <Tooltip
+          label={canCreate ? "New cabinet" : "Select a project to add cabinets"}
+          position="right"
+          withArrow
         >
-          <i className="fa fa-plus" />
-        </button>
+          <button
+            type="button"
+            onClick={onNew}
+            disabled={!canCreate || !onNew}
+            aria-label={canCreate ? "New cabinet" : "Select a project to add cabinets"}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 6,
+              marginTop: 4,
+              background: "#fff",
+              color: notesTheme.muted,
+              border: `1px dashed ${notesTheme.border}`,
+              cursor: canCreate && onNew ? "pointer" : "not-allowed",
+              fontSize: 12,
+              opacity: canCreate && onNew ? 1 : 0.5
+            }}
+          >
+            <i className="fa fa-plus" />
+          </button>
+        </Tooltip>
       </div>
 
       <div
@@ -130,39 +136,41 @@ function CabinetTile({
   const color = cabinetColorFor(cabinet.id);
   const icon = cabinet.icon ?? defaultCabinetIcon();
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      title={cabinet.name}
-      style={{
-        position: "relative",
-        width: 40,
-        height: 40,
-        borderRadius: 6,
-        background: active ? color : hover ? color + "15" : "#fff",
-        color: active ? "#fff" : color,
-        border: active ? "none" : `1px solid ${notesTheme.border}`,
-        cursor: "pointer",
-        fontSize: 14,
-        transition: "all 100ms"
-      }}
-    >
-      <i className={`fa ${icon}`} />
-      {active && (
-        <span
-          style={{
-            position: "absolute",
-            left: -10,
-            top: 6,
-            bottom: 6,
-            width: 3,
-            borderRadius: 2,
-            background: color
-          }}
-        />
-      )}
-    </button>
+    <Tooltip label={cabinet.name} position="right" withArrow>
+      <button
+        type="button"
+        onClick={onClick}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        aria-label={cabinet.name}
+        style={{
+          position: "relative",
+          width: 40,
+          height: 40,
+          borderRadius: 6,
+          background: active ? color : hover ? color + "15" : "#fff",
+          color: active ? "#fff" : color,
+          border: active ? "none" : `1px solid ${notesTheme.border}`,
+          cursor: "pointer",
+          fontSize: 14,
+          transition: "all 100ms"
+        }}
+      >
+        <i className={`fa ${icon}`} />
+        {active && (
+          <span
+            style={{
+              position: "absolute",
+              left: -10,
+              top: 6,
+              bottom: 6,
+              width: 3,
+              borderRadius: 2,
+              background: color
+            }}
+          />
+        )}
+      </button>
+    </Tooltip>
   );
 }

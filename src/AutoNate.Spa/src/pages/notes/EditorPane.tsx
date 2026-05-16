@@ -29,6 +29,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS as DndCss } from "@dnd-kit/utilities";
 import { HistoryModal } from "./HistoryModal";
+import { ShareModal } from "./ShareModal";
 
 // Identity of a revision the user is browsing. Scoped to a specific page or
 // note id so switching tabs/pages clears it. The content fetch lives in a
@@ -81,6 +82,7 @@ export function EditorPane({
       : null;
   const [pageEditMode, setPageEditMode] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [revision, setRevision] = useState<RevisionRef | null>(null);
   const toggleFavorite = useToggleFavoritePage();
   const restorePageVersion = useRestorePageVersion();
@@ -148,7 +150,11 @@ export function EditorPane({
   const restoreBusy =
     restorePageVersion.isPending || restoreNoteVersion.isPending;
 
-  if (!page || !cabinet || !notebook) {
+  // Only block on `page` — a viewer who's been per-page-shared a page won't
+  // have access to the cabinet/notebook list endpoints (those return empty
+  // for them), but the page itself loads fine via its dedicated allow-grant.
+  // The breadcrumb degrades to just the page title in that case.
+  if (!page) {
     return (
       <main
         style={{
@@ -178,8 +184,8 @@ export function EditorPane({
     );
   }
 
-  const cabinetColor = cabinetColorFor(cabinet.id);
-  const cabinetIcon = cabinet.icon ?? defaultCabinetIcon();
+  const cabinetColor = cabinet ? cabinetColorFor(cabinet.id) : notesTheme.muted;
+  const cabinetIcon = cabinet?.icon ?? defaultCabinetIcon();
   const activeNote =
     activeTab && activeTab.kind !== "page"
       ? notes.find((n) => n.id === (activeTab as Extract<EditorTab, { noteId: string }>).noteId) ?? null
@@ -257,10 +263,18 @@ export function EditorPane({
           }}
         >
           <i className={`fa ${cabinetIcon}`} style={{ color: cabinetColor, fontSize: 10 }} />
-          <span>{cabinet.name}</span>
-          <i className="fa fa-chevron-right" style={{ fontSize: 8 }} />
-          <span>{notebook.name}</span>
-          <i className="fa fa-chevron-right" style={{ fontSize: 8 }} />
+          {cabinet && (
+            <>
+              <span>{cabinet.name}</span>
+              <i className="fa fa-chevron-right" style={{ fontSize: 8 }} />
+            </>
+          )}
+          {notebook && (
+            <>
+              <span>{notebook.name}</span>
+              <i className="fa fa-chevron-right" style={{ fontSize: 8 }} />
+            </>
+          )}
           <strong style={{ color: notesTheme.dark, fontWeight: 700 }}>{page.title}</strong>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -281,7 +295,11 @@ export function EditorPane({
               toggleFavorite.mutate({ id: page.id, favorited: !page.isFavorited })
             }
           />
-          <HBtn icon="fa-share-nodes" title="Share" />
+          <HBtn
+            icon="fa-share-nodes"
+            title="Share"
+            onClick={() => setShareOpen(true)}
+          />
           <HBtn
             icon="fa-clock-rotate-left"
             title={onPageTab ? "Page history" : "Note history"}
@@ -371,6 +389,14 @@ export function EditorPane({
             setHistoryOpen(false);
           }}
           onClose={() => setHistoryOpen(false)}
+        />
+      )}
+
+      {shareOpen && (
+        <ShareModal
+          pageId={page.id}
+          pageTitle={page.title}
+          onClose={() => setShareOpen(false)}
         />
       )}
     </main>

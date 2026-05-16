@@ -54,7 +54,7 @@ export function ContentItemMenu({
     <div ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
       <button
         type="button"
-        title={`${capitalize(entityLabel)} options`}
+        aria-label={`${capitalize(entityLabel)} options`}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((o) => !o);

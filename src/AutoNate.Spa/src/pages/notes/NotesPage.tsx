@@ -16,6 +16,7 @@ import {
   useCreateNote,
   useCreateNotebook,
   useCreatePage,
+  useCreateProject,
   useDeleteCabinet,
   useDeleteNote,
   useDeleteNotebook,
@@ -33,7 +34,13 @@ import {
 import { ProjectSelector } from "./ProjectSelector";
 import { CabinetRail } from "./CabinetRail";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { Explorer, NewPageTarget } from "./Explorer";
+import {
+  EXPLORER_DEFAULT_WIDTH,
+  EXPLORER_MAX_WIDTH,
+  EXPLORER_MIN_WIDTH,
+  Explorer,
+  NewPageTarget
+} from "./Explorer";
 import { EditorPane } from "./EditorPane";
 import { EditCabinetModal } from "./EditCabinetModal";
 import { EditNotebookModal } from "./EditNotebookModal";
@@ -42,6 +49,7 @@ import { NewCabinetModal } from "./NewCabinetModal";
 import { NewNotebookModal } from "./NewNotebookModal";
 import { NewNoteModal } from "./NewNoteModal";
 import { NewPageModal } from "./NewPageModal";
+import { NewProjectModal } from "./NewProjectModal";
 import { ProjectSettingsModal } from "./ProjectSettingsModal";
 import { EditorTab, NotebookWithPages, flattenToTree, tabsForPage } from "./types";
 import { useYjsNotesList } from "@/lib/yjs/useYjsNotesList";
@@ -124,6 +132,34 @@ export default function NotesPage() {
   const [deleteNoteError, setDeleteNoteError] = useState<string | null>(null);
   const [newPageTarget, setNewPageTarget] = useState<NewPageTarget | null>(null);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
+  // Collapsed sidebar — both cabinet rail and explorer are hidden, a floating
+  // restore button appears at the bottom-left of the viewport. Persisted so
+  // the layout is sticky across reloads.
+  const [sidebarCollapsed, setSidebarCollapsedRaw] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("notes.sidebarCollapsed") === "1";
+  });
+  const setSidebarCollapsed = (next: boolean) => {
+    setSidebarCollapsedRaw(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("notes.sidebarCollapsed", next ? "1" : "0");
+    }
+  };
+  // Explorer (notebook/page tree) width. Persisted to localStorage so it
+  // survives a refresh. Validated to a sane range so a stale/corrupt value
+  // can't collapse or runaway the panel.
+  const [explorerWidth, setExplorerWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return EXPLORER_DEFAULT_WIDTH;
+    const raw = window.localStorage.getItem("notes.explorerWidth");
+    const parsed = raw == null ? NaN : Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) return EXPLORER_DEFAULT_WIDTH;
+    return Math.max(EXPLORER_MIN_WIDTH, Math.min(EXPLORER_MAX_WIDTH, parsed));
+  });
+  const persistExplorerWidth = (final: number) => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("notes.explorerWidth", String(final));
+  };
   // Ids of nodes the user has asked to expand (e.g. after creating a child
   // inside them). Stays additive — manual collapses are preserved because
   // PageRow / NotebookRow only force-open when their id is in this set.
@@ -139,30 +175,39 @@ export default function NotesPage() {
 
   // Default-select the first project once it loads (or if the URL-supplied
   // project id is no longer in the user's accessible set — silently fall
-  // through to the first instead of leaving the rail empty).
+  // through to the first instead of leaving the rail empty). If the URL has
+  // already resolved to an entity whose ancestor chain includes a project,
+  // hydration is the source of truth and this effect must not clobber it —
+  // both effects fire in the same commit when projects is already cached
+  // and resolved arrives, and React's last-write-wins on setState would
+  // otherwise overwrite the hydration with projects[0].
   useEffect(() => {
     if (urlPending) return;
     if (projects.length === 0) return;
+    if (resolved?.ancestors.project) return;
     if (!activeProjectId || !projects.find((p) => p.id === activeProjectId)) {
       setActiveProjectId(projects[0].id);
     }
-  }, [projects, activeProjectId, urlPending]);
+  }, [projects, activeProjectId, urlPending, resolved]);
 
   const cabinetsQuery = useCabinets(activeProjectId);
   const cabinets = cabinetsQuery.data ?? [];
 
   // Default-select the first cabinet whenever the project / cabinet list
-  // changes — otherwise the rail has nothing highlighted.
+  // changes — otherwise the rail has nothing highlighted. Same hydration
+  // guard as the project effect above: if the URL resolved to a cabinet
+  // (directly or via a deeper entity), don't clobber that selection.
   useEffect(() => {
     if (urlPending) return;
     if (!cabinets.length) {
       setActiveCabinetId(null);
       return;
     }
+    if (resolved?.ancestors.cabinet) return;
     if (!activeCabinetId || !cabinets.find((c) => c.id === activeCabinetId)) {
       setActiveCabinetId(cabinets[0].id);
     }
-  }, [cabinets, activeCabinetId, urlPending]);
+  }, [cabinets, activeCabinetId, urlPending, resolved]);
 
   const notebooksQuery = useNotebooks(activeCabinetId);
   const notebooks = notebooksQuery.data ?? [];
@@ -262,6 +307,7 @@ export default function NotesPage() {
     });
   }, [activePageId, pageQuery.data, liveNotes, urlNoteIndex]);
 
+  const createProject = useCreateProject();
   const createCabinet = useCreateCabinet(activeProjectId);
   const updateCabinetMutation = useUpdateCabinet(activeProjectId);
   const deleteCabinetMutation = useDeleteCabinet(activeProjectId);
@@ -469,7 +515,10 @@ export default function NotesPage() {
         color: notesTheme.dark
       }}
     >
-      {/* Inner sidebar: project selector on top, then cabinet rail + explorer. */}
+      {/* Inner sidebar: project selector on top, then cabinet rail + explorer.
+          When collapsed, the entire wrapper is skipped and a floating button
+          at the bottom-left of the viewport (rendered below) brings it back. */}
+      {!sidebarCollapsed && (
       <div
         style={{
           display: "flex",
@@ -484,7 +533,7 @@ export default function NotesPage() {
             padding: "10px",
             borderBottom: `1px solid ${notesTheme.border}`,
             background: "#fafbfc",
-            width: 64 + 264
+            width: 64 + explorerWidth
           }}
         >
           {activeProject ? (
@@ -496,9 +545,32 @@ export default function NotesPage() {
                 setActiveCabinetId(null);
                 setActivePageId(null);
               }}
+              onNewProject={() => setProjectModalOpen(true)}
             />
           ) : (
-            <div style={{ height: 36 }} />
+            <button
+              type="button"
+              onClick={() => setProjectModalOpen(true)}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                background: "#fff",
+                border: `1px dashed ${notesTheme.border}`,
+                borderRadius: 4,
+                padding: "7px 10px",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 12,
+                fontWeight: 700,
+                color: notesTheme.primary
+              }}
+            >
+              <i className="fa fa-plus" style={{ fontSize: 10 }} />
+              Add project
+            </button>
           )}
         </div>
 
@@ -557,9 +629,14 @@ export default function NotesPage() {
             }}
             onNewPage={setNewPageTarget}
             forceExpandIds={forceExpandIds}
+            width={explorerWidth}
+            onResize={setExplorerWidth}
+            onResizeEnd={persistExplorerWidth}
+            onCollapse={() => setSidebarCollapsed(true)}
           />
         </div>
       </div>
+      )}
 
       <EditorPane
         page={pageQuery.data ?? null}
@@ -580,6 +657,23 @@ export default function NotesPage() {
           onClose={() => setModalOpen(false)}
           onCreate={onCreateNote}
           submitting={createNote.isPending}
+        />
+      )}
+
+      {projectModalOpen && (
+        <NewProjectModal
+          onClose={() => {
+            if (createProject.isPending) return;
+            setProjectModalOpen(false);
+          }}
+          onCreate={async (vars) => {
+            const project = await createProject.mutateAsync(vars);
+            setProjectModalOpen(false);
+            setActiveProjectId(project.id);
+            setActiveCabinetId(null);
+            setActivePageId(null);
+          }}
+          submitting={createProject.isPending}
         />
       )}
 
@@ -834,6 +928,39 @@ export default function NotesPage() {
         opened={projectSettingsOpen}
         onClose={() => setProjectSettingsOpen(false)}
       />
+
+      {/* Restore-sidebar affordance shown only when the sidebar is hidden.
+          Fixed to the bottom-left of the viewport so it stays reachable
+          regardless of where the user is scrolled in the editor. */}
+      {sidebarCollapsed && (
+        <button
+          type="button"
+          onClick={() => setSidebarCollapsed(false)}
+          aria-label="Show sidebar"
+          title="Show sidebar"
+          style={{
+            position: "fixed",
+            left: 16,
+            bottom: 16,
+            zIndex: 200,
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+            background: notesTheme.primary,
+            border: `1px solid ${notesTheme.primary}`,
+            color: "#fff",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
+            fontSize: 14,
+            fontFamily: "inherit"
+          }}
+        >
+          <i className="fa fa-bars" />
+        </button>
+      )}
     </div>
   );
 }

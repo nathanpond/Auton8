@@ -20,6 +20,7 @@ import FormPublicView from "@/pages/forms/FormPublicView";
 import TaskFormPage from "@/pages/workflow-tasks/TaskFormPage";
 import Notifications from "@/pages/notifications/Notifications";
 import NotesPage from "@/pages/notes/NotesPage";
+import AllProjects from "@/pages/notes/AllProjects";
 import DynamicPageRoute from "@/pages/dynamic-page/DynamicPageRoute";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
 
@@ -140,6 +141,11 @@ export const APP_ROUTES: AppRoute[] = [
   // The first splat segment is the entity locator (any kind) and the optional
   // second segment is the page-scoped note index.
   { path: "notes/*", element: protect(<NotesPage />) },
+
+  // Read-only datatable view of every project the user can access. Reached
+  // from the project picker in /notes; clicking a row jumps back to /notes
+  // with that project selected.
+  { path: "projects", element: protect(<AllProjects />) },
 
   // Forms feature: dev preview (draft) and runtime render (published).
   // Both require an authenticated user; the runtime render is additionally

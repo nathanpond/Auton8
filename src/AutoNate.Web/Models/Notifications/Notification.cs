@@ -40,6 +40,11 @@ public static class NotificationKinds
     // page. Body carries the issue title; LinkPath deep-links to
     // /admin/config/system-issues.
     public const string SystemIssueOpened = "system.issue.opened";
+
+    // Page-share: emitted from POST /api/content/pages/{id}/share when one
+    // user shares a page with one or more others. Body carries the sharer's
+    // display name + page title; LinkPath deep-links to /notes/{pageLocator}.
+    public const string PageShared = "content.page.shared";
 }
 
 public static class NotificationEntityKinds

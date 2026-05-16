@@ -511,3 +511,43 @@ export async function removeProjectMember(
 ): Promise<void> {
   await api.delete(`/api/content/projects/${projectId}/members/${userId}`);
 }
+
+// ── Page sharing ──────────────────────────────────────────────────────────
+
+export type PageShareUserAccess = {
+  userId: string;
+  canView: boolean;
+};
+
+export type PageSharePreviewResponse = {
+  isOwner: boolean;
+  users: PageShareUserAccess[];
+};
+
+export async function previewPageShare(
+  pageId: string,
+  userIds: string[]
+): Promise<PageSharePreviewResponse> {
+  const { data } = await api.post<PageSharePreviewResponse>(
+    `/api/content/pages/${pageId}/share/preview`,
+    { userIds }
+  );
+  return data;
+}
+
+export type PageShareResponse = {
+  notifiedUserIds: string[];
+  skippedUserIds: string[];
+  grantedUserIds: string[];
+};
+
+export async function sharePage(
+  pageId: string,
+  req: { userIds: string[]; grantAccess: boolean }
+): Promise<PageShareResponse> {
+  const { data } = await api.post<PageShareResponse>(
+    `/api/content/pages/${pageId}/share`,
+    req
+  );
+  return data;
+}
