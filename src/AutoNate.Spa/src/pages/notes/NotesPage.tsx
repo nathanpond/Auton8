@@ -26,6 +26,7 @@ import {
   usePage,
   useProjects,
   useUpdateCabinet,
+  useUpdateNote,
   useUpdateNotebook,
   useUpdatePage
 } from "@/hooks/useContent";
@@ -272,6 +273,22 @@ export default function NotesPage() {
   const createPageMutation = useCreatePage();
   const createNote = useCreateNote(activePageId);
   const deleteNoteMutation = useDeleteNote(activePageId);
+  const updateNoteMutation = useUpdateNote(activePageId);
+
+  // Drag-to-reorder note tabs. Persist new sortOrder via PATCH for every
+  // note whose position changed; updateNote.onSuccess invalidates the
+  // notes query, which feeds the newer-wins seed in useYjsNotesList,
+  // which broadcasts the new sortOrder to other connected users.
+  const onReorderNotes = (orderedNoteIds: string[]) => {
+    if (!activePageId) return;
+    orderedNoteIds.forEach((noteId, idx) => {
+      const existing = liveNotes.find((n) => n.id === noteId);
+      // Skip notes whose sortOrder didn't change — saves a PATCH per
+      // unchanged tab when the user drags one tab a single position.
+      if (existing && existing.sortOrder === idx) return;
+      updateNoteMutation.mutate({ id: noteId, body: { sortOrder: idx } });
+    });
+  };
 
   const activeCabinet = cabinets.find((c) => c.id === activeCabinetId) ?? null;
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -555,6 +572,7 @@ export default function NotesPage() {
         onSwitchTab={onSwitchTab}
         onCloseTab={onCloseTab}
         onNewNote={() => setModalOpen(true)}
+        onReorderNotes={onReorderNotes}
       />
 
       {modalOpen && activePageId && (

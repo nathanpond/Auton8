@@ -23,6 +23,7 @@ public static class ContentResourceKinds
     public const string PageAttachment = "page.attachment";
     public const string Note = "note";
     public const string NoteVersion = "note.version";
+    public const string Comment = "comment";
 }
 
 public static class ContentEventTypes
@@ -102,4 +103,14 @@ public static class ContentEventTypes
     public const string NoteVersionDeleted = "content.note.version.deleted";
     public const string NoteVersionListViewed = "content.note.version.list.viewed";
     public const string NoteVersionViewed = "content.note.version.viewed";
+
+    // Comments (BlockNote thread lifecycle inside a page body).
+    // Body edits inherit PageUpdated; these capture the comment-specific
+    // user actions surfaced by the SPA after the corresponding Y.Map
+    // write succeeds.
+    public const string CommentCreated = "content.comment.created";
+    public const string CommentReplied = "content.comment.replied";
+    public const string CommentResolved = "content.comment.resolved";
+    public const string CommentReopened = "content.comment.reopened";
+    public const string CommentDeleted = "content.comment.deleted";
 }

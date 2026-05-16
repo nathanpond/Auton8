@@ -1,13 +1,16 @@
-import { Suspense, lazy, useMemo, useRef } from "react";
+import { Suspense, lazy, useMemo, useState } from "react";
 import type {
   ExcalidrawImperativeAPI,
   ExcalidrawInitialDataState
 } from "@excalidraw/excalidraw/types";
 import { NoteDto } from "@/api/content";
 import { useUpdateNote } from "@/hooks/useContent";
+import { useMe } from "@/hooks/useMe";
 import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
 import { useYjsExcalidraw } from "@/lib/yjs/useYjsExcalidraw";
+import { useExcalidrawAwareness } from "@/lib/yjs/useExcalidrawAwareness";
 import { ConnectionStatusPill } from "@/lib/yjs/ConnectionStatusPill";
+import { userCursorColor } from "@/lib/yjs/userColor";
 import { EditableNoteTitle } from "./EditableNoteTitle";
 import { notesTheme } from "./notesTheme";
 
@@ -117,11 +120,39 @@ function CollabScene({
   handle: NonNullable<ReturnType<typeof useYjsDocument>["handle"]>;
   viewer: boolean;
 }) {
-  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  // useState (not useRef) so the hooks below re-run their effects once
+  // Excalidraw hands us its imperative API. With a ref, the api change
+  // wouldn't trigger a re-render and the observers / awareness
+  // subscribers would never see the non-null api.
+  const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+
+  const me = useMe();
+  const currentUser = me.data?.authenticated
+    ? {
+        id: me.data.userId,
+        displayName:
+          [me.data.firstName, me.data.lastName].filter(Boolean).join(" ") ||
+          me.data.username,
+        color: userCursorColor(me.data.userId)
+      }
+    : {
+        id: "anonymous",
+        displayName: "Anonymous",
+        color: userCursorColor("anonymous")
+      };
+
   const { initialData, onChange } = useYjsExcalidraw({
     doc: handle.doc,
     provider: handle.provider,
-    excalidrawAPI: apiRef.current
+    excalidrawAPI: api
+  });
+  // Live cursors: broadcast our pointer state through Yjs awareness;
+  // remote pointers are pushed into Excalidraw's collaborators Map via
+  // updateScene.
+  const { onPointerUpdate } = useExcalidrawAwareness({
+    provider: handle.provider,
+    excalidrawAPI: api,
+    currentUser
   });
 
   return (
@@ -130,9 +161,8 @@ function CollabScene({
       onChange={(elements, appState, files) =>
         onChange(elements as readonly { id: string; version?: number }[], appState, files)
       }
-      onApiReady={(api) => {
-        apiRef.current = api;
-      }}
+      onApiReady={setApi}
+      onPointerUpdate={onPointerUpdate}
       // Viewer connections render the canvas non-editable. The server-side
       // readOnly enforcement is the actual security boundary — this just
       // hides the editing tools so users don't try.
@@ -157,6 +187,7 @@ function ExcalidrawCanvas({
   initialData,
   onChange,
   onApiReady,
+  onPointerUpdate,
   viewModeEnabled
 }: {
   initialData: ExcalidrawInitialDataState | null;
@@ -169,6 +200,13 @@ function ExcalidrawCanvas({
     files: unknown
   ) => void;
   onApiReady: (api: ExcalidrawImperativeAPI) => void;
+  // Optional — only the live (collab) editor wires this; revision
+  // views pass undefined so Excalidraw skips broadcasting pointer
+  // moves through awareness.
+  onPointerUpdate?: (payload: {
+    pointer: { x: number; y: number; tool: "pointer" | "laser" };
+    button: "down" | "up";
+  }) => void;
   viewModeEnabled: boolean;
 }) {
   return (
@@ -197,6 +235,11 @@ function ExcalidrawCanvas({
           viewModeEnabled={viewModeEnabled}
           excalidrawAPI={onApiReady}
           onChange={onChange}
+          onPointerUpdate={onPointerUpdate}
+          // `isCollaborating` flips Excalidraw into collab mode so the
+          // collaborators Map (set via updateScene) actually renders.
+          // Without this Excalidraw treats the doc as solo-edit.
+          isCollaborating={Boolean(onPointerUpdate)}
         />
       </Suspense>
     </div>

@@ -14,6 +14,20 @@ import { PageOverview } from "./PageOverview";
 import { VisualTextEditor } from "./VisualTextEditor";
 import { NapkinEditor } from "./NapkinEditor";
 import { DiagramEditor } from "./DiagramEditor";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  arrayMove,
+  useSortable
+} from "@dnd-kit/sortable";
+import { CSS as DndCss } from "@dnd-kit/utilities";
 import { HistoryModal } from "./HistoryModal";
 
 // Identity of a revision the user is browsing. Scoped to a specific page or
@@ -35,6 +49,10 @@ type Props = {
   onSwitchTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onNewNote: () => void;
+  // Called after a drag-and-drop reorder of note tabs. `orderedNoteIds`
+  // is the new sequence the user dropped them into; the caller persists
+  // sortOrder updates from this.
+  onReorderNotes?: (orderedNoteIds: string[]) => void;
 };
 
 export function EditorPane({
@@ -47,7 +65,8 @@ export function EditorPane({
   notes,
   onSwitchTab,
   onCloseTab,
-  onNewNote
+  onNewNote,
+  onReorderNotes
 }: Props) {
   // All hooks must run on every render — the empty-state early return below
   // must not skip them. Bug we hit before: useState/useEffect lived after the
@@ -280,6 +299,7 @@ export function EditorPane({
         onSwitchTab={onSwitchTab}
         onCloseTab={onCloseTab}
         onNewNote={onNewNote}
+        onReorderNotes={onReorderNotes}
       />
 
       {revision != null && (
@@ -517,13 +537,15 @@ function TabStrip({
   activeTabId,
   onSwitchTab,
   onCloseTab,
-  onNewNote
+  onNewNote,
+  onReorderNotes
 }: {
   tabs: EditorTab[];
   activeTabId: string | undefined;
   onSwitchTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onNewNote: () => void;
+  onReorderNotes?: (orderedNoteIds: string[]) => void;
 }) {
   // The page tab is always present and always first. We pin it outside the
   // scroller so it stays visible even when the user has so many note tabs
@@ -601,6 +623,26 @@ function TabStrip({
     el.scrollBy({ left: direction * step, behavior: "smooth" });
   };
 
+  // Drag-to-reorder. PointerSensor with activationConstraint.distance keeps
+  // single-click-to-switch behavior intact — a drag only starts after the
+  // pointer moves ≥6px so casual clicks on the tab body still fire
+  // onSwitchTab.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  );
+  const noteTabIds = noteTabs
+    .filter((t): t is Extract<EditorTab, { noteId: string }> => "noteId" in t)
+    .map((t) => t.noteId);
+  const onDragEnd = (event: DragEndEvent) => {
+    if (!onReorderNotes) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = noteTabIds.indexOf(String(active.id));
+    const newIndex = noteTabIds.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    onReorderNotes(arrayMove(noteTabIds, oldIndex, newIndex));
+  };
+
   return (
     <div
       style={{
@@ -645,20 +687,21 @@ function TabStrip({
           overflowY: "hidden"
         }}
       >
-        {noteTabs.map((t) => (
-          <div
-            key={t.id}
-            data-tab-id={t.id}
-            style={{ flexShrink: 0, display: "inline-flex", alignItems: "flex-end" }}
-          >
-            <Tab
-              tab={t}
-              active={t.id === activeTabId}
-              onSwitch={() => onSwitchTab(t.id)}
-              onClose={() => onCloseTab(t.id)}
-            />
-          </div>
-        ))}
+        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+          <SortableContext items={noteTabIds} strategy={horizontalListSortingStrategy}>
+            {noteTabs.map((t) =>
+              "noteId" in t ? (
+                <SortableTab
+                  key={t.id}
+                  tab={t}
+                  active={t.id === activeTabId}
+                  onSwitch={() => onSwitchTab(t.id)}
+                  onClose={() => onCloseTab(t.id)}
+                />
+              ) : null
+            )}
+          </SortableContext>
+        </DndContext>
       </div>
       {hasOverflow && (
         <ScrollArrow
@@ -752,6 +795,46 @@ function ScrollArrow({
         <i className={`fa fa-chevron-${direction}`} />
       </button>
     </Tooltip>
+  );
+}
+
+// Wraps a note Tab with dnd-kit's useSortable so the user can drag it to
+// a new position. PointerSensor's 6px activation distance means a tap on
+// the body of the tab still triggers onSwitch — only a real drag motion
+// engages the reorder.
+function SortableTab({
+  tab,
+  active,
+  onSwitch,
+  onClose
+}: {
+  tab: Extract<EditorTab, { noteId: string }>;
+  active: boolean;
+  onSwitch: () => void;
+  onClose: () => void;
+}) {
+  const sortable = useSortable({ id: tab.noteId });
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = sortable;
+  return (
+    <div
+      ref={setNodeRef}
+      data-tab-id={tab.id}
+      style={{
+        flexShrink: 0,
+        display: "inline-flex",
+        alignItems: "flex-end",
+        transform: DndCss.Transform.toString(transform),
+        transition,
+        // Lift the dragged item above its siblings; keep z-index small
+        // so the editor's own UI (toolbars, etc.) still wins.
+        zIndex: isDragging ? 5 : undefined,
+        opacity: isDragging ? 0.9 : 1
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <Tab tab={tab} active={active} onSwitch={onSwitch} onClose={onClose} />
+    </div>
   );
 }
 

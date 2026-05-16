@@ -106,6 +106,30 @@ export function useYjsNotesList(
     initialCapturedRef.current = true;
   }, [notesMap]);
 
+  // ── one-shot phantom-entry GC ─────────────────────────────────────
+  // The seed effect below is intentionally additive — a stale REST
+  // refetch must not delete real notes that are mid-flight. But a
+  // pagemeta Y.Map can drift from the `notes` table over time:
+  //   - dropped Y.Map write after a SPA crash mid-delete
+  //   - a note row deleted by an admin tool bypassing the SPA
+  //   - manual DB intervention
+  // Once per session, after the first definitive REST result arrives,
+  // editors reconcile by removing Y.Map entries whose ids aren't in
+  // the REST list. After that pass, every subsequent seed stays
+  // additive so concurrent creates aren't ghost-deleted.
+  const gcRanRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!handle || !notesMap || !seedNotes || role !== "editor") return;
+    if (gcRanRef.current) return;
+    gcRanRef.current = true;
+    const restIds = new Set(seedNotes.map((n) => n.id));
+    handle.doc.transact(() => {
+      for (const id of Array.from(notesMap.keys())) {
+        if (!restIds.has(id)) notesMap.delete(id);
+      }
+    }, LOCAL_ORIGIN);
+  }, [handle, notesMap, seedNotes, role]);
+
   // ── seed / reconcile from REST ────────────────────────────────────
   // Editors mirror the REST notes list into the Y.Map. For each REST
   // entry:

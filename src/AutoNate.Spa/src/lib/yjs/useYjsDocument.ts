@@ -120,7 +120,33 @@ export function useYjsDocument(documentName: string | null): UseYjsDocumentResul
 
     setHandle({ doc, provider });
 
+    // Force-reconnect on tab focus after a long idle. Reasons:
+    //   - The Yjs ticket is HMAC-signed against the user's permissions at
+    //     mint time, and Hocuspocus's `connection.readOnly` is decided at
+    //     auth time. If an admin demotes / promotes the user while the
+    //     tab was backgrounded, the in-flight session keeps the stale
+    //     role until next reconnect. Forcing reconnect after a long idle
+    //     trades a brief sync for fresh authorization.
+    //   - The 5-minute threshold avoids reconnect storms when users
+    //     quickly tab-switch.
+    const IDLE_RECONNECT_THRESHOLD_MS = 5 * 60_000;
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      const idleMs = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = null;
+      if (idleMs >= IDLE_RECONNECT_THRESHOLD_MS) {
+        provider.disconnect();
+        provider.connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
       provider.off("status", onStatus);
       provider.off("disconnect", onDisconnect);
       provider.off("authenticationFailed", onAuthFailed);

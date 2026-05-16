@@ -110,6 +110,68 @@ public static class YjsEndpoints
             return Results.Ok(new TicketResponse(ticket, options.Value.HocuspocusWsUrl, ttl, role));
         }).DisableAntiforgery();
 
+        // Comments fire SPA-driven audit events: BlockNote's CommentsExtension
+        // writes the thread mutation into the Y.Doc, then the SPA POSTs here
+        // so the operation lands on the content.events bus alongside the
+        // existing PageUpdated/NoteUpdated webhook event. We authorize on
+        // Page.View (matching the Yjs ticket gate — anyone who can connect
+        // to the page can post comment events for it).
+        browserGroup.MapPost("/comment-event", async (
+            CommentEventRequest request,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IContentAuthorizer authorizer,
+            IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var log = loggerFactory.CreateLogger("YjsCommentEvent");
+            if (!Guid.TryParse(request.PageId, out var pageId) ||
+                string.IsNullOrWhiteSpace(request.ThreadId) ||
+                string.IsNullOrWhiteSpace(request.EventType))
+            {
+                return Results.BadRequest(new { error = "pageId, threadId, eventType required." });
+            }
+
+            var decision = await authorizer.AuthorizeAsync(
+                http.User, ContentKinds.Page, pageId, Actions.View, ct);
+            if (!decision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var pageExists = await db.Pages.AsNoTracking().AnyAsync(p => p.Id == pageId, ct);
+            if (!pageExists) return Results.NotFound();
+
+            var eventName = request.EventType switch
+            {
+                "created" => ContentEventTypes.CommentCreated,
+                "replied" => ContentEventTypes.CommentReplied,
+                "resolved" => ContentEventTypes.CommentResolved,
+                "reopened" => ContentEventTypes.CommentReopened,
+                "deleted" => ContentEventTypes.CommentDeleted,
+                _ => null
+            };
+            if (eventName is null)
+            {
+                log.LogWarning("Rejected comment-event with unknown eventType '{Type}'.", request.EventType);
+                return Results.BadRequest(new { error = "Unknown eventType." });
+            }
+
+            await auditPublisher.PublishAsync(
+                ContentEventTopic.TopicName,
+                eventName,
+                ContentResourceKinds.Comment,
+                resource: new
+                {
+                    pageId,
+                    threadId = request.ThreadId,
+                    commentId = request.CommentId
+                },
+                details: null,
+                ct);
+
+            return Results.NoContent();
+        }).DisableAntiforgery();
+
         // -- /internal/yjs-* -------------------------------------------------
         var internalGroup = app.MapGroup("/internal")
             .AllowAnonymous();
@@ -549,6 +611,12 @@ public static class YjsEndpoints
     public sealed record TicketResponse(string Ticket, string WsUrl, int ExpiresInSeconds, string Role);
     public sealed record YjsAuthRequest(string Token, string DocumentName);
     public sealed record YjsAuthResponse(Guid UserId, string DisplayName, string Role);
+    public sealed record CommentEventRequest(
+        string PageId,
+        string ThreadId,
+        string? CommentId,
+        // "created" | "replied" | "resolved" | "reopened" | "deleted"
+        string EventType);
 
     private sealed record TicketPayload(
         string DocumentName,

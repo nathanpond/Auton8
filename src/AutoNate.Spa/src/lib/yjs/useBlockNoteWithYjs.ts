@@ -9,6 +9,7 @@ import {
 import type { ResolveUsersFn } from "./useResolveUsers";
 import { ReadOnlyThreadStoreAuth } from "./ReadOnlyThreadStoreAuth";
 import type { YjsRole } from "./ticket";
+import { wrapThreadStoreWithAuditing } from "./commentAudit";
 
 export interface YjsCurrentUser {
   // Backend user Guid. Used as the principal for the YjsThreadStore's
@@ -35,6 +36,9 @@ export function useBlockNoteWithYjs(args: {
   // affordances (Add comment, reply, react, resolve) are hidden for
   // viewers.
   role: YjsRole;
+  // Doc name (`page:<guid>` or `note:<guid>`). Passed to the audit
+  // wrapper so comment events land on the bus with the right pageId.
+  documentName: string;
 }) {
   // Threads live in the same Y.Doc as the body, in a Y.Map named
   // "threads" (BlockNote's recommended key). Sync rides the same
@@ -51,11 +55,15 @@ export function useBlockNoteWithYjs(args: {
     args.role === "editor"
       ? new DefaultThreadStoreAuth(args.currentUser.id, "editor")
       : new ReadOnlyThreadStoreAuth();
-  const threadStore = new YjsThreadStore(
+  const rawThreadStore = new YjsThreadStore(
     args.currentUser.id,
     args.doc.getMap("threads"),
     threadStoreAuth
   );
+  // Wrap with an auditing Proxy so successful comment writes also POST
+  // to /api/yjs/comment-event, landing per-action audit events on the
+  // bus alongside the existing PageUpdated webhook event.
+  const threadStore = wrapThreadStoreWithAuditing(rawThreadStore, args.documentName);
 
   return useCreateBlockNote({
     collaboration: {

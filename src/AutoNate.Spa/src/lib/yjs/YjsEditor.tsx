@@ -94,7 +94,11 @@ function YjsEditorInner({
       color: userCursorColor(currentUserId)
     },
     resolveUsers,
-    role
+    role,
+    // The provider's `name` is the doc identifier we connected with
+    // (`page:<guid>` or `note:<guid>`) — pass it through so comment
+    // audit events land on the right resource server-side.
+    documentName: handle.provider.configuration.name
   });
 
   // We take manual control of:

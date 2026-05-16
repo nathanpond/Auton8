@@ -28,6 +28,12 @@ __pycache__/
 # live in src/AutoNate.Spa/public/ and Vite copies them into wwwroot/ at build.
 src/AutoNate.Spa/dist/
 src/AutoNate.Web/wwwroot/
+
+# Node sidecar build output. `npx tsc` regenerates services/*/dist/ from
+# src/, and the Docker image build runs the compile inside its own stage —
+# nothing in dist/ should ever be hand-maintained.
+services/*/dist/
+
 .idea/
 Test Results/
 
