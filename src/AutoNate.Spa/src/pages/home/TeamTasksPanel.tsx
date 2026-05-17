@@ -1,11 +1,10 @@
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
-import { useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Group, Paper, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
 import { listTeamAssignedTasks } from "@/api/executions";
-import { useBusConnection } from "@/hooks/useBusConnection";
+import { useInvalidateOnChannels } from "@/hooks/useInvalidateOnChannels";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { FlowableTaskSummary } from "@/types/flowable";
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
@@ -16,23 +15,17 @@ const COLUMN_WIDTHS = ["26%", "12%", "16%", "14%", "10%", "14%", "8%"];
 const QUERY_KEY = ["home", "team-tasks"] as const;
 
 export default function TeamTasksPanel() {
-  const qc = useQueryClient();
   const { data: statusAppearance = [] } = useStatusAppearance();
 
-  // Re-fetch on workflow-execution bus events. A reassignment can move a task
-  // in or out of the team queue, and the actor's own queue, so both keys are
-  // invalidated together.
-  const onBusMessage = useCallback(
-    (msg: { topic: string }) => {
-      const topic = msg.topic ?? "";
-      if (topic.startsWith("workflow.execution")) {
-        qc.invalidateQueries({ queryKey: QUERY_KEY });
-        qc.invalidateQueries({ queryKey: ["home", "my-tasks"] });
-      }
-    },
-    [qc]
+  // The server delivers task events for any of the actor's supervisees on
+  // this channel; subscribe-time gate also requires at least one outbound
+  // supervisor edge. Reassignments may move work in or out of the actor's
+  // own queue so MyTasks is invalidated alongside.
+  const queryKeys = useMemo(
+    () => [QUERY_KEY, ["home", "my-tasks"] as const],
+    [],
   );
-  useBusConnection({ onMessage: onBusMessage });
+  useInvalidateOnChannels(["tasks:supervisees-of-me"], queryKeys);
 
   // listTeamAssignedTasks returns the full set (server doesn't paginate it),
   // so client mode is the right fit. The wrapper will sort + page + search

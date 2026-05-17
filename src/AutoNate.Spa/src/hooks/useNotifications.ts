@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   NotificationListResponse,
@@ -7,7 +7,7 @@ import {
   markAllNotificationsRead,
   markNotificationRead
 } from "@/api/notifications";
-import { BusMessageEnvelope, useBusConnection } from "./useBusConnection";
+import { useBusSubscription } from "./useBusSubscription";
 import { useMe } from "./useMe";
 
 const RECENT_LIMIT = 10;
@@ -52,30 +52,29 @@ export function useMarkAllNotificationsRead() {
   });
 }
 
-// Subscribes to the notification.* topic prefix on the bus and refreshes the
-// react-query caches whenever an event arrives for the current user.
+// Subscribes to the per-user notification channel on the scoped /ws/bus-watcher
+// stream and refreshes the react-query caches whenever an event arrives.
 // Mounted once at the shell level so live updates flow regardless of which
-// page the user is on.
+// page the user is on. Server-side gates ensure only this user's events are
+// ever delivered — no client-side userId filtering is needed.
 export function useNotificationLiveUpdates(enabled = true) {
   const { data: me } = useMe();
   const qc = useQueryClient();
   const userId = me && me.authenticated ? me.userId : null;
 
-  useBusConnection({
-    enabled: enabled && Boolean(userId),
-    topicPrefix: "notification.",
-    onMessage: (envelope: BusMessageEnvelope) => {
-      try {
-        const event = JSON.parse(envelope.payload) as { userId?: string };
-        if (event.userId && userId && event.userId === userId) {
-          qc.invalidateQueries({ queryKey: ["notifications"] });
-        }
-      } catch {
-        // BusWatcher pretty-prints payloads on the way through; if it isn't
-        // JSON we have nothing to filter on. Drop silently.
-      }
-    }
-  });
+  const channels = useMemo(
+    () => (userId ? [`notification:user:${userId}`] : []),
+    [userId],
+  );
+
+  useBusSubscription(
+    channels,
+    (event) => {
+      if (event.type !== "event") return;
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+    { enabled: enabled && Boolean(userId) },
+  );
 
   // Keep the recent feed warm in case the websocket misses a frame after a
   // reconnect — every 30s tanstack-query refetch above also picks up gaps.

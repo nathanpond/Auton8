@@ -15,6 +15,7 @@ using AutoNate.Web.Services.Audit;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.BusWatcher.Subscriptions;
 using AutoNate.Web.Services.Dapr;
 using AutoNate.Web.Services.Agent;
 using AutoNate.Web.Services.Agent.Conversations;
@@ -178,6 +179,7 @@ builder.Services.AddOptions<NatsOptions>()
     .BindConfiguration(NatsOptions.SectionName);
 builder.Services.AddSingleton<NatsStreamProvisioner>();
 builder.Services.AddSingleton<BusWatcherStreamService>();
+builder.Services.AddScopedSubscriptions();
 builder.Services.AddSingleton<DaprSidecarProbe>();
 builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.SystemHealthService>();
 builder.Services.AddSingleton<AutoNate.Web.Services.SystemHealth.ISystemHealthProbe>(
@@ -728,7 +730,13 @@ app.UseAntiforgery();
 // the WebSocket fan-out for the SPA's live BusWatcher page remains.
 app.Map(
     BusWatcherStreamService.WebSocketRoute,
-    async (HttpContext context, BusWatcherStreamService busWatcherStreamService, CancellationToken cancellationToken) =>
+    async (
+        HttpContext context,
+        SubscriptionManager subscriptionManager,
+        AutoNate.Web.Authorization.Evaluator.IAuthorizer authorizer,
+        Microsoft.Extensions.Options.IOptions<AutoNate.Web.Authorization.AuthorizationOptions> authorizationOptions,
+        Microsoft.EntityFrameworkCore.IDbContextFactory<AutoNate.Web.Persistence.AutoNateDbContext> dbFactory,
+        CancellationToken cancellationToken) =>
     {
         if (!context.WebSockets.IsWebSocketRequest)
         {
@@ -736,8 +744,22 @@ app.Map(
             return;
         }
 
-        await busWatcherStreamService.AcceptClientAsync(context, cancellationToken);
-    });
+        await subscriptionManager.AcceptAsync(context, authorizer, authorizationOptions, dbFactory, cancellationToken);
+    })
+    .RequireAuthorization();
+
+// Bridge the in-process BusWatcher notifier into the SubscriptionManager so
+// every Dapr message reaches the scoped fan-out path. AuthChangeListener
+// subscribes to the same notifier to react to iam.events mutations.
+{
+    var bus = app.Services.GetRequiredService<BusWatcherStreamService>();
+    var manager = app.Services.GetRequiredService<SubscriptionManager>();
+    var authChangeListener = app.Services.GetRequiredService<AuthChangeListener>();
+    // Subscriptions returned by Subscribe are intentionally not disposed:
+    // both services are singletons that live for the app lifetime.
+    _ = bus.Subscribe(message => manager.PublishAsync(message, CancellationToken.None));
+    authChangeListener.Start(bus);
+}
 
 // Pushes the current default-model snapshot to every chatbot SPA. The
 // admin's "Set as default" action updates the catalog, which triggers

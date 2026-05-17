@@ -65,11 +65,12 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             return AuthDecision.Deny("no project ancestor for resource");
         }
 
-        // Pull every override grant that applies to this resource through
-        // any ancestor (depth 0 = self). One join across permission_grants
-        // and content_ancestors; the depth + effect tiebreak is done in code
-        // to keep the SQL portable.
-        var overrides = await LoadOverrideGrantsAsync(db, ctx, kind, resourceId, action, ct);
+        // Load every grant for this principal+action once, then derive both
+        // the closest-ancestor overrides and the "global content allow"
+        // wildcard from the same list.
+        var grants = await LoadActorGrantsAsync(db, ctx, action, ct);
+        var hasWildcardAllow = HasGlobalContentAllow(grants);
+        var overrides = await BuildOverrideRowsAsync(db, grants, kind, resourceId, ct);
 
         if (overrides.Count > 0)
         {
@@ -84,6 +85,15 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             }
             return EnforceDeletionLock(action, kind, project.DeletionsLocked,
                 AuthDecision.Allow($"override allow at depth {bestDepth}"));
+        }
+
+        // No specific override: a wildcard allow grant (`*` / `<action>` on
+        // `/*`) acts as a baseline pass over every content resource, similar
+        // to super-admin but still subject to the project deletion lock.
+        if (hasWildcardAllow)
+        {
+            return EnforceDeletionLock(action, kind, project.DeletionsLocked,
+                AuthDecision.Allow("wildcard grant"));
         }
 
         // No override → role baseline.
@@ -123,6 +133,23 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             return ContentAccessSet.UnrestrictedAccess();
         }
 
+        // Single grant load drives both the per-resource override path and
+        // the global wildcard fallback.
+        var grants = await LoadActorGrantsAsync(db, ctx, action, ct);
+        var hasWildcardAllow = HasGlobalContentAllow(grants);
+
+        // Wildcard-allow with no carve-outs and no lock concerns is the
+        // same answer as super-admin — skip resource enumeration entirely.
+        if (hasWildcardAllow && !HasAnyContentDeny(grants))
+        {
+            var lockBlocksAll = action == Actions.Delete
+                && await db.Projects.AsNoTracking().AnyAsync(p => p.DeletionsLocked, ct);
+            if (!lockBlocksAll)
+            {
+                return ContentAccessSet.UnrestrictedAccess();
+            }
+        }
+
         // Collect every resource id of this kind whose project ancestor is
         // one the actor is a member of. Then merge with overrides. Final
         // decision per id is computed in code, mirroring AuthorizeAsync.
@@ -149,7 +176,7 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         // Override grants for this kind+action across every resource the
         // actor's principals reach. Loaded in one shot then bucketed per
         // resource so the closest-depth tiebreak is in-memory.
-        var overrideRows = await LoadOverrideGrantsForListingAsync(db, ctx, kind, action, ct);
+        var overrideRows = await BuildOverrideListingRowsAsync(db, grants, kind, ct);
         var overridesByResource = overrideRows
             .GroupBy(r => r.ResourceId)
             .ToDictionary(g => g.Key, g => g.ToList());
@@ -183,6 +210,18 @@ public sealed class ContentAuthorizer : IContentAuthorizer
                 continue;
             }
 
+            // Wildcard-allow acts as a baseline over every resource when
+            // there's no specific override. Project lock still gates Delete.
+            if (hasWildcardAllow)
+            {
+                if (action == Actions.Delete && locked)
+                {
+                    continue;
+                }
+                allowed.Add(r.ResourceId);
+                continue;
+            }
+
             // Baseline path.
             if (rolesByProject.TryGetValue(r.ProjectId, out var role) &&
                 RoleAllowsAction(role, action))
@@ -206,6 +245,10 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var ctx = await LoadActorAsync(db, userId.Value, ct);
         if (ctx.IsSuperAdmin) return ProjectRole.Owner;
+        // A wildcard-action allow grant on `/*` confers owner-equivalent
+        // standing for member-management and the deletion-lock toggle.
+        var wildcardActionGrants = await LoadActorGrantsAsync(db, ctx, Actions.Wildcard, ct);
+        if (HasGlobalContentAllow(wildcardActionGrants)) return ProjectRole.Owner;
         var roleString = await GetRoleStringAsync(db, projectId, ctx.UserId, ct);
         return ProjectRoleNames.TryParse(roleString);
     }
@@ -215,6 +258,119 @@ public sealed class ContentAuthorizer : IContentAuthorizer
     {
         var role = await GetProjectRoleAsync(actor, projectId, ct);
         return role == ProjectRole.Owner;
+    }
+
+    public async Task<IReadOnlyList<DerivedAccess>> GetDerivedAccessAsync(
+        Guid projectId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        var noResources = Array.Empty<DerivedResource>();
+        var result = new List<DerivedAccess>();
+        var seenSuperAdmin = new HashSet<(string Kind, Guid Id)>();
+
+        // SuperAdmin role: emit one row per role_assignment principal. The
+        // assignment principal is always user|group (never role).
+        var superAdminAssignments = await db.RoleAssignments.AsNoTracking()
+            .Where(a => a.RoleId == SystemRoles.SuperAdminId)
+            .Select(a => new { a.PrincipalKind, a.PrincipalId })
+            .ToListAsync(ct);
+        foreach (var a in superAdminAssignments)
+        {
+            if (!Guid.TryParse(a.PrincipalId, out var pid)) continue;
+            if (seenSuperAdmin.Add((a.PrincipalKind, pid)))
+            {
+                result.Add(new DerivedAccess(
+                    GrantId: null,
+                    a.PrincipalKind, pid,
+                    DerivedAccessSource.SuperAdmin,
+                    Action: null,
+                    Revokable: false,
+                    noResources));
+            }
+        }
+
+        // Project subtree — used both for wildcard de-dup and grant scoping.
+        var subtree = await db.ContentAncestors.AsNoTracking()
+            .Where(ca => ca.AncestorKind == ContentKinds.Project && ca.AncestorId == projectId)
+            .Select(ca => new { ca.DescendantKind, ca.DescendantId })
+            .ToListAsync(ct);
+        var projectScope = new HashSet<(string Kind, Guid Id)>();
+        foreach (var r in subtree) projectScope.Add((r.DescendantKind, r.DescendantId));
+        projectScope.Add((ContentKinds.Project, projectId));
+
+        // Walk every allow grant once. Branch on selector shape:
+        //  - `/*` (wildcard kind): Wildcard source — emit one row per grant.
+        //  - `/<contentKind>/<id>` or `/<contentKind>/{ids}`: explicit content
+        //    targets — emit a Grant row if any of those ids are in scope.
+        // Anything else (wildcard ids, predicates, non-content kinds) is
+        // dropped — those don't fit the "show a specific resource link" model
+        // and are managed under Admin → Permissions.
+        var grants = await db.PermissionGrants.AsNoTracking()
+            .Where(pg => pg.Effect == "allow")
+            .Select(pg => new
+            {
+                pg.Id, pg.PrincipalKind, pg.PrincipalId, pg.Action, pg.SelectorString
+            })
+            .ToListAsync(ct);
+        foreach (var g in grants)
+        {
+            if (!Guid.TryParse(g.PrincipalId, out var ppid)) continue;
+            SelectorAst ast;
+            try { ast = SelectorParser.Parse(g.SelectorString); }
+            catch { continue; }
+
+            // Wildcard source: `/*` only — predicate/id-wildcard variants are
+            // not "global content allow" and don't get owner-equivalent.
+            if (IsGlobalContentAllow(ast))
+            {
+                result.Add(new DerivedAccess(
+                    g.Id, g.PrincipalKind, ppid,
+                    DerivedAccessSource.Wildcard,
+                    g.Action,
+                    Revokable: false,
+                    noResources));
+                continue;
+            }
+
+            // Grant source: must have a single content kind and an explicit
+            // (non-wildcard, non-predicate) id list.
+            if (ast.Predicate is not null) continue;
+            if (ast.Path.KindsAreWildcard) continue;
+            if (ast.Path.Kinds.Count != 1) continue;
+            var pathKind = ast.Path.Kinds[0];
+            if (!ContentKinds.IsContentKind(pathKind)) continue;
+            if (ast.Path.Ids is null || ast.Path.Ids.Count == 0) continue;
+            if (ast.Path.IdsAreWildcard) continue;
+
+            var grantTargets = new List<(string Kind, Guid Id)>(ast.Path.Ids.Count);
+            var malformed = false;
+            foreach (var idStr in ast.Path.Ids)
+            {
+                if (!Guid.TryParse(idStr, out var id)) { malformed = true; break; }
+                grantTargets.Add((pathKind, id));
+            }
+            if (malformed) continue;
+
+            var inScope = new List<DerivedResource>();
+            foreach (var t in grantTargets)
+            {
+                if (projectScope.Contains(t))
+                {
+                    inScope.Add(new DerivedResource(t.Kind, t.Id));
+                }
+            }
+            if (inScope.Count == 0) continue;
+            var allInScope = inScope.Count == grantTargets.Count;
+
+            result.Add(new DerivedAccess(
+                g.Id, g.PrincipalKind, ppid,
+                DerivedAccessSource.Grant,
+                g.Action,
+                Revokable: allInScope,
+                inScope));
+        }
+        return result;
     }
 
     // ---- private helpers ----
@@ -281,22 +437,18 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             .Select(m => (string?)m.Role)
             .FirstOrDefaultAsync(ct);
 
-    private async Task<List<OverrideRow>> LoadOverrideGrantsAsync(
-        AutoNateDbContext db, ActorPrincipals ctx, string descendantKind, Guid descendantId,
-        string action, CancellationToken ct)
+    private static async Task<List<OverrideRow>> BuildOverrideRowsAsync(
+        AutoNateDbContext db, IReadOnlyList<ParsedGrant> grants,
+        string descendantKind, Guid descendantId, CancellationToken ct)
     {
+        if (grants.Count == 0) return new List<OverrideRow>();
+
         // Ancestor chain for this resource: (ancestorKind, ancestorId, depth).
         var chain = await db.ContentAncestors.AsNoTracking()
             .Where(ca => ca.DescendantKind == descendantKind && ca.DescendantId == descendantId)
             .Select(ca => new { ca.AncestorKind, ca.AncestorId, ca.Depth })
             .ToListAsync(ct);
         if (chain.Count == 0) return new List<OverrideRow>();
-
-        // Pull every grant matching the actor's principals + action; filter
-        // to content kinds and parse the selector path in-process so we don't
-        // need JSONB-specific predicates in LINQ.
-        var grants = await LoadActorGrantsAsync(db, ctx, action, ct);
-        if (grants.Count == 0) return new List<OverrideRow>();
 
         var chainSet = chain.ToDictionary(c => (c.AncestorKind, c.AncestorId), c => c.Depth);
         var result = new List<OverrideRow>();
@@ -318,11 +470,10 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         return result;
     }
 
-    private async Task<List<OverrideListingRow>> LoadOverrideGrantsForListingAsync(
-        AutoNateDbContext db, ActorPrincipals ctx, string kind, string action,
+    private static async Task<List<OverrideListingRow>> BuildOverrideListingRowsAsync(
+        AutoNateDbContext db, IReadOnlyList<ParsedGrant> grants, string kind,
         CancellationToken ct)
     {
-        var grants = await LoadActorGrantsAsync(db, ctx, action, ct);
         if (grants.Count == 0) return new List<OverrideListingRow>();
 
         // Collect each grant's (kind, id) target, then a single closure
@@ -395,6 +546,38 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             result.Add(new ParsedGrant(ast, effect));
         }
         return result;
+    }
+
+    // A "global content allow" is a permission_grants row whose selector is
+    // `/*` with no ids and no predicate, effect=allow. It mirrors the super-
+    // admin short-circuit but stays within the normal grant model so admins
+    // can carve out specific-resource denies on top of it.
+    private static bool IsGlobalContentAllow(SelectorAst ast) =>
+        ast.Path.KindsAreWildcard
+        && (ast.Path.Ids is null || ast.Path.Ids.Count == 0)
+        && ast.Predicate is null;
+
+    private static bool HasGlobalContentAllow(IReadOnlyList<ParsedGrant> grants)
+    {
+        foreach (var g in grants)
+        {
+            if (g.Effect == AuthEffect.Allow && IsGlobalContentAllow(g.Ast))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool HasAnyContentDeny(IReadOnlyList<ParsedGrant> grants)
+    {
+        foreach (var g in grants)
+        {
+            if (g.Effect != AuthEffect.Deny) continue;
+            if (!TryGetPathTarget(g.Ast, out var pathKind, out _)) continue;
+            if (ContentKinds.IsContentKind(pathKind)) return true;
+        }
+        return false;
     }
 
     // Selectors for content grants are path-only of the form /<kind>/<id>.

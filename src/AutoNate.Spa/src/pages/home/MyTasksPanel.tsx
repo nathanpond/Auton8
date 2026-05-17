@@ -12,7 +12,8 @@ import {
   TaskFormConfig
 } from "@/api/executions";
 import { taskFormConfigQueryKey, useCompleteTask } from "@/hooks/useExecutions";
-import { useBusConnection } from "@/hooks/useBusConnection";
+import { useInvalidateOnChannels } from "@/hooks/useInvalidateOnChannels";
+import { useMe } from "@/hooks/useMe";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
 import { RecordModel, RecordType } from "@/types/records";
 import { FlowableTaskSummary } from "@/types/flowable";
@@ -61,22 +62,22 @@ export default function MyTasksPanel() {
     return map;
   }, [types]);
 
-  // Refetch on any record or workflow-execution bus event. The server-side
-  // /assigned-to-me endpoints already filter by the current user, so we don't
-  // need to inspect payloads to decide whether to act — assignments and
-  // reassignments both flow through these topics. Team Tasks is invalidated
-  // too since reassignments may move work in or out of a supervisee's queue.
-  const onBusMessage = useCallback(
-    (msg: { topic: string }) => {
-      const topic = msg.topic ?? "";
-      if (topic.startsWith("record.") || topic.startsWith("workflow.execution")) {
-        qc.invalidateQueries({ queryKey: QUERY_KEY });
-        qc.invalidateQueries({ queryKey: ["home", "team-tasks"] });
-      }
-    },
-    [qc]
+  // Server-side scoped channels: any task assigned to me OR any record
+  // assigned to me fires here. Team Tasks is invalidated alongside because
+  // reassignments may move work in or out of a supervisee's queue.
+  const { data: me } = useMe();
+  const userId = me?.authenticated ? me.userId : null;
+  const channels = useMemo(
+    () => (userId
+      ? [`tasks:assigned-to:${userId}`, `records:assigned-to:${userId}`]
+      : []),
+    [userId],
   );
-  useBusConnection({ onMessage: onBusMessage });
+  const queryKeys = useMemo(
+    () => [QUERY_KEY, ["home", "team-tasks"] as const],
+    [],
+  );
+  useInvalidateOnChannels(channels, queryKeys, { enabled: Boolean(userId) });
 
   // Fan out to both endpoints in parallel and merge into the discriminated
   // TaskRow union. Sorted by activity time so the most-recent items rise.

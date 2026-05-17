@@ -13,10 +13,19 @@ import {
   Text,
   Tooltip
 } from "@mantine/core";
-import { ProjectDto, ProjectMemberDto, ProjectRoleWire } from "@/api/content";
+import {
+  DerivedResourceDto,
+  PrincipalKind,
+  ProjectDto,
+  ProjectMemberDto,
+  ProjectMemberSource,
+  ProjectRoleWire
+} from "@/api/content";
+import { modals } from "@mantine/modals";
 import {
   useProjectMembers,
   useRemoveProjectMember,
+  useRevokeDerivedGrant,
   useSetProjectMemberRole
 } from "@/hooks/useContent";
 import { useUsers } from "@/hooks/useUsers";
@@ -155,12 +164,17 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
 
   const setRole = useSetProjectMemberRole(project?.id ?? null);
   const removeMember = useRemoveProjectMember(project?.id ?? null);
+  const revokeGrant = useRevokeDerivedGrant(project?.id ?? null);
 
   const [newUserId, setNewUserId] = useState<string | null>(null);
   const [newRole, setNewRole] = useState<ProjectRoleWire>("contributor");
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  const members = membersQuery.data ?? [];
+  const members = membersQuery.data?.members ?? [];
+  // Server's verdict — true for project owners, super-admins, and holders
+  // of a wildcard content grant. Mirrors backend gating, so the SPA enables
+  // controls for viewers who aren't literal project_members rows.
+  const viewerCanManage = !!membersQuery.data?.viewerCanManage;
   const users = usersQuery.data ?? [];
 
   const usersByUserId = useMemo(() => {
@@ -171,16 +185,32 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
 
   const myRole = useMemo<ProjectRoleWire | null>(() => {
     if (!me) return null;
-    const row = members.find((mem) => mem.userId === me.userId);
+    // Real project_members rows are always user principals.
+    const row = members.find(
+      (mem) =>
+        mem.source === "member" &&
+        mem.principalKind === "user" &&
+        mem.principalId === me.userId
+    );
     return row?.role ?? null;
   }, [members, me]);
 
-  const canEdit = isSuperAdmin || myRole === "owner";
+  // Synthesized rows (super-admin / wildcard / grant) don't represent literal
+  // project_members records — they can't be edited or removed and shouldn't
+  // shrink the "add a member" candidate list.
+  const isSynthesized = (m: ProjectMemberDto) => m.source !== "member";
 
-  // Users who can be added (i.e. aren't already members). Reset the picker
-  // value when the candidate list changes underneath it.
+  const canEdit = viewerCanManage || isSuperAdmin || myRole === "owner";
+
+  // Users who can be added (i.e. aren't already real members). Synthesized
+  // entries don't take up a slot. Reset the picker value when the candidate
+  // list changes underneath it.
   const candidates = useMemo(() => {
-    const taken = new Set(members.map((m) => m.userId));
+    const taken = new Set(
+      members
+        .filter((m) => m.source === "member" && m.principalKind === "user")
+        .map((m) => m.principalId)
+    );
     return users.filter((u) => !taken.has(u.userId));
   }, [users, members]);
 
@@ -198,15 +228,43 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
     [candidates]
   );
 
-  const memberRows = useMemo(() => {
-    return [...members].sort((a, b) => {
-      const ra = roleRank(a.role);
-      const rb = roleRank(b.role);
-      if (ra !== rb) return ra - rb;
-      const na = displayLabel(usersByUserId.get(a.userId)) || a.userId;
-      const nb = displayLabel(usersByUserId.get(b.userId)) || b.userId;
-      return na.localeCompare(nb);
-    });
+  const principalDisplay = (m: ProjectMemberDto): string => {
+    if (m.principalKind === "user") {
+      return displayLabel(usersByUserId.get(m.principalId)) || m.principalId;
+    }
+    return m.principalName ?? m.principalId;
+  };
+
+  const projectMemberRows = useMemo(() => {
+    return members
+      .filter((m) => m.source === "member")
+      .sort((a, b) => {
+        const ra = roleRank(a.role);
+        const rb = roleRank(b.role);
+        if (ra !== rb) return ra - rb;
+        return principalDisplay(a).localeCompare(principalDisplay(b));
+      });
+    // principalDisplay only depends on `usersByUserId`, captured here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [members, usersByUserId]);
+
+  const derivedRows = useMemo(() => {
+    return members
+      .filter((m) => isSynthesized(m))
+      .sort((a, b) => {
+        const sa = sourceRank(a.source);
+        const sb = sourceRank(b.source);
+        if (sa !== sb) return sa - sb;
+        const ka = principalKindRank(a.principalKind);
+        const kb = principalKindRank(b.principalKind);
+        if (ka !== kb) return ka - kb;
+        const nameCmp = principalDisplay(a).localeCompare(principalDisplay(b));
+        if (nameCmp !== 0) return nameCmp;
+        const actionCmp = (a.action ?? "").localeCompare(b.action ?? "");
+        if (actionCmp !== 0) return actionCmp;
+        return (a.grantId ?? "").localeCompare(b.grantId ?? "");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members, usersByUserId]);
 
   if (!project) {
@@ -237,6 +295,42 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
     } catch (err) {
       setMutationError(describeError(err));
     }
+  };
+
+  const onRevokeGrant = (member: ProjectMemberDto) => {
+    if (!member.grantId || !member.revokable) return;
+    setMutationError(null);
+    const principalLabel =
+      member.principalKind === "user"
+        ? displayLabel(usersByUserId.get(member.principalId)) || member.principalId
+        : member.principalName ?? `${member.principalKind} ${member.principalId.slice(0, 8)}…`;
+    const grantId = member.grantId;
+    modals.openConfirmModal({
+      title: "Revoke grant",
+      zIndex: 1066,
+      children: (
+        <Stack gap="xs">
+          <Text size="sm">
+            Revoke <strong>{principalLabel}</strong>'s{" "}
+            <strong>{member.action ?? "grant"}</strong> grant?
+          </Text>
+          <Text size="sm" c="dimmed">
+            The grant will be deleted. Principals whose only path to the listed resources was this
+            grant will lose access. Other paths (super admin, wildcard grants, project membership,
+            other grants) are unaffected.
+          </Text>
+        </Stack>
+      ),
+      labels: { confirm: "Revoke", cancel: "Cancel" },
+      confirmProps: { color: "red" },
+      onConfirm: async () => {
+        try {
+          await revokeGrant.mutateAsync(grantId);
+        } catch (err) {
+          setMutationError(describeError(err));
+        }
+      }
+    });
   };
 
   const onRemove = async (userId: string) => {
@@ -303,54 +397,97 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
       )}
 
       <Stack gap={0}>
-        <Group
-          justify="space-between"
-          align="center"
-          py="xs"
-          px="xs"
-          style={{
-            borderBottom: "1px solid var(--mantine-color-default-border)",
-            fontSize: 12,
-            fontWeight: 600,
-            color: "var(--mantine-color-dimmed)",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em"
-          }}
-        >
-          <Text size="xs" fw={700} c="dimmed" style={{ flex: 1 }}>
-            Member
+        <Group gap="xs" align="baseline" mb="xs">
+          <Text size="sm" fw={600}>
+            Project Permissions
           </Text>
-          <Text size="xs" fw={700} c="dimmed" style={{ width: 160 }}>
-            Role
-          </Text>
-          <span style={{ width: 36 }} />
         </Group>
+        <SectionHeader label="Member" />
 
         {membersQuery.isLoading ? (
           <Group justify="center" p="lg">
             <Loader size="sm" />
           </Group>
-        ) : memberRows.length === 0 ? (
+        ) : projectMemberRows.length === 0 ? (
           <div className="pref-empty-state">
             <i className="fa fa-users" aria-hidden="true" />
             <div>No members yet.</div>
           </div>
         ) : (
-          memberRows.map((m) => (
+          projectMemberRows.map((m) => (
             <MemberRow
-              key={m.userId}
+              key={`${m.source}:${m.principalKind}:${m.principalId}`}
               member={m}
-              user={usersByUserId.get(m.userId) ?? null}
-              isSelf={!!me && m.userId === me.userId}
+              user={usersByUserId.get(m.principalId) ?? null}
+              isSelf={!!me && m.principalKind === "user" && m.principalId === me.userId}
               canEdit={canEdit}
               busy={setRole.isPending || removeMember.isPending}
-              onChangeRole={(role) => onChangeRole(m.userId, role)}
-              onRemove={() => onRemove(m.userId)}
+              onChangeRole={(role) => onChangeRole(m.principalId, role)}
+              onRemove={() => onRemove(m.principalId)}
             />
           ))
         )}
       </Stack>
+
+      {derivedRows.length > 0 && (
+        <Stack gap={0} mt="xl">
+          <Group gap="xs" align="baseline" mb="xs">
+            <Text size="sm" fw={600}>
+              Derived Permissions
+            </Text>
+            <Text size="xs" c="dimmed">
+              One row per grant or SuperAdmin assignment. Grants scoped entirely to this project
+              can be revoked here. Grants that also reach resources outside this project must be
+              managed under <strong>Admin → Permissions</strong>.
+            </Text>
+          </Group>
+          <SectionHeader label="Principal" roleColumn="Access" />
+          {derivedRows.map((m) => (
+            <MemberRow
+              key={`${m.source}:${m.grantId ?? "_"}:${m.principalKind}:${m.principalId}`}
+              member={m}
+              user={
+                m.principalKind === "user" ? usersByUserId.get(m.principalId) ?? null : null
+              }
+              isSelf={!!me && m.principalKind === "user" && m.principalId === me.userId}
+              canEdit={false}
+              busy={revokeGrant.isPending}
+              canRevokeGrants={canEdit}
+              onRevokeGrant={() => onRevokeGrant(m)}
+              onChangeRole={() => {}}
+              onRemove={() => {}}
+            />
+          ))}
+        </Stack>
+      )}
     </>
+  );
+}
+
+function SectionHeader({ label, roleColumn = "Role" }: { label: string; roleColumn?: string }) {
+  return (
+    <Group
+      justify="space-between"
+      align="center"
+      py="xs"
+      px="xs"
+      style={{
+        borderBottom: "1px solid var(--mantine-color-default-border)",
+        fontSize: 12,
+        fontWeight: 600,
+        color: "var(--mantine-color-dimmed)",
+        textTransform: "uppercase",
+        letterSpacing: "0.04em"
+      }}
+    >
+      <Text size="xs" fw={700} c="dimmed" style={{ flex: 1 }}>
+        {label}
+      </Text>
+      <Text size="xs" fw={700} c="dimmed" style={{ width: 160 }}>
+        {roleColumn}
+      </Text>
+      <span style={{ width: 36 }} />
+    </Group>
   );
 }
 
@@ -360,44 +497,145 @@ function MemberRow({
   isSelf,
   canEdit,
   busy,
+  canRevokeGrants = false,
   onChangeRole,
-  onRemove
+  onRemove,
+  onRevokeGrant
 }: {
   member: ProjectMemberDto;
   user: LocalUser | null;
   isSelf: boolean;
   canEdit: boolean;
   busy: boolean;
+  canRevokeGrants?: boolean;
   onChangeRole: (role: ProjectRoleWire) => void;
   onRemove: () => void;
+  onRevokeGrant?: () => void;
 }) {
-  const displayName = user ? displayLabel(user) : `Unknown user (${member.userId.slice(0, 8)}…)`;
-  const subtitle = user ? user.username : member.userId;
+  const isUserPrincipal = member.principalKind === "user";
+  const displayName = isUserPrincipal
+    ? user
+      ? displayLabel(user)
+      : `Unknown user (${member.principalId.slice(0, 8)}…)`
+    : member.principalName ?? `Unknown ${member.principalKind} (${member.principalId.slice(0, 8)}…)`;
+  const subtitle = isUserPrincipal
+    ? user
+      ? user.username
+      : member.principalId
+    : principalKindLabel(member.principalKind);
+  const synthesized = member.source !== "member";
+  const grantResources = member.source === "grant" ? (member.resources ?? []) : [];
   return (
     <Group
       justify="space-between"
-      align="center"
+      align="flex-start"
       py="xs"
       px="xs"
       wrap="nowrap"
       style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
     >
-      <Group gap="sm" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-        <Avatar src={avatarUrl(member.userId, displayName)} radius="xl" size="sm" />
-        <Stack gap={0} style={{ minWidth: 0 }}>
+      <Group gap="sm" wrap="nowrap" style={{ flex: 1, minWidth: 0 }} align="flex-start">
+        {isUserPrincipal ? (
+          <Avatar src={avatarUrl(member.principalId, displayName)} radius="xl" size="sm" />
+        ) : (
+          <Avatar radius="xl" size="sm" color={member.principalKind === "group" ? "indigo" : "orange"}>
+            <i
+              className={`fa ${member.principalKind === "group" ? "fa-users" : "fa-shield-halved"}`}
+              aria-hidden="true"
+            />
+          </Avatar>
+        )}
+        <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
           <Group gap="xs" wrap="nowrap">
             <Text size="sm" fw={600} truncate>
               {displayName}
             </Text>
+            {!isUserPrincipal && (
+              <Badge size="xs" variant="light" color="gray">
+                {principalKindLabel(member.principalKind)}
+              </Badge>
+            )}
             {isSelf && (
               <Badge size="xs" variant="light" color="gray">
                 you
               </Badge>
             )}
+            {member.source === "super-admin" && (
+              <Tooltip label="Has access via SuperAdmin role" withArrow zIndex={1067}>
+                <Badge size="xs" variant="light" color="grape">
+                  super admin
+                </Badge>
+              </Tooltip>
+            )}
+            {member.source === "wildcard" && (
+              <Tooltip label="Has access via a wildcard permission grant" withArrow zIndex={1067}>
+                <Badge size="xs" variant="light" color="blue">
+                  full access
+                </Badge>
+              </Tooltip>
+            )}
+            {member.source === "grant" && (
+              <Tooltip
+                label="Has access only to the listed resources"
+                withArrow
+                zIndex={1067}
+              >
+                <Badge size="xs" variant="light" color="teal">
+                  partial access
+                </Badge>
+              </Tooltip>
+            )}
           </Group>
           <Text size="xs" c="dimmed" truncate>
             {subtitle}
           </Text>
+          {grantResources.length > 0 && (
+            <Group gap={4} wrap="wrap" mt={4}>
+              {grantResources.map((r) => {
+                const label = r.name ?? `${r.kind} (${r.id.slice(0, 8)}…)`;
+                const href = r.locator != null ? `/notes/${r.locator}` : null;
+                return (
+                  <Tooltip
+                    key={`${r.kind}:${r.id}`}
+                    label={
+                      href
+                        ? `${r.kind}: ${label} — opens in new tab`
+                        : `${r.kind}: ${label}`
+                    }
+                    withArrow
+                    zIndex={1067}
+                  >
+                    <Text
+                      component={href ? "a" : "span"}
+                      href={href ?? undefined}
+                      target={href ? "_blank" : undefined}
+                      rel={href ? "noopener noreferrer" : undefined}
+                      size="xs"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        textDecoration: "none",
+                        color: "inherit",
+                        cursor: href ? "pointer" : "default",
+                        padding: "1px 6px",
+                        border: "1px solid var(--mantine-color-default-border)",
+                        borderRadius: "var(--mantine-radius-xl)",
+                        lineHeight: 1.5
+                      }}
+                    >
+                      <i
+                        className={`fa ${resourceKindIcon(r.kind)}`}
+                        style={{ fontSize: 10 }}
+                        aria-hidden="true"
+                      />
+                      {label}
+                    </Text>
+                  </Tooltip>
+                );
+              })}
+            </Group>
+          )}
         </Stack>
       </Group>
 
@@ -413,24 +651,55 @@ function MemberRow({
             size="xs"
           />
         ) : (
-          <Text size="sm">{ROLE_LABEL[member.role]}</Text>
+          <Text size="sm" c={synthesized ? "dimmed" : undefined}>
+            {member.source === "grant" || member.source === "wildcard"
+              ? member.action ?? "—"
+              : ROLE_LABEL[member.role]}
+          </Text>
         )}
       </div>
 
       <div style={{ width: 36, display: "flex", justifyContent: "flex-end" }}>
-        {canEdit && (
-          <Tooltip label={isSelf ? "Remove yourself" : "Remove member"} withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="red"
-              onClick={onRemove}
-              disabled={busy}
-              aria-label="Remove member"
-            >
-              <i className="fa fa-trash" />
-            </ActionIcon>
+        {member.source === "member" ? (
+          canEdit && (
+            <Tooltip label={isSelf ? "Remove yourself" : "Remove member"} withArrow zIndex={1067}>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                onClick={onRemove}
+                disabled={busy}
+                aria-label="Remove member"
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </Tooltip>
+          )
+        ) : member.source === "grant" && canRevokeGrants && onRevokeGrant ? (
+          <Tooltip
+            label={
+              member.revokable
+                ? "Revoke this grant"
+                : "This grant also targets resources outside this project — contact your administrator to manage it"
+            }
+            withArrow
+            multiline={!member.revokable}
+            w={member.revokable ? undefined : 260}
+            zIndex={1067}
+          >
+            {/* Wrap disabled ActionIcon so the Tooltip still fires on hover. */}
+            <span style={{ display: "inline-flex" }}>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                onClick={onRevokeGrant}
+                disabled={busy || !member.revokable}
+                aria-label="Revoke grant"
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </span>
           </Tooltip>
-        )}
+        ) : null}
       </div>
     </Group>
   );
@@ -445,6 +714,31 @@ function displayLabel(user: LocalUser | null | undefined): string {
 
 function roleRank(role: ProjectRoleWire): number {
   return role === "owner" ? 0 : role === "contributor" ? 1 : 2;
+}
+
+function sourceRank(source: ProjectMemberSource): number {
+  return source === "member" ? 0 : source === "super-admin" ? 1 : source === "wildcard" ? 2 : 3;
+}
+
+function principalKindRank(kind: PrincipalKind): number {
+  return kind === "user" ? 0 : kind === "group" ? 1 : 2;
+}
+
+function principalKindLabel(kind: PrincipalKind): string {
+  return kind === "user" ? "user" : kind === "group" ? "group" : "role";
+}
+
+function resourceKindIcon(kind: DerivedResourceDto["kind"]): string {
+  switch (kind) {
+    case "project":
+      return "fa-folder-tree";
+    case "cabinet":
+      return "fa-folder";
+    case "notebook":
+      return "fa-book";
+    case "page":
+      return "fa-file-lines";
+  }
 }
 
 function describeError(err: unknown): string {

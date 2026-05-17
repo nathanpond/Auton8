@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ActionIcon,
@@ -18,6 +18,9 @@ import {
 } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import {
+  recordByKeyKey,
+  recordHistoryKey,
+  recordKey as recordIdKey,
   useDeleteRecord,
   useRecordByKey,
   useUnwatchRecord,
@@ -26,6 +29,7 @@ import {
   useWatchStatus
 } from "@/hooks/useRecords";
 import { useRecordTypeFields, useRecordTypes } from "@/hooks/useRecordTypes";
+import { useInvalidateOnChannels } from "@/hooks/useInvalidateOnChannels";
 import "./fields/renderers";
 import CommentsPanel from "./CommentsPanel";
 import EdgesPanel from "./EdgesPanel";
@@ -55,6 +59,23 @@ export default function RecordDetail() {
   const [tab, setTab] = useState<Tab>("details");
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  // Live updates: when this specific record changes upstream, invalidate the
+  // detail/by-key/history queries so the view refreshes without a manual
+  // reload. Subscribed only once the record id resolves; the scoped channel
+  // means we only see events for this one record.
+  const recordId = record?.id ?? null;
+  const channels = useMemo(
+    () => (recordId ? [`record:${recordId}`] : []),
+    [recordId],
+  );
+  const queryKeys = useMemo(
+    () => (recordId
+      ? [recordIdKey(recordId), recordByKeyKey(key), recordHistoryKey(recordId, undefined)]
+      : []),
+    [recordId, key],
+  );
+  useInvalidateOnChannels(channels, queryKeys, { enabled: Boolean(recordId) });
 
   if (isLoading || !type) {
     return (

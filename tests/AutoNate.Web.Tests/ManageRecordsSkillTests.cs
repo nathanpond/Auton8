@@ -412,6 +412,8 @@ public sealed class ManageRecordsSkillTests
             Task.FromResult<Record?>(null);
         public Task<Record> SetArchivedAsync(Guid id, bool archived, Guid actorId, CancellationToken cancellationToken = default) =>
             Task.FromResult(new Record());
+        public Task<Record> DeleteAsync(Guid id, Guid actorId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new Record());
         public Task<RecordListPage> SearchAsync(RecordSearchInput input, CancellationToken cancellationToken = default) =>
             Task.FromResult(EmptyPage(input.Page, input.PageSize));
         public Task<RecordListPage> SearchAsync(RecordSearchInput input, ClaimsPrincipal actor, CancellationToken cancellationToken = default) =>

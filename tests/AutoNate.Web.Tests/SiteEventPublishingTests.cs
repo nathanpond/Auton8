@@ -141,7 +141,7 @@ public sealed class SiteEventPublishingTests
             current.SidebarActiveBg, current.SidebarActiveColor, current.SidebarIconColor,
             current.SidebarSubmenuBg, current.SidebarSectionColor,
             current.SurfaceBg, current.SurfaceSecondaryBg, current.SurfaceTextColor,
-            current.BorderColor, current.DropdownBg, current.ModalBg,
+            current.SurfaceDimmedColor, current.BorderColor, current.DropdownBg, current.ModalBg,
             current.SecondaryButtonBg, current.SecondaryButtonTextColor,
             current.SecondaryButtonBorderColor, current.SecondaryButtonHoverBg,
             current.SecondaryButtonHoverTextColor);

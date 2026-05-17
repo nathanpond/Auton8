@@ -476,21 +476,52 @@ export async function deleteNote(id: string): Promise<void> {
 
 export type ProjectRoleWire = "owner" | "contributor" | "viewer";
 
+export type ProjectMemberSource = "member" | "super-admin" | "wildcard" | "grant";
+
+export type PrincipalKind = "user" | "group" | "role";
+
+export type DerivedResourceDto = {
+  kind: "project" | "cabinet" | "notebook" | "page";
+  id: string;
+  name: string | null;
+  locator: number | null;
+};
+
 export type ProjectMemberDto = {
   projectId: string;
-  userId: string;
+  principalKind: PrincipalKind;
+  principalId: string;
+  // Display name for group/role principals. Null for user principals — the
+  // SPA already has a users lookup keyed by user id.
+  principalName: string | null;
   role: ProjectRoleWire;
   addedAtUtc: string;
   addedBy: string;
   updatedAtUtc: string;
   updatedBy: string;
+  source: ProjectMemberSource;
+  // Populated for derived rows backed by a permission_grants row
+  // (sources `wildcard` and `grant`). Null for `member` and `super-admin`.
+  grantId: string | null;
+  action: string | null;
+  revokable: boolean | null;
+  resources: DerivedResourceDto[] | null;
+};
+
+export type ProjectMembersResponse = {
+  members: ProjectMemberDto[];
+  // Mirror of IContentAuthorizer.IsProjectOwnerAsync — true for project
+  // owners, SuperAdmins, and holders of a wildcard content grant. The SPA
+  // uses this to light up manage/revoke controls for viewers who aren't
+  // literal project_members rows.
+  viewerCanManage: boolean;
 };
 
 export async function listProjectMembers(
   projectId: string,
   signal?: AbortSignal
-): Promise<ProjectMemberDto[]> {
-  const { data } = await api.get<ProjectMemberDto[]>(
+): Promise<ProjectMembersResponse> {
+  const { data } = await api.get<ProjectMembersResponse>(
     `/api/content/projects/${projectId}/members`,
     { signal }
   );
@@ -510,6 +541,13 @@ export async function removeProjectMember(
   userId: string
 ): Promise<void> {
   await api.delete(`/api/content/projects/${projectId}/members/${userId}`);
+}
+
+export async function revokeDerivedGrant(
+  projectId: string,
+  grantId: string
+): Promise<void> {
+  await api.delete(`/api/content/projects/${projectId}/derived-grants/${grantId}`);
 }
 
 // ── Page sharing ──────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ import {
   PageVersionDetail,
   PageVersionsResponse,
   ProjectDto,
-  ProjectMemberDto,
+  ProjectMembersResponse,
   ProjectRoleWire,
   UpdateCabinetRequest,
   UpdateNotebookRequest,
@@ -34,6 +34,7 @@ import {
   listPageVersions,
   listProjectMembers,
   removeProjectMember,
+  revokeDerivedGrant,
   restoreNoteVersion,
   restorePageVersion,
   setProjectMemberRole,
@@ -401,7 +402,7 @@ export const projectMembersKey = (projectId: string) =>
   ["content", "project-members", projectId] as const;
 
 export function useProjectMembers(projectId: string | null) {
-  return useQuery<ProjectMemberDto[]>({
+  return useQuery<ProjectMembersResponse>({
     queryKey: projectId ? projectMembersKey(projectId) : ["content", "project-members", "none"],
     enabled: !!projectId,
     queryFn: ({ signal }) => listProjectMembers(projectId!, signal)
@@ -423,6 +424,16 @@ export function useRemoveProjectMember(projectId: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (userId: string) => removeProjectMember(projectId!, userId),
+    onSuccess: () => {
+      if (projectId) qc.invalidateQueries({ queryKey: projectMembersKey(projectId) });
+    }
+  });
+}
+
+export function useRevokeDerivedGrant(projectId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (grantId: string) => revokeDerivedGrant(projectId!, grantId),
     onSuccess: () => {
       if (projectId) qc.invalidateQueries({ queryKey: projectMembersKey(projectId) });
     }

@@ -1,29 +1,56 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "@mantine/core";
+import { Alert, Button } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
-import { useBusConnection, BusMessageEnvelope } from "@/hooks/useBusConnection";
+import { useBusSubscription } from "@/hooks/useBusSubscription";
+import { useSubscriptionStatus } from "@/hooks/useSubscriptionStatus";
+import { useMe } from "@/hooks/useMe";
+import { ChannelEvent } from "@/lib/ws/subscription";
 import { getDaprSidecarStatus } from "@/api/health";
 import "./BusWatcher.css";
+
+type LoggedEvent = {
+  receivedAtUtc: string;
+  topic: string;
+  contentType?: string | null;
+  headers: Record<string, string>;
+  payload: string;
+};
 
 const MAX_ENTRIES = 250;
 
 export default function BusWatcher() {
-  const [entries, setEntries] = useState<BusMessageEnvelope[]>([]);
+  const { data: me } = useMe();
+  const isSuperAdmin = me?.authenticated ? me.isSuperAdmin : false;
+  const [entries, setEntries] = useState<LoggedEvent[]>([]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
-  const onMessage = useCallback((entry: BusMessageEnvelope) => {
-    setEntries((prev) => {
-      const next = [...prev, entry];
-      if (next.length > MAX_ENTRIES) {
-        next.splice(0, next.length - MAX_ENTRIES);
-      }
-      return next;
-    });
-  }, []);
+  // firehose:all delivers every bus message the server sees; subscribe gate
+  // requires SuperAdmin so non-admins are server-rejected (the nav entry
+  // also hides the page link below).
+  useBusSubscription(
+    isSuperAdmin ? ["firehose:all"] : [],
+    useCallback((event) => {
+      if (event.type !== "event") return;
+      const channelEvent = event as ChannelEvent;
+      setEntries((prev) => {
+        const next = [...prev, {
+          receivedAtUtc: channelEvent.receivedAtUtc,
+          topic: channelEvent.topic,
+          contentType: channelEvent.contentType ?? null,
+          headers: channelEvent.headers,
+          payload: channelEvent.payload,
+        }];
+        if (next.length > MAX_ENTRIES) {
+          next.splice(0, next.length - MAX_ENTRIES);
+        }
+        return next;
+      });
+    }, []),
+  );
 
-  const { status } = useBusConnection({ onMessage });
+  const status = useSubscriptionStatus();
 
   const { data: daprStatus } = useQuery({
     queryKey: ["health", "dapr"],
@@ -37,6 +64,20 @@ export default function BusWatcher() {
       : null;
 
   const clearLog = () => setEntries([]);
+
+  if (me?.authenticated && !isSuperAdmin) {
+    return (
+      <>
+        <PageHeader
+          title="Bus Watcher"
+          description="Watch every workflow bus event the app consumes and stream it into a live log window."
+        />
+        <Alert color="red" variant="light" role="alert">
+          The Bus Watcher live stream is restricted to SuperAdmins.
+        </Alert>
+      </>
+    );
+  }
 
   return (
     <>
@@ -119,7 +160,7 @@ function formatTimestamp(iso: string): string {
   return `${y}-${m}-${d} ${hh}:${mm}:${ss} ${sign}${offH}:${offM}`;
 }
 
-function formatHeaders(entry: BusMessageEnvelope): string {
+function formatHeaders(entry: LoggedEvent): string {
   const lines: string[] = [];
   if (entry.contentType) {
     lines.push(`content-type: ${entry.contentType}`);

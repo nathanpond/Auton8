@@ -16,7 +16,8 @@ import {
   ThemeIcon,
   Title
 } from "@mantine/core";
-import { useBusConnection } from "@/hooks/useBusConnection";
+import { useBusSubscription } from "@/hooks/useBusSubscription";
+import { useSubscriptionStatus } from "@/hooks/useSubscriptionStatus";
 import {
   EXECUTIONS_QUERY_KEY,
   executionDiagramQueryKey,
@@ -64,7 +65,6 @@ import ReassignTaskModal from "./ReassignTaskModal";
 import { describeError as describeErrorUtil, formatTimestamp as formatTimestampUtil } from "./utils";
 import "./WorkflowExecutions.css";
 
-const WORKFLOW_EXECUTION_TOPIC_PREFIX = "workflow.execution";
 
 export default function WorkflowExecutions() {
   const qc = useQueryClient();
@@ -103,24 +103,37 @@ export default function WorkflowExecutions() {
   );
   const { data: rowActionPermissions } = usePermissionChecks(rowActionChecks);
 
-  const onBusMessage = useCallback(
-    (msg: { topic: string; payload: string }) => {
-      if (!msg.topic?.startsWith(WORKFLOW_EXECUTION_TOPIC_PREFIX)) {
-        return;
-      }
+  // List channel: any workflow event visible to the actor invalidates the
+  // list query. Per-message GateTarget filters to those the actor can see.
+  useBusSubscription(
+    ["workflow-executions:visible"],
+    useCallback(
+      () => qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY }),
+      [qc],
+    ),
+  );
 
-      qc.invalidateQueries({ queryKey: EXECUTIONS_QUERY_KEY });
-      if (selectedId) {
+  // Detail channel: only when a row is open. Fires on events for that one
+  // execution; cascades into the four detail panes.
+  const detailChannels = useMemo(
+    () => (selectedId ? [`workflow-execution:${selectedId}`] : []),
+    [selectedId],
+  );
+  useBusSubscription(
+    detailChannels,
+    useCallback(
+      () => {
+        if (!selectedId) return;
         qc.invalidateQueries({ queryKey: executionDiagramQueryKey(selectedId) });
         qc.invalidateQueries({ queryKey: executionHistoryQueryKey(selectedId) });
         qc.invalidateQueries({ queryKey: executionLogQueryKey(selectedId) });
         qc.invalidateQueries({ queryKey: executionTasksQueryKey(selectedId) });
-      }
-    },
-    [qc, selectedId]
+      },
+      [qc, selectedId],
+    ),
   );
 
-  const { status: busStatus } = useBusConnection({ onMessage: onBusMessage });
+  const busStatus = useSubscriptionStatus();
 
   const requestDelete = (execution: WorkflowExecutionSummary) => {
     setPendingAction({ kind: "delete", execution });

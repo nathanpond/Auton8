@@ -1,12 +1,11 @@
 import { useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
-import { useQueryClient } from "@tanstack/react-query";
 import { Badge, Code, Group, Paper, Text, Title } from "@mantine/core";
 import { DataTable } from "@/components/data-table/DataTable";
 import { listWatchedRecords, WatchedRecord } from "@/api/records";
 import { useStatusAppearance } from "@/hooks/useStatusAppearance";
-import { useBusConnection } from "@/hooks/useBusConnection";
+import { useInvalidateOnChannels } from "@/hooks/useInvalidateOnChannels";
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
 import { badgeTextColor, resolveStatusBadgeColor } from "@/lib/statusAppearance";
 import UserBadge from "@/pages/records/UserBadge";
@@ -18,20 +17,13 @@ const COLUMN_WIDTHS = ["28%", "30%", "12%", "18%", "12%"];
 const QUERY_KEY = ["home", "watched-records"] as const;
 
 export default function WatchedRecordsPanel() {
-  const qc = useQueryClient();
   const { data: statusAppearance = [] } = useStatusAppearance();
 
-  // Refetch when records change so a watched record's status / due date /
-  // name updates surface here without a manual reload.
-  const onBusMessage = useCallback(
-    (msg: { topic: string }) => {
-      if ((msg.topic ?? "").startsWith("record.")) {
-        qc.invalidateQueries({ queryKey: QUERY_KEY });
-      }
-    },
-    [qc]
-  );
-  useBusConnection({ onMessage: onBusMessage });
+  // Refetch when any record this user can see changes — the watched-records
+  // query itself re-filters server-side. records:visible delivers all events
+  // the actor is authorized to view; the table refetch is cheap and idempotent
+  // even when the changed record isn't on the watched list.
+  useInvalidateOnChannels(["records:visible"], [QUERY_KEY]);
 
   const loadAll = useCallback(async () => {
     const page = await listWatchedRecords({ page: 0, pageSize: CLIENT_PRELOAD });

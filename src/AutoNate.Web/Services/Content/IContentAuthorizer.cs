@@ -42,6 +42,46 @@ public interface IContentAuthorizer
         ClaimsPrincipal actor,
         Guid projectId,
         CancellationToken ct);
+
+    // Returns every user who has access to this project through some path
+    // other than project_members: SuperAdmins, holders of a global content
+    // allow grant (`*` on `/*`), and principals of any permission grant whose
+    // selector targets the project itself or one of its descendants
+    // (cabinets / notebooks / pages). Group- and role-scoped grants are
+    // expanded to their user members.
+    Task<IReadOnlyList<DerivedAccess>> GetDerivedAccessAsync(
+        Guid projectId, CancellationToken ct);
+}
+
+// One row per *grant* (or per SuperAdmin role assignment) that confers
+// derived access to this project. The principal is shown as-is — never
+// expanded into individual users.
+//
+// For `Grant`: GrantId/Action are populated, Resources lists the in-scope
+// targets, Revokable is true iff every target the grant row carries is
+// inside this project's subtree (otherwise revoking would remove access
+// to resources outside the project too).
+// For `Wildcard`: GrantId is the wildcard grant's id, Action="*", Resources
+// empty, Revokable=false (selector is `/*`, far broader than the project).
+// For `SuperAdmin`: GrantId/Action are null (the assignment lives in
+// role_assignments, not permission_grants), Resources empty, Revokable=false.
+public sealed record DerivedAccess(
+    Guid? GrantId,
+    string PrincipalKind,
+    Guid PrincipalId,
+    DerivedAccessSource Source,
+    string? Action,
+    bool Revokable,
+    IReadOnlyList<DerivedResource> Resources);
+
+// (kind, id) of a content resource that's in-scope for the grant.
+public sealed record DerivedResource(string Kind, Guid Id);
+
+public enum DerivedAccessSource
+{
+    SuperAdmin,
+    Wildcard,
+    Grant
 }
 
 public sealed record class ContentAccessSet
