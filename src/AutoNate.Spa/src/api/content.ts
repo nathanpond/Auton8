@@ -58,6 +58,9 @@ export type PageDto = {
   sortOrder: number;
   isArchived: boolean;
   isFavorited: boolean;
+  // True when the calling user is the project owner (or wildcard /
+  // super-admin equivalent). Drives the ellipsis menu's Delete gate.
+  actorIsProjectOwner: boolean;
   createdAtUtc: string;
   updatedAtUtc: string;
   createdBy: string;
@@ -306,6 +309,14 @@ export async function deletePage(id: string): Promise<void> {
   await api.delete(`/api/content/pages/${id}`);
 }
 
+export async function copyPage(
+  id: string,
+  req: { notebookId: string; parentPageId?: string | null; title?: string }
+): Promise<PageDto> {
+  const { data } = await api.post<PageDto>(`/api/content/pages/${id}/copy`, req);
+  return data;
+}
+
 export async function favoritePage(id: string): Promise<void> {
   await api.put(`/api/content/pages/${id}/favorite`);
 }
@@ -462,7 +473,7 @@ export async function createNote(
 
 export async function updateNote(
   id: string,
-  req: { title?: string; contentJsonb?: string; sortOrder?: number }
+  req: { title?: string; contentJsonb?: string; sortOrder?: number; pageId?: string }
 ): Promise<NoteDto> {
   const { data } = await api.patch<NoteDto>(`/api/content/notes/${id}`, req);
   return data;
@@ -470,6 +481,14 @@ export async function updateNote(
 
 export async function deleteNote(id: string): Promise<void> {
   await api.delete(`/api/content/notes/${id}`);
+}
+
+export async function copyNote(
+  id: string,
+  req: { pageId?: string | null; title?: string }
+): Promise<NoteDto> {
+  const { data } = await api.post<NoteDto>(`/api/content/notes/${id}/copy`, req);
+  return data;
 }
 
 // ── Project members ────────────────────────────────────────────────────────
@@ -548,6 +567,52 @@ export async function revokeDerivedGrant(
   grantId: string
 ): Promise<void> {
   await api.delete(`/api/content/projects/${projectId}/derived-grants/${grantId}`);
+}
+
+// ── Project tree (Move/Copy picker) ───────────────────────────────────────
+
+// Filtered to entities the caller can view; CanEdit per entity drives the
+// destination picker's enabled/disabled state for each row.
+export type ProjectTreePageDto = {
+  id: string;
+  locator: number;
+  title: string;
+  parentPageId: string | null;
+  canEdit: boolean;
+};
+
+export type ProjectTreeNotebookDto = {
+  id: string;
+  locator: number;
+  name: string;
+  icon: string | null;
+  canEdit: boolean;
+  pages: ProjectTreePageDto[];
+};
+
+export type ProjectTreeCabinetDto = {
+  id: string;
+  locator: number;
+  name: string;
+  icon: string | null;
+  canEdit: boolean;
+  notebooks: ProjectTreeNotebookDto[];
+};
+
+export type ProjectTreeResponse = {
+  projectId: string;
+  cabinets: ProjectTreeCabinetDto[];
+};
+
+export async function fetchProjectTree(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<ProjectTreeResponse> {
+  const { data } = await api.get<ProjectTreeResponse>(
+    `/api/content/projects/${projectId}/tree/`,
+    { signal }
+  );
+  return data;
 }
 
 // ── Page sharing ──────────────────────────────────────────────────────────

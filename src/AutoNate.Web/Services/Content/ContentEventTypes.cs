@@ -71,6 +71,7 @@ public static class ContentEventTypes
     public const string PageArchived = "content.page.archived";
     public const string PageRestored = "content.page.restored";
     public const string PageDeleted = "content.page.deleted";
+    public const string PageCopied = "content.page.copied";
     public const string PageTreeViewed = "content.page.tree.viewed";
     public const string PageViewed = "content.page.viewed";
     public const string PageFavorited = "content.page.favorited";
@@ -94,6 +95,8 @@ public static class ContentEventTypes
     public const string NoteCreated = "content.note.created";
     public const string NoteUpdated = "content.note.updated";
     public const string NoteDeleted = "content.note.deleted";
+    public const string NoteMoved = "content.note.moved";
+    public const string NoteCopied = "content.note.copied";
     public const string NoteListViewed = "content.note.list.viewed";
     public const string NoteViewed = "content.note.viewed";
 

@@ -400,6 +400,28 @@ export default function NotesPage() {
   useEffect(() => {
     // Wait until the URL's locator has resolved before touching the URL.
     if (urlPending) return;
+    // Hydration race: the URL locator resolved to an entity (typically a
+    // page) that doesn't match the currently-active selection yet. The
+    // hydration effect below is about to call setActiveProjectId /
+    // setActiveCabinetId / setActivePageId from `resolved.ancestors`, but
+    // it hasn't fired yet — the closure values captured for this effect
+    // still point at the previous selection. Writing back here would
+    // navigate the URL right back to where it came from (the copy/move
+    // → navigate flow in EditorPane hits this race). Wait one tick for
+    // the hydration to land.
+    if (resolved) {
+      const resolvedPageId =
+        resolved.ancestors.page?.id ??
+        (resolved.kind === "page" ? resolved.id : null);
+      if (resolvedPageId != null && resolvedPageId !== activePageId) return;
+      // Same race for cabinet-level URLs (no page in the chain).
+      if (resolvedPageId == null) {
+        const resolvedCabinetId =
+          resolved.ancestors.cabinet?.id ??
+          (resolved.kind === "cabinet" ? resolved.id : null);
+        if (resolvedCabinetId != null && resolvedCabinetId !== activeCabinetId) return;
+      }
+    }
     // Page in flight: activePageId is set but its tree node hasn't loaded
     // yet (page-tree query still pending). Without this gate the URL would
     // briefly overwrite a /notes/{page} URL with /notes/{cabinet} during
@@ -419,7 +441,9 @@ export default function NotesPage() {
     currentPath,
     navigate,
     urlPending,
+    resolved,
     activePageId,
+    activeCabinetId,
     activePageTreeNode,
     notesQuery.data
   ]);
@@ -650,6 +674,26 @@ export default function NotesPage() {
         onCloseTab={onCloseTab}
         onNewNote={() => setModalOpen(true)}
         onReorderNotes={onReorderNotes}
+        projectId={activeProjectId}
+        onPageDeleted={() => {
+          // Clear active page so the editor pane drops back to the empty
+          // state. The page-tree invalidation in useDeletePage refreshes
+          // the explorer, so the row will disappear there too.
+          setActivePageId(null);
+        }}
+        onNoteDeleted={(noteId) => {
+          if (!activePageId) return;
+          notesYjs.removeNote(noteId);
+          setTabsByPage((prev) => {
+            const cur = prev[activePageId];
+            if (!cur) return prev;
+            const tabId = `${activePageId}::${noteId}`;
+            const tabs = cur.tabs.filter((t) => t.id !== tabId);
+            const activeTabId =
+              cur.activeTabId === tabId ? tabs[0]?.id ?? "" : cur.activeTabId;
+            return { ...prev, [activePageId]: { tabs, activeTabId } };
+          });
+        }}
       />
 
       {modalOpen && activePageId && (

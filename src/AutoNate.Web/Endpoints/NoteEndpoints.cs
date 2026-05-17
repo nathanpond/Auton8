@@ -132,6 +132,27 @@ public static class NoteEndpoints
                 http.User, ContentKinds.Page, note.PageId, Actions.Edit, ct);
             if (!pageDecision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
 
+            // Move semantics: when PageId is supplied and differs, the caller
+            // also needs Edit on the destination page. The note's
+            // page_note_index is recomputed against the destination so it
+            // stays unique within that page.
+            Guid? previousPageId = null;
+            if (request.PageId is { } newPageId && newPageId != note.PageId)
+            {
+                var receive = await authorizer.AuthorizeAsync(
+                    http.User, ContentKinds.Page, newPageId, Actions.Edit, ct);
+                if (!receive.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                var destExists = await db.Pages.AsNoTracking().AnyAsync(p => p.Id == newPageId, ct);
+                if (!destExists) return Results.BadRequest(new { error = "Destination page not found." });
+                previousPageId = note.PageId;
+                note.PageId = newPageId;
+                var maxIdx = await db.Notes.AsNoTracking()
+                    .Where(n => n.PageId == newPageId && n.Id != id)
+                    .Select(n => (int?)n.PageNoteIndex)
+                    .MaxAsync(ct) ?? 0;
+                note.PageNoteIndex = maxIdx + 1;
+            }
+
             // All three note kinds are Yjs-managed (richtext/Phase 1,
             // drawing+diagram/Phase 4) — reject contentJsonb writes here
             // so a stray REST caller can't race the Hocuspocus webhook
@@ -143,6 +164,11 @@ public static class NoteEndpoints
             var actorId = http.GetActorId();
             var fields = new List<string>();
             int? newVersionNumber = null;
+            if (previousPageId is not null)
+            {
+                fields.Add("pageId");
+                fields.Add("pageNoteIndex");
+            }
 
             var contentChanging = (request.Title is not null && request.Title.Trim() != (note.Title ?? string.Empty)
                                    && !(request.Title.Trim() == string.Empty && note.Title is null))
@@ -185,6 +211,21 @@ public static class NoteEndpoints
                     details: null,
                     ct);
             }
+            if (previousPageId is not null)
+            {
+                await auditPublisher.PublishAsync(
+                    ContentEventTopic.TopicName,
+                    ContentEventTypes.NoteMoved,
+                    ContentResourceKinds.Note,
+                    resource: new { id = note.Id },
+                    details: new
+                    {
+                        previousPageId,
+                        newPageId = note.PageId,
+                        newPageNoteIndex = note.PageNoteIndex
+                    },
+                    ct);
+            }
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
                 ContentEventTypes.NoteUpdated,
@@ -194,6 +235,97 @@ public static class NoteEndpoints
                 ct);
 
             return Results.Ok(MapDto(note));
+        }).DisableAntiforgery();
+
+        // Copy a note to a destination page (defaults to the note's current
+        // page when omitted). Requires Edit on the source page (existing) and
+        // Edit on the destination page.
+        directScoped.MapPost("/{id:guid}/copy", async (
+            Guid id,
+            CopyNoteRequest request,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IContentAuthorizer authorizer,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var src = await db.Notes.AsNoTracking().FirstOrDefaultAsync(n => n.Id == id, ct);
+            if (src is null) return Results.NotFound();
+
+            // Source-page Edit is needed to view+clone the note's content.
+            var sourceDecision = await authorizer.AuthorizeAsync(
+                http.User, ContentKinds.Page, src.PageId, Actions.Edit, ct);
+            if (!sourceDecision.IsAllowed)
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+            var destPageId = request.PageId ?? src.PageId;
+            if (destPageId != src.PageId)
+            {
+                var destDecision = await authorizer.AuthorizeAsync(
+                    http.User, ContentKinds.Page, destPageId, Actions.Edit, ct);
+                if (!destDecision.IsAllowed)
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                var destExists = await db.Pages.AsNoTracking().AnyAsync(p => p.Id == destPageId, ct);
+                if (!destExists) return Results.BadRequest(new { error = "Destination page not found." });
+            }
+
+            var actorId = http.GetActorId();
+            var now = DateTime.UtcNow;
+
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            var nextNoteIndex = await db.Notes.AsNoTracking()
+                .Where(n => n.PageId == destPageId)
+                .Select(n => (int?)n.PageNoteIndex)
+                .MaxAsync(ct) ?? 0;
+            nextNoteIndex++;
+
+            var copy = new Note
+            {
+                Id = Guid.NewGuid(),
+                PageId = destPageId,
+                NoteKind = src.NoteKind,
+                Title = string.IsNullOrWhiteSpace(request.Title) ? src.Title : request.Title!.Trim(),
+                ContentJsonb = src.ContentJsonb,
+                CurrentVersionNumber = 2,
+                PageNoteIndex = nextNoteIndex,
+                SortOrder = src.SortOrder,
+                IsArchived = false,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+                CreatedBy = actorId,
+                UpdatedBy = actorId
+            };
+            db.Notes.Add(copy);
+            db.NoteVersions.Add(new NoteVersion
+            {
+                Id = Guid.NewGuid(),
+                NoteId = copy.Id,
+                VersionNumber = 1,
+                Title = copy.Title,
+                NoteKind = copy.NoteKind,
+                ContentJsonb = copy.ContentJsonb,
+                Kind = ContentVersionKinds.Manual,
+                Note = $"copied from {id}",
+                CreatedAtUtc = now,
+                CreatedBy = actorId
+            });
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            // Reload to materialize the DB-assigned Locator.
+            var row = await db.Notes.AsNoTracking().FirstAsync(n => n.Id == copy.Id, ct);
+
+            await auditPublisher.PublishAsync(
+                ContentEventTopic.TopicName,
+                ContentEventTypes.NoteCopied,
+                ContentResourceKinds.Note,
+                resource: new { sourceId = id, id = row.Id, pageId = row.PageId },
+                details: new { noteKind = row.NoteKind },
+                ct);
+
+            return Results.Created($"/api/content/notes/{row.Id}", MapDto(row));
         }).DisableAntiforgery();
 
         directScoped.MapDelete("/{id:guid}", async (
@@ -242,8 +374,16 @@ public static class NoteEndpoints
     public sealed record CreateNoteRequest(
         string NoteKind, string? Title, string? ContentJsonb, int? SortOrder);
 
+    // PageId is optional. When non-null and different from the note's current
+    // page, the note is moved (page_note_index is recomputed against the
+    // destination page). Distinct sentinel for "unset" is fine here because
+    // PageId is never a meaningful null on a note.
     public sealed record UpdateNoteRequest(
-        string? Title, string? ContentJsonb, int? SortOrder);
+        string? Title, string? ContentJsonb, int? SortOrder, Guid? PageId);
+
+    // POST /api/content/notes/{id}/copy. PageId defaults to the note's
+    // current page; Title overrides the source title when provided.
+    public sealed record CopyNoteRequest(Guid? PageId, string? Title);
 
     public sealed record NoteDto(
         Guid Id, long Locator, int PageNoteIndex, Guid PageId, string NoteKind,

@@ -14,8 +14,11 @@ import {
   ProjectDto,
   ProjectMembersResponse,
   ProjectRoleWire,
+  ProjectTreeResponse,
   UpdateCabinetRequest,
   UpdateNotebookRequest,
+  copyNote,
+  copyPage,
   createCabinet,
   createNote,
   createNotebook,
@@ -30,6 +33,7 @@ import {
   fetchPage,
   fetchPageTree,
   fetchPageVersion,
+  fetchProjectTree,
   listNoteVersions,
   listPageVersions,
   listProjectMembers,
@@ -284,6 +288,28 @@ export function useDeletePage() {
   });
 }
 
+// Deep-clones a page (and its descendants + notes) to a destination notebook
+// + optional parent page. Invalidates every cached page-tree so the new
+// subtree shows up wherever it landed.
+export function useCopyPage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      notebookId: string;
+      parentPageId?: string | null;
+      title?: string;
+    }) => copyPage(vars.id, {
+      notebookId: vars.notebookId,
+      parentPageId: vars.parentPageId,
+      title: vars.title
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["content", "page-tree"] });
+    }
+  });
+}
+
 export function useNotes(pageId: string | null) {
   return useQuery<NoteDto[]>({
     queryKey: pageId ? notesKey(pageId) : ["content", "notes", "none"],
@@ -323,6 +349,57 @@ export function useDeleteNote(pageId: string | null) {
     onSuccess: () => {
       if (pageId) qc.invalidateQueries({ queryKey: notesKey(pageId) });
     }
+  });
+}
+
+// Copies a note to a destination page (defaults to its current page). After
+// success, the source page's notes list and the destination page's notes
+// list both need refreshing.
+export function useCopyNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      sourcePageId: string;
+      destPageId?: string | null;
+      title?: string;
+    }) => copyNote(vars.id, { pageId: vars.destPageId, title: vars.title }),
+    onSuccess: (note, vars) => {
+      qc.invalidateQueries({ queryKey: notesKey(vars.sourcePageId) });
+      qc.invalidateQueries({ queryKey: notesKey(note.pageId) });
+    }
+  });
+}
+
+// Moves a note to a new page via PATCH /api/content/notes/{id}. Recomputes
+// page_note_index server-side; the SPA invalidates both pages' notes
+// caches so the source and destination tab strips refresh.
+export function useMoveNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: string; sourcePageId: string; destPageId: string }) =>
+      updateNote(vars.id, { pageId: vars.destPageId }),
+    onSuccess: (note, vars) => {
+      qc.invalidateQueries({ queryKey: notesKey(vars.sourcePageId) });
+      qc.invalidateQueries({ queryKey: notesKey(note.pageId) });
+    }
+  });
+}
+
+// Project tree dump used by the Move/Copy modal's destination picker.
+// Returns only entities the caller can view; per-entity `canEdit` flags
+// drive the picker's enabled/disabled state. Cached for 60s — short enough
+// that picker freshness is fine, long enough to dodge thrash when the modal
+// is opened repeatedly within a session.
+export const projectTreeKey = (projectId: string) =>
+  ["content", "project-tree", projectId] as const;
+
+export function useProjectTree(projectId: string | null, enabled = true) {
+  return useQuery<ProjectTreeResponse>({
+    queryKey: projectId ? projectTreeKey(projectId) : ["content", "project-tree", "none"],
+    enabled: !!projectId && enabled,
+    queryFn: ({ signal }) => fetchProjectTree(projectId!, signal),
+    staleTime: 60_000
   });
 }
 

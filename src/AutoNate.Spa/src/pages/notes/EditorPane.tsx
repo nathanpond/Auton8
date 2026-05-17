@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Tooltip } from "@mantine/core";
 import { CabinetDto, NoteDto, PageDto } from "@/api/content";
 import {
+  useCopyNote,
+  useCopyPage,
+  useDeleteNote,
+  useDeletePage,
+  useMoveNote,
   useNoteVersion,
   usePageVersion,
   useRestoreNoteVersion,
   useRestorePageVersion,
-  useToggleFavoritePage
+  useToggleFavoritePage,
+  useUpdatePage
 } from "@/hooks/useContent";
 import { NOTE_KIND_META, cabinetColorFor, defaultCabinetIcon, notesTheme } from "./notesTheme";
 import { EditorTab, NotebookWithPages, PageTreeNode } from "./types";
@@ -30,6 +37,9 @@ import {
 import { CSS as DndCss } from "@dnd-kit/utilities";
 import { HistoryModal } from "./HistoryModal";
 import { ShareModal } from "./ShareModal";
+import { MoveCopyModal } from "./MoveCopyModal";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { exportToPdf } from "./exportToPdf";
 
 // Identity of a revision the user is browsing. Scoped to a specific page or
 // note id so switching tabs/pages clears it. The content fetch lives in a
@@ -54,6 +64,13 @@ type Props = {
   // is the new sequence the user dropped them into; the caller persists
   // sortOrder updates from this.
   onReorderNotes?: (orderedNoteIds: string[]) => void;
+  // Called after a successful page delete — parent clears active page id.
+  onPageDeleted?: () => void;
+  // Called after a successful note delete from the ellipsis menu — parent
+  // closes the tab and removes the note from local state.
+  onNoteDeleted?: (noteId: string) => void;
+  // Project id is needed for the move/copy destination picker.
+  projectId: string | null;
 };
 
 export function EditorPane({
@@ -67,8 +84,12 @@ export function EditorPane({
   onSwitchTab,
   onCloseTab,
   onNewNote,
-  onReorderNotes
+  onReorderNotes,
+  onPageDeleted,
+  onNoteDeleted,
+  projectId
 }: Props) {
+  const navigate = useNavigate();
   // All hooks must run on every render — the empty-state early return below
   // must not skip them. Bug we hit before: useState/useEffect lived after the
   // null-page early return, so hook call counts differed between "no page"
@@ -83,10 +104,21 @@ export function EditorPane({
   const [pageEditMode, setPageEditMode] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moveCopyOpen, setMoveCopyOpen] = useState<"move" | "copy" | null>(null);
+  const [moveCopyError, setMoveCopyError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [revision, setRevision] = useState<RevisionRef | null>(null);
   const toggleFavorite = useToggleFavoritePage();
   const restorePageVersion = useRestorePageVersion();
   const restoreNoteVersion = useRestoreNoteVersion(page?.id ?? null);
+  const updatePageMutation = useUpdatePage();
+  const deletePageMutation = useDeletePage();
+  const deleteNoteMutation = useDeleteNote(page?.id ?? null);
+  const copyPageMutation = useCopyPage();
+  const copyNoteMutation = useCopyNote();
+  const moveNoteMutation = useMoveNote();
 
   // Reset to view mode when the active page changes or when the user navigates
   // away from the page tab — otherwise "edit mode" would silently persist
@@ -307,7 +339,36 @@ export function EditorPane({
             disabled={!onPageTab && !activeNote}
             onClick={onHistoryClick}
           />
-          <HBtn icon="fa-ellipsis" title="More" />
+          <MoreMenu
+            open={moreOpen}
+            onOpenChange={setMoreOpen}
+            showDelete={page.actorIsProjectOwner}
+            // Note tabs delete just the note. Page tab deletes the entire
+            // page (and cascade-deletes its notes server-side).
+            onExportPdf={() => {
+              setMoreOpen(false);
+              exportToPdf({
+                onPageTab,
+                pageTitle: page.title,
+                noteTitle: activeNote?.title ?? activeTab?.name ?? "Note"
+              });
+            }}
+            onMove={() => {
+              setMoreOpen(false);
+              setMoveCopyError(null);
+              setMoveCopyOpen("move");
+            }}
+            onCopy={() => {
+              setMoreOpen(false);
+              setMoveCopyError(null);
+              setMoveCopyOpen("copy");
+            }}
+            onDelete={() => {
+              setMoreOpen(false);
+              setDeleteError(null);
+              setDeleteConfirmOpen(true);
+            }}
+          />
         </div>
       </div>
 
@@ -399,9 +460,166 @@ export function EditorPane({
           onClose={() => setShareOpen(false)}
         />
       )}
+
+      {moveCopyOpen && (
+        <MoveCopyModal
+          mode={moveCopyOpen}
+          itemKind={onPageTab ? "page" : "note"}
+          itemId={onPageTab ? page.id : (activeNote?.id ?? "")}
+          itemTitle={onPageTab ? page.title : (activeNote?.title ?? activeTab?.name ?? "Note")}
+          projectId={projectId}
+          sourceNotebookId={onPageTab ? page.notebookId : null}
+          sourceParentPageId={onPageTab ? page.parentPageId : null}
+          sourcePageId={!onPageTab ? page.id : null}
+          busy={
+            (onPageTab && (updatePageMutation.isPending || copyPageMutation.isPending)) ||
+            (!onPageTab && (moveNoteMutation.isPending || copyNoteMutation.isPending))
+          }
+          error={moveCopyError}
+          onClose={() => {
+            if (
+              updatePageMutation.isPending ||
+              copyPageMutation.isPending ||
+              moveNoteMutation.isPending ||
+              copyNoteMutation.isPending
+            ) {
+              return;
+            }
+            setMoveCopyOpen(null);
+            setMoveCopyError(null);
+          }}
+          onConfirm={async (dest) => {
+            try {
+              if (onPageTab) {
+                // Notebook destination → top-level page (parentPageId=null).
+                // Page destination → sub-page under that parent in the dest
+                // notebook (the picker carries the destination notebookId on
+                // PageDestination so we don't have to look it up here).
+                const destNotebookId = dest.kind === "notebook" ? dest.id : dest.notebookId;
+                const parentPageId = dest.kind === "page" ? dest.id : null;
+                if (moveCopyOpen === "move") {
+                  const moved = await updatePageMutation.mutateAsync({
+                    id: page.id,
+                    body: {
+                      notebookId: destNotebookId,
+                      parentPageId,
+                      parentPageIdSet: true
+                    }
+                  });
+                  setMoveCopyOpen(null);
+                  // Locator is stable across moves — re-route so URL reflects
+                  // the new ancestor chain.
+                  navigate(`/notes/${moved.locator}`, { replace: true });
+                } else {
+                  const copy = await copyPageMutation.mutateAsync({
+                    id: page.id,
+                    notebookId: destNotebookId,
+                    parentPageId
+                  });
+                  setMoveCopyOpen(null);
+                  navigate(`/notes/${copy.locator}`);
+                }
+              } else {
+                if (dest.kind !== "page") {
+                  setMoveCopyError("Pick a page as the destination.");
+                  return;
+                }
+                if (!activeNote) {
+                  setMoveCopyError("Select a note first.");
+                  return;
+                }
+                if (moveCopyOpen === "move") {
+                  await moveNoteMutation.mutateAsync({
+                    id: activeNote.id,
+                    sourcePageId: page.id,
+                    destPageId: dest.id
+                  });
+                  setMoveCopyOpen(null);
+                  // Jump to the destination page so the user sees the note
+                  // in its new location. We land on the destination page
+                  // (no /n segment) and let the SPA's URL-writeback effect
+                  // resync once the destination's notes query refetches and
+                  // the moved note's new pageNoteIndex is known.
+                  navigate(`/notes/${dest.locator}`);
+                } else {
+                  await copyNoteMutation.mutateAsync({
+                    id: activeNote.id,
+                    sourcePageId: page.id,
+                    destPageId: dest.id
+                  });
+                  setMoveCopyOpen(null);
+                  navigate(`/notes/${dest.locator}`);
+                }
+              }
+              setMoveCopyError(null);
+            } catch (err) {
+              setMoveCopyError(describeError(err));
+            }
+          }}
+        />
+      )}
+
+      {deleteConfirmOpen && (
+        <ConfirmDialog
+          icon="fa-trash"
+          title={
+            onPageTab
+              ? `Delete “${page.title}”?`
+              : `Delete “${activeNote?.title ?? activeTab?.name ?? "Note"}”?`
+          }
+          destructive
+          body={
+            onPageTab ? (
+              <>
+                This permanently deletes the page and{" "}
+                <strong>every note, child page, and attachment inside it</strong>.
+                This cannot be undone.
+              </>
+            ) : (
+              <>This permanently deletes the note and all of its content. This cannot be undone.</>
+            )
+          }
+          confirmLabel={onPageTab ? "Delete page" : "Delete note"}
+          busy={onPageTab ? deletePageMutation.isPending : deleteNoteMutation.isPending}
+          error={deleteError}
+          onCancel={() => {
+            if (deletePageMutation.isPending || deleteNoteMutation.isPending) return;
+            setDeleteConfirmOpen(false);
+            setDeleteError(null);
+          }}
+          onConfirm={async () => {
+            try {
+              if (onPageTab) {
+                await deletePageMutation.mutateAsync(page.id);
+                setDeleteConfirmOpen(false);
+                setDeleteError(null);
+                onPageDeleted?.();
+              } else if (activeNote) {
+                await deleteNoteMutation.mutateAsync(activeNote.id);
+                setDeleteConfirmOpen(false);
+                setDeleteError(null);
+                onNoteDeleted?.(activeNote.id);
+              }
+            } catch (err) {
+              setDeleteError(describeError(err));
+            }
+          }}
+        />
+      )}
     </main>
   );
 }
+
+// Map of describeError mirrors NotesPage helper — kept local so this file
+// doesn't reach into the parent module.
+function describeError(err: unknown): string {
+  if (typeof err === "object" && err && "response" in err) {
+    const resp = (err as { response?: { data?: { error?: string; message?: string } } }).response;
+    return resp?.data?.error ?? resp?.data?.message ?? "Request failed.";
+  }
+  return err instanceof Error ? err.message : "Request failed.";
+}
+
 
 function RevisionBanner({
   versionNumber,
@@ -505,6 +723,125 @@ function RevisionBanner({
         {restoreBusy ? "Restoring…" : "Restore"}
       </button>
     </div>
+  );
+}
+
+// Popover menu attached to the header's ellipsis button. Renders four
+// actions: Export PDF, Move, Copy, Delete. Delete is conditionally rendered
+// (Owner-only — the backend enforces too, but the SPA hides the option for
+// non-owners to match the design). Click-outside / Escape closes.
+function MoreMenu({
+  open,
+  onOpenChange,
+  showDelete,
+  onExportPdf,
+  onMove,
+  onCopy,
+  onDelete
+}: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  showDelete: boolean;
+  onExportPdf: () => void;
+  onMove: () => void;
+  onCopy: () => void;
+  onDelete: () => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) onOpenChange(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onOpenChange(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, onOpenChange]);
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <HBtn
+        icon="fa-ellipsis"
+        title="More"
+        active={open}
+        onClick={() => onOpenChange(!open)}
+      />
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            minWidth: 200,
+            background: "#fff",
+            border: `1px solid ${notesTheme.border}`,
+            borderRadius: 4,
+            boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+            padding: 4,
+            zIndex: 60
+          }}
+        >
+          <MoreMenuItem icon="fa-file-pdf" label="Export PDF" onClick={onExportPdf} />
+          <MoreMenuItem icon="fa-arrow-right" label="Move" onClick={onMove} />
+          <MoreMenuItem icon="fa-copy" label="Copy" onClick={onCopy} />
+          {showDelete && (
+            <>
+              <div style={{ height: 1, background: notesTheme.border, margin: "4px 2px" }} />
+              <MoreMenuItem icon="fa-trash" label="Delete" danger onClick={onDelete} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoreMenuItem({
+  icon,
+  label,
+  onClick,
+  danger
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  const color = danger ? notesTheme.danger : notesTheme.dark;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        background: hover ? (danger ? "#fee" : notesTheme.hover) : "transparent",
+        border: "none",
+        borderRadius: 4,
+        padding: "6px 10px",
+        textAlign: "left",
+        cursor: "pointer",
+        color,
+        fontSize: 12,
+        fontWeight: 600,
+        fontFamily: "inherit"
+      }}
+    >
+      <i className={`fa ${icon}`} style={{ width: 14, fontSize: 11 }} />
+      {label}
+    </button>
   );
 }
 

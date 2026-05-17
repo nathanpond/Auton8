@@ -1,3 +1,4 @@
+using AutoNate.Web.Authorization;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Content;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +20,100 @@ public static class ContentLocatorEndpoints
     public static IEndpointRouteBuilder MapContentLocatorEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/content/locator").RequireAuthorization();
+
+        // Lightweight project-tree dump used by the SPA Move/Copy modal.
+        // Returns every cabinet / notebook / page in the project the caller
+        // can view, with a per-entity flag indicating whether the caller can
+        // also edit it (Contributor or above). The modal uses CanEdit to
+        // mark valid destinations. Filtered by IContentAuthorizer so a
+        // viewer never sees resources outside their reach.
+        var treeGroup = app.MapGroup("/api/content/projects/{projectId:guid}/tree")
+            .RequireAuthorization();
+        treeGroup.MapGet("/", async (
+            Guid projectId,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IContentAuthorizer authorizer,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var projectExists = await db.Projects.AsNoTracking()
+                .AnyAsync(p => p.Id == projectId, ct);
+            if (!projectExists) return Results.NotFound();
+
+            // View-decision gate: caller must be able to see *something* in
+            // the project, otherwise return 404 to avoid revealing existence.
+            var projectViewDecision = await authorizer.AuthorizeAsync(
+                http.User, ContentKinds.Project, projectId, Actions.View, ct);
+            if (!projectViewDecision.IsAllowed)
+            {
+                return Results.NotFound();
+            }
+
+            var cabinetView = await authorizer.GetAllowedIdsAsync(
+                http.User, ContentKinds.Cabinet, Actions.View, ct);
+            var cabinetEdit = await authorizer.GetAllowedIdsAsync(
+                http.User, ContentKinds.Cabinet, Actions.Edit, ct);
+            var notebookView = await authorizer.GetAllowedIdsAsync(
+                http.User, ContentKinds.Notebook, Actions.View, ct);
+            var notebookEdit = await authorizer.GetAllowedIdsAsync(
+                http.User, ContentKinds.Notebook, Actions.Edit, ct);
+            var pageView = await authorizer.GetAllowedIdsAsync(
+                http.User, ContentKinds.Page, Actions.View, ct);
+            var pageEdit = await authorizer.GetAllowedIdsAsync(
+                http.User, ContentKinds.Page, Actions.Edit, ct);
+
+            bool Allows(ContentAccessSet set, Guid id) =>
+                set.Unrestricted || set.AllowedIds.Contains(id);
+
+            var cabinets = await db.Cabinets.AsNoTracking()
+                .Where(c => c.ProjectId == projectId && !c.IsArchived)
+                .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
+                .Select(c => new
+                {
+                    c.Id, c.Locator, c.Name, c.Icon
+                })
+                .ToListAsync(ct);
+            var cabinetIds = cabinets.Select(c => c.Id).ToList();
+
+            var notebooks = await db.Notebooks.AsNoTracking()
+                .Where(n => cabinetIds.Contains(n.CabinetId) && !n.IsArchived)
+                .OrderBy(n => n.SortOrder).ThenBy(n => n.Name)
+                .Select(n => new
+                {
+                    n.Id, n.Locator, n.Name, n.Icon, n.CabinetId
+                })
+                .ToListAsync(ct);
+            var notebookIds = notebooks.Select(n => n.Id).ToList();
+
+            var pages = await db.Pages.AsNoTracking()
+                .Where(p => notebookIds.Contains(p.NotebookId) && !p.IsArchived)
+                .OrderBy(p => p.SortOrder).ThenBy(p => p.Title)
+                .Select(p => new
+                {
+                    p.Id, p.Locator, p.Title, p.NotebookId, p.ParentPageId
+                })
+                .ToListAsync(ct);
+
+            var cabinetDtos = cabinets
+                .Where(c => Allows(cabinetView, c.Id))
+                .Select(c => new ProjectTreeCabinet(
+                    c.Id, c.Locator, c.Name, c.Icon, Allows(cabinetEdit, c.Id),
+                    notebooks
+                        .Where(n => n.CabinetId == c.Id && Allows(notebookView, n.Id))
+                        .Select(n => new ProjectTreeNotebook(
+                            n.Id, n.Locator, n.Name, n.Icon, Allows(notebookEdit, n.Id),
+                            pages
+                                .Where(p => p.NotebookId == n.Id && Allows(pageView, p.Id))
+                                .Select(p => new ProjectTreePage(
+                                    p.Id, p.Locator, p.Title, p.ParentPageId,
+                                    Allows(pageEdit, p.Id)))
+                                .ToList()))
+                        .ToList()))
+                .ToList();
+
+            return Results.Ok(new ProjectTreeResponse(projectId, cabinetDtos));
+        });
 
         group.MapGet("/{locator:long}", async (
             long locator,
@@ -205,6 +300,19 @@ public static class ContentLocatorEndpoints
                 Page: pageRef,
                 Note: null));
     }
+
+    // Used by the SPA Move/Copy destination picker. Pages are returned as a
+    // flat list per notebook with their ParentPageId so the SPA can rebuild
+    // the hierarchy without an extra round trip.
+    public sealed record ProjectTreeResponse(Guid ProjectId, List<ProjectTreeCabinet> Cabinets);
+    public sealed record ProjectTreeCabinet(
+        Guid Id, long Locator, string Name, string? Icon, bool CanEdit,
+        List<ProjectTreeNotebook> Notebooks);
+    public sealed record ProjectTreeNotebook(
+        Guid Id, long Locator, string Name, string? Icon, bool CanEdit,
+        List<ProjectTreePage> Pages);
+    public sealed record ProjectTreePage(
+        Guid Id, long Locator, string Title, Guid? ParentPageId, bool CanEdit);
 
     public sealed record LocatorRef(Guid Id, long Locator);
 
