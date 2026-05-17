@@ -82,12 +82,24 @@ export function createWebhookExtension(config: WebhookConfig): Extension {
       const ctx = (data.context ?? {}) as ContextWithUser;
       // No body for disconnect — .NET only logs it in Phase 1. Future
       // phases (comments / presence) will hang real work off this event.
-      await post("disconnect", {
-        event: "disconnect",
-        documentName: data.documentName,
-        userId: ctx.user?.id ?? null,
-        bodyJsonb: null
-      });
+      //
+      // Swallow failures: @hocuspocus/server does not catch errors thrown
+      // from onDisconnect, so a rejected fetch (typical when .NET shuts
+      // down mid-session) becomes an unhandled rejection and kills the
+      // Node process. There's no document state to lose on disconnect.
+      try {
+        await post("disconnect", {
+          event: "disconnect",
+          documentName: data.documentName,
+          userId: ctx.user?.id ?? null,
+          bodyJsonb: null
+        });
+      } catch (err) {
+        console.error(
+          `[webhook] onDisconnect for ${data.documentName} failed; ignoring:`,
+          err instanceof Error ? err.message : err
+        );
+      }
     }
   };
 }

@@ -74,3 +74,15 @@ async function shutdown(): Promise<void> {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// Belt-and-suspenders: @hocuspocus/server does not catch errors from every
+// extension hook (notably onDisconnect). A bare unhandled rejection there
+// would otherwise terminate the process and wedge the container until a
+// full `compose down`. Log and keep running — individual hooks own their
+// own retry/data-loss semantics.
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] unhandledRejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[process] uncaughtException:", err);
+});

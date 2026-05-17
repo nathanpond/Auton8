@@ -164,6 +164,11 @@ services:
       context: ../services/hocuspocus
       dockerfile: Dockerfile
     container_name: autonate-hocuspocus
+    # Survive transient crashes (e.g. webhook fetch failures during .NET
+    # restarts) so `ensure-up` doesn't need a full `compose down` to
+    # recover. Hooks own their own retry semantics; this is just process
+    # supervision.
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
