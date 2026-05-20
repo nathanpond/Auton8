@@ -12,6 +12,16 @@ public sealed class ContentAuthorizer : IContentAuthorizer
     private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
     private readonly ILogger<ContentAuthorizer> _log;
 
+    // ContentAuthorizer is scoped — one instance per request. The project-tree
+    // endpoint hits GetAllowedIdsAsync six times (cabinet/notebook/page × view/
+    // edit) with the same actor; each call otherwise re-runs the grant load,
+    // membership query, and full closure scan. Memoize by (user, kind, action)
+    // so repeat calls within a request collapse to a single computation.
+    // Endpoint flow is sequential await — no Task.WhenAll across this service —
+    // so a plain Dictionary is safe.
+    private readonly Dictionary<(Guid UserId, string Kind, string Action), ContentAccessSet>
+        _accessSetCache = new();
+
     public ContentAuthorizer(
         IDbContextFactory<AutoNateDbContext> dbFactory,
         ILogger<ContentAuthorizer> log)
@@ -126,8 +136,22 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             return ContentAccessSet.Empty;
         }
 
+        var cacheKey = (userId.Value, kind, action);
+        if (_accessSetCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        var computed = await ComputeAllowedIdsAsync(userId.Value, kind, action, ct);
+        _accessSetCache[cacheKey] = computed;
+        return computed;
+    }
+
+    private async Task<ContentAccessSet> ComputeAllowedIdsAsync(
+        Guid userId, string kind, string action, CancellationToken ct)
+    {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var ctx = await LoadActorAsync(db, userId.Value, ct);
+        var ctx = await LoadActorAsync(db, userId, ct);
         if (ctx.IsSuperAdmin)
         {
             return ContentAccessSet.UnrestrictedAccess();
@@ -150,14 +174,68 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             }
         }
 
-        // Collect every resource id of this kind whose project ancestor is
-        // one the actor is a member of. Then merge with overrides. Final
-        // decision per id is computed in code, mirroring AuthorizeAsync.
-        var lockedProjectIds = await db.Projects.AsNoTracking()
-            .Where(p => p.DeletionsLocked)
-            .Select(p => p.Id)
+        // Role baseline by project (small — bounded by the actor's project
+        // count). Loaded up front because both fast and slow paths need it.
+        var memberships = await db.ProjectMembers.AsNoTracking()
+            .Where(m => m.UserId == ctx.UserId)
+            .Select(m => new { m.ProjectId, m.Role })
             .ToListAsync(ct);
-        var lockedSet = lockedProjectIds.ToHashSet();
+
+        // Fast path: actor has no wildcard-allow and no content-kind override
+        // targets. The answer is exactly "every resource of `kind` whose
+        // project ancestor is a membership project whose role grants
+        // `action`" — push it into SQL and skip the system-wide closure
+        // scan + in-memory merge.
+        if (!hasWildcardAllow && !HasOverrideTargets(grants))
+        {
+            var grantingProjectIds = memberships
+                .Where(m => RoleAllowsAction(m.Role, action))
+                .Select(m => m.ProjectId)
+                .ToList();
+            if (grantingProjectIds.Count == 0)
+            {
+                return ContentAccessSet.Empty;
+            }
+
+            var fastQuery = db.ContentAncestors.AsNoTracking()
+                .Where(ca => ca.DescendantKind == kind
+                             && ca.AncestorKind == ContentKinds.Project
+                             && grantingProjectIds.Contains(ca.AncestorId));
+            if (action == Actions.Delete)
+            {
+                // Drop resources whose project is delete-locked. Done with a
+                // subquery so we don't materialise the locked set unless this
+                // action actually cares about it.
+                fastQuery = fastQuery.Where(ca =>
+                    !db.Projects.Any(p => p.Id == ca.AncestorId && p.DeletionsLocked));
+            }
+            var fastIds = await fastQuery
+                .Select(ca => ca.DescendantId)
+                .ToListAsync(ct);
+            return ContentAccessSet.From(fastIds);
+        }
+
+        // Slow path: wildcard-with-denies or explicit override grants. We
+        // need the full resource list because overrides can reach beyond the
+        // actor's membership scope, and per-resource override math doesn't
+        // fit cleanly in SQL.
+        //
+        // Locked-projects only matter for Delete; for any other action the
+        // lock checks below short-circuit before consulting `lockedSet`, so
+        // skipping the load saves a round trip on every non-Delete call.
+        HashSet<Guid> lockedSet;
+        if (action == Actions.Delete)
+        {
+            var lockedProjectIds = await db.Projects.AsNoTracking()
+                .Where(p => p.DeletionsLocked)
+                .Select(p => p.Id)
+                .ToListAsync(ct);
+            lockedSet = lockedProjectIds.ToHashSet();
+        }
+        else
+        {
+            lockedSet = new HashSet<Guid>();
+        }
 
         // (resourceId, projectId) pairs for every resource of this kind.
         var resources = await db.ContentAncestors.AsNoTracking()
@@ -166,11 +244,6 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             .Select(ca => new { ResourceId = ca.DescendantId, ProjectId = ca.AncestorId })
             .ToListAsync(ct);
 
-        // Role baseline by project.
-        var memberships = await db.ProjectMembers.AsNoTracking()
-            .Where(m => m.UserId == ctx.UserId)
-            .Select(m => new { m.ProjectId, m.Role })
-            .ToListAsync(ct);
         var rolesByProject = memberships.ToDictionary(m => m.ProjectId, m => m.Role);
 
         // Override grants for this kind+action across every resource the
@@ -476,32 +549,59 @@ public sealed class ContentAuthorizer : IContentAuthorizer
     {
         if (grants.Count == 0) return new List<OverrideListingRow>();
 
-        // Collect each grant's (kind, id) target, then a single closure
-        // query gives us every descendant of those targets within `kind`.
-        var targets = new List<(string Kind, Guid Id, AuthEffect Effect)>();
+        // Collect each grant's (kind, id) target. Multiple grants can land on
+        // the same (kind, id) with different effects (e.g. user-allow plus
+        // group-deny), so retain a list of effects per target rather than
+        // collapsing.
+        var effectsByTarget = new Dictionary<(string Kind, Guid Id), List<AuthEffect>>();
         foreach (var g in grants)
         {
             if (!TryGetPathTarget(g.Ast, out var pathKind, out var pathId)) continue;
             if (!ContentKinds.IsContentKind(pathKind)) continue;
             if (pathId is null) continue;
-            targets.Add((pathKind, pathId.Value, g.Effect));
+            var key = (pathKind, pathId.Value);
+            if (!effectsByTarget.TryGetValue(key, out var list))
+            {
+                list = new List<AuthEffect>();
+                effectsByTarget[key] = list;
+            }
+            list.Add(g.Effect);
         }
-        if (targets.Count == 0) return new List<OverrideListingRow>();
+        if (effectsByTarget.Count == 0) return new List<OverrideListingRow>();
 
-        // For each target, find every descendant of `kind` plus the depth
-        // from descendant to that specific target ancestor.
+        // Group targets by ancestor kind so we issue at most one closure
+        // query per kind (≤ 4 round trips total, regardless of grant count)
+        // instead of one per grant target.
+        var idsByAncestorKind = new Dictionary<string, List<Guid>>();
+        foreach (var (target, _) in effectsByTarget)
+        {
+            if (!idsByAncestorKind.TryGetValue(target.Kind, out var ids))
+            {
+                ids = new List<Guid>();
+                idsByAncestorKind[target.Kind] = ids;
+            }
+            ids.Add(target.Id);
+        }
+
         var rows = new List<OverrideListingRow>();
-        foreach (var t in targets)
+        foreach (var (ancestorKind, ids) in idsByAncestorKind)
         {
             var matches = await db.ContentAncestors.AsNoTracking()
                 .Where(ca => ca.DescendantKind == kind
-                             && ca.AncestorKind == t.Kind
-                             && ca.AncestorId == t.Id)
-                .Select(ca => new { ca.DescendantId, ca.Depth })
+                             && ca.AncestorKind == ancestorKind
+                             && ids.Contains(ca.AncestorId))
+                .Select(ca => new { ca.AncestorId, ca.DescendantId, ca.Depth })
                 .ToListAsync(ct);
             foreach (var m in matches)
             {
-                rows.Add(new OverrideListingRow(m.DescendantId, m.Depth, t.Effect));
+                if (!effectsByTarget.TryGetValue((ancestorKind, m.AncestorId), out var effects))
+                {
+                    continue;
+                }
+                foreach (var effect in effects)
+                {
+                    rows.Add(new OverrideListingRow(m.DescendantId, m.Depth, effect));
+                }
             }
         }
         return rows;
@@ -575,6 +675,21 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         {
             if (g.Effect != AuthEffect.Deny) continue;
             if (!TryGetPathTarget(g.Ast, out var pathKind, out _)) continue;
+            if (ContentKinds.IsContentKind(pathKind)) return true;
+        }
+        return false;
+    }
+
+    // Does any grant target a specific content resource (the shape that
+    // BuildOverrideListingRowsAsync turns into override rows)? Used to decide
+    // whether GetAllowedIdsAsync can take the SQL fast path or has to fall
+    // back to the per-resource merge.
+    private static bool HasOverrideTargets(IReadOnlyList<ParsedGrant> grants)
+    {
+        foreach (var g in grants)
+        {
+            if (!TryGetPathTarget(g.Ast, out var pathKind, out var pathId)) continue;
+            if (pathId is null) continue;
             if (ContentKinds.IsContentKind(pathKind)) return true;
         }
         return false;
