@@ -47,6 +47,12 @@ export function NoteSlashController({ pageId }: { pageId: string }) {
   return (
     <SuggestionMenuController
       triggerCharacter="/"
+      // Matches the default-UI controller we suppress in YjsEditor: don't pop
+      // the slash menu inside table cells (typing `/` there is almost always
+      // literal text, and the dropdown would obscure the cell).
+      shouldOpen={(state) =>
+        !state.selection.$from.parent.type.isInGroup("tableContent")
+      }
       getItems={async (query) => {
         // Switch on the literal prefix `note` (case-insensitive, optional
         // separator + subquery). When the user types `/note <name>`, show

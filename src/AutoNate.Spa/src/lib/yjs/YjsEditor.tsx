@@ -157,6 +157,12 @@ function YjsEditorInner({
       theme="light"
       renderEditor={false}
       comments={false}
+      // BlockNoteDefaultUI (auto-mounted by <BlockNoteViewEditor/>) registers
+      // its own `/`-trigger SuggestionMenuController. Without this opt-out,
+      // both it AND <NoteSlashController/> below render overlapping popovers
+      // at the same position — visually one menu, but mouse clicks land on
+      // the wrong layer and the selected item never inserts.
+      slashMenu={false}
     >
       <UserStorePrewarmer />
       <div style={{ display: "flex", alignItems: "stretch", width: "100%" }}>
