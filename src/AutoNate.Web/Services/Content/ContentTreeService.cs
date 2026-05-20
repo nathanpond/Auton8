@@ -9,7 +9,7 @@ public sealed class ContentTreeService : IContentTreeService
     public async Task InsertSelfWithAncestorsAsync(
         AutoNateDbContext db, string kind, Guid id, CancellationToken ct)
     {
-        var chain = await BuildAncestorChainAsync(db, kind, id, ct);
+        var chain = await BuildAncestorChainViaDbAsync(db, kind, id, ct);
         foreach (var row in chain)
         {
             db.ContentAncestors.Add(row);
@@ -17,27 +17,53 @@ public sealed class ContentTreeService : IContentTreeService
         await db.SaveChangesAsync(ct);
     }
 
+    // Recomputes content_ancestors for the moved root and every descendant.
+    // Previous shape ran one query per node to collect, one DELETE per
+    // descendant, and one parent walk (1+ queries per level) per descendant —
+    // ~280 round trips on a modest cabinet subtree. The replacement is bounded
+    // at ~10 round trips regardless of subtree size:
+    //   1) one recursive CTE enumerates every (kind, id) descendant;
+    //   2) at most 4 batched DELETEs (one per descendant kind) wipe the
+    //      existing closure rows;
+    //   3) one short walk above the root + one batched parent-lookup per
+    //      descendant kind populates an in-memory (kind, id) → parent map,
+    //      so each chain walk runs against memory not the DB;
+    //   4) a single SaveChangesAsync batches every INSERT.
     public async Task RebuildAncestorsForSubtreeAsync(
         AutoNateDbContext db, string kind, Guid rootId, CancellationToken ct)
     {
-        // Collect every descendant in the subtree (kind+id pairs).
         var descendants = await CollectSubtreeAsync(db, kind, rootId, ct);
+        if (descendants.Count == 0)
+        {
+            return;
+        }
 
-        // Wipe their existing ancestor rows in bulk.
-        foreach (var (descendantKind, descendantId) in descendants)
+        var idsByKind = descendants
+            .GroupBy(d => d.Kind, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Select(d => d.Id).ToList(), StringComparer.Ordinal);
+
+        // Wipe in bulk, one DELETE per kind.
+        foreach (var (descendantKind, ids) in idsByKind)
         {
             var k = descendantKind;
-            var i = descendantId;
             await db.ContentAncestors
-                .Where(ca => ca.DescendantKind == k && ca.DescendantId == i)
+                .Where(ca => ca.DescendantKind == k && ids.Contains(ca.DescendantId))
                 .ExecuteDeleteAsync(ct);
         }
 
-        // Recompute each row from the current entity state.
+        // Build (kind, id) → (parent_kind, parent_id) for every node we'll
+        // need to walk. Two sources:
+        //   - The chain ABOVE the root (root's parent, grandparent, …, project).
+        //     Walked once via ResolveParentAsync — bounded by tree depth (≤4).
+        //   - The subtree nodes themselves, fetched per-kind in bulk.
+        var parentMap = new Dictionary<(string Kind, Guid Id), (string Kind, Guid Id)>(
+            ContentNodeComparer.Instance);
+        await SeedAboveRootAsync(db, kind, rootId, parentMap, ct);
+        await SeedSubtreeAsync(db, idsByKind, parentMap, ct);
+
         foreach (var (descendantKind, descendantId) in descendants)
         {
-            var chain = await BuildAncestorChainAsync(db, descendantKind, descendantId, ct);
-            foreach (var row in chain)
+            foreach (var row in BuildAncestorChainInMemory(parentMap, descendantKind, descendantId))
             {
                 db.ContentAncestors.Add(row);
             }
@@ -57,17 +83,17 @@ public sealed class ContentTreeService : IContentTreeService
 
     // Walks parent FKs in code (kept simple and DB-agnostic) and returns a
     // list of ContentAncestor rows for the entity itself plus every ancestor
-    // (depth 0 = self, depth 1 = direct parent, …, up to the project).
-    private static async Task<List<ContentAncestor>> BuildAncestorChainAsync(
+    // (depth 0 = self, depth 1 = direct parent, …, up to the project). Used
+    // by InsertSelfWithAncestorsAsync which only needs the chain for a single
+    // new entity — the per-level DB queries are bounded by tree depth and
+    // amortized over a single create.
+    private static async Task<List<ContentAncestor>> BuildAncestorChainViaDbAsync(
         AutoNateDbContext db, string startKind, Guid startId, CancellationToken ct)
     {
         var rows = new List<ContentAncestor>();
         var depth = 0;
         var currentKind = startKind;
         var currentId = startId;
-        // Guardrail: refuses to walk past a generous depth in case the page
-        // graph ever has a cycle (the CHECK constraint on pages prevents the
-        // direct self-cycle case, but defence in depth).
         const int maxDepth = 256;
         while (true)
         {
@@ -127,8 +153,6 @@ public sealed class ContentTreeService : IContentTreeService
                     .Select(p => new { p.NotebookId, p.ParentPageId })
                     .FirstOrDefaultAsync(ct);
                 if (page is null) return (null, null);
-                // Pages nest: prefer parent page when present, fall back to
-                // the notebook so the chain always reaches the project.
                 if (page.ParentPageId is { } parent)
                 {
                     return (ContentKinds.Page, parent);
@@ -140,63 +164,146 @@ public sealed class ContentTreeService : IContentTreeService
         }
     }
 
+    // Single recursive CTE enumerates every descendant under the root in one
+    // round trip. The inner SELECT joins parent links from cabinets +
+    // notebooks + pages; pages' parent toggles between 'page' (when nested)
+    // and 'notebook'. Projects are roots and only appear if rootKind=project,
+    // in which case they're the seed row of the recursion.
     private static async Task<List<(string Kind, Guid Id)>> CollectSubtreeAsync(
         AutoNateDbContext db, string rootKind, Guid rootId, CancellationToken ct)
     {
-        var result = new List<(string, Guid)> { (rootKind, rootId) };
-        switch (rootKind)
+        const string sql = """
+            WITH RECURSIVE subtree (kind, id) AS (
+                SELECT {0}::text AS kind, {1}::uuid AS id
+                UNION ALL
+                SELECT child.kind, child.id
+                FROM subtree s
+                JOIN (
+                    SELECT 'cabinet'::text AS kind, id, 'project'::text AS parent_kind, project_id AS parent_id
+                    FROM cabinets
+                    UNION ALL
+                    SELECT 'notebook'::text, id, 'cabinet'::text, cabinet_id
+                    FROM notebooks
+                    UNION ALL
+                    SELECT 'page'::text, id,
+                           CASE WHEN parent_page_id IS NOT NULL THEN 'page'::text ELSE 'notebook'::text END,
+                           COALESCE(parent_page_id, notebook_id)
+                    FROM pages
+                ) AS child ON child.parent_kind = s.kind AND child.parent_id = s.id
+            )
+            SELECT kind AS "Kind", id AS "Id" FROM subtree
+            """;
+
+        var rows = await db.Database
+            .SqlQueryRaw<SubtreeNode>(sql, rootKind, rootId)
+            .ToListAsync(ct);
+        return rows.Select(r => (r.Kind, r.Id)).ToList();
+    }
+
+    private static async Task SeedAboveRootAsync(
+        AutoNateDbContext db, string rootKind, Guid rootId,
+        Dictionary<(string Kind, Guid Id), (string Kind, Guid Id)> parentMap,
+        CancellationToken ct)
+    {
+        var currentKind = rootKind;
+        var currentId = rootId;
+        const int maxDepth = 256;
+        for (var d = 0; d < maxDepth; d++)
         {
-            case ContentKinds.Project:
+            var (parentKind, parentId) = await ResolveParentAsync(db, currentKind, currentId, ct);
+            if (parentKind is null || parentId is null) break;
+            parentMap[(currentKind, currentId)] = (parentKind, parentId.Value);
+            currentKind = parentKind;
+            currentId = parentId.Value;
+        }
+    }
+
+    private static async Task SeedSubtreeAsync(
+        AutoNateDbContext db,
+        Dictionary<string, List<Guid>> idsByKind,
+        Dictionary<(string Kind, Guid Id), (string Kind, Guid Id)> parentMap,
+        CancellationToken ct)
+    {
+        if (idsByKind.TryGetValue(ContentKinds.Cabinet, out var cabinetIds) && cabinetIds.Count > 0)
+        {
+            var rows = await db.Cabinets.AsNoTracking()
+                .Where(c => cabinetIds.Contains(c.Id))
+                .Select(c => new { c.Id, c.ProjectId })
+                .ToListAsync(ct);
+            foreach (var r in rows)
             {
-                var cabinetIds = await db.Cabinets.AsNoTracking()
-                    .Where(c => c.ProjectId == rootId)
-                    .Select(c => c.Id)
-                    .ToListAsync(ct);
-                foreach (var cid in cabinetIds)
-                {
-                    result.AddRange(await CollectSubtreeAsync(db, ContentKinds.Cabinet, cid, ct));
-                }
-                break;
-            }
-            case ContentKinds.Cabinet:
-            {
-                var notebookIds = await db.Notebooks.AsNoTracking()
-                    .Where(n => n.CabinetId == rootId)
-                    .Select(n => n.Id)
-                    .ToListAsync(ct);
-                foreach (var nid in notebookIds)
-                {
-                    result.AddRange(await CollectSubtreeAsync(db, ContentKinds.Notebook, nid, ct));
-                }
-                break;
-            }
-            case ContentKinds.Notebook:
-            {
-                // Root pages of the notebook only — child pages are reached
-                // recursively through the Page branch below.
-                var rootPageIds = await db.Pages.AsNoTracking()
-                    .Where(p => p.NotebookId == rootId && p.ParentPageId == null)
-                    .Select(p => p.Id)
-                    .ToListAsync(ct);
-                foreach (var pid in rootPageIds)
-                {
-                    result.AddRange(await CollectSubtreeAsync(db, ContentKinds.Page, pid, ct));
-                }
-                break;
-            }
-            case ContentKinds.Page:
-            {
-                var childIds = await db.Pages.AsNoTracking()
-                    .Where(p => p.ParentPageId == rootId)
-                    .Select(p => p.Id)
-                    .ToListAsync(ct);
-                foreach (var cpid in childIds)
-                {
-                    result.AddRange(await CollectSubtreeAsync(db, ContentKinds.Page, cpid, ct));
-                }
-                break;
+                parentMap[(ContentKinds.Cabinet, r.Id)] = (ContentKinds.Project, r.ProjectId);
             }
         }
-        return result;
+        if (idsByKind.TryGetValue(ContentKinds.Notebook, out var notebookIds) && notebookIds.Count > 0)
+        {
+            var rows = await db.Notebooks.AsNoTracking()
+                .Where(n => notebookIds.Contains(n.Id))
+                .Select(n => new { n.Id, n.CabinetId })
+                .ToListAsync(ct);
+            foreach (var r in rows)
+            {
+                parentMap[(ContentKinds.Notebook, r.Id)] = (ContentKinds.Cabinet, r.CabinetId);
+            }
+        }
+        if (idsByKind.TryGetValue(ContentKinds.Page, out var pageIds) && pageIds.Count > 0)
+        {
+            var rows = await db.Pages.AsNoTracking()
+                .Where(p => pageIds.Contains(p.Id))
+                .Select(p => new { p.Id, p.NotebookId, p.ParentPageId })
+                .ToListAsync(ct);
+            foreach (var r in rows)
+            {
+                parentMap[(ContentKinds.Page, r.Id)] = r.ParentPageId is { } pp
+                    ? (ContentKinds.Page, pp)
+                    : (ContentKinds.Notebook, r.NotebookId);
+            }
+        }
+        // Projects are roots — they never have a parent entry, which makes
+        // BuildAncestorChainInMemory terminate when it walks into one.
     }
+
+    private static List<ContentAncestor> BuildAncestorChainInMemory(
+        Dictionary<(string Kind, Guid Id), (string Kind, Guid Id)> parentMap,
+        string startKind, Guid startId)
+    {
+        var rows = new List<ContentAncestor>();
+        var depth = 0;
+        var currentKind = startKind;
+        var currentId = startId;
+        const int maxDepth = 256;
+        while (true)
+        {
+            rows.Add(new ContentAncestor
+            {
+                DescendantKind = startKind,
+                DescendantId = startId,
+                AncestorKind = currentKind,
+                AncestorId = currentId,
+                Depth = depth
+            });
+            if (depth >= maxDepth) break;
+            if (!parentMap.TryGetValue((currentKind, currentId), out var parent))
+            {
+                break;
+            }
+            currentKind = parent.Kind;
+            currentId = parent.Id;
+            depth++;
+        }
+        return rows;
+    }
+
+    private sealed class ContentNodeComparer : IEqualityComparer<(string Kind, Guid Id)>
+    {
+        public static readonly ContentNodeComparer Instance = new();
+        public bool Equals((string Kind, Guid Id) x, (string Kind, Guid Id) y) =>
+            string.Equals(x.Kind, y.Kind, StringComparison.Ordinal) && x.Id == y.Id;
+        public int GetHashCode((string Kind, Guid Id) obj) =>
+            HashCode.Combine(obj.Kind, obj.Id);
+    }
+
+    // Result row for the recursive-CTE SqlQueryRaw — column aliases in the
+    // SQL match these property names. Public to satisfy EF Core's reflection.
+    public sealed record SubtreeNode(string Kind, Guid Id);
 }
