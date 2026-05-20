@@ -27,6 +27,15 @@ public interface IAgentConversationStore
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    // Lightweight ownership + header lookup. Loads only the AgentConversations
+    // row, no messages, no tool calls, and emits no audit event — it's a
+    // precondition check on the way to a send, not a "view." Use this when
+    // the caller only needs PageKey / ConnectionId / Title / timestamps.
+    Task<AgentConversationDto?> GetHeaderForUserAsync(
+        Guid id,
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task<AgentConversationDto?> RenameAsync(
         Guid id,
         Guid userId,

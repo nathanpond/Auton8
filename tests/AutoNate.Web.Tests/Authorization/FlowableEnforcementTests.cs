@@ -44,16 +44,18 @@ public sealed class FlowableEnforcementTests
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
             EnforceConfigNoBackfill());
 
-        // Seed a stub task assigned to the admin user.
-        factory.FlowableStub.TasksByUser[AdminUserId.ToString()] = new List<FlowableTaskSummary>
+        // Seed a stub task assigned to the admin user. The task authorizer
+        // resolves by id via GetTaskAsync, so TasksById is the load-bearing
+        // entry here; TasksByUser is left set too so the "my tasks" listing
+        // surface (a different code path) keeps matching.
+        var task = new FlowableTaskSummary
         {
-            new()
-            {
-                Id = "task-99",
-                Assignee = AdminUserId.ToString(),
-                ProcessDefinitionId = "lead:1:abc"
-            }
+            Id = "task-99",
+            Assignee = AdminUserId.ToString(),
+            ProcessDefinitionId = "lead:1:abc"
         };
+        factory.FlowableStub.TasksById["task-99"] = task;
+        factory.FlowableStub.TasksByUser[AdminUserId.ToString()] = new List<FlowableTaskSummary> { task };
 
         var client = factory.CreateClient();
         await client.GetAsync("/api/auth/me");
@@ -78,6 +80,85 @@ public sealed class FlowableEnforcementTests
             new { variables = (object?)null });
 
         Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task CompleteTask_WildcardGrant_AllowsEvenWhenTaskAssignedToSomeoneElse()
+    {
+        // Regression guard: WorkflowTaskInstanceAuthorizer used to resolve
+        // tasks via a scan of the actor's own assigned list, which silently
+        // denied any selector that granted access to tasks the actor didn't
+        // own (e.g. a supervisor's wildcard grant). The resolver now goes
+        // through GetTaskAsync directly, so the selector layer alone decides
+        // visibility.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            EnforceConfigNoBackfill());
+
+        // Task lives on someone else entirely — actor never appears in any
+        // assigned/candidate list.
+        var someoneElse = Guid.NewGuid().ToString();
+        factory.FlowableStub.TasksById["task-other"] = new FlowableTaskSummary
+        {
+            Id = "task-other",
+            Assignee = someoneElse,
+            ProcessDefinitionId = "lead:1:abc"
+        };
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var roleStore = scope.ServiceProvider.GetRequiredService<IRoleStore>();
+            var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
+            var assignments = scope.ServiceProvider.GetRequiredService<IRoleAssignmentStore>();
+
+            var role = await roleStore.CreateAsync(new CreateRoleInput("TaskSupervisor", null), AdminUserId);
+            await grants.CreateAsync(new CreatePermissionGrantInput(
+                EntityKinds.Role, role.Id.ToString(),
+                Actions.Complete, "/workflowtask/*", "allow", 0), AdminUserId);
+            await assignments.AssignAsync(new CreateRoleAssignmentInput(
+                role.Id, EntityKinds.User, AdminUserId.ToString(), null), AdminUserId);
+        }
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/tasks/task-other/complete",
+            new { variables = (object?)null });
+
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task CompleteTask_MissingTask_Returns403_NotServerError()
+    {
+        // GetTaskAsync returns null for unknown ids; the authorizer must
+        // translate that to a 403 (fail closed) rather than letting a
+        // null-reference walk into the selector evaluator.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(
+            EnforceConfigNoBackfill());
+
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var roleStore = scope.ServiceProvider.GetRequiredService<IRoleStore>();
+            var grants = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
+            var assignments = scope.ServiceProvider.GetRequiredService<IRoleAssignmentStore>();
+
+            var role = await roleStore.CreateAsync(new CreateRoleInput("TaskSupervisor2", null), AdminUserId);
+            await grants.CreateAsync(new CreatePermissionGrantInput(
+                EntityKinds.Role, role.Id.ToString(),
+                Actions.Complete, "/workflowtask/*", "allow", 0), AdminUserId);
+            await assignments.AssignAsync(new CreateRoleAssignmentInput(
+                role.Id, EntityKinds.User, AdminUserId.ToString(), null), AdminUserId);
+        }
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/tasks/does-not-exist/complete",
+            new { variables = (object?)null });
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]

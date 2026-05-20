@@ -1,3 +1,4 @@
+using AutoNate.Web.Services.Agent;
 using AutoNate.Web.Services.Agent.Conversations;
 using AutoNate.Web.Services.Agent.Providers;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,5 +76,59 @@ public sealed class AgentConversationSummaryStoreTests
         var detail = await store.GetForUserAsync(conversation.Id, TestUserId);
         Assert.NotNull(detail);
         Assert.Equal(6, detail!.Messages.Count);
+    }
+
+    [Fact]
+    public async Task GetHeaderForUserAsync_returns_header_for_owner_and_null_for_others()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = factory.CreateClient();
+
+        using var scope = factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAgentConversationStore>();
+
+        var owner = Guid.NewGuid();
+        var intruder = Guid.NewGuid();
+        var conversation = await store.CreateAsync(
+            owner, pageKey: "header-test", connectionId: null,
+            providerKind: null, modelId: null);
+
+        var header = await store.GetHeaderForUserAsync(conversation.Id, owner);
+        Assert.NotNull(header);
+        Assert.Equal(conversation.Id, header!.Id);
+        Assert.Equal("header-test", header.PageKey);
+
+        var crossUser = await store.GetHeaderForUserAsync(conversation.Id, intruder);
+        Assert.Null(crossUser);
+
+        var missing = await store.GetHeaderForUserAsync(Guid.NewGuid(), owner);
+        Assert.Null(missing);
+    }
+
+    [Fact]
+    public async Task GetHeaderForUserAsync_does_not_emit_ConversationViewed_audit()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = factory.CreateClient();
+
+        using var scope = factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAgentConversationStore>();
+
+        var conversation = await store.CreateAsync(
+            TestUserId, pageKey: "audit-silence", connectionId: null,
+            providerKind: null, modelId: null);
+
+        // Drop create-time events so we're only measuring what the header
+        // path emits.
+        factory.RecordedAuditEvents.Clear();
+
+        _ = await store.GetHeaderForUserAsync(conversation.Id, TestUserId);
+
+        // GetForUserAsync emits ConversationViewed. The header path is a
+        // precondition check on the way to a send and must stay quiet —
+        // otherwise every chat send inflates the audit feed.
+        Assert.DoesNotContain(
+            factory.RecordedAuditEvents.Events,
+            e => e.EventType == AgentEventTypes.ConversationViewed);
     }
 }

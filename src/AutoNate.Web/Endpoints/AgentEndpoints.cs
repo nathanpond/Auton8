@@ -113,17 +113,21 @@ public static class AgentEndpoints
                     await http.Response.WriteAsync("pageContext.pageKey is required.", ct);
                     return;
                 }
-                var conv = await store.GetForUserAsync(id, userId, ct);
-                if (conv is null)
+                // Header-only lookup — we just need PageKey + ownership.
+                // GetForUserAsync would also pull every message + tool call
+                // and emit a ConversationViewed audit, neither of which
+                // belongs on the precondition path for a send.
+                var header = await store.GetHeaderForUserAsync(id, userId, ct);
+                if (header is null)
                 {
                     http.Response.StatusCode = StatusCodes.Status404NotFound;
                     return;
                 }
-                if (!string.Equals(pc.PageKey, conv.Conversation.PageKey, StringComparison.Ordinal))
+                if (!string.Equals(pc.PageKey, header.PageKey, StringComparison.Ordinal))
                 {
                     http.Response.StatusCode = StatusCodes.Status400BadRequest;
                     await http.Response.WriteAsync(
-                        $"pageContext.pageKey '{pc.PageKey}' does not match conversation pageKey '{conv.Conversation.PageKey}'.",
+                        $"pageContext.pageKey '{pc.PageKey}' does not match conversation pageKey '{header.PageKey}'.",
                         ct);
                     return;
                 }

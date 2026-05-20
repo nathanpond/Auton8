@@ -100,14 +100,18 @@ public sealed class AgentSession : IAgentSession
         PageContextInput? pageContext = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var detail = await _conversationStore.GetForUserAsync(conversationId, userId, cancellationToken);
-        if (detail is null)
+        // Header-only lookup — we read PageKey + ConnectionId here and load
+        // the real history later via LoadMessagesWithIdsAsync. Calling the
+        // full GetForUserAsync would pull every message + tool call (only to
+        // throw them away) and emit a spurious ConversationViewed audit on
+        // every send.
+        var conversation = await _conversationStore.GetHeaderForUserAsync(conversationId, userId, cancellationToken);
+        if (conversation is null)
         {
             yield return new AgentEvent.Error("Conversation not found.");
             yield return new AgentEvent.Done();
             yield break;
         }
-        var conversation = detail.Conversation;
 
         // Validate / normalize the SPA-supplied page snapshot. Defense in
         // depth: the endpoint already enforces these, but tests and direct

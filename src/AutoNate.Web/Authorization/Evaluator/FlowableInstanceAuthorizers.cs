@@ -46,7 +46,7 @@ public sealed class WorkflowTaskInstanceAuthorizer : IInstanceAuthorizer
             return false;
         }
 
-        var task = await ResolveTaskAsync(targetId, actorId.Value, cancellationToken);
+        var task = await _flowable.GetTaskAsync(targetId, cancellationToken);
         if (task is null)
         {
             return false;
@@ -61,18 +61,6 @@ public sealed class WorkflowTaskInstanceAuthorizer : IInstanceAuthorizer
             actor, Kind, action,
             ast => evaluator.Matches(ast, task.Id, facts),
             cancellationToken);
-    }
-
-    private async Task<Models.FlowableTaskSummary?> ResolveTaskAsync(
-        string taskId, Guid actorUserId, CancellationToken ct)
-    {
-        // IFlowableClient doesn't yet expose a "get task by id" — we scan the
-        // tasks assigned to the actor. That covers the headline `complete my
-        // task` flow but means multi-hop selectors (supervisor sees their
-        // supervisees' tasks) won't resolve until the resolver broadens.
-        // Records are unaffected — the SQL compiler walks the graph there.
-        var assigned = await _flowable.GetTasksAssignedToUserAsync(actorUserId.ToString(), ct);
-        return assigned.FirstOrDefault(t => string.Equals(t.Id, taskId, StringComparison.Ordinal));
     }
 
     // Tag set mirrors CoreEntityTypes.WorkflowTask.tags. `candidategroup` was

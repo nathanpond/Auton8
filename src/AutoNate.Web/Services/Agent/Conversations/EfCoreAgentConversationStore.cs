@@ -126,6 +126,18 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
             toolCalls.Select(ToToolCallDto).ToList());
     }
 
+    public async Task<AgentConversationDto?> GetHeaderForUserAsync(
+        Guid id,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.AgentConversations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId, cancellationToken);
+        return entity is null ? null : ToConversationDto(entity);
+    }
+
     public async Task<AgentConversationDto?> RenameAsync(
         Guid id,
         Guid userId,
