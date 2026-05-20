@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Tooltip } from "@mantine/core";
 import { CabinetDto, NoteDto, PageDto } from "@/api/content";
@@ -20,7 +20,12 @@ import { EditorTab, NotebookWithPages, PageTreeNode } from "./types";
 import { PageOverview } from "./PageOverview";
 import { VisualTextEditor } from "./VisualTextEditor";
 import { NapkinEditor } from "./NapkinEditor";
-import { DiagramEditor } from "./DiagramEditor";
+// Lazy-loaded — DiagramEditor pulls in the drawio postMessage/Yjs glue,
+// which isn't needed unless the user actually opens a diagram tab.
+// React.lazy only accepts default exports, so shim the named export.
+const DiagramEditor = lazy(() =>
+  import("./DiagramEditor").then((m) => ({ default: m.DiagramEditor }))
+);
 import {
   DndContext,
   PointerSensor,
@@ -415,11 +420,13 @@ export function EditorPane({
         />
       )}
       {activeTab?.kind === "diagram" && (
-        <DiagramEditor
-          note={activeNote}
-          noteName={activeTab.name}
-          revisionOverride={showNoteOverride ? noteRevisionOverride : null}
-        />
+        <Suspense fallback={<div style={{ flex: 1 }} />}>
+          <DiagramEditor
+            note={activeNote}
+            noteName={activeTab.name}
+            revisionOverride={showNoteOverride ? noteRevisionOverride : null}
+          />
+        </Suspense>
       )}
 
       {historyOpen && onPageTab && (
