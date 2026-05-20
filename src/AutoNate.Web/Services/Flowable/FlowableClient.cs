@@ -6,14 +6,26 @@ using System.Text.Json;
 using System.Xml.Linq;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace AutoNate.Web.Services.Flowable;
 
-public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptions> options) : IFlowableClient
+public sealed class FlowableClient(
+    HttpClient httpClient,
+    IOptions<FlowableOptions> options,
+    IMemoryCache cache) : IFlowableClient
 {
     private const int WorkflowExecutionQuerySize = 200;
     private const int WorkflowExecutionActivityQuerySize = 2000;
+    private const string ProcessDefinitionNameCacheKeyPrefix = "flowable:process-definition-name:";
+
+    // Process definitions are immutable per (key, version) in Flowable — a
+    // redeploy produces a new id, so once we've resolved id → name it never
+    // changes. Sliding TTL is plenty; the eviction is really about bounding
+    // memory if a deployment churns many definitions.
+    private static readonly TimeSpan ProcessDefinitionNameCacheTtl = TimeSpan.FromHours(24);
+
     private static readonly XNamespace BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -23,6 +35,7 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
 
     private readonly HttpClient _httpClient = httpClient;
     private readonly FlowableOptions _options = options.Value;
+    private readonly IMemoryCache _cache = cache;
 
     public async Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default)
     {
@@ -206,110 +219,150 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
 
     public async Task<IReadOnlyList<WorkflowExecutionSummary>> GetWorkflowExecutionsAsync(CancellationToken cancellationToken = default)
     {
-        using var historicResponse = await _httpClient.GetAsync(
+        // Four independent Flowable collections — kick them off concurrently
+        // so the wall-clock for the list page is bounded by the slowest, not
+        // the sum. Each response is consumed only after the merge below, so
+        // overlapping the fetches is safe.
+        var historicTask = _httpClient.GetAsync(
             $"service/history/historic-process-instances?sort=startTime&order=desc&size={WorkflowExecutionQuerySize}",
             cancellationToken);
-        await EnsureSuccessAsync(historicResponse, "query historic process instances");
-
-        using var runtimeResponse = await _httpClient.GetAsync(
+        var runtimeTask = _httpClient.GetAsync(
             $"service/runtime/process-instances?sort=startTime&order=desc&size={WorkflowExecutionQuerySize}",
             cancellationToken);
-        await EnsureSuccessAsync(runtimeResponse, "query runtime process instances");
-
-        using var tasksResponse = await _httpClient.GetAsync(
+        var tasksTask = _httpClient.GetAsync(
             $"service/runtime/tasks?sort=createTime&order=desc&size={WorkflowExecutionQuerySize}",
             cancellationToken);
-        await EnsureSuccessAsync(tasksResponse, "query runtime tasks");
-
-        using var activitiesResponse = await _httpClient.GetAsync(
+        var activitiesTask = _httpClient.GetAsync(
             $"service/history/historic-activity-instances?sort=startTime&order=desc&size={WorkflowExecutionActivityQuerySize}",
             cancellationToken);
-        await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
 
-        var historicPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(historicResponse, cancellationToken);
-        var runtimePayload = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(runtimeResponse, cancellationToken);
-        var tasksPayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(tasksResponse, cancellationToken);
-        var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
-        var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(historicPayload.Data, cancellationToken);
-
-        var lastActivityByProcessInstanceId = activitiesPayload.Data
-            .Where(activity => !string.IsNullOrWhiteSpace(activity.ProcessInstanceId))
-            .GroupBy(activity => activity.ProcessInstanceId!, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => group
-                    .Select(activity => MaxTimestamp(activity.EndTime, activity.StartTime))
-                    .Where(value => value.HasValue)
-                    .DefaultIfEmpty()
-                    .Max(),
-                StringComparer.Ordinal);
-
-        var runtimeById = runtimePayload.Data
-            .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
-            .ToDictionary(instance => instance.Id!, StringComparer.Ordinal);
-
-        var currentTaskByProcessInstanceId = tasksPayload.Data
-            .Where(task => !string.IsNullOrWhiteSpace(task.ProcessInstanceId))
-            .GroupBy(task => task.ProcessInstanceId!, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => group
-                    .OrderBy(task => task.CreateTime ?? DateTimeOffset.MaxValue)
-                    .ThenBy(task => task.Id, StringComparer.Ordinal)
-                    .First(),
-                StringComparer.Ordinal);
-
-        return historicPayload.Data
-            .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
-            .Select(instance =>
+        HttpResponseMessage? historicResponse = null;
+        HttpResponseMessage? runtimeResponse = null;
+        HttpResponseMessage? tasksResponse = null;
+        HttpResponseMessage? activitiesResponse = null;
+        try
+        {
+            try
             {
-                runtimeById.TryGetValue(instance.Id!, out var runtimeInstance);
-                currentTaskByProcessInstanceId.TryGetValue(instance.Id!, out var currentTask);
-                processDefinitionNames.TryGetValue(instance.ProcessDefinitionId ?? string.Empty, out var workflowModelName);
+                await Task.WhenAll(historicTask, runtimeTask, tasksTask, activitiesTask);
+            }
+            catch
+            {
+                // WhenAll waits for every task to finish before throwing, so
+                // each task is .IsCompleted here. Reclaim responses that
+                // succeeded before we let the original exception propagate.
+                // await on a completed-successfully task returns synchronously
+                // — it's just the way to get the value without tripping the
+                // VSTHRD103 analyzer for .Result.
+                if (historicTask.IsCompletedSuccessfully) (await historicTask).Dispose();
+                if (runtimeTask.IsCompletedSuccessfully) (await runtimeTask).Dispose();
+                if (tasksTask.IsCompletedSuccessfully) (await tasksTask).Dispose();
+                if (activitiesTask.IsCompletedSuccessfully) (await activitiesTask).Dispose();
+                throw;
+            }
 
-                var isRunning = runtimeInstance is not null;
-                var currentStep = isRunning
-                    ? FirstNonEmpty(currentTask?.Name, runtimeInstance?.ActivityId)
-                    : null;
+            historicResponse = await historicTask;
+            runtimeResponse = await runtimeTask;
+            tasksResponse = await tasksTask;
+            activitiesResponse = await activitiesTask;
 
-                lastActivityByProcessInstanceId.TryGetValue(instance.Id!, out var lastActivityAtUtc);
-                var lastActivityAt = MaxTimestamp(
-                    lastActivityAtUtc,
-                    instance.EndTime,
-                    currentTask?.CreateTime,
-                    instance.StartTime);
+            await EnsureSuccessAsync(historicResponse, "query historic process instances");
+            await EnsureSuccessAsync(runtimeResponse, "query runtime process instances");
+            await EnsureSuccessAsync(tasksResponse, "query runtime tasks");
+            await EnsureSuccessAsync(activitiesResponse, "query historic activity instances");
 
-                // Any non-empty DeleteReason on a finished process means it
-                // was torn down (cancelled) rather than reaching an end event.
-                // We don't pin the exact reason string — Delete fully removes
-                // the historic record, so the only reasons that survive here
-                // are cancellations (ours or operator-issued).
-                var status = isRunning
-                    ? "Running"
-                    : !string.IsNullOrWhiteSpace(instance.DeleteReason)
-                        ? "Cancelled"
-                        : "Complete";
+            var historicPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricProcessInstanceResponse>>(historicResponse, cancellationToken);
+            var runtimePayload = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(runtimeResponse, cancellationToken);
+            var tasksPayload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(tasksResponse, cancellationToken);
+            var activitiesPayload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(activitiesResponse, cancellationToken);
+            var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(historicPayload.Data, cancellationToken);
 
-                return new WorkflowExecutionSummary
+            var lastActivityByProcessInstanceId = activitiesPayload.Data
+                .Where(activity => !string.IsNullOrWhiteSpace(activity.ProcessInstanceId))
+                .GroupBy(activity => activity.ProcessInstanceId!, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .Select(activity => MaxTimestamp(activity.EndTime, activity.StartTime))
+                        .Where(value => value.HasValue)
+                        .DefaultIfEmpty()
+                        .Max(),
+                    StringComparer.Ordinal);
+
+            var runtimeById = runtimePayload.Data
+                .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
+                .ToDictionary(instance => instance.Id!, StringComparer.Ordinal);
+
+            var currentTaskByProcessInstanceId = tasksPayload.Data
+                .Where(task => !string.IsNullOrWhiteSpace(task.ProcessInstanceId))
+                .GroupBy(task => task.ProcessInstanceId!, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderBy(task => task.CreateTime ?? DateTimeOffset.MaxValue)
+                        .ThenBy(task => task.Id, StringComparer.Ordinal)
+                        .First(),
+                    StringComparer.Ordinal);
+
+            return historicPayload.Data
+                .Where(instance => !string.IsNullOrWhiteSpace(instance.Id))
+                .Select(instance =>
                 {
-                    Id = instance.Id!,
-                    Name = string.IsNullOrWhiteSpace(instance.Name) ? null : instance.Name,
-                    WorkflowModelName = workflowModelName,
-                    StartedAtUtc = instance.StartTime,
-                    LastActivityAtUtc = lastActivityAt,
-                    Status = status,
-                    CurrentStep = currentStep,
-                    ProcessDefinitionId = string.IsNullOrWhiteSpace(instance.ProcessDefinitionId)
-                        ? null
-                        : instance.ProcessDefinitionId,
-                    StartUserId = string.IsNullOrWhiteSpace(instance.StartUserId)
-                        ? null
-                        : instance.StartUserId
-                };
-            })
-            .OrderByDescending(execution => execution.StartedAtUtc ?? DateTimeOffset.MinValue)
-            .ThenByDescending(execution => execution.Id, StringComparer.Ordinal)
-            .ToArray();
+                    runtimeById.TryGetValue(instance.Id!, out var runtimeInstance);
+                    currentTaskByProcessInstanceId.TryGetValue(instance.Id!, out var currentTask);
+                    processDefinitionNames.TryGetValue(instance.ProcessDefinitionId ?? string.Empty, out var workflowModelName);
+
+                    var isRunning = runtimeInstance is not null;
+                    var currentStep = isRunning
+                        ? FirstNonEmpty(currentTask?.Name, runtimeInstance?.ActivityId)
+                        : null;
+
+                    lastActivityByProcessInstanceId.TryGetValue(instance.Id!, out var lastActivityAtUtc);
+                    var lastActivityAt = MaxTimestamp(
+                        lastActivityAtUtc,
+                        instance.EndTime,
+                        currentTask?.CreateTime,
+                        instance.StartTime);
+
+                    // Any non-empty DeleteReason on a finished process means it
+                    // was torn down (cancelled) rather than reaching an end event.
+                    // We don't pin the exact reason string — Delete fully removes
+                    // the historic record, so the only reasons that survive here
+                    // are cancellations (ours or operator-issued).
+                    var status = isRunning
+                        ? "Running"
+                        : !string.IsNullOrWhiteSpace(instance.DeleteReason)
+                            ? "Cancelled"
+                            : "Complete";
+
+                    return new WorkflowExecutionSummary
+                    {
+                        Id = instance.Id!,
+                        Name = string.IsNullOrWhiteSpace(instance.Name) ? null : instance.Name,
+                        WorkflowModelName = workflowModelName,
+                        StartedAtUtc = instance.StartTime,
+                        LastActivityAtUtc = lastActivityAt,
+                        Status = status,
+                        CurrentStep = currentStep,
+                        ProcessDefinitionId = string.IsNullOrWhiteSpace(instance.ProcessDefinitionId)
+                            ? null
+                            : instance.ProcessDefinitionId,
+                        StartUserId = string.IsNullOrWhiteSpace(instance.StartUserId)
+                            ? null
+                            : instance.StartUserId
+                    };
+                })
+                .OrderByDescending(execution => execution.StartedAtUtc ?? DateTimeOffset.MinValue)
+                .ThenByDescending(execution => execution.Id, StringComparer.Ordinal)
+                .ToArray();
+        }
+        finally
+        {
+            historicResponse?.Dispose();
+            runtimeResponse?.Dispose();
+            tasksResponse?.Dispose();
+            activitiesResponse?.Dispose();
+        }
     }
 
     private async Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
@@ -323,24 +376,64 @@ public sealed class FlowableClient(HttpClient httpClient, IOptions<FlowableOptio
             .ToArray();
 
         var namesById = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (processDefinitionIds.Length == 0)
+        {
+            return namesById;
+        }
 
+        // Hit the cache first. Process-definition id → name is stable for the
+        // lifetime of a deployment (Flowable produces a new id on redeploy),
+        // so warmed entries are reusable across requests.
+        var misses = new List<string>();
         foreach (var processDefinitionId in processDefinitionIds)
         {
-            using var processDefinitionResponse = await _httpClient.GetAsync(
-                $"service/repository/process-definitions/{Uri.EscapeDataString(processDefinitionId!)}",
-                cancellationToken);
-            await EnsureSuccessAsync(processDefinitionResponse, $"query process definition '{processDefinitionId}'");
-
-            var processDefinition = await DeserializeAsync<FlowableProcessDefinitionResponse>(processDefinitionResponse, cancellationToken);
-            var resolvedName = FirstNonEmpty(processDefinition.Name, processDefinition.Key, processDefinition.Id);
-
-            if (!string.IsNullOrWhiteSpace(resolvedName))
+            var key = ProcessDefinitionNameCacheKeyPrefix + processDefinitionId;
+            if (_cache.TryGetValue(key, out string? cached) && !string.IsNullOrWhiteSpace(cached))
             {
-                namesById[processDefinitionId!] = resolvedName;
+                namesById[processDefinitionId!] = cached!;
+            }
+            else
+            {
+                misses.Add(processDefinitionId!);
             }
         }
 
+        if (misses.Count == 0)
+        {
+            return namesById;
+        }
+
+        // Fan misses out in parallel — the previous serial foreach turned a
+        // distinct-definitions-per-page count into that many round trips
+        // stacked end to end.
+        var fetchTasks = misses
+            .Select(id => FetchProcessDefinitionNameAsync(id, cancellationToken))
+            .ToArray();
+        var resolved = await Task.WhenAll(fetchTasks);
+
+        var cacheEntryOptions = new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = ProcessDefinitionNameCacheTtl
+        };
+        for (var i = 0; i < misses.Count; i++)
+        {
+            var name = resolved[i];
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            namesById[misses[i]] = name!;
+            _cache.Set(ProcessDefinitionNameCacheKeyPrefix + misses[i], name, cacheEntryOptions);
+        }
         return namesById;
+    }
+
+    private async Task<string?> FetchProcessDefinitionNameAsync(
+        string processDefinitionId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(processDefinitionId)}",
+            cancellationToken);
+        await EnsureSuccessAsync(response, $"query process definition '{processDefinitionId}'");
+        var processDefinition = await DeserializeAsync<FlowableProcessDefinitionResponse>(response, cancellationToken);
+        return FirstNonEmpty(processDefinition.Name, processDefinition.Key, processDefinition.Id);
     }
 
     public async Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default)

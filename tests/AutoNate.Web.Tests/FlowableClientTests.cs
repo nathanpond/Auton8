@@ -5,6 +5,7 @@ using System.Text.Json;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -1167,7 +1168,8 @@ public sealed class FlowableClientTests
     {
         var stub = new StubHttpMessageHandler();
         var http = new HttpClient(stub) { BaseAddress = new Uri(BaseAddress) };
-        var client = new FlowableClient(http, Options.Create(new FlowableOptions { BaseUrl = BaseAddress }));
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var client = new FlowableClient(http, Options.Create(new FlowableOptions { BaseUrl = BaseAddress }), cache);
         return (client, stub);
     }
 }
