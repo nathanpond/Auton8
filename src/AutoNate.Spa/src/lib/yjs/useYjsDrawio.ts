@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 
@@ -8,9 +8,15 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 const LOCAL_ORIGIN = Symbol("yjs-drawio-local");
 
 export interface UseYjsDrawioResult {
-  // XML to feed the iframe's initial `load` postMessage. Reflects the
-  // Y.Text state captured at hook-mount time.
-  initialXml: string;
+  // Always-current XML accessor. Reads `ytext.toString()` at the moment
+  // it's called — NOT captured at hook-mount, because Hocuspocus's
+  // server-state sync arrives asynchronously and a stale empty snapshot
+  // taken at mount time becomes "wrong" within milliseconds. The iframe
+  // init handler calls this just-in-time when it actually needs the XML
+  // (i.e., after drawio reports `event: "init"` and is ready to receive
+  // a `load` action), which closes the race that made saved diagrams
+  // open blank.
+  getCurrentXml: () => string;
   // Subscribe to remote XML updates. Returns the unsubscribe function.
   // The caller is expected to postMessage a fresh `load` action to the
   // drawio iframe — drawio has no per-shape diff protocol, so any remote
@@ -40,11 +46,10 @@ export function useYjsDrawio(args: {
 
   const ytext = useMemo(() => doc.getText("xml"), [doc]);
 
-  // Captured once at hook-mount. Subsequent changes go through the
-  // observer / postMessage path so we never re-mount the iframe purely
-  // because the React tree re-rendered.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const initialXml = useMemo<string>(() => ytext.toString(), []);
+  // Always-current accessor — Hocuspocus's server-state sync is async,
+  // so reading ytext at mount time may give "" and only later be filled
+  // in. Reading at call time avoids that race.
+  const getCurrentXml = useCallback(() => ytext.toString(), [ytext]);
 
   // Subscriber registry. We expose a thin subscribe API rather than
   // a useEffect-from-the-consumer pattern so DiagramEditor can wire the
@@ -82,5 +87,5 @@ export function useYjsDrawio(args: {
     }, LOCAL_ORIGIN);
   };
 
-  return { initialXml, onRemoteXml, pushLocalXml };
+  return { getCurrentXml, onRemoteXml, pushLocalXml };
 }

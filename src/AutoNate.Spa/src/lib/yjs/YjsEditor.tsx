@@ -13,6 +13,13 @@ import type { YjsRole } from "./ticket";
 import { useBlockNoteWithYjs } from "./useBlockNoteWithYjs";
 import { useResolveUsersRef } from "./useResolveUsers";
 import { userCursorColor } from "./userColor";
+import { useEffect } from "react";
+import { EmbedDepthContext } from "@/lib/blocknote/PageEditorContext";
+import { NoteSlashController } from "@/lib/blocknote/NoteSlashController";
+import {
+  clearPageEditorSignal,
+  setPageEditorSignal
+} from "@/lib/blocknote/pageEditorSignal";
 
 interface Props {
   handle: YjsDocumentHandle;
@@ -85,6 +92,7 @@ function YjsEditorInner({
   currentUserName: string;
   resolveUsers: ReturnType<typeof useResolveUsersRef>["resolve"];
 }) {
+  const documentName = handle.provider.configuration.name;
   const editor = useBlockNoteWithYjs({
     doc: handle.doc,
     provider: handle.provider,
@@ -97,9 +105,30 @@ function YjsEditorInner({
     role,
     // The provider's `name` is the doc identifier we connected with
     // (`page:<guid>` or `note:<guid>`) — pass it through so comment
-    // audit events land on the right resource server-side.
-    documentName: handle.provider.configuration.name
+    // audit events land on the right resource server-side. The hook
+    // also uses the `page:` prefix to gate the noteEmbed schema.
+    documentName
   });
+
+  // Parse the page id from the doc identifier for page editors. Only
+  // these get the `/note` slash command and the noteEmbed render context.
+  const pageId = documentName.startsWith("page:")
+    ? documentName.slice("page:".length)
+    : null;
+
+  // Register the editor's pageId + editable state in a per-editor signal
+  // store. The noteEmbed block render reads from this signal using the
+  // BlockNote editor instance as the key. We don't rely on React context
+  // because Tiptap's ReactNodeViewRenderer renders custom blocks in a
+  // way that isn't guaranteed to inherit parent contexts (depending on
+  // the Tiptap version's portal strategy). The signal sidesteps this:
+  // the editor instance is reliably handed to the block render via
+  // props, so the lookup always works.
+  useEffect(() => {
+    if (!pageId) return;
+    setPageEditorSignal(editor, { pageId, editable });
+    return () => clearPageEditorSignal(editor);
+  }, [editor, pageId, editable]);
 
   // We take manual control of:
   //   - layout (`renderEditor={false}` + explicit <BlockNoteViewEditor />)
@@ -116,7 +145,12 @@ function YjsEditorInner({
   //     the editor highlights the associated text (via the comments
   //     extension's selection decorations) but does NOT pop the inline
   //     thread — the sidebar already shows it.
-  return (
+  // Page editors mount the `/note` slash controller + the contexts the
+  // noteEmbed block reads. Both providers are no-ops for note editors
+  // (pageId is null), so we still wrap them universally to keep one
+  // render path. EmbedDepthContext starts at 0 here; nested embeds bump
+  // it inside their own render.
+  const body = (
     <BlockNoteView
       editor={editor}
       editable={editable}
@@ -128,6 +162,7 @@ function YjsEditorInner({
       <div style={{ display: "flex", alignItems: "stretch", width: "100%" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <BlockNoteViewEditor />
+          {pageId && <NoteSlashController pageId={pageId} />}
           <FloatingComposerController />
           {!showSidebar && <FloatingThreadController />}
         </div>
@@ -151,4 +186,6 @@ function YjsEditorInner({
       </div>
     </BlockNoteView>
   );
+
+  return <EmbedDepthContext.Provider value={0}>{body}</EmbedDepthContext.Provider>;
 }

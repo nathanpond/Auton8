@@ -5,8 +5,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.yml"
-COMPOSE=(docker compose -f "$COMPOSE_FILE")
+# Pin the compose project name so every invocation puts containers on the
+# same Docker network. Without `-p`, docker compose tries to derive it from
+# the working directory or COMPOSE_PROJECT_NAME env var — and an empty
+# value (or a different cwd) silently puts new containers on a fresh
+# network that can't reach existing services. This bit us: a rebuild
+# landed hocuspocus on `autonate_default` while postgres was on
+# `infra_default`, so DNS for `postgres` failed and every Y.Doc load
+# returned empty (drawings appeared blank).
+COMPOSE=(docker compose -f "$COMPOSE_FILE" -p infra)
 FLOWABLE_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/flowable/.build-input-hash"
+HOCUSPOCUS_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/hocuspocus/.build-input-hash"
 
 POSTGRES_PORT="${AUTONATE_POSTGRES_PORT:-5432}"
 FLOWABLE_PORT="${AUTONATE_FLOWABLE_PORT:-8080}"
@@ -84,6 +93,57 @@ flowable_build_required() {
 
 record_flowable_build_hash() {
   printf '%s\n' "$1" > "$FLOWABLE_BUILD_STAMP_FILE"
+}
+
+# Hocuspocus mirror of the Flowable rebuild-on-source-change pattern.
+# The image is built from services/hocuspocus/{Dockerfile, package*.json,
+# tsconfig.json, src/**}; any change to those files invalidates the
+# stamp and forces a rebuild. Without this, `ensure-up.sh` runs would
+# keep the previous image (and a stale dist/) even after the developer
+# edits TypeScript locally, which is exactly the loop we just hit.
+compute_hocuspocus_build_hash() {
+  local path
+  local hash_input=()
+
+  hash_input+=("$REPO_ROOT/services/hocuspocus/Dockerfile")
+  hash_input+=("$REPO_ROOT/services/hocuspocus/package.json")
+  if [[ -f "$REPO_ROOT/services/hocuspocus/package-lock.json" ]]; then
+    hash_input+=("$REPO_ROOT/services/hocuspocus/package-lock.json")
+  fi
+  hash_input+=("$REPO_ROOT/services/hocuspocus/tsconfig.json")
+
+  while IFS= read -r path; do
+    hash_input+=("$path")
+  done < <(find "$REPO_ROOT/services/hocuspocus/src" -type f | LC_ALL=C sort)
+
+  for path in "${hash_input[@]}"; do
+    printf '%s\n' "$path"
+    shasum "$path"
+  done | shasum | awk '{print $1}'
+}
+
+current_hocuspocus_build_hash() {
+  if [[ -f "$HOCUSPOCUS_BUILD_STAMP_FILE" ]]; then
+    cat "$HOCUSPOCUS_BUILD_STAMP_FILE"
+    return 0
+  fi
+
+  return 1
+}
+
+hocuspocus_build_required() {
+  local desired_hash="$1"
+  local current_hash
+
+  if ! current_hash="$(current_hocuspocus_build_hash)"; then
+    return 0
+  fi
+
+  [[ "$current_hash" != "$desired_hash" ]]
+}
+
+record_hocuspocus_build_hash() {
+  printf '%s\n' "$1" > "$HOCUSPOCUS_BUILD_STAMP_FILE"
 }
 
 compose_service_container_id() {
@@ -253,6 +313,7 @@ main() {
     "$REPO_ROOT/infra/mounts/dapr-dashboard/components" \
     "$REPO_ROOT/infra/mounts/flowable-dapr/components" \
     "$REPO_ROOT/infra/mounts/flowable" \
+    "$REPO_ROOT/infra/mounts/hocuspocus" \
     "$REPO_ROOT/infra/mounts/dapr-placement"
 
   cp "$REPO_ROOT"/infra/dapr/components/*.yaml "$REPO_ROOT/infra/mounts/dapr-dashboard/components/"
@@ -271,7 +332,20 @@ main() {
     record_flowable_build_hash "$desired_flowable_hash"
   fi
 
-  if (( should_rebuild_flowable == 0 )) && all_services_ready; then
+  local desired_hocuspocus_hash
+  desired_hocuspocus_hash="$(compute_hocuspocus_build_hash)"
+
+  local should_rebuild_hocuspocus=0
+  if hocuspocus_build_required "$desired_hocuspocus_hash"; then
+    should_rebuild_hocuspocus=1
+    log "Hocuspocus build inputs changed. Rebuilding the Hocuspocus image."
+    "${COMPOSE[@]}" build hocuspocus
+    record_hocuspocus_build_hash "$desired_hocuspocus_hash"
+  fi
+
+  if (( should_rebuild_flowable == 0 )) \
+     && (( should_rebuild_hocuspocus == 0 )) \
+     && all_services_ready; then
     log "Required infrastructure is already running and ready."
     exit 0
   fi
@@ -280,9 +354,19 @@ main() {
     if (( should_rebuild_flowable == 1 )); then
       log "Recreating Flowable services to apply the rebuilt image."
       "${COMPOSE[@]}" up -d --no-deps --force-recreate flowable flowable-dapr
-    else
-      log "Infrastructure containers exist but are not ready yet. Waiting for readiness."
     fi
+    if (( should_rebuild_hocuspocus == 1 )); then
+      log "Recreating Hocuspocus to apply the rebuilt image."
+      "${COMPOSE[@]}" up -d --no-deps --force-recreate hocuspocus
+    fi
+    # Always ask compose to bring up every required service — `bootstrapped`
+    # only checks that containers EXIST, not that they're running. After a
+    # Docker Desktop restart (or a manual `docker stop`), the containers
+    # exist but are in `Exited` state and the wait loop below would spin
+    # forever expecting them to come up on their own. Compose `up` is
+    # idempotent — running containers stay running, exited ones start.
+    log "Ensuring required infrastructure is running."
+    "${COMPOSE[@]}" up -d "${REQUIRED_SERVICES[@]}"
   else
     log "Starting required infrastructure from infra/docker-compose.yml."
     "${COMPOSE[@]}" up -d "${REQUIRED_SERVICES[@]}"

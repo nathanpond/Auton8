@@ -21,6 +21,11 @@ public partial class Note
 
     public string ContentJsonb { get; set; } = null!;
 
+    // Rendered SVG snapshot of the note's content, written by the SPA on
+    // idle for drawing/diagram kinds. Used by the page-embed renderer in
+    // view mode; null for richtext (which renders blocks directly).
+    public string? PreviewSvg { get; set; }
+
     public int CurrentVersionNumber { get; set; }
 
     public int SortOrder { get; set; }

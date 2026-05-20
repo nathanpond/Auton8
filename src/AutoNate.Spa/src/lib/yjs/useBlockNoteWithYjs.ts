@@ -10,6 +10,7 @@ import type { ResolveUsersFn } from "./useResolveUsers";
 import { ReadOnlyThreadStoreAuth } from "./ReadOnlyThreadStoreAuth";
 import type { YjsRole } from "./ticket";
 import { wrapThreadStoreWithAuditing } from "./commentAudit";
+import { pageBlockNoteSchema } from "@/lib/blocknote/pageSchema";
 
 export interface YjsCurrentUser {
   // Backend user Guid. Used as the principal for the YjsThreadStore's
@@ -65,7 +66,16 @@ export function useBlockNoteWithYjs(args: {
   // bus alongside the existing PageUpdated webhook event.
   const threadStore = wrapThreadStoreWithAuditing(rawThreadStore, args.documentName);
 
+  // Page editors get the extended schema that registers the `noteEmbed`
+  // block (used by the `/note` slash command). Richtext-note editors keep
+  // the default schema — same-page note embedding is meaningful only on a
+  // page, and a default-schema editor opening a page would silently drop
+  // any noteEmbed nodes. Derive from documentName so this can't drift
+  // from the doc identity (no separate prop for callers to forget).
+  const isPage = args.documentName.startsWith("page:");
+
   return useCreateBlockNote({
+    ...(isPage ? { schema: pageBlockNoteSchema } : {}),
     collaboration: {
       // BlockNote types provider as `{ awareness?: Awareness | undefined }`
       // and HocuspocusProvider types it as `Awareness | null` (the null

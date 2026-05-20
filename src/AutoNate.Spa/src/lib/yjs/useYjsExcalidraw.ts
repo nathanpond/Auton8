@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type {
@@ -55,7 +55,38 @@ export function useYjsExcalidraw(args: {
   provider: HocuspocusProvider;
   excalidrawAPI: ExcalidrawImperativeAPI | null;
 }): UseYjsExcalidrawResult {
-  const { doc, excalidrawAPI } = args;
+  const { doc, provider, excalidrawAPI } = args;
+
+  // Gate the local→Y.Doc writer on (a) Hocuspocus's initial sync AND
+  // (b) the bootstrap effect having run. Without this, Excalidraw's
+  // first onChange (fired with empty `elements: []` because
+  // `initialData` was captured before Hocuspocus delivered the saved
+  // state) gets interpreted by the diff below as "user deleted
+  // everything", silently wiping the saved drawing on open.
+  //
+  // `provider.synced` is necessary but not sufficient: sync can finish
+  // before Excalidraw mounts, and Excalidraw still fires its initial
+  // empty onChange AFTER mount and BEFORE the bootstrap effect re-applies
+  // the saved scene. `bootstrappedRef` closes that second window — the
+  // bootstrap effect flips it true after calling updateScene (or after
+  // confirming Y.Doc has nothing to bootstrap).
+  const syncedRef = useRef<boolean>(provider.synced);
+  const bootstrappedRef = useRef<boolean>(false);
+  // Flag set while we're pushing Y.Doc state back to Excalidraw to recover
+  // from the spurious-empty-onChange race; prevents the resulting echo
+  // onChange from re-triggering the recovery and looping forever.
+  const recoveringRef = useRef<boolean>(false);
+  useEffect(() => {
+    syncedRef.current = provider.synced;
+    if (provider.synced) return;
+    const onSynced = () => {
+      syncedRef.current = true;
+    };
+    provider.on("synced", onSynced);
+    return () => {
+      provider.off("synced", onSynced);
+    };
+  }, [provider]);
 
   // Stable references to the shared containers — fetched once per Y.Doc.
   const elementsArray = useMemo(
@@ -114,6 +145,29 @@ export function useYjsExcalidraw(args: {
     elementsArray.observeDeep(onElementsChange);
     appStateMap.observe(onAppStateChange);
 
+    // Bootstrap the scene from whatever's currently in Y.Doc. Hocuspocus's
+    // initial server-state sync is async, so it may have landed AFTER
+    // Excalidraw mounted (when `initialData` was captured empty) but
+    // BEFORE this observer is set up — neither path delivers the saved
+    // content to Excalidraw, leaving the canvas blank on a saved
+    // drawing. Applying once on observer-attach closes the race. The
+    // bootstrappedRef flag also unlocks the local writer (see onChange
+    // below) so an empty Excalidraw onChange that fires before this
+    // runs can't wipe the saved scene.
+    const currentElements = elementsArray.toArray().map(yMapToPojo);
+    const currentAppState = yMapToPojo(appStateMap);
+    if (currentElements.length > 0 || Object.keys(currentAppState).length > 0) {
+      excalidrawAPI.updateScene({
+        elements: currentElements as unknown as Parameters<
+          typeof excalidrawAPI.updateScene
+        >[0]["elements"],
+        appState: currentAppState as unknown as Parameters<
+          typeof excalidrawAPI.updateScene
+        >[0]["appState"]
+      });
+    }
+    bootstrappedRef.current = true;
+
     return () => {
       elementsArray.unobserveDeep(onElementsChange);
       appStateMap.unobserve(onAppStateChange);
@@ -129,6 +183,51 @@ export function useYjsExcalidraw(args: {
     elements: readonly ExcalidrawElement[],
     appState: unknown
   ) => {
+    // Refuse to write until BOTH conditions hold:
+    //   1. Hocuspocus has completed its initial sync (server's saved
+    //      state has been merged into the Y.Doc).
+    //   2. The bootstrap effect has run (Excalidraw has been
+    //      updateScene'd with whatever was in Y.Doc, so any incoming
+    //      onChange reflects the real scene — not an empty mount
+    //      state that hasn't seen the saved data yet).
+    // Without (2), Excalidraw's first onChange post-mount fires with
+    // `elements: []` AFTER `synced` becomes true but BEFORE the
+    // bootstrap effect, and the diff below interprets that as "user
+    // deleted everything" — silently wiping every saved element.
+    if (!syncedRef.current || !bootstrappedRef.current) return;
+    // Empty-onChange-against-non-empty-Y.Doc guard. Excalidraw can fire
+    // a spurious empty onChange after a refresh (the visual "drawing
+    // briefly shows, then flashes blank" the user sees) — interpreting
+    // that as "user deleted everything" wipes the saved scene. Refuse
+    // the destructive diff AND push the saved Y.Doc state back into
+    // Excalidraw so the canvas re-renders the drawing the data layer
+    // actually has. recoveringRef breaks the loop so the resulting
+    // echo-onChange doesn't trigger another recovery push.
+    if (elements.length === 0 && elementsArray.length > 0) {
+      if (!recoveringRef.current) {
+        recoveringRef.current = true;
+        const recovered = elementsArray.toArray().map(yMapToPojo);
+        const recoveredAppState = yMapToPojo(appStateMap);
+        excalidrawAPI?.updateScene({
+          elements: recovered as unknown as Parameters<
+            NonNullable<typeof excalidrawAPI>["updateScene"]
+          >[0]["elements"],
+          appState: recoveredAppState as unknown as Parameters<
+            NonNullable<typeof excalidrawAPI>["updateScene"]
+          >[0]["appState"]
+        });
+        // Clear the flag a tick later — Excalidraw's echo onChange
+        // fires synchronously after updateScene, so the flag has
+        // already short-circuited it by the time this microtask runs.
+        // The 250 ms slack catches any additional empty-onChange burst
+        // from the same race without permanently blocking legitimate
+        // user clears.
+        setTimeout(() => {
+          recoveringRef.current = false;
+        }, 250);
+      }
+      return;
+    }
     doc.transact(() => {
       const incomingIds = new Set<string>();
       const currentById = new Map<string, Y.Map<unknown>>();

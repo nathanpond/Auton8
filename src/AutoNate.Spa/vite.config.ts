@@ -6,20 +6,22 @@ import type { ProxyOptions } from "vite";
 const backendTarget = process.env.ASPNETCORE_URL ?? "http://localhost:5108";
 const wsBackendTarget = backendTarget.replace(/^http/, "ws");
 
-// Hard-refreshes yank the browser-side WebSocket without a clean close, and
-// the http-proxy that Vite uses logs the resulting TCP reset as a noisy
-// "ws proxy socket error: ECONNRESET" stack. The connection IS torn down,
-// nothing's broken; the next page load reconnects. Swallow that one error
-// code so the dev console stays readable. Any other proxy error still bubbles.
+// Hard-refreshes (and React Strict Mode's mount/unmount churn) yank the
+// browser-side WebSocket without a clean close, and the http-proxy that
+// Vite uses logs the resulting socket error as a noisy stack trace.
+// The connection IS torn down, nothing's broken; the next page load
+// reconnects. Swallow the disconnect-related error codes so the dev
+// console stays readable. Any other proxy error still bubbles.
 type ProxyConfigureCallback = NonNullable<ProxyOptions["configure"]>;
+const QUIET_WS_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ECONNABORTED"]);
 const silenceWsResetNoise: ProxyConfigureCallback = (proxy) => {
-  const isReset = (err: unknown) =>
+  const isQuietCode = (err: unknown) =>
     typeof err === "object" &&
     err !== null &&
     "code" in err &&
-    (err as { code?: string }).code === "ECONNRESET";
+    QUIET_WS_ERROR_CODES.has((err as { code?: string }).code ?? "");
   proxy.on("error", (err) => {
-    if (isReset(err)) return;
+    if (isQuietCode(err)) return;
     console.error(err);
   });
   proxy.on("econnreset", () => {

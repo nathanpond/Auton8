@@ -2674,6 +2674,18 @@ internal static class DatabaseSchemaInitializer
             ON notes (page_id, page_note_index);
         """;
 
+    // SVG snapshot for drawing/diagram notes. Written by the SPA on idle
+    // (Excalidraw exportToSvg / draw.io postMessage export) via PATCH, kept
+    // out of the Yjs document on purpose so the CRDT update log doesn't
+    // accumulate 50–200 KB of SVG per save. The page-embed renderer reads
+    // this column to render a note's preview inline in view mode without
+    // mounting the source editor.
+    private const string NotePreviewSvgSql =
+        """
+        ALTER TABLE notes
+            ADD COLUMN IF NOT EXISTS preview_svg TEXT NULL;
+        """;
+
     // Per-user page favorites. Composite PK (page_id, user_id) makes
     // PUT idempotent via ON CONFLICT DO NOTHING. Cascade on page delete so
     // favorites disappear with the page they pointed at.
@@ -2813,6 +2825,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(ContentHierarchySchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentLocatorSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentNotePageIndexSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(NotePreviewSvgSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageFavoritesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(YjsDocumentsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);

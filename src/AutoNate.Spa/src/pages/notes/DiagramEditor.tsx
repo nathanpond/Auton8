@@ -1,11 +1,16 @@
 import { useEffect, useRef } from "react";
-import { NoteDto } from "@/api/content";
+import { NoteDto, updateNote as patchNote } from "@/api/content";
 import { useUpdateNote } from "@/hooks/useContent";
 import { useYjsDocument, type YjsDocumentHandle } from "@/lib/yjs/useYjsDocument";
 import { useYjsDrawio } from "@/lib/yjs/useYjsDrawio";
 import { ConnectionStatusPill } from "@/lib/yjs/ConnectionStatusPill";
 import { EditableNoteTitle } from "./EditableNoteTitle";
 import { notesTheme } from "./notesTheme";
+
+// Debounce window for the SVG snapshot. Matches NapkinEditor's window so
+// the page-embed renderer sees previews land at the same rough cadence
+// across kinds.
+const SVG_SNAPSHOT_DEBOUNCE_MS = 1500;
 
 type Props = {
   note: NoteDto | null;
@@ -79,7 +84,11 @@ export function DiagramEditor({ note, noteName, revisionOverride }: Props) {
           // Re-mount on version swap so drawio re-sends `init` and we
           // push the new revision's XML on the load action.
           key={revisionOverride.versionNumber}
-          initialXml={parseXml(revisionOverride.contentJsonb) ?? ""}
+          noteId={null}
+          // Revision view: static snapshot, no Yjs binding. Wrap in a
+          // function so DrawioIframe can use a single accessor shape
+          // for both live and revision paths.
+          getXml={() => parseXml(revisionOverride.contentJsonb) ?? ""}
           viewingRevision
           onLocalXml={null}
           subscribeRemoteXml={null}
@@ -132,19 +141,21 @@ function LiveDiagram({
       onTitleSave={onTitleSave}
       rightSlot={<ConnectionStatusPill status={status} role={role} />}
     >
-      {handle ? <DiagramBody handle={handle} viewer={role === "viewer"} /> : null}
+      {handle ? <DiagramBody note={note} handle={handle} viewer={role === "viewer"} /> : null}
     </DiagramShell>
   );
 }
 
 function DiagramBody({
+  note,
   handle,
   viewer
 }: {
+  note: NoteDto;
   handle: YjsDocumentHandle;
   viewer: boolean;
 }) {
-  const { initialXml, onRemoteXml, pushLocalXml } = useYjsDrawio({
+  const { getCurrentXml, onRemoteXml, pushLocalXml } = useYjsDrawio({
     doc: handle.doc,
     provider: handle.provider
   });
@@ -156,7 +167,8 @@ function DiagramBody({
   // this is the UX layer.
   return (
     <DrawioIframe
-      initialXml={initialXml}
+      noteId={!viewer ? note.id : null}
+      getXml={getCurrentXml}
       viewingRevision={viewer}
       onLocalXml={viewer ? null : pushLocalXml}
       subscribeRemoteXml={onRemoteXml}
@@ -165,12 +177,21 @@ function DiagramBody({
 }
 
 function DrawioIframe({
-  initialXml,
+  noteId,
+  getXml,
   viewingRevision,
   onLocalXml,
   subscribeRemoteXml
 }: {
-  initialXml: string;
+  // Note id to PATCH the rendered SVG snapshot against. Null in viewer /
+  // revision-view modes — skips the snapshot path entirely.
+  noteId: string | null;
+  // Just-in-time XML accessor. Called when drawio's iframe reports
+  // `event: "init"` and is ready to accept a `load` action. Reading at
+  // call time (rather than capturing at mount) avoids the race where
+  // Hocuspocus's server-state sync hadn't completed at mount yet,
+  // which made saved diagrams open blank.
+  getXml: () => string;
   viewingRevision: boolean;
   // Called with each autosave XML from drawio. Null in revision-view mode
   // (drawio's autosave is disabled in the load action anyway, but the
@@ -181,6 +202,16 @@ function DrawioIframe({
   subscribeRemoteXml: ((cb: (xml: string) => void) => () => void) | null;
 }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const snapshotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSentSvgRef = useRef<string | null>(null);
+
+  // Clear any pending snapshot timer on unmount so a tab swap can't fire a
+  // snapshot against the previous iframe (whose contentWindow is gone).
+  useEffect(() => {
+    return () => {
+      if (snapshotTimer.current) clearTimeout(snapshotTimer.current);
+    };
+  }, []);
 
   // postMessage listener for the iframe. Re-subscribed when the bindings
   // change (note swap re-keys the iframe and remounts this component
@@ -204,11 +235,13 @@ function DrawioIframe({
         case "configure": {
           // Load the diagram. autosave is enabled only in the live editor;
           // for revision views we omit it so drawio doesn't fire change
-          // events we'd have to suppress.
+          // events we'd have to suppress. Call getXml() at THIS moment
+          // (not at mount) so Yjs sync has had time to land the saved
+          // content into the Y.Text.
           target.postMessage(
             JSON.stringify({
               action: "load",
-              xml: initialXml,
+              xml: getXml(),
               autosave: viewingRevision ? 0 : 1
             }),
             "*"
@@ -234,6 +267,40 @@ function DrawioIframe({
           }
           const xml = typeof data.xml === "string" ? data.xml : "";
           if (xml) onLocalXml(xml);
+          // Schedule a debounced SVG export so the page-embed renderer can
+          // show this diagram inline. drawio's `export` action with
+          // `format: "xmlsvg"` returns SVG (with embedded mxfile) on a
+          // follow-up "export" message — handled below.
+          if (noteId) {
+            if (snapshotTimer.current) clearTimeout(snapshotTimer.current);
+            snapshotTimer.current = setTimeout(() => {
+              snapshotTimer.current = null;
+              const w = iframeRef.current?.contentWindow;
+              if (!w) return;
+              w.postMessage(
+                JSON.stringify({ action: "export", format: "xmlsvg" }),
+                "*"
+              );
+            }, SVG_SNAPSHOT_DEBOUNCE_MS);
+          }
+          break;
+        }
+        case "export": {
+          // Reply to our `action: "export"` request above. drawio's
+          // xmlsvg export returns a data: URL in `data` — strip the
+          // prefix and decode to a plain SVG string before PATCHing.
+          //
+          // Fire-and-forget on purpose: invalidating the notes query
+          // here would churn the live Yjs/drawio editor mid-edit (see
+          // the same rationale in NapkinEditor's snapshot scheduler).
+          if (!noteId) return;
+          const raw = typeof data.data === "string" ? data.data : "";
+          const svg = decodeDrawioExportPayload(raw);
+          if (!svg || svg === lastSentSvgRef.current) return;
+          lastSentSvgRef.current = svg;
+          void patchNote(noteId, { previewSvg: svg }).catch((err) => {
+            console.warn("[DiagramEditor] previewSvg PATCH failed:", err);
+          });
           break;
         }
         default:
@@ -243,7 +310,7 @@ function DrawioIframe({
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [initialXml, viewingRevision, onLocalXml]);
+  }, [getXml, viewingRevision, onLocalXml, noteId]);
 
   // Subscribe to remote Y.Text changes. When another collaborator's XML
   // arrives, push a fresh `load` action — drawio has no per-shape diff
@@ -322,6 +389,28 @@ function DiagramShell({
       {children}
     </div>
   );
+}
+
+// drawio's `action: "export", format: "xmlsvg"` reply puts the SVG in
+// `data.data` as a data URL (`data:image/svg+xml;base64,...`). Strip the
+// prefix and decode so we can ship plain SVG markup to the backend (the
+// page-embed renderer wraps it in its own data URL again via encodeURIComponent).
+function decodeDrawioExportPayload(raw: string): string | null {
+  if (!raw) return null;
+  // Sometimes drawio returns raw SVG (no data: prefix) for newer builds;
+  // accept both for resilience.
+  if (raw.trimStart().startsWith("<svg")) return raw;
+  const match = /^data:image\/svg\+xml(?:;[^,]*)?,(.*)$/i.exec(raw);
+  if (!match) return null;
+  const payload = match[1];
+  try {
+    // Heuristic: the comma-delimited payload is base64 unless it starts
+    // with a `%` (URL-encoded). drawio's exporter uses base64 by default.
+    if (payload.startsWith("%")) return decodeURIComponent(payload);
+    return atob(payload);
+  } catch {
+    return null;
+  }
 }
 
 // Stored value shape: `{ "type": "drawio", "version": 1, "xml": "..." }`

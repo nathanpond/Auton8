@@ -334,7 +334,12 @@ export function useUpdateNote(pageId: string | null) {
   return useMutation({
     mutationFn: (vars: {
       id: string;
-      body: { title?: string; contentJsonb?: string; sortOrder?: number };
+      body: {
+        title?: string;
+        contentJsonb?: string;
+        sortOrder?: number;
+        previewSvg?: string;
+      };
     }) => updateNote(vars.id, vars.body),
     onSuccess: () => {
       if (pageId) qc.invalidateQueries({ queryKey: notesKey(pageId) });

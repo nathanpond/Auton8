@@ -1,5 +1,7 @@
 import * as Y from "yjs";
 import { ServerBlockNoteEditor } from "@blocknote/server-util";
+import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
+import { noteEmbedServerSpec } from "./noteEmbedStub.js";
 
 // Each materializer reads a Yjs document and produces the JSON string that
 // .NET will store in `body_jsonb` (pages) or `content_jsonb` (notes). The
@@ -12,12 +14,35 @@ import { ServerBlockNoteEditor } from "@blocknote/server-util";
 
 export type Materializer = (doc: Y.Doc) => Promise<string>;
 
-const serverBlockNoteEditor = ServerBlockNoteEditor.create();
+// Critical: register `noteEmbed` in the server-side schema. Without it,
+// y-prosemirror's read path (yXmlFragmentToProseMirrorRootNode) throws
+// on the unknown node type and self-heals by DELETING the element from
+// the Y.Doc — that delete is then broadcast to every connected client,
+// making the embed visually disappear ~2s after every page edit (the
+// Hocuspocus debounce interval that triggers materialization). The
+// stub block has no real render — the materializer only reads the doc
+// structure — but the schema MUST recognize the type.
+const serverSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    noteEmbed: noteEmbedServerSpec()
+  }
+});
+
+const serverBlockNoteEditor = ServerBlockNoteEditor.create({ schema: serverSchema });
 
 // BlockNote-backed pages and richtext notes share the same materialization:
 // Yjs XmlFragment → BlockNote blocks (server-side via @blocknote/server-util).
+//
+// Fragment name MUST match the SPA's `useBlockNoteWithYjs` (which writes
+// to `doc.getXmlFragment("document-store")`). Server-util's `yDocToBlocks`
+// defaults the second arg to "prosemirror" — passing it explicitly here
+// keeps the SPA-side and server-side reads aligned. Without this, the
+// materializer reads an empty fragment, serializes `[]`, and every
+// richtext note / page snapshot lands in Postgres as an empty array
+// regardless of what the user typed.
 const blockNoteMaterializer: Materializer = async (doc) => {
-  const blocks = await serverBlockNoteEditor.yDocToBlocks(doc);
+  const blocks = await serverBlockNoteEditor.yDocToBlocks(doc, "document-store");
   return JSON.stringify(blocks);
 };
 

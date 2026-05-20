@@ -161,6 +161,23 @@ public static class NoteEndpoints
                     note.NoteKind, request.ContentJsonb) is { } reject)
                 return reject;
 
+            // previewSvg is a derived snapshot only the SPA editors should
+            // ever write, and only for drawing/diagram (the kinds whose
+            // live content can't be replayed from a JSON blob). Richtext
+            // embeds render blocks directly, so a previewSvg on richtext
+            // is meaningless and we reject it loudly rather than silently
+            // dropping the field.
+            if (request.PreviewSvg is not null
+                && note.NoteKind != "drawing"
+                && note.NoteKind != "diagram")
+            {
+                return Results.BadRequest(new
+                {
+                    error = "previewSvg may only be set on drawing or diagram notes.",
+                    field = "previewSvg"
+                });
+            }
+
             var actorId = http.GetActorId();
             var fields = new List<string>();
             int? newVersionNumber = null;
@@ -195,7 +212,23 @@ public static class NoteEndpoints
             }
             if (request.SortOrder is { } so && note.SortOrder != so) { note.SortOrder = so; fields.Add("sortOrder"); }
 
-            if (fields.Count == 0) return Results.Ok(MapDto(note));
+            // previewSvg is a derived snapshot, not a domain field — apply it
+            // without recording an audit event or bumping UpdatedAt/UpdatedBy,
+            // so the SPA's debounced snapshot writes don't bury real edits in
+            // the activity feed. Saved if any other field is also changing,
+            // or via a dedicated SaveChanges below when it's the only change.
+            var onlyPreviewSvgChanged = false;
+            if (request.PreviewSvg is not null && request.PreviewSvg != note.PreviewSvg)
+            {
+                note.PreviewSvg = request.PreviewSvg;
+                onlyPreviewSvgChanged = fields.Count == 0;
+            }
+
+            if (fields.Count == 0)
+            {
+                if (onlyPreviewSvgChanged) await db.SaveChangesAsync(ct);
+                return Results.Ok(MapDto(note));
+            }
 
             note.UpdatedAtUtc = DateTime.UtcNow;
             note.UpdatedBy = actorId;
@@ -368,6 +401,7 @@ public static class NoteEndpoints
 
     internal static NoteDto MapDto(Note n) => new(
         n.Id, n.Locator, n.PageNoteIndex, n.PageId, n.NoteKind, n.Title, n.ContentJsonb,
+        n.PreviewSvg,
         n.CurrentVersionNumber, n.SortOrder, n.IsArchived,
         n.CreatedAtUtc, n.UpdatedAtUtc, n.CreatedBy, n.UpdatedBy);
 
@@ -378,8 +412,13 @@ public static class NoteEndpoints
     // page, the note is moved (page_note_index is recomputed against the
     // destination page). Distinct sentinel for "unset" is fine here because
     // PageId is never a meaningful null on a note.
+    //
+    // PreviewSvg is a derived snapshot the SPA writes on idle for drawing/
+    // diagram notes — accepted only for those kinds (richtext rejected with
+    // 400 since the embed renderer renders blocks directly). Never triggers
+    // a content version snapshot.
     public sealed record UpdateNoteRequest(
-        string? Title, string? ContentJsonb, int? SortOrder, Guid? PageId);
+        string? Title, string? ContentJsonb, int? SortOrder, Guid? PageId, string? PreviewSvg);
 
     // POST /api/content/notes/{id}/copy. PageId defaults to the note's
     // current page; Title overrides the source title when provided.
@@ -387,7 +426,8 @@ public static class NoteEndpoints
 
     public sealed record NoteDto(
         Guid Id, long Locator, int PageNoteIndex, Guid PageId, string NoteKind,
-        string? Title, string ContentJsonb, int CurrentVersionNumber, int SortOrder,
+        string? Title, string ContentJsonb, string? PreviewSvg,
+        int CurrentVersionNumber, int SortOrder,
         bool IsArchived,
         DateTime CreatedAtUtc, DateTime UpdatedAtUtc, Guid CreatedBy, Guid UpdatedBy);
 }

@@ -1336,6 +1336,7 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.NoteKind).HasColumnName("note_kind");
             entity.Property(e => e.Title).HasColumnName("title");
             entity.Property(e => e.ContentJsonb).HasColumnName("content_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.PreviewSvg).HasColumnName("preview_svg");
             entity.Property(e => e.CurrentVersionNumber).HasColumnName("current_version_number");
             entity.Property(e => e.SortOrder).HasColumnName("sort_order");
             entity.Property(e => e.IsArchived).HasColumnName("is_archived");

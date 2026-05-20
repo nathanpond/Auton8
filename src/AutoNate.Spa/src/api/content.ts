@@ -91,6 +91,10 @@ export type NoteDto = {
   noteKind: NoteKind;
   title: string | null;
   contentJsonb: string;
+  // Rendered SVG snapshot. Populated only for drawing/diagram notes, written
+  // by the editors on idle so the page-embed renderer in view mode can show
+  // the note inline without mounting Excalidraw / drawio.
+  previewSvg: string | null;
   currentVersionNumber: number;
   sortOrder: number;
   isArchived: boolean;
@@ -473,7 +477,13 @@ export async function createNote(
 
 export async function updateNote(
   id: string,
-  req: { title?: string; contentJsonb?: string; sortOrder?: number; pageId?: string }
+  req: {
+    title?: string;
+    contentJsonb?: string;
+    sortOrder?: number;
+    pageId?: string;
+    previewSvg?: string;
+  }
 ): Promise<NoteDto> {
   const { data } = await api.patch<NoteDto>(`/api/content/notes/${id}`, req);
   return data;
