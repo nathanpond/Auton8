@@ -114,6 +114,7 @@ public sealed class AuthorizationFilterIntegrationTests
             compilers,
             Array.Empty<IInstanceAuthorizer>(),
             registrar.Filters,
+            EmptyRecordTypeShortCodeResolver.Instance,
             NullLogger<Authorizer>.Instance);
         return (authorizer, registrar);
     }

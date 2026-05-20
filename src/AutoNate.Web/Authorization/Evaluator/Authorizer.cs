@@ -3,6 +3,7 @@ using System.Security.Claims;
 using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Records;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -27,6 +28,7 @@ public sealed class Authorizer : IAuthorizer
     private readonly ISelectorCompilerRegistry _compilers;
     private readonly IReadOnlyDictionary<string, IInstanceAuthorizer> _instanceAuthorizers;
     private readonly IFilterHub _filterHub;
+    private readonly IRecordTypeShortCodeResolver _recordTypeShortCodes;
     private readonly ILogger<Authorizer> _log;
 
     private ActorContext? _actorContext;
@@ -42,6 +44,16 @@ public sealed class Authorizer : IAuthorizer
     private readonly Dictionary<(Guid UserId, string Kind, string Action),
         IReadOnlyList<EffectiveGrant>> _grantsCache = new();
 
+    // Per-request memo for the assembled record-SQL filter. The compile loop
+    // is cheap individually but a busy dashboard hits BuildRecordSqlFilter
+    // multiple times in one request (records list + assigned list, etc.), so
+    // deduping by (UserId, Action, ParameterOffset) saves the grant-replay
+    // and the per-grant Compile calls. The offset is part of the key because
+    // the emitted SQL bakes positional placeholders relative to the caller's
+    // parameter list — same grants + different offsets ⇒ different SQL.
+    private readonly Dictionary<(Guid UserId, string Action, int ParameterOffset),
+        RecordSqlFilter> _recordSqlFilterCache = new();
+
     public Authorizer(
         IDbContextFactory<AutoNateDbContext> dbFactory,
         IOptions<AuthorizationOptions> options,
@@ -49,12 +61,14 @@ public sealed class Authorizer : IAuthorizer
         ISelectorCompilerRegistry compilers,
         IEnumerable<IInstanceAuthorizer> instanceAuthorizers,
         IFilterHub filterHub,
+        IRecordTypeShortCodeResolver recordTypeShortCodes,
         ILogger<Authorizer> log)
     {
         _dbFactory = dbFactory;
         _options = options;
         _registry = registry;
         _compilers = compilers;
+        _recordTypeShortCodes = recordTypeShortCodes;
         _instanceAuthorizers = instanceAuthorizers.ToDictionary(h => h.Kind, StringComparer.Ordinal);
         _filterHub = filterHub;
         _log = log;
@@ -373,7 +387,21 @@ public sealed class Authorizer : IAuthorizer
             return RecordSqlFilter.Closed;
         }
 
-        var ctx = await GetActorContextAsync(userId.Value, cancellationToken);
+        var cacheKey = (userId.Value, action, parameterOffset);
+        if (_recordSqlFilterCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        var computed = await ComputeRecordSqlFilterAsync(userId.Value, action, parameterOffset, cancellationToken);
+        _recordSqlFilterCache[cacheKey] = computed;
+        return computed;
+    }
+
+    private async Task<RecordSqlFilter> ComputeRecordSqlFilterAsync(
+        Guid userId, string action, int parameterOffset, CancellationToken cancellationToken)
+    {
+        var ctx = await GetActorContextAsync(userId, cancellationToken);
         if (ctx.IsSuperAdmin)
         {
             return RecordSqlFilter.Open;
@@ -385,13 +413,10 @@ public sealed class Authorizer : IAuthorizer
             return RecordSqlFilter.Closed;
         }
 
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var shortCodes = await db.RecordTypes.AsNoTracking()
-            .Select(t => new { t.Id, t.ShortCode })
-            .ToDictionaryAsync(t => t.ShortCode, t => t.Id, StringComparer.Ordinal, cancellationToken);
+        var shortCodes = await GetShortCodeToIdMapAsync(cancellationToken);
 
         var compiler = new RecordSelectorSqlCompiler();
-        var build = new RecordSqlBuildContext(userId.Value, parameterOffset, shortCodes);
+        var build = new RecordSqlBuildContext(userId, parameterOffset, shortCodes);
         var allows = new List<string>();
         var denies = new List<string>();
 
@@ -426,6 +451,28 @@ public sealed class Authorizer : IAuthorizer
             Sql = combinedSql,
             Parameters = build.Parameters
         };
+    }
+
+    // Prefer the singleton RecordTypeShortCodeCache snapshot — it stays fresh
+    // via a HookPoints.AuditEventPublished subscription on record-type
+    // lifecycle events. Fall back to a direct DB load if the cache is empty
+    // (cold start before RecordTypeShortCodeCacheInitializer.StartAsync has
+    // run, or a prior refresh failure). The empty case is rare in practice
+    // but cheap to handle.
+    private async Task<IReadOnlyDictionary<string, Guid>> GetShortCodeToIdMapAsync(
+        CancellationToken cancellationToken)
+    {
+        var cached = _recordTypeShortCodes.ShortCodeToId;
+        if (cached.Count > 0)
+        {
+            return cached;
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        return await db.RecordTypes.AsNoTracking()
+            .Where(t => t.ShortCode != null)
+            .Select(t => new { t.Id, t.ShortCode })
+            .ToDictionaryAsync(t => t.ShortCode!, t => t.Id, StringComparer.Ordinal, cancellationToken);
     }
 
     public async Task<AuthExplanation> ExplainAsync(

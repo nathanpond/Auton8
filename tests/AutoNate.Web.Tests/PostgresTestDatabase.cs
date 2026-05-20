@@ -284,6 +284,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         return new Authorizer(
             CreateDbContextFactory(), options, registry, compilers, instanceAuthorizers,
             new HookRegistrar(NullLogger<ActionHub>.Instance).Filters,
+            EmptyRecordTypeShortCodeResolver.Instance,
             NullLogger<Authorizer>.Instance);
     }
 

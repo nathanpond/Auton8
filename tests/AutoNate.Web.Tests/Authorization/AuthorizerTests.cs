@@ -70,6 +70,7 @@ public sealed class AuthorizerTests
             compilers,
             Array.Empty<IInstanceAuthorizer>(),
             new HookRegistrar(NullLogger<ActionHub>.Instance).Filters,
+            EmptyRecordTypeShortCodeResolver.Instance,
             NullLogger<Authorizer>.Instance);
     }
 

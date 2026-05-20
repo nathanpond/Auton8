@@ -31,6 +31,8 @@ public sealed class RecordTypeShortCodeCache(
 
     private IReadOnlyDictionary<Guid, string> _byId =
         new Dictionary<Guid, string>();
+    private IReadOnlyDictionary<string, Guid> _byShortCode =
+        new Dictionary<string, Guid>(StringComparer.Ordinal);
 
     public bool TryGetShortCode(Guid recordTypeId, out string shortCode)
     {
@@ -42,6 +44,8 @@ public sealed class RecordTypeShortCodeCache(
         shortCode = string.Empty;
         return false;
     }
+
+    public IReadOnlyDictionary<string, Guid> ShortCodeToId => _byShortCode;
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
@@ -56,9 +60,13 @@ public sealed class RecordTypeShortCodeCache(
                 .Select(rt => new { rt.Id, rt.ShortCode })
                 .ToListAsync(cancellationToken);
 
-            _byId = rows
+            var populated = rows
                 .Where(r => !string.IsNullOrWhiteSpace(r.ShortCode))
-                .ToDictionary(r => r.Id, r => r.ShortCode);
+                .ToArray();
+
+            _byId = populated.ToDictionary(r => r.Id, r => r.ShortCode);
+            _byShortCode = populated.ToDictionary(
+                r => r.ShortCode, r => r.Id, StringComparer.Ordinal);
 
             _logger.LogInformation(
                 "Record-type short-code cache refreshed: {Count} entries.",

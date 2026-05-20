@@ -261,6 +261,11 @@ public sealed class WorkflowSignalDispatcherTests
             shortCode = string.Empty;
             return false;
         }
+
+        // Dispatcher tests only consult TryGetShortCode; the inverse map is
+        // here just to satisfy the interface.
+        public IReadOnlyDictionary<string, Guid> ShortCodeToId =>
+            ShortCodesById.ToDictionary(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal);
     }
 
     private sealed class InMemorySignalRegistry : IWorkflowSignalRegistry
