@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BlockNoteEditor, type PartialBlock } from "@blocknote/core";
 import { createReactBlockSpec } from "@blocknote/react";
 import { useLocation } from "react-router-dom";
-import { Anchor, Box, Group, Stack, Text } from "@mantine/core";
+import {
+  Anchor,
+  Box,
+  Button,
+  Group,
+  Menu,
+  Modal,
+  Slider,
+  Stack,
+  Text
+} from "@mantine/core";
 import { useNotes } from "@/hooks/useContent";
 import type { NoteDto, NoteKind } from "@/api/content";
 import { NOTE_KIND_META, notesTheme } from "@/pages/notes/notesTheme";
@@ -28,8 +38,15 @@ export const noteEmbedBlock = createReactBlockSpec(
     // content that might drift from the source. NO `textAlignment` /
     // `backgroundColor` props: those defaults are inline-formatting
     // affordances that don't apply to a leaf embed block.
+    //
+    // `widthPercent` is the percentage of the page width the embed renders
+    // at (drawing + diagram notes only — richtext doesn't expose the
+    // configure menu). Default 100 = full width, matches the pre-config
+    // rendering. Configured via the right-click → Configure modal in edit
+    // mode; persists via editor.updateBlock so the value rides Yjs sync.
     propSchema: {
-      noteId: { default: "" }
+      noteId: { default: "" },
+      widthPercent: { default: 100 }
     },
     content: "none"
   },
@@ -49,11 +66,19 @@ export const noteEmbedBlock = createReactBlockSpec(
   }
 );
 
+// Embed block shape that includes the bits we touch here: id (for
+// editor.updateBlock to find the right block by reference even if the
+// snapshot is stale) and the two props we declare on propSchema.
+type NoteEmbedBlock = {
+  id: string;
+  props: { noteId: string; widthPercent: number };
+};
+
 function NoteEmbedRender({
   block,
   editor
 }: {
-  block: { props: { noteId: string } };
+  block: NoteEmbedBlock;
   // BlockNote passes the host editor instance — that's the reliable key
   // we use to read the per-editor page/editable signal. Doesn't rely
   // on React context inheritance through Tiptap's NodeView, which is
@@ -69,6 +94,10 @@ function NoteEmbedRender({
     if (!block.props.noteId) return null;
     return notesQuery.data?.find((n) => n.id === block.props.noteId) ?? null;
   }, [notesQuery.data, block.props.noteId]);
+
+  // Clamp on read so a stored value outside [10, 100] (e.g. from a future
+  // schema migration or a hand-edited Y.Doc) still renders sanely.
+  const widthPercent = clampWidth(block.props.widthPercent);
 
   if (!block.props.noteId) {
     return <PlaceholderCard text="Note embed has no linked note." />;
@@ -99,7 +128,27 @@ function NoteEmbedRender({
   // (depth > 0) renders skip the heavyweight content to break recursion
   // and prevent fan-out from collapsing the viewport.
   if (isEditable || depth > 0) {
-    return <EmbedPlaceholderCard note={note} />;
+    return (
+      <WidthFrame widthPercent={widthPercent}>
+        <EmbedPlaceholderCard
+          note={note}
+          // Configure menu is edit-mode-only and exposed only on note
+          // kinds whose width is meaningful (drawing + diagram render as
+          // SVG; richtext flows naturally). Nested renders get no menu.
+          configurable={
+            isEditable &&
+            depth === 0 &&
+            (note.noteKind === "drawing" || note.noteKind === "diagram")
+          }
+          widthPercent={widthPercent}
+          onChangeWidthPercent={(next) =>
+            editor.updateBlock(block.id, {
+              props: { widthPercent: next }
+            })
+          }
+        />
+      </WidthFrame>
+    );
   }
 
   // View mode, top-level: render the actual note content. Increment the
@@ -107,12 +156,58 @@ function NoteEmbedRender({
   // bottoms out at the placeholder card on its next recursion.
   return (
     <EmbedDepthContext.Provider value={depth + 1}>
-      <EmbedContent note={note} />
+      <WidthFrame widthPercent={widthPercent}>
+        <EmbedContent note={note} />
+      </WidthFrame>
     </EmbedDepthContext.Provider>
   );
 }
 
-function EmbedPlaceholderCard({ note }: { note: NoteDto }) {
+// Block-width wrapper. Width is a percentage of the block content area,
+// which is what the user configures in the Size slider. We keep the
+// outer element 100% so block-level affordances (drag handle, selection
+// outline) still cover the full row.
+function WidthFrame({
+  widthPercent,
+  children
+}: {
+  widthPercent: number;
+  children: React.ReactNode;
+}) {
+  if (widthPercent >= 100) return <>{children}</>;
+  return (
+    <Box style={{ width: "100%" }}>
+      <Box style={{ width: `${widthPercent}%` }}>{children}</Box>
+    </Box>
+  );
+}
+
+const MIN_WIDTH_PERCENT = 10;
+const MAX_WIDTH_PERCENT = 100;
+const WIDTH_STEP = 10;
+
+function clampWidth(value: unknown): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : 100;
+  if (n < MIN_WIDTH_PERCENT) return MIN_WIDTH_PERCENT;
+  if (n > MAX_WIDTH_PERCENT) return MAX_WIDTH_PERCENT;
+  // Snap to the nearest step so a hand-edited 37 doesn't sit between
+  // the slider's tick marks.
+  return Math.round(n / WIDTH_STEP) * WIDTH_STEP;
+}
+
+function EmbedPlaceholderCard({
+  note,
+  configurable,
+  widthPercent,
+  onChangeWidthPercent
+}: {
+  note: NoteDto;
+  // When true, right-clicking the card opens a "Configure" context menu
+  // that pops the size modal. Off for richtext + nested renders.
+  configurable: boolean;
+  widthPercent: number;
+  onChangeWidthPercent: (next: number) => void;
+}) {
   const meta = NOTE_KIND_META[note.noteKind as NoteKind];
   const title = note.title?.trim() || "Untitled note";
   const location = useLocation();
@@ -128,8 +223,22 @@ function EmbedPlaceholderCard({ note }: { note: NoteDto }) {
     return `/notes/${pageLocator}/${note.pageNoteIndex}`;
   }, [location.pathname, note.pageNoteIndex]);
 
+  // Context-menu state. Position is captured from the contextmenu event
+  // and used to anchor a virtual <Menu.Target/> at the cursor.
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [configureOpen, setConfigureOpen] = useState(false);
+
+  const handleContextMenu = (event: React.MouseEvent) => {
+    if (!configurable) return;
+    event.preventDefault();
+    // Stop the editor / outer anchor from also consuming the right-click.
+    event.stopPropagation();
+    setMenuPos({ x: event.clientX, y: event.clientY });
+  };
+
   const body = (
     <Box
+      onContextMenu={handleContextMenu}
       style={{
         border: `1px solid ${notesTheme.border}`,
         borderLeft: `4px solid ${meta?.color ?? notesTheme.primary}`,
@@ -158,8 +267,7 @@ function EmbedPlaceholderCard({ note }: { note: NoteDto }) {
     </Box>
   );
 
-  if (!href) return body;
-  return (
+  const wrapped = href ? (
     <Anchor
       href={href}
       target="_blank"
@@ -169,6 +277,153 @@ function EmbedPlaceholderCard({ note }: { note: NoteDto }) {
     >
       {body}
     </Anchor>
+  ) : (
+    body
+  );
+
+  if (!configurable) return wrapped;
+
+  return (
+    <>
+      {wrapped}
+      <ConfigureContextMenu
+        position={menuPos}
+        onClose={() => setMenuPos(null)}
+        onConfigure={() => {
+          setMenuPos(null);
+          setConfigureOpen(true);
+        }}
+      />
+      <ConfigureSizeModal
+        opened={configureOpen}
+        initialValue={widthPercent}
+        noteTitle={title}
+        onClose={() => setConfigureOpen(false)}
+        onSave={(next) => {
+          onChangeWidthPercent(next);
+          setConfigureOpen(false);
+        }}
+      />
+    </>
+  );
+}
+
+// Right-click menu pinned to the cursor coordinates. The Mantine Menu
+// is anchored to a 0×0 fixed-position phantom div so the dropdown lands
+// at the exact click point. `position="bottom-start"` then places the
+// dropdown's top-left corner there.
+function ConfigureContextMenu({
+  position,
+  onClose,
+  onConfigure
+}: {
+  position: { x: number; y: number } | null;
+  onClose: () => void;
+  onConfigure: () => void;
+}) {
+  const targetRef = useRef<HTMLDivElement>(null);
+  if (!position) return null;
+  return (
+    <Menu
+      opened
+      onClose={onClose}
+      position="bottom-start"
+      withinPortal
+      closeOnClickOutside
+      closeOnEscape
+      shadow="md"
+    >
+      <Menu.Target>
+        <div
+          ref={targetRef}
+          style={{
+            position: "fixed",
+            left: position.x,
+            top: position.y,
+            width: 0,
+            height: 0,
+            pointerEvents: "none"
+          }}
+        />
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Item
+          leftSection={<i className="fa fa-sliders" />}
+          onClick={onConfigure}
+        >
+          Configure
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
+// Configure modal — a single Size slider for now. Value is held locally
+// so dragging doesn't fire a Yjs update per pixel; we commit once on
+// Save. Cancel discards the local edit and reverts to the persisted
+// widthPercent on next open.
+function ConfigureSizeModal({
+  opened,
+  initialValue,
+  noteTitle,
+  onClose,
+  onSave
+}: {
+  opened: boolean;
+  initialValue: number;
+  noteTitle: string;
+  onClose: () => void;
+  onSave: (next: number) => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+
+  // Sync local state when the modal re-opens against a different stored
+  // value (e.g. another collaborator changed it while this user had the
+  // page open). Reset on close so the next open starts clean.
+  useEffect(() => {
+    if (opened) setValue(initialValue);
+  }, [opened, initialValue]);
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={`Configure: ${noteTitle}`}
+      size="md"
+      centered
+    >
+      <Stack gap="lg">
+        <Stack gap={6}>
+          <Group justify="space-between" align="baseline">
+            <Text size="sm" fw={600}>
+              Size
+            </Text>
+            <Text size="sm" c="dimmed">
+              {value}% of page width
+            </Text>
+          </Group>
+          <Slider
+            value={value}
+            onChange={setValue}
+            min={MIN_WIDTH_PERCENT}
+            max={MAX_WIDTH_PERCENT}
+            step={WIDTH_STEP}
+            marks={[
+              { value: 10, label: "10%" },
+              { value: 50, label: "50%" },
+              { value: 100, label: "100%" }
+            ]}
+            label={(v) => `${v}%`}
+          />
+        </Stack>
+        <Group justify="flex-end" gap="sm" mt="md">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => onSave(value)}>Save</Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
