@@ -51,7 +51,7 @@ import { NewNoteModal } from "./NewNoteModal";
 import { NewPageModal } from "./NewPageModal";
 import { NewProjectModal } from "./NewProjectModal";
 import { ProjectSettingsModal } from "./ProjectSettingsModal";
-import { EditorTab, NotebookWithPages, flattenToTree, tabsForPage } from "./types";
+import { EditorTab, NotebookWithPages, PageTreeNode, flattenToTree, tabsForPage } from "./types";
 import { useYjsNotesList } from "@/lib/yjs/useYjsNotesList";
 import { WireNoteKind, notesTheme } from "./notesTheme";
 import "./notes.css";
@@ -104,6 +104,21 @@ export default function NotesPage() {
       setActivePageId(resolved.ancestors.page.id);
     } else if (resolved.kind === "page") {
       setActivePageId(resolved.id);
+    }
+    // Expand the containing notebook so the deep-linked target row is
+    // visible in the explorer. Only the first notebook auto-opens
+    // otherwise; without this, /notes/{locator} into a non-first notebook
+    // leaves the page hidden behind a collapsed row. Parent-page
+    // ancestors are filled in by the chain effect below once the page
+    // tree loads.
+    const notebookId = resolved.ancestors.notebook?.id ?? null;
+    if (notebookId) {
+      setForceExpandIds((prev) => {
+        if (prev.has(notebookId)) return prev;
+        const next = new Set(prev);
+        next.add(notebookId);
+        return next;
+      });
     }
   }, [resolved]);
   const [tabsByPage, setTabsByPage] = useState<
@@ -199,11 +214,19 @@ export default function NotesPage() {
   // (directly or via a deeper entity), don't clobber that selection.
   useEffect(() => {
     if (urlPending) return;
+    // When the URL resolved to (or under) a specific cabinet, the
+    // hydration effect owns activeCabinetId. Bail BEFORE the cabinets-
+    // empty branch — the queries that arrive in the same commit as
+    // hydration haven't been retriggered for the new activeProjectId
+    // yet, so `cabinets` is still []. Without this early return, the
+    // clear-on-empty branch would wipe out the cabinet hydration just
+    // set, and on the next run this very guard would return early so
+    // the selection would never be restored.
+    if (resolved?.ancestors.cabinet) return;
     if (!cabinets.length) {
       setActiveCabinetId(null);
       return;
     }
-    if (resolved?.ancestors.cabinet) return;
     if (!activeCabinetId || !cabinets.find((c) => c.id === activeCabinetId)) {
       setActiveCabinetId(cabinets[0].id);
     }
@@ -232,6 +255,51 @@ export default function NotesPage() {
   }, [notebooks, pageTreeQueries]);
 
   const anyTreeLoading = pageTreeQueries.some((q) => q.isLoading);
+
+  // Ensure every ancestor on the path to the active page (containing
+  // notebook + each parent page) is expanded. Without this, deep-linked
+  // sub-pages stay hidden if their parent page was previously collapsed,
+  // or if the page lives in a non-first notebook (only the first notebook
+  // auto-opens). Adding is idempotent so unrelated manual collapses are
+  // preserved.
+  useEffect(() => {
+    if (!activePageId) return;
+    if (notebooksWithPages.length === 0) return;
+    const ancestorIds: string[] = [];
+    const walk = (node: PageTreeNode, trail: string[]): boolean => {
+      if (node.id === activePageId) {
+        ancestorIds.push(...trail);
+        return true;
+      }
+      for (const child of node.children) {
+        if (walk(child, [...trail, node.id])) return true;
+      }
+      return false;
+    };
+    for (const nb of notebooksWithPages) {
+      let found = false;
+      for (const root of nb.pages) {
+        if (walk(root, [])) {
+          ancestorIds.unshift(nb.id);
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (ancestorIds.length === 0) return;
+    setForceExpandIds((prev) => {
+      let mutated = false;
+      const next = new Set(prev);
+      for (const id of ancestorIds) {
+        if (!next.has(id)) {
+          next.add(id);
+          mutated = true;
+        }
+      }
+      return mutated ? next : prev;
+    });
+  }, [activePageId, notebooksWithPages]);
 
   const qc = useQueryClient();
   const pageQuery = usePage(activePageId);
