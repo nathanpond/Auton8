@@ -64,7 +64,9 @@ public static class NoteVersionEndpoints
                 ct);
 
             return Results.Ok(new NoteVersionPageResponse(items, totalCount));
-        });
+        }).AuthorizedInHandler(
+            "Page.View via AuthorizeAsync on the note's owning page; route " +
+            "doesn't carry pageId so the filter form can't dispatch.");
 
         group.MapGet("/{n:int}", async (
             Guid noteId,
@@ -99,7 +101,8 @@ public static class NoteVersionEndpoints
                 version.Title, version.NoteKind, version.ContentJsonb,
                 version.Kind, version.Note, version.CreatedAtUtc, version.CreatedBy,
                 names.TryGetValue(version.CreatedBy, out var n2) ? n2 : null));
-        });
+        }).AuthorizedInHandler(
+            "Page.View via AuthorizeAsync on the note's owning page.");
 
         group.MapPost("/{n:int}/restore", async (
             Guid noteId,
@@ -147,7 +150,9 @@ public static class NoteVersionEndpoints
                 ct);
 
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.Edit via AuthorizeAsync on the note's owning page.");
 
         group.MapDelete("/{n:int}", async (
             Guid noteId,
@@ -186,7 +191,10 @@ public static class NoteVersionEndpoints
                 ct);
 
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.Edit via AuthorizeAsync on the note's owning page; " +
+              "note version pruning is not subject to deletions_locked.");
 
         return app;
     }

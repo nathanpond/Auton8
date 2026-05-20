@@ -7,12 +7,12 @@ namespace AutoNate.Web.Tests.Authorization;
 public sealed class EntityRegistryTests
 {
     [Fact]
-    public void All_RegistersThirteenCoreKinds()
+    public void All_RegistersEveryCoreKind()
     {
         var registry = new EntityRegistry(CoreEntityTypes.All);
         var kinds = registry.All.Select(t => t.Kind).ToHashSet();
 
-        Assert.Equal(13, kinds.Count);
+        Assert.Equal(17, kinds.Count);
         Assert.Contains(EntityKinds.User, kinds);
         Assert.Contains(EntityKinds.Group, kinds);
         Assert.Contains(EntityKinds.Role, kinds);
@@ -26,6 +26,10 @@ public sealed class EntityRegistryTests
         Assert.Contains(EntityKinds.ExternalConnection, kinds);
         Assert.Contains(EntityKinds.SystemIssue, kinds);
         Assert.Contains(EntityKinds.SiteConfig, kinds);
+        Assert.Contains(EntityKinds.Project, kinds);
+        Assert.Contains(EntityKinds.Cabinet, kinds);
+        Assert.Contains(EntityKinds.Notebook, kinds);
+        Assert.Contains(EntityKinds.Page, kinds);
     }
 
     [Fact]

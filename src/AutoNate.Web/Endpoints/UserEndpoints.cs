@@ -54,7 +54,10 @@ public static class UserEndpoints
                 IsLocked = false,
                 LockedAtUtc = null
             }));
-        });
+        }).OpenToAuthenticated(
+            "Authenticated-only minimal user directory used by collab UI " +
+            "(Yjs cursor names, comment authors, member pickers); admin-" +
+            "only fields are blanked before the response.");
 
         // Paged variant of GET /api/users for tables that fetch one screen at
         // a time. Returns { items, totalCount } and supports search, status

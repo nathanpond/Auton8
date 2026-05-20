@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Events;
@@ -108,7 +109,10 @@ public static class YjsEndpoints
             var ticket = MintTicket(request.DocumentName, actorId, displayName, role, ttl, secret);
 
             return Results.Ok(new TicketResponse(ticket, options.Value.HocuspocusWsUrl, ttl, role));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.View via AuthorizeAsync gates ticket issuance; Page.Edit " +
+              "AuthorizeAsync picks editor-vs-viewer role on the ticket.");
 
         // Comments fire SPA-driven audit events: BlockNote's CommentsExtension
         // writes the thread mutation into the Y.Doc, then the SPA POSTs here
@@ -170,7 +174,10 @@ public static class YjsEndpoints
                 ct);
 
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.View via AuthorizeAsync gates whether the caller can " +
+              "publish comment events for the page.");
 
         // -- /internal/yjs-* -------------------------------------------------
         var internalGroup = app.MapGroup("/internal")

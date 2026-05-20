@@ -61,7 +61,9 @@ public static class CabinetEndpoints
                 ct);
 
             return Results.Ok(new CabinetPageResponse(items.Select(MapDto).ToList(), totalCount));
-        });
+        }).AuthorizedInHandler(
+            "Result set filtered by GetAllowedIdsAsync(Cabinet.View); " +
+            "unauthorized cabinets never enter the response.");
 
         group.MapGet("/{id:guid}", async (
             Guid id,
@@ -137,7 +139,11 @@ public static class CabinetEndpoints
                 ct);
 
             return Results.Created($"/api/content/cabinets/{cabinet.Id}", MapDto(cabinet));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "AuthorizeAsync(Project.Edit) on the parent project gates " +
+              "child creation (composes kind-level Create with per-resource " +
+              "Edit per design D9).");
 
         group.MapPatch("/{id:guid}", async (
             Guid id,

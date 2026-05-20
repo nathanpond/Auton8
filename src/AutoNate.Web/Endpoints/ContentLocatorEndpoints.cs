@@ -1,4 +1,5 @@
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Content;
 using Microsoft.EntityFrameworkCore;
@@ -113,7 +114,9 @@ public static class ContentLocatorEndpoints
                 .ToList();
 
             return Results.Ok(new ProjectTreeResponse(projectId, cabinetDtos));
-        });
+        }).AuthorizedInHandler(
+            "Project.View via AuthorizeAsync (project gate); per-resource " +
+            "cabinet/notebook/page filtering via GetAllowedIdsAsync.");
 
         group.MapGet("/{locator:long}", async (
             long locator,
@@ -190,7 +193,11 @@ public static class ContentLocatorEndpoints
             }
 
             return Results.NotFound(new { error = $"Locator {locator} not found." });
-        });
+        }).OpenToAuthenticated(
+            "Locator → (kind, id, ancestor chain) lookup. Returns identifiers " +
+            "only; the SPA's follow-up fetch for the entity is gated by " +
+            "IContentAuthorizer. Locators are sequential, so authenticated " +
+            "mapping doesn't leak meaningful info.");
 
         return app;
     }

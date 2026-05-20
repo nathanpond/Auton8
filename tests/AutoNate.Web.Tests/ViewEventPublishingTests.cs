@@ -272,6 +272,7 @@ public sealed class ViewEventPublishingTests
             RecordEventTypes.Created,
             RecordEventTypes.Updated,
             RecordEventTypes.Deleted,
+            RecordEventTypes.Purged,
             RecordEventTypes.StatusChanged,
             RecordEventTypes.Restored,
             RecordEventTypes.AssigneesChanged

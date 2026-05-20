@@ -164,7 +164,8 @@ public static class PageAttachmentEndpoints
             if (!await CheckPageActionAsync(authorizer, http, attachment.PageId, Actions.View, ct))
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             return Results.Ok(MapDto(attachment));
-        });
+        }).AuthorizedInHandler(
+            "Page.View via AuthorizeAsync on the attachment's owning page.");
 
         directScoped.MapGet("/{id:guid}/download", async (
             Guid id,
@@ -198,7 +199,8 @@ public static class PageAttachmentEndpoints
 
             var stream = await store.ReadAsync(attachment.StorageKey, ct);
             return Results.File(stream, attachment.ContentType, attachment.FileName);
-        });
+        }).AuthorizedInHandler(
+            "Page.View via AuthorizeAsync on the attachment's owning page.");
 
         directScoped.MapPatch("/{id:guid}", async (
             Guid id,
@@ -237,7 +239,9 @@ public static class PageAttachmentEndpoints
                 ct);
 
             return Results.Ok(MapDto(attachment));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.Edit via AuthorizeAsync on the attachment's owning page.");
 
         directScoped.MapDelete("/{id:guid}", async (
             Guid id,
@@ -281,7 +285,11 @@ public static class PageAttachmentEndpoints
                 ct);
 
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.Delete via AuthorizeAsync on the attachment's owning " +
+              "page; that decision also honours the project's deletions " +
+              "lock.");
 
         return app;
     }

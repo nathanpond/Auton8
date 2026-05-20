@@ -61,7 +61,9 @@ public static class ProjectEndpoints
                 ct);
 
             return Results.Ok(new ProjectPageResponse(items.Select(MapDto).ToList(), totalCount));
-        });
+        }).AuthorizedInHandler(
+            "Result set filtered by GetAllowedIdsAsync(Project.View); " +
+            "unauthorized projects never enter the response.");
 
         group.MapGet("/{id:guid}", async (
             Guid id,
@@ -131,7 +133,11 @@ public static class ProjectEndpoints
                 ct);
 
             return Results.Created($"/api/content/projects/{project.Id}", MapDto(project));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .OpenToAuthenticated(
+              "Any signed-in user can create a project; the creator becomes " +
+              "Owner in the same transaction so the new project is immediately " +
+              "scoped to them.");
 
         group.MapPatch("/{id:guid}", async (
             Guid id,
@@ -233,7 +239,10 @@ public static class ProjectEndpoints
                 ct);
 
             return Results.Ok(MapDto(project));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "IsProjectOwnerAsync gates the toggle; owner-only by design " +
+              "(deletion lock lives outside the override system).");
 
         group.MapDelete("/{id:guid}", async (
             Guid id,

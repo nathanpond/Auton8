@@ -143,7 +143,13 @@ public sealed class EfCorePermissionGrantStoreTests
             EntityKinds.User, alice.ToString(),
             Actions.View, "/record/*", "allow", 0), Actor);
 
-        var page = await recordStore.ListAuthorizedAsync(aliceActor, type.Id, 0, 50, false);
+        // Re-resolve the record store so the second list call runs against a
+        // fresh IAuthorizer. In production the authorizer is scoped per
+        // request — grant writes in one request are picked up by subsequent
+        // requests, not by an already-resolved instance whose per-request
+        // grant cache predates the write.
+        var refreshedStore = db.CreateRecordStore(authorizationEnabled: true, AuthorizationEnforcement.ReadOnly);
+        var page = await refreshedStore.ListAuthorizedAsync(aliceActor, type.Id, 0, 50, false);
         Assert.Equal(1, page.TotalCount);
     }
 }

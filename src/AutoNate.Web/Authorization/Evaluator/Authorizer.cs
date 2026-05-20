@@ -31,6 +31,17 @@ public sealed class Authorizer : IAuthorizer
 
     private ActorContext? _actorContext;
 
+    // Per-request grant cache. Authorizer is registered scoped, so this lives
+    // exactly as long as _actorContext above. Per-row loops (e.g.
+    // ExecutionEndpoints.FilterVisibleExecutionsAsync, FlowableInstance
+    // authorizers) call IsAuthorizedAsync with the same (kind, action) for
+    // every row — without this cache each iteration would re-query
+    // permission_grants and re-parse every selector returned. Cache key
+    // includes the actor's UserId so a stray "different principal" call
+    // doesn't return a stale set.
+    private readonly Dictionary<(Guid UserId, string Kind, string Action),
+        IReadOnlyList<EffectiveGrant>> _grantsCache = new();
+
     public Authorizer(
         IDbContextFactory<AutoNateDbContext> dbFactory,
         IOptions<AuthorizationOptions> options,
@@ -669,6 +680,12 @@ public sealed class Authorizer : IAuthorizer
         string action,
         CancellationToken ct)
     {
+        var cacheKey = (actor.UserId, kind, action);
+        if (_grantsCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
         var userIdString = actor.UserId.ToString();
@@ -716,6 +733,7 @@ public sealed class Authorizer : IAuthorizer
             result.Add(new EffectiveGrant(ast, effect, raw.Selector));
         }
 
+        _grantsCache[cacheKey] = result;
         return result;
     }
 

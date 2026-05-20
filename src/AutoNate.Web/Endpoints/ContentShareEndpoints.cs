@@ -190,7 +190,11 @@ public static class ContentShareEndpoints
                 ct);
 
             return Results.Ok(new ShareResponse(notified, skipped, granted));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "IsProjectOwnerAsync gates the GrantAccess path; per-recipient " +
+              "AuthorizeAsync(Page.View) gates whether the user is notified " +
+              "or returned in SkippedUserIds.");
 
         return app;
     }

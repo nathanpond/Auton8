@@ -61,7 +61,9 @@ public static class NotebookEndpoints
                 ct);
 
             return Results.Ok(new NotebookPageResponse(items.Select(MapDto).ToList(), totalCount));
-        });
+        }).AuthorizedInHandler(
+            "Result set filtered by GetAllowedIdsAsync(Notebook.View); " +
+            "unauthorized notebooks never enter the response.");
 
         group.MapGet("/{id:guid}", async (
             Guid id,
@@ -134,7 +136,11 @@ public static class NotebookEndpoints
                 ct);
 
             return Results.Created($"/api/content/notebooks/{notebook.Id}", MapDto(notebook));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "AuthorizeAsync(Cabinet.Edit) on the parent cabinet gates " +
+              "child creation (composes kind-level Create with per-resource " +
+              "Edit per design D9).");
 
         group.MapPatch("/{id:guid}", async (
             Guid id,

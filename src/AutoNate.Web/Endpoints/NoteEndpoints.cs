@@ -268,7 +268,10 @@ public static class NoteEndpoints
                 ct);
 
             return Results.Ok(MapDto(note));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.Edit via AuthorizeAsync on the note's owning page; move " +
+              "additionally requires Edit on the destination page.");
 
         // Copy a note to a destination page (defaults to the note's current
         // page when omitted). Requires Edit on the source page (existing) and
@@ -359,7 +362,10 @@ public static class NoteEndpoints
                 ct);
 
             return Results.Created($"/api/content/notes/{row.Id}", MapDto(row));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.Edit via AuthorizeAsync on the source page and on the " +
+              "destination page (when different).");
 
         directScoped.MapDelete("/{id:guid}", async (
             Guid id,
@@ -391,7 +397,11 @@ public static class NoteEndpoints
                 ct);
 
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Page.Edit via AuthorizeAsync on the note's owning page; " +
+              "notes are intentionally not subject to deletions_locked, " +
+              "so Page.Edit (not Delete) is the right gate.");
 
         return app;
     }

@@ -162,7 +162,9 @@ public static class ProjectMemberEndpoints
                 ct);
 
             return Results.Ok(new { projectId, userId, role = ProjectRoleNames.ToWire(role.Value) });
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "IsProjectOwnerAsync gates the upsert; owner-only by design.");
 
         // Owner-only: remove a member. Refused if it would remove the last
         // owner.
@@ -206,7 +208,10 @@ public static class ProjectMemberEndpoints
                 ct);
 
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "IsProjectOwnerAsync gates the remove; service refuses to drop " +
+              "the last Owner.");
 
         // Owner-only: revoke a derived-access permission grant whose targets
         // are entirely inside this project. Used by the "× revoke" affordance
@@ -271,7 +276,10 @@ public static class ProjectMemberEndpoints
                     details: new { source = "project-derived-revoke" },
                     ct);
                 return Results.NoContent();
-            }).RequireAuthorization().DisableAntiforgery();
+            }).RequireAuthorization().DisableAntiforgery()
+              .AuthorizedInHandler(
+                  "IsProjectOwnerAsync gates the revoke; grant's selector " +
+                  "must resolve entirely inside this project's subtree.");
 
         return app;
     }

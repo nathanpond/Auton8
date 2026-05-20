@@ -182,7 +182,11 @@ public static class ContentPageEndpoints
                 ct);
 
             return Results.Created($"/api/content/pages/{page.Id}", MapDto(page));
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "AuthorizeAsync(Notebook.Edit) on the parent notebook (and " +
+              "AuthorizeAsync(Page.Edit) on the parent page when nesting) " +
+              "gates child creation per design D9.");
 
         pages.MapPatch("/{id:guid}", async (
             Guid id,
@@ -441,7 +445,11 @@ public static class ContentPageEndpoints
                 ct);
 
             return Results.NoContent();
-        }).DisableAntiforgery();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "IsProjectOwnerAsync gates the delete; intentionally narrower " +
+              "than Page.Delete because the ellipsis-menu Delete cascades " +
+              "child pages and notes via FK CASCADE.");
 
         // Copy a page (and every descendant page + every contained note) to
         // a destination notebook (and optionally under a parent page). The
