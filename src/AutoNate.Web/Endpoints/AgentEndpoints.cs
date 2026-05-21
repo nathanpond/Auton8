@@ -189,8 +189,11 @@ public static class AgentEndpoints
             }
             var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
-            var conv = await store.GetForUserAsync(id, userId, ct);
-            if (conv is null) return Results.NotFound();
+            // Header-only ownership check — we don't read messages or tool
+            // calls here, and the callback shouldn't emit a ConversationViewed
+            // audit on every page-query result.
+            var header = await store.GetHeaderForUserAsync(id, userId, ct);
+            if (header is null) return Results.NotFound();
 
             PageQueryResult result = request.Result.Ok
                 ? new PageQueryResult.Success(request.Result.Data ?? EmptyJsonObject())
@@ -220,8 +223,10 @@ public static class AgentEndpoints
             }
             var userId = http.GetActorId();
             if (userId == Guid.Empty) return Results.Unauthorized();
-            var conv = await store.GetForUserAsync(id, userId, ct);
-            if (conv is null) return Results.NotFound();
+            // Header-only ownership check — same rationale as the page-query
+            // callback above.
+            var header = await store.GetHeaderForUserAsync(id, userId, ct);
+            if (header is null) return Results.NotFound();
 
             PageActionResult result = request.Result.Ok
                 ? new PageActionResult.Success(
