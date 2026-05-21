@@ -10,7 +10,8 @@ namespace AutoNate.E2E.Tests;
 /// 403/204 by grant); this file just verifies the SPA renders the new pages
 /// and doesn't crash on the override-aware refactor.
 /// </summary>
-public sealed class WorkflowOverrideTests : IClassFixture<AutoNateE2EFixture>
+[Collection(AutoNateE2ECollection.Name)]
+public sealed class WorkflowOverrideTests
 {
     private readonly AutoNateE2EFixture _fixture;
 
@@ -25,15 +26,27 @@ public sealed class WorkflowOverrideTests : IClassFixture<AutoNateE2EFixture>
         await using var context = await _fixture.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await SignInAsAdminAsync(page);
+        await AutoNateE2EFixture.SignInAsAdminAsync(page);
         await page.GotoAsync("/workflow-executions");
 
-        // The page header is the cheapest assertion that the route resolved
-        // and the React tree mounted. SuperAdmin always has override, but
-        // there may be no executions to drill into in a fresh test database,
-        // so we don't open the modal here — just confirm the page renders.
-        await page.GetByRole(AriaRole.Heading, new() { Name = "Workflow Executions" })
-            .WaitForAsync(new() { Timeout = 15_000 });
+        await Assertions
+            .Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Workflow Executions" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // The four status-count cards (RUNNING / COMPLETED / CANCELLED /
+        // ERRORED) only render once useExecutions() resolves. Asserting on
+        // them proves the executions API actually responded, not just that
+        // the route registered. A fresh DB has zero executions, so we don't
+        // care about the numeric value — only that the cards mount.
+        await Assertions.Expect(page.GetByText("RUNNING")).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("COMPLETED")).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("CANCELLED")).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("ERRORED")).ToBeVisibleAsync();
+
+        // And no error banner — if useExecutions() threw we'd see a red Alert
+        // with role="alert". The flash slot uses role="status" for success,
+        // so this only catches the failure case.
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
     }
 
     [Fact]
@@ -42,26 +55,24 @@ public sealed class WorkflowOverrideTests : IClassFixture<AutoNateE2EFixture>
         await using var context = await _fixture.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await SignInAsAdminAsync(page);
+        await AutoNateE2EFixture.SignInAsAdminAsync(page);
 
-        // /executions/:id with an obviously fake id: the route should resolve
-        // (proving the new route registration works) and ExecutionContent
-        // should render with a Flowable-not-found error rather than a blank
-        // page or a JS exception.
+        // /executions/:id with a fake id: the route should resolve (proving
+        // the route registration works) and ExecutionContent should render a
+        // describeError alert rather than a blank page or a JS exception.
         await page.GotoAsync("/executions/this-instance-does-not-exist");
 
-        // The page-level error banner is the alert role; we just want it to
-        // appear within the timeout, regardless of exact wording.
-        await page.GetByRole(AriaRole.Alert)
-            .First.WaitForAsync(new() { Timeout = 15_000 });
-    }
+        // PageHeader "Execution" is the cheapest proof the route mounted. We
+        // need Exact=true because ExecutionContent also renders a sub-heading
+        // like "Execution this-instance-does-not-exist" once the API errors,
+        // which would otherwise match the same Name filter.
+        await Assertions
+            .Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Execution", Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-    private static async Task SignInAsAdminAsync(IPage page)
-    {
-        await page.GotoAsync("/");
-        await page.Locator("#username").FillAsync("admin");
-        await page.Locator("#password").FillAsync("admin");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Sign me in" }).ClickAsync();
-        await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex("/home"));
+        // The Flowable lookup fails -> describeError populates a red Alert.
+        await Assertions
+            .Expect(page.GetByRole(AriaRole.Alert).First)
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 }

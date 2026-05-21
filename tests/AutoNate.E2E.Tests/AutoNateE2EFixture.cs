@@ -6,10 +6,17 @@ using Xunit;
 namespace AutoNate.E2E.Tests;
 
 /// <summary>
-/// xUnit class fixture that boots AutoNate.Web as a child process on a random
-/// port — auto-login disabled, Dapr probe skipped, SpaProxy dormant — and owns
-/// a Playwright browser. Tests get an isolated <see cref="IBrowserContext"/>
-/// preconfigured with the bound BaseURL via <see cref="NewContextAsync"/>.
+/// xUnit collection fixture that boots AutoNate.Web as a child process on a
+/// random port — auto-login disabled, Dapr probe skipped, SpaProxy dormant —
+/// and owns a Playwright browser. Tests get an isolated
+/// <see cref="IBrowserContext"/> preconfigured with the bound BaseURL via
+/// <see cref="NewContextAsync"/>.
+///
+/// Wired as a <em>collection</em> fixture (not <c>IClassFixture</c>) so all
+/// E2E test classes share a single fixture instance. Per-class would let
+/// xUnit parallelize three concurrent <c>dotnet run -p:BuildSpa=true</c>
+/// invocations that race on obj/.../rpswa.dswa.cache.json and on wiping
+/// wwwroot/, killing every fixture except the lucky winner.
 ///
 /// First run rebuilds the SPA into wwwroot/, so it can take 30-60s.
 /// </summary>
@@ -30,6 +37,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     {
         var repoRoot = FindRepoRoot();
         WipeStaleStaticWebAssetsManifests(repoRoot);
+        WipeWwwroot(repoRoot);
         BaseUrl = await StartAppAsync(repoRoot);
 
         _playwright = await Playwright.CreateAsync();
@@ -42,6 +50,35 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
 
     public Task<IBrowserContext> NewContextAsync() =>
         Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = BaseUrl });
+
+    /// <summary>
+    /// Drives the SPA login form as the seeded super-admin and waits for the
+    /// post-login redirect to land on /home. Mantine's TextInput controls have
+    /// auto-generated IDs, so we drive them by label.
+    /// </summary>
+    public static async Task SignInAsAdminAsync(IPage page) =>
+        await SignInAsync(page, "admin", "admin");
+
+    /// <summary>
+    /// Drives the SPA login form with arbitrary credentials. Returns once the
+    /// post-login navigation has settled — either at /home (success) or back at
+    /// / with an ?error= query param (failure).
+    /// </summary>
+    public static async Task SignInAsync(IPage page, string username, string password)
+    {
+        await page.GotoAsync("/");
+        // Mantine's TextInput and PasswordInput don't expose a stable id; drive
+        // them by accessible role + name. Plain `GetByLabel("Password")` is
+        // ambiguous because Mantine renders an aria-label="Toggle password
+        // visibility" eye-icon button inside the same wrapper.
+        await page.GetByRole(AriaRole.Textbox, new() { Name = "Username" }).FillAsync(username);
+        await page.Locator("input[autocomplete='current-password']").FillAsync(password);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Sign me in" }).ClickAsync();
+
+        // /account/login 302s to /home on success or back to /?error=... on
+        // failure. Wait for either so the caller can branch on URL.
+        await page.WaitForURLAsync(new Regex(@"/(home|\?error=)"));
+    }
 
     public async Task DisposeAsync()
     {
@@ -158,6 +195,28 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     /// (or copied into peer test projects' bin/) survive. Wipe them all here
     /// before building.
     /// </summary>
+    /// <summary>
+    /// Deletes src/AutoNate.Web/wwwroot/ before launching the app. Two reasons:
+    /// (1) the upstream drawio bundle ships SVGs with commas in their filenames
+    /// (e.g. SAP_BTP,_ABAP_environment.svg). When MSBuild's static-web-assets
+    /// publish targets enumerate a populated wwwroot/, they invoke
+    /// [MSBuild]::MakeRelative on each path; commas inside an argument break
+    /// the function-call syntax and the build fails with MSB4186. Starting
+    /// from empty wwwroot/ avoids the enumeration on the way in (BuildSpa
+    /// repopulates after), so the comma files only exist in-process. (2) the
+    /// BuildSpa target's Inputs/Outputs check skips rebuilding when
+    /// wwwroot/index.html is present, leaving us at the mercy of whatever
+    /// hashed asset names were on disk from a prior session.
+    /// </summary>
+    private static void WipeWwwroot(string repoRoot)
+    {
+        var wwwroot = Path.Combine(repoRoot, "src", "AutoNate.Web", "wwwroot");
+        if (Directory.Exists(wwwroot))
+        {
+            try { Directory.Delete(wwwroot, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
     private static void WipeStaleStaticWebAssetsManifests(string repoRoot)
     {
         var roots = new List<string> { Path.Combine(repoRoot, "src", "AutoNate.Web") };

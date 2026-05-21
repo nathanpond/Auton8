@@ -3,14 +3,16 @@ using Xunit;
 
 namespace AutoNate.E2E.Tests;
 
-// Smoke check for the Phase-8 agent sidebar. We don't probe an actual LLM
-// here because the E2E fixture starts a fresh DB with no External Connection
-// rows; the goal is to confirm the sidebar mounts, toggles open, accepts a
-// message, and the "no provider configured" error path surfaces cleanly to
-// the user. Wiring the full streaming-with-real-Anthropic flow is a separate
-// fixture concern we'll add when we have a way to inject a stubbed provider
-// from the E2E side.
-public sealed class AgentSidebarTests : IClassFixture<AutoNateE2EFixture>
+// Smoke + interaction coverage for the agent sidebar. We don't probe a real
+// LLM here — the E2E fixture starts a fresh DB with no External Connection
+// rows. The goal is to confirm:
+//   1. The toggle is rendered for a signed-in user.
+//   2. Clicking it actually opens the side panel.
+//   3. The admin "External connections" config page renders and its
+//      "New connection" affordance opens the form modal.
+// Streaming-with-real-Anthropic flow is a separate fixture concern.
+[Collection(AutoNateE2ECollection.Name)]
+public sealed class AgentSidebarTests
 {
     private readonly AutoNateE2EFixture _fixture;
 
@@ -20,39 +22,56 @@ public sealed class AgentSidebarTests : IClassFixture<AutoNateE2EFixture>
     }
 
     [Fact]
-    public async Task Sidebar_toggle_is_present_after_admin_signs_in()
+    public async Task Toggle_OpensTheAgentPanel()
     {
         await using var context = await _fixture.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync("/");
-        await page.Locator("#username").FillAsync("admin");
-        await page.Locator("#password").FillAsync("admin");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Sign me in" }).ClickAsync();
-        await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex("/home"));
+        await AutoNateE2EFixture.SignInAsAdminAsync(page);
 
-        var toggle = page.Locator(".agent-toggle");
+        // The header trigger announces itself via aria-label. Previously the
+        // tests grepped for a `.agent-toggle` class, which the Mantine
+        // migration deleted.
+        var toggle = page.GetByLabel("Open AutoNate assistant");
         await toggle.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
-        Assert.True(await toggle.IsVisibleAsync());
+
+        // Before the click the panel header text shouldn't be visible (the
+        // <aside> is rendered but its inner is gated on isOpen).
+        await Assertions.Expect(page.GetByText("AutoNate Assistant")).Not.ToBeVisibleAsync();
+
+        await toggle.ClickAsync();
+
+        // The opened panel renders a header reading "AutoNate Assistant" and
+        // a Close button with aria-label="Close assistant". Asserting both
+        // catches drift in either the trigger or the open-state CSS class.
+        await Assertions.Expect(page.GetByText("AutoNate Assistant"))
+            .ToBeVisibleAsync(new() { Timeout = 5_000 });
+        await Assertions.Expect(page.GetByLabel("Close assistant"))
+            .ToBeVisibleAsync(new() { Timeout = 5_000 });
     }
 
     [Fact]
-    public async Task External_connections_admin_page_renders_after_admin_signs_in()
+    public async Task ExternalConnectionsAdminPage_OpensNewConnectionModal()
     {
         await using var context = await _fixture.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync("/");
-        await page.Locator("#username").FillAsync("admin");
-        await page.Locator("#password").FillAsync("admin");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Sign me in" }).ClickAsync();
-        await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex("/home"));
-
+        await AutoNateE2EFixture.SignInAsAdminAsync(page);
         await page.GotoAsync("/admin/config/external-connections");
-        // The page replaces the legacy stub component; the heading or the
-        // "New connection" button is enough to prove Phase 3 wired up.
-        var newButton = page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex("New connection") });
-        await newButton.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
-        Assert.True(await newButton.IsVisibleAsync());
+
+        // The "New connection" button is the tooltip-wrapped + (plus) icon
+        // in the toolbar. It has both aria-label="New connection" and a
+        // Mantine Tooltip; we click by the accessible name.
+        var newButton = page.GetByRole(AriaRole.Button, new() { Name = "New connection" });
+        await Assertions.Expect(newButton).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await newButton.ClickAsync();
+
+        // ConnectionFormModal opens with title "New connection". Asserting on
+        // both the dialog role and the Kind selector exercise the full mount,
+        // not just the heading.
+        var modal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(modal).ToBeVisibleAsync(new() { Timeout = 5_000 });
+        await Assertions.Expect(modal.GetByLabel("Kind")).ToBeVisibleAsync();
     }
 }

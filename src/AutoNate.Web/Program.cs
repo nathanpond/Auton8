@@ -1007,6 +1007,18 @@ app.MapYjsEndpoints();
 // that's a real packaging bug; falling through to a clear 404 surfaces it.
 if (Directory.Exists(app.Environment.WebRootPath))
 {
+    // UseStaticFiles is the runtime-enumerating backstop for MapStaticAssets.
+    // The SDK's compile-time static-web-assets manifest only catches files
+    // that exist at the start of build; files that the BuildSpa target drops
+    // into wwwroot/ during BeforeBuild (Vite's hashed bundles, drawio public/
+    // tree, etc.) don't make it into AutoNate.Web.staticwebassets.endpoints
+    // .json, so MapStaticAssets ends up serving nothing. UseStaticFiles
+    // enumerates wwwroot/ on each request and serves anything it finds. The
+    // E2E fixture (dotnet run -p:BuildSpa=true) is the canonical repro;
+    // dotnet publish also currently breaks on commas in drawio filenames,
+    // which would leave the manifest empty in production too. Negligible
+    // overhead behind MapStaticAssets's manifest hits in normal operation.
+    app.UseStaticFiles();
     app.MapStaticAssets();
 
     // React SPA is the only UI now and is mounted at the site root. Any URL that isn't a
