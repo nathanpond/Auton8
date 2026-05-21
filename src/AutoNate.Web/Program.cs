@@ -1,4 +1,5 @@
 using AutoNate.Plugins.Abstractions;
+using Microsoft.AspNetCore.HttpOverrides;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EntityTypes;
@@ -171,6 +172,8 @@ builder.Services.AddSingleton<IAuditEventOutbox>(sp =>
 builder.Services.AddHostedService<AuditOutboxDispatcher>();
 builder.Services.AddOptions<DevelopmentAutoLoginOptions>()
     .BindConfiguration(DevelopmentAutoLoginOptions.SectionName);
+builder.Services.AddOptions<TrustedProxyOptions>()
+    .BindConfiguration(TrustedProxyOptions.SectionName);
 builder.Services.AddOptions<FlowableOptions>()
     .BindConfiguration(FlowableOptions.SectionName);
 builder.Services.AddOptions<DaprOptions>()
@@ -591,6 +594,40 @@ if (!app.Environment.IsDevelopment())
 // rethrows, leaving the existing dev-exception-page (development) or
 // default 500 handler (production) in charge of the response.
 app.UseUnhandledExceptionSystemIssues();
+
+// Only honor X-Forwarded-For when an operator has explicitly named the
+// upstream proxies/networks they trust. Runs before auth so the recorded
+// audit IP (read from Connection.RemoteIpAddress downstream) reflects the
+// real client when a trusted proxy is in place.
+{
+    var trustedProxyOptions = app.Services
+        .GetRequiredService<IOptions<TrustedProxyOptions>>().Value;
+    if (trustedProxyOptions.Enabled)
+    {
+        var forwardedHeadersOptions = new ForwardedHeadersOptions
+        {
+            ForwardedHeaders = ForwardedHeaders.XForwardedFor,
+            ForwardLimit = trustedProxyOptions.ForwardLimit
+        };
+        // ASP.NET defaults to trusting loopback (127.0.0.1, ::1) which
+        // is fine for local sidecars; operators add their LB IPs here.
+        foreach (var ip in trustedProxyOptions.KnownProxies)
+        {
+            if (System.Net.IPAddress.TryParse(ip, out var parsed))
+            {
+                forwardedHeadersOptions.KnownProxies.Add(parsed);
+            }
+        }
+        foreach (var network in trustedProxyOptions.KnownNetworks)
+        {
+            if (System.Net.IPNetwork.TryParse(network, out var parsed))
+            {
+                forwardedHeadersOptions.KnownIPNetworks.Add(parsed);
+            }
+        }
+        app.UseForwardedHeaders(forwardedHeadersOptions);
+    }
+}
 
 app.UseWebSockets();
 app.UseAuthentication();

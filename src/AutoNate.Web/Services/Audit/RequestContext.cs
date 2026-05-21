@@ -69,16 +69,12 @@ public sealed class RequestContext(IHttpContextAccessor httpContextAccessor) : I
         {
             var ctx = httpContextAccessor.HttpContext;
             if (ctx is null) return string.Empty;
-            // Honor X-Forwarded-For only when present; the leftmost value is
-            // the originating client per the spec. No allow-list is enforced
-            // here — that's a deployment concern handled by the proxy.
-            if (ctx.Request.Headers.TryGetValue("X-Forwarded-For", out var fwd)
-                && fwd.Count > 0
-                && !string.IsNullOrWhiteSpace(fwd[0]))
-            {
-                var first = fwd[0]!.Split(',')[0].Trim();
-                if (!string.IsNullOrEmpty(first)) return first;
-            }
+            // Always read from the TCP peer. When operators have opted in
+            // via TrustedProxy.Enabled, ASP.NET's ForwardedHeaders
+            // middleware has already promoted a trusted X-Forwarded-For
+            // value into Connection.RemoteIpAddress upstream; we never
+            // parse the header here, so an unverified header from a
+            // direct client can't forge this field.
             return ctx.Connection.RemoteIpAddress?.ToString() ?? string.Empty;
         }
     }

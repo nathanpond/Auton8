@@ -139,15 +139,50 @@ public sealed class AuditContextEventPublisherTests
     }
 
     [Fact]
-    public void RequestContext_honors_X_Forwarded_For_header()
+    public void RequestContext_ignores_unverified_X_Forwarded_For_header()
     {
+        // An attacker with direct access to the listener used to be able
+        // to forge the recorded audit IP by setting X-Forwarded-For. The
+        // ForwardedHeaders middleware (gated on TrustedProxy.Enabled) is
+        // now the only thing that may promote a forwarded value into
+        // Connection.RemoteIpAddress. RequestContext itself trusts only
+        // the TCP peer, so a spoofed header from a direct client is
+        // dropped on the floor.
         var accessor = new HttpContextAccessor();
         var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("1.2.3.4");
         http.Request.Headers["X-Forwarded-For"] = "203.0.113.5, 10.0.0.1";
         accessor.HttpContext = http;
 
         var requestContext = new RequestContext(accessor);
-        Assert.Equal("203.0.113.5", requestContext.IpAddress);
+        Assert.Equal("1.2.3.4", requestContext.IpAddress);
+    }
+
+    [Fact]
+    public void RequestContext_without_remote_ip_returns_empty_even_with_forwarded_header()
+    {
+        // No TCP peer, only a forwarded header — must not fall back to
+        // the header. Empty is the right answer.
+        var accessor = new HttpContextAccessor();
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = null;
+        http.Request.Headers["X-Forwarded-For"] = "203.0.113.5";
+        accessor.HttpContext = http;
+
+        var requestContext = new RequestContext(accessor);
+        Assert.Equal(string.Empty, requestContext.IpAddress);
+    }
+
+    [Fact]
+    public void RequestContext_uses_remote_ip_when_no_forwarded_header()
+    {
+        var accessor = new HttpContextAccessor();
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("198.51.100.7");
+        accessor.HttpContext = http;
+
+        var requestContext = new RequestContext(accessor);
+        Assert.Equal("198.51.100.7", requestContext.IpAddress);
     }
 
     private static IRequestContext BuildRequestContext(

@@ -46,7 +46,7 @@ public static class EventCatalog
         new("auditContext.occurredAtUtc", "string (ISO 8601)", "UTC timestamp at which the publisher emitted the event."),
         new("auditContext.requestId", "string", "HttpContext trace identifier — links the event to request-log lines."),
         new("auditContext.correlationId", "string | null", "Value of the X-Correlation-Id (or X-Request-Id) header if the caller supplied one."),
-        new("auditContext.ipAddress", "string", "Originating client IP after honoring X-Forwarded-For. Empty for non-HTTP-originated events."),
+        new("auditContext.ipAddress", "string", "Client IP from the TCP peer. When TrustedProxy.Enabled is configured with a known upstream, ASP.NET's ForwardedHeaders middleware promotes a trusted X-Forwarded-For value into this slot; an unverified header from a direct client is ignored. Empty for non-HTTP-originated events."),
         new("auditContext.userAgent", "string", "User-Agent header, truncated to 512 chars."),
         new("auditContext.sourceAppId", "string", "Publishing application identifier, e.g. 'autonate.web'."),
         new("auditContext.httpMethod", "string", "HTTP method of the request that produced the event."),
