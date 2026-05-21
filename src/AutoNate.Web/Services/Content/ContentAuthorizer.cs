@@ -215,100 +215,170 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             return ContentAccessSet.From(fastIds);
         }
 
-        // Slow path: wildcard-with-denies or explicit override grants. We
-        // need the full resource list because overrides can reach beyond the
-        // actor's membership scope, and per-resource override math doesn't
-        // fit cleanly in SQL.
-        //
-        // Locked-projects only matter for Delete; for any other action the
-        // lock checks below short-circuit before consulting `lockedSet`, so
-        // skipping the load saves a round trip on every non-Delete call.
-        HashSet<Guid> lockedSet;
-        if (action == Actions.Delete)
-        {
-            var lockedProjectIds = await db.Projects.AsNoTracking()
-                .Where(p => p.DeletionsLocked)
-                .Select(p => p.Id)
-                .ToListAsync(ct);
-            lockedSet = lockedProjectIds.ToHashSet();
-        }
-        else
-        {
-            lockedSet = new HashSet<Guid>();
-        }
-
-        // (resourceId, projectId) pairs for every resource of this kind.
-        var resources = await db.ContentAncestors.AsNoTracking()
-            .Where(ca => ca.DescendantKind == kind
-                         && ca.AncestorKind == ContentKinds.Project)
-            .Select(ca => new { ResourceId = ca.DescendantId, ProjectId = ca.AncestorId })
-            .ToListAsync(ct);
-
-        var rolesByProject = memberships.ToDictionary(m => m.ProjectId, m => m.Role);
-
-        // Override grants for this kind+action across every resource the
-        // actor's principals reach. Loaded in one shot then bucketed per
-        // resource so the closest-depth tiebreak is in-memory.
-        var overrideRows = await BuildOverrideListingRowsAsync(db, grants, kind, ct);
-        var overridesByResource = overrideRows
-            .GroupBy(r => r.ResourceId)
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        var allowed = new HashSet<Guid>();
-        foreach (var r in resources)
-        {
-            var locked = lockedSet.Contains(r.ProjectId);
-            if (overridesByResource.TryGetValue(r.ResourceId, out var rowOverrides))
-            {
-                var bestDepth = rowOverrides.Min(g => g.Depth);
-                var atBest = rowOverrides.Where(g => g.Depth == bestDepth).ToList();
-                var hasDeny = atBest.Any(g => g.Effect == AuthEffect.Deny);
-                if (hasDeny)
-                {
-                    continue;
-                }
-                if (action == Actions.Delete && locked && kind != ContentKinds.Project &&
-                    !KindIsAlwaysDeletable(kind))
-                {
-                    // Lock blocks Delete on content kinds (notes are not in
-                    // this map — they aren't content kinds — and attachments
-                    // are gated through Page.Delete which we want blocked).
-                    continue;
-                }
-                if (action == Actions.Delete && locked)
-                {
-                    continue;
-                }
-                allowed.Add(r.ResourceId);
-                continue;
-            }
-
-            // Wildcard-allow acts as a baseline over every resource when
-            // there's no specific override. Project lock still gates Delete.
-            if (hasWildcardAllow)
-            {
-                if (action == Actions.Delete && locked)
-                {
-                    continue;
-                }
-                allowed.Add(r.ResourceId);
-                continue;
-            }
-
-            // Baseline path.
-            if (rolesByProject.TryGetValue(r.ProjectId, out var role) &&
-                RoleAllowsAction(role, action))
-            {
-                if (action == Actions.Delete && locked)
-                {
-                    continue;
-                }
-                allowed.Add(r.ResourceId);
-            }
-        }
-
-        return ContentAccessSet.From(allowed);
+        // Slow path: wildcard-with-denies or explicit override grants. The
+        // entire policy collapses into one SQL query so we never materialise
+        // the system-wide resource list in C# and the closest-depth-deny-
+        // wins tiebreak runs inside the database where it can use the
+        // existing content_ancestors indexes.
+        var slowGrantingProjectIds = memberships
+            .Where(m => RoleAllowsAction(m.Role, action))
+            .Select(m => m.ProjectId)
+            .ToList();
+        var overrideTargets = ExtractOverrideTargets(grants);
+        var allowedIds = await ComputeAllowedIdsViaSqlAsync(
+            db, kind, action,
+            hasWildcardAllow, slowGrantingProjectIds, overrideTargets, ct);
+        return ContentAccessSet.From(allowedIds);
     }
+
+    // Single CTE pipeline that produces the access set:
+    //   1. Expand allow/deny override targets through content_ancestors to
+    //      get per-resource (descendant_id, depth, effect) rows. Bounded by
+    //      override-target subtree sizes, not total resources.
+    //   2. Compute the per-resource "winning" effect at the closest depth.
+    //      Deny beats allow at the same depth (current policy).
+    //   3. Assemble reach = membership-reach ∪ (if wildcard) all-of-kind ∪
+    //      override-allow winners.
+    //   4. Subtract deny winners and (for Delete) resources whose project
+    //      ancestor is in deletions_locked.
+    //
+    // The wildcard and is-delete branches stay as boolean parameters in the
+    // CTEs rather than being composed at C# time, which keeps a single SQL
+    // shape Postgres can cache the plan for. Empty override-target arrays
+    // are handled cleanly — unnest('{}'::text[]) returns zero rows so the
+    // override CTEs degenerate to empty sets.
+    private static async Task<List<Guid>> ComputeAllowedIdsViaSqlAsync(
+        AutoNateDbContext db,
+        string kind,
+        string action,
+        bool hasWildcardAllow,
+        IReadOnlyList<Guid> grantingProjectIds,
+        IReadOnlyList<(string TargetKind, Guid TargetId, AuthEffect Effect)> overrideTargets,
+        CancellationToken ct)
+    {
+        var allowKinds = overrideTargets.Where(t => t.Effect == AuthEffect.Allow)
+            .Select(t => t.TargetKind).ToArray();
+        var allowIds = overrideTargets.Where(t => t.Effect == AuthEffect.Allow)
+            .Select(t => t.TargetId).ToArray();
+        var denyKinds = overrideTargets.Where(t => t.Effect == AuthEffect.Deny)
+            .Select(t => t.TargetKind).ToArray();
+        var denyIds = overrideTargets.Where(t => t.Effect == AuthEffect.Deny)
+            .Select(t => t.TargetId).ToArray();
+        var grantingProjects = grantingProjectIds.ToArray();
+        var isDelete = action == Actions.Delete;
+
+        const string sql = """
+            WITH
+            allow_targets AS (
+                SELECT unnest({0}::text[]) AS kind, unnest({1}::uuid[]) AS id
+            ),
+            deny_targets AS (
+                SELECT unnest({2}::text[]) AS kind, unnest({3}::uuid[]) AS id
+            ),
+            override_expansions AS (
+                SELECT ca.descendant_id, ca.depth, 'allow'::text AS effect
+                FROM content_ancestors ca
+                JOIN allow_targets t
+                    ON t.kind = ca.ancestor_kind AND t.id = ca.ancestor_id
+                WHERE ca.descendant_kind = {4}
+                UNION ALL
+                SELECT ca.descendant_id, ca.depth, 'deny'::text AS effect
+                FROM content_ancestors ca
+                JOIN deny_targets t
+                    ON t.kind = ca.ancestor_kind AND t.id = ca.ancestor_id
+                WHERE ca.descendant_kind = {4}
+            ),
+            min_depth_per_resource AS (
+                SELECT descendant_id, MIN(depth) AS min_depth
+                FROM override_expansions
+                GROUP BY descendant_id
+            ),
+            deny_winners AS (
+                SELECT DISTINCT e.descendant_id
+                FROM override_expansions e
+                JOIN min_depth_per_resource m ON m.descendant_id = e.descendant_id
+                WHERE e.depth = m.min_depth AND e.effect = 'deny'
+            ),
+            allow_winners AS (
+                SELECT DISTINCT e.descendant_id
+                FROM override_expansions e
+                JOIN min_depth_per_resource m ON m.descendant_id = e.descendant_id
+                WHERE e.depth = m.min_depth
+                  AND e.effect = 'allow'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM deny_winners d
+                      WHERE d.descendant_id = e.descendant_id)
+            ),
+            membership_reach AS (
+                SELECT ca.descendant_id
+                FROM content_ancestors ca
+                WHERE ca.descendant_kind = {4}
+                  AND ca.ancestor_kind = 'project'
+                  AND ca.ancestor_id = ANY({5}::uuid[])
+            ),
+            wildcard_reach AS (
+                SELECT ca.descendant_id
+                FROM content_ancestors ca
+                WHERE {6}::boolean
+                  AND ca.descendant_kind = {4}
+                  AND ca.ancestor_kind = 'project'
+            ),
+            reach AS (
+                SELECT descendant_id FROM membership_reach
+                UNION
+                SELECT descendant_id FROM wildcard_reach
+                UNION
+                SELECT descendant_id FROM allow_winners
+            ),
+            locked_for_delete AS (
+                SELECT ca.descendant_id
+                FROM content_ancestors ca
+                JOIN projects p
+                    ON p.id = ca.ancestor_id AND p.deletions_locked
+                WHERE {7}::boolean
+                  AND ca.descendant_kind = {4}
+                  AND ca.ancestor_kind = 'project'
+            )
+            SELECT r.descendant_id AS "Id"
+            FROM reach r
+            WHERE NOT EXISTS (
+                    SELECT 1 FROM deny_winners d WHERE d.descendant_id = r.descendant_id)
+              AND NOT EXISTS (
+                    SELECT 1 FROM locked_for_delete l WHERE l.descendant_id = r.descendant_id)
+            """;
+
+        var rows = await db.Database
+            .SqlQueryRaw<ResourceIdRow>(
+                sql,
+                allowKinds, allowIds, denyKinds, denyIds,
+                kind, grantingProjects, hasWildcardAllow, isDelete)
+            .ToListAsync(ct);
+        return rows.Select(r => r.Id).ToList();
+    }
+
+    // Flat list of (kind, id, effect) targets pulled from the actor's grants
+    // for the SQL slow path. Mirrors the entry condition of HasOverrideTargets
+    // but yields the data the SQL needs rather than just a boolean. Multiple
+    // grants on the same target — e.g. a user-allow plus a group-deny on the
+    // same page — produce multiple tuples, which the SQL collapses via the
+    // closest-depth-deny-wins CTE.
+    private static List<(string TargetKind, Guid TargetId, AuthEffect Effect)>
+        ExtractOverrideTargets(IReadOnlyList<ParsedGrant> grants)
+    {
+        var result = new List<(string, Guid, AuthEffect)>();
+        foreach (var g in grants)
+        {
+            if (!TryGetPathTarget(g.Ast, out var pathKind, out var pathId)) continue;
+            if (pathId is null) continue;
+            if (!ContentKinds.IsContentKind(pathKind)) continue;
+            result.Add((pathKind, pathId.Value, g.Effect));
+        }
+        return result;
+    }
+
+    // Row shape for the slow-path SqlQueryRaw. Public so EF Core's reflection
+    // can bind the "Id" column alias. Plain record — no entity mapping.
+    public sealed record class ResourceIdRow(Guid Id);
 
     public async Task<ProjectRole?> GetProjectRoleAsync(
         ClaimsPrincipal actor, Guid projectId, CancellationToken ct)
@@ -543,70 +613,6 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         return result;
     }
 
-    private static async Task<List<OverrideListingRow>> BuildOverrideListingRowsAsync(
-        AutoNateDbContext db, IReadOnlyList<ParsedGrant> grants, string kind,
-        CancellationToken ct)
-    {
-        if (grants.Count == 0) return new List<OverrideListingRow>();
-
-        // Collect each grant's (kind, id) target. Multiple grants can land on
-        // the same (kind, id) with different effects (e.g. user-allow plus
-        // group-deny), so retain a list of effects per target rather than
-        // collapsing.
-        var effectsByTarget = new Dictionary<(string Kind, Guid Id), List<AuthEffect>>();
-        foreach (var g in grants)
-        {
-            if (!TryGetPathTarget(g.Ast, out var pathKind, out var pathId)) continue;
-            if (!ContentKinds.IsContentKind(pathKind)) continue;
-            if (pathId is null) continue;
-            var key = (pathKind, pathId.Value);
-            if (!effectsByTarget.TryGetValue(key, out var list))
-            {
-                list = new List<AuthEffect>();
-                effectsByTarget[key] = list;
-            }
-            list.Add(g.Effect);
-        }
-        if (effectsByTarget.Count == 0) return new List<OverrideListingRow>();
-
-        // Group targets by ancestor kind so we issue at most one closure
-        // query per kind (≤ 4 round trips total, regardless of grant count)
-        // instead of one per grant target.
-        var idsByAncestorKind = new Dictionary<string, List<Guid>>();
-        foreach (var (target, _) in effectsByTarget)
-        {
-            if (!idsByAncestorKind.TryGetValue(target.Kind, out var ids))
-            {
-                ids = new List<Guid>();
-                idsByAncestorKind[target.Kind] = ids;
-            }
-            ids.Add(target.Id);
-        }
-
-        var rows = new List<OverrideListingRow>();
-        foreach (var (ancestorKind, ids) in idsByAncestorKind)
-        {
-            var matches = await db.ContentAncestors.AsNoTracking()
-                .Where(ca => ca.DescendantKind == kind
-                             && ca.AncestorKind == ancestorKind
-                             && ids.Contains(ca.AncestorId))
-                .Select(ca => new { ca.AncestorId, ca.DescendantId, ca.Depth })
-                .ToListAsync(ct);
-            foreach (var m in matches)
-            {
-                if (!effectsByTarget.TryGetValue((ancestorKind, m.AncestorId), out var effects))
-                {
-                    continue;
-                }
-                foreach (var effect in effects)
-                {
-                    rows.Add(new OverrideListingRow(m.DescendantId, m.Depth, effect));
-                }
-            }
-        }
-        return rows;
-    }
-
     private async Task<List<ParsedGrant>> LoadActorGrantsAsync(
         AutoNateDbContext db, ActorPrincipals ctx, string action, CancellationToken ct)
     {
@@ -680,10 +686,10 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         return false;
     }
 
-    // Does any grant target a specific content resource (the shape that
-    // BuildOverrideListingRowsAsync turns into override rows)? Used to decide
-    // whether GetAllowedIdsAsync can take the SQL fast path or has to fall
-    // back to the per-resource merge.
+    // Does any grant target a specific content resource? Used to decide
+    // whether GetAllowedIdsAsync can take the SQL fast path (no overrides
+    // → membership-reach only) or has to fall through to the SQL slow path
+    // (closest-depth-deny-wins CTE).
     private static bool HasOverrideTargets(IReadOnlyList<ParsedGrant> grants)
     {
         foreach (var g in grants)
@@ -725,6 +731,4 @@ public sealed class ContentAuthorizer : IContentAuthorizer
     private readonly record struct ParsedGrant(SelectorAst Ast, AuthEffect Effect);
 
     private readonly record struct OverrideRow(Guid ResourceId, int Depth, AuthEffect Effect);
-
-    private readonly record struct OverrideListingRow(Guid ResourceId, int Depth, AuthEffect Effect);
 }
