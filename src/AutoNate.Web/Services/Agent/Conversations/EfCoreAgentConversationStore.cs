@@ -301,54 +301,64 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
         CancellationToken cancellationToken = default)
     {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var rows = await dbContext.AgentMessages
+
+        // Find the most recent summary first. Backed by the partial index
+        // ix_agent_message_conversation_summary, so this is a single cheap
+        // lookup that doesn't grow with total history length.
+        var latestSummary = await dbContext.AgentMessages
             .AsNoTracking()
-            .Where(m => m.ConversationId == conversationId)
+            .Where(m => m.ConversationId == conversationId && m.Kind == "summary")
+            .OrderByDescending(m => m.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (latestSummary is null)
+        {
+            // Pre-first-compaction case. Costs are bounded by tail size
+            // anyway (no rolled-up prefix exists yet), so the full scan is
+            // the same shape as the tail-only path below.
+            var allRows = await dbContext.AgentMessages
+                .AsNoTracking()
+                .Where(m => m.ConversationId == conversationId)
+                .OrderBy(m => m.CreatedAtUtc)
+                .ToListAsync(cancellationToken);
+            var loaded = new List<LoadedMessage>(allRows.Count);
+            foreach (var row in allRows)
+            {
+                loaded.Add(new LoadedMessage(
+                    row.Id,
+                    new ChatMessage(ParseRole(row.Role), DeserializeBlocks(row.ContentJson))));
+            }
+            return loaded;
+        }
+
+        // Summary exists — pull only the live tail: rows strictly newer
+        // than the summary and any older summaries (from prior compactions)
+        // excluded by predicate, not by post-load filtering. Anchored on
+        // the indexed (conversation_id, created_at_utc) tuple so cost
+        // scales with tail length, not total history.
+        var tailRows = await dbContext.AgentMessages
+            .AsNoTracking()
+            .Where(m => m.ConversationId == conversationId
+                     && m.CreatedAtUtc > latestSummary.CreatedAtUtc
+                     && m.Kind != "summary")
             .OrderBy(m => m.CreatedAtUtc)
             .ToListAsync(cancellationToken);
 
-        // Find the most recent summary row. Everything older than (and
-        // including) the message it subsumes drops out; the summary itself
-        // becomes a synthetic assistant turn so the model sees "previously
-        // we discussed: …" before the live tail.
-        AgentMessage? latestSummary = null;
-        for (var i = rows.Count - 1; i >= 0; i--)
+        // Synthesize the assistant turn from the summary row's own
+        // ContentJson, carrying its id so re-compaction can chain through.
+        var result = new List<LoadedMessage>(tailRows.Count + 1)
         {
-            if (string.Equals(rows[i].Kind, "summary", StringComparison.OrdinalIgnoreCase))
-            {
-                latestSummary = rows[i];
-                break;
-            }
-        }
-
-        var loaded = new List<LoadedMessage>(rows.Count);
-        if (latestSummary is not null)
-        {
-            // Synthesize the assistant turn. The actual text lives inside
-            // the summary row's ContentJson (a single text block). Carry the
-            // summary row's own id so re-compaction can chain through it.
-            loaded.Add(new LoadedMessage(
+            new LoadedMessage(
                 latestSummary.Id,
-                new ChatMessage(ChatRole.Assistant, DeserializeBlocks(latestSummary.ContentJson))));
-            foreach (var row in rows)
-            {
-                if (row.CreatedAtUtc <= latestSummary.CreatedAtUtc) continue;
-                if (string.Equals(row.Kind, "summary", StringComparison.OrdinalIgnoreCase)) continue;
-                loaded.Add(new LoadedMessage(
-                    row.Id,
-                    new ChatMessage(ParseRole(row.Role), DeserializeBlocks(row.ContentJson))));
-            }
-        }
-        else
+                new ChatMessage(ChatRole.Assistant, DeserializeBlocks(latestSummary.ContentJson)))
+        };
+        foreach (var row in tailRows)
         {
-            foreach (var row in rows)
-            {
-                loaded.Add(new LoadedMessage(
-                    row.Id,
-                    new ChatMessage(ParseRole(row.Role), DeserializeBlocks(row.ContentJson))));
-            }
+            result.Add(new LoadedMessage(
+                row.Id,
+                new ChatMessage(ParseRole(row.Role), DeserializeBlocks(row.ContentJson))));
         }
-        return loaded;
+        return result;
     }
 
     public async Task<Guid> AppendSummaryAsync(
