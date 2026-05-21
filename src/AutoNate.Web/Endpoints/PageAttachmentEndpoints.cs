@@ -94,6 +94,30 @@ public static class PageAttachmentEndpoints
             await using var ms = new MemoryStream();
             await stream.CopyToAsync(ms, ct);
             var bytes = ms.ToArray();
+
+            // Strict magic-byte check. The client-supplied Content-Type
+            // is untrusted — a script could claim image/png while
+            // uploading HTML or SVG. Reject anything whose bytes don't
+            // match a known-safe binary signature, or whose claimed type
+            // doesn't agree with the sniffed family.
+            var sniffed = ContentTypeSniffer.Sniff(bytes);
+            if (sniffed is null)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Unsupported file format. The uploaded bytes do " +
+                            "not match any allowed file type."
+                });
+            }
+            if (!ContentTypeSniffer.ClientTypeMatchesSniff(sniffed, file.ContentType))
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"Content type '{file.ContentType}' does not " +
+                            "match the file's actual format."
+                });
+            }
+
             var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             using var writeStream = new MemoryStream(bytes, writable: false);
             var storageKey = await store.WriteAsync(projectId.Value, attachmentId, writeStream, ct);
@@ -198,7 +222,16 @@ public static class PageAttachmentEndpoints
                 ct);
 
             var stream = await store.ReadAsync(attachment.StorageKey, ct);
-            return Results.File(stream, attachment.ContentType, attachment.FileName);
+            // Defense in depth on the way out: belt-and-braces against
+            // rows that pre-date the strict upload sniff, or against any
+            // future code path that bypasses it. Rewrite active-content
+            // types to octet-stream, refuse MIME sniffing, and sandbox
+            // any sub-resource embed.
+            var responseContentType = SanitizeResponseContentType(attachment.ContentType);
+            http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            http.Response.Headers["Content-Security-Policy"] =
+                "default-src 'none'; sandbox; frame-ancestors 'none'";
+            return Results.File(stream, responseContentType, attachment.FileName);
         }).AuthorizedInHandler(
             "Page.View via AuthorizeAsync on the attachment's owning page.");
 
@@ -320,6 +353,33 @@ public static class PageAttachmentEndpoints
             }
         }
         return false;
+    }
+
+    // Content types that browsers may render as active content even with
+    // Content-Disposition: attachment when embedded via <iframe>, <object>,
+    // <embed>, or <img> (SVG). On download these are forced to
+    // application/octet-stream.
+    private static readonly HashSet<string> DangerousResponseContentTypes =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "text/html",
+            "application/xhtml+xml",
+            "image/svg+xml",
+            "application/javascript",
+            "text/javascript",
+            "application/ecmascript",
+            "text/ecmascript",
+            "application/xml",
+            "text/xml"
+        };
+
+    private static string SanitizeResponseContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType)) return "application/octet-stream";
+        var trimmed = contentType.Trim();
+        return DangerousResponseContentTypes.Contains(trimmed)
+            ? "application/octet-stream"
+            : trimmed;
     }
 
     private static string SanitizeFileName(string raw)
