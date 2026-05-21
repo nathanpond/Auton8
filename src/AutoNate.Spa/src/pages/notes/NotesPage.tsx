@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
@@ -465,31 +465,37 @@ export default function NotesPage() {
       : `/notes/${urlLocator}`;
   }, [urlLocator, urlNoteIndex]);
 
+  // Hydration-race detection. When the URL's locator changes externally
+  // (paste, back/forward, in-app navigate from another flow), there is a
+  // brief window where urlLocator has updated but the hydration effect
+  // hasn't yet propagated the new ancestors into activeProjectId /
+  // activeCabinetId / activePageId. If we ran the URL writeback during
+  // that window we'd compute desiredPath from the STALE selection and
+  // navigate right back to the old URL — undoing the change.
+  //
+  // The fix is to detect "urlLocator changed since the last commit" via a
+  // ref. A render that observes that mismatch is one that hasn't yet
+  // hydrated to the new URL; we skip the writeback for it. After
+  // hydration runs (in the next render), the ref matches urlLocator and
+  // we're free to write back.
+  //
+  // The previous version of this gate compared resolved.ancestors.page.id
+  // to activePageId — which ALSO fires on plain user clicks (state moves
+  // ahead, URL stays behind), causing every click after the first to be
+  // silently swallowed by this effect.
+  const prevUrlLocatorRef = useRef<number | null>(urlLocator);
+  const urlLocatorChangedThisRender = prevUrlLocatorRef.current !== urlLocator;
+  useEffect(() => {
+    prevUrlLocatorRef.current = urlLocator;
+  }, [urlLocator]);
+
   useEffect(() => {
     // Wait until the URL's locator has resolved before touching the URL.
     if (urlPending) return;
-    // Hydration race: the URL locator resolved to an entity (typically a
-    // page) that doesn't match the currently-active selection yet. The
-    // hydration effect below is about to call setActiveProjectId /
-    // setActiveCabinetId / setActivePageId from `resolved.ancestors`, but
-    // it hasn't fired yet — the closure values captured for this effect
-    // still point at the previous selection. Writing back here would
-    // navigate the URL right back to where it came from (the copy/move
-    // → navigate flow in EditorPane hits this race). Wait one tick for
-    // the hydration to land.
-    if (resolved) {
-      const resolvedPageId =
-        resolved.ancestors.page?.id ??
-        (resolved.kind === "page" ? resolved.id : null);
-      if (resolvedPageId != null && resolvedPageId !== activePageId) return;
-      // Same race for cabinet-level URLs (no page in the chain).
-      if (resolvedPageId == null) {
-        const resolvedCabinetId =
-          resolved.ancestors.cabinet?.id ??
-          (resolved.kind === "cabinet" ? resolved.id : null);
-        if (resolvedCabinetId != null && resolvedCabinetId !== activeCabinetId) return;
-      }
-    }
+    // URL just changed externally — hydration will catch state up to the
+    // new URL in the next render. See the comment on
+    // prevUrlLocatorRef above.
+    if (urlLocatorChangedThisRender) return;
     // Page in flight: activePageId is set but its tree node hasn't loaded
     // yet (page-tree query still pending). Without this gate the URL would
     // briefly overwrite a /notes/{page} URL with /notes/{cabinet} during
@@ -509,9 +515,8 @@ export default function NotesPage() {
     currentPath,
     navigate,
     urlPending,
-    resolved,
+    urlLocatorChangedThisRender,
     activePageId,
-    activeCabinetId,
     activePageTreeNode,
     notesQuery.data
   ]);
@@ -720,6 +725,24 @@ export default function NotesPage() {
               setDeletePageNode(p);
             }}
             onNewPage={setNewPageTarget}
+            onMovePage={(req) => {
+              // Match the MoveCopyModal move semantics: PATCH the page's
+              // notebookId + parentPageId, with parentPageIdSet:true so the
+              // backend treats null as an explicit "make this top-level."
+              // Backend cascades children with the parent. Don't navigate
+              // here — moving a non-active page shouldn't yank the URL; the
+              // active-page case is fine since the locator stays stable
+              // across moves and the URL writeback resyncs once the page
+              // tree refetches.
+              updatePageMutation.mutate({
+                id: req.pageId,
+                body: {
+                  notebookId: req.notebookId,
+                  parentPageId: req.parentPageId,
+                  parentPageIdSet: true
+                }
+              });
+            }}
             forceExpandIds={forceExpandIds}
             width={explorerWidth}
             onResize={setExplorerWidth}

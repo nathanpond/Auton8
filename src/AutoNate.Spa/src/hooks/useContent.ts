@@ -242,7 +242,12 @@ export function useUpdatePage() {
       updatePage(vars.id, vars.body),
     onSuccess: (page) => {
       qc.invalidateQueries({ queryKey: pageKey(page.id) });
-      qc.invalidateQueries({ queryKey: pageTreeKey(page.notebookId) });
+      // Invalidate every cached page-tree — a notebookId/parentPageId change
+      // (move/reparent) means the page left some other notebook's tree, and
+      // tracking the source notebook here would require an extra cache read.
+      // For rename/sortOrder updates this is a no-op extra refetch of one
+      // tree; cheap compared to leaving a stale row in the explorer.
+      qc.invalidateQueries({ queryKey: ["content", "page-tree"] });
     }
   });
 }

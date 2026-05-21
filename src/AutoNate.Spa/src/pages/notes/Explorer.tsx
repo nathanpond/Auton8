@@ -39,6 +39,23 @@ export type NewPageTarget = {
   parentKind: "notebook" | "page";
 };
 
+// Tracks the page currently being dragged inside the explorer. excludedIds
+// includes the dragged page itself plus every descendant — drop targets check
+// membership to refuse self-drops and cycle creation. notebookId/parentPageId
+// describe the dragged page's current location so no-op drops can be skipped.
+type PageDragInfo = {
+  pageId: string;
+  notebookId: string;
+  parentPageId: string | null;
+  excludedIds: Set<string>;
+};
+
+export type PageMoveRequest = {
+  pageId: string;
+  notebookId: string;
+  parentPageId: string | null;
+};
+
 type Props = {
   cabinet: CabinetDto | null;
   notebooks: NotebookWithPages[];
@@ -56,6 +73,10 @@ type Props = {
   onArchivePage?: (page: PageTreeNodeDto) => void;
   onDeletePage?: (page: PageTreeNodeDto) => void;
   onNewPage?: (target: NewPageTarget) => void;
+  // Drag-and-drop page reparenting. Called once when the user drops a page on
+  // a valid target (another page in this cabinet, or a notebook in this
+  // cabinet). The parent owns the mutation + cache invalidation.
+  onMovePage?: (req: PageMoveRequest) => void;
   forceExpandIds?: ReadonlySet<string>;
   width: number;
   // Called continuously while dragging; parent stores the live value.
@@ -97,6 +118,7 @@ export function Explorer({
   onArchivePage,
   onDeletePage,
   onNewPage,
+  onMovePage,
   forceExpandIds,
   width,
   onResize,
@@ -105,6 +127,29 @@ export function Explorer({
 }: Props) {
   const canCreate = !!cabinet && !!onNewNotebook;
   const [query, setQuery] = useState("");
+  // Live drag state — set on a PageRow's onDragStart, cleared on onDragEnd
+  // (and on a successful drop). Lifted here so every NotebookRow / PageRow
+  // can read it without React's context machinery.
+  const [pageDrag, setPageDrag] = useState<PageDragInfo | null>(null);
+  // No-op detection: dragging a page onto its current parent (or onto its
+  // current notebook when it's already top-level there) shouldn't fire a
+  // mutation. Centralised here so both row kinds share the rule.
+  const isNoOpMove = (destNotebookId: string, destParentPageId: string | null) => {
+    if (!pageDrag) return true;
+    return (
+      pageDrag.notebookId === destNotebookId &&
+      pageDrag.parentPageId === destParentPageId
+    );
+  };
+  const commitMove = (destNotebookId: string, destParentPageId: string | null) => {
+    if (!pageDrag || !onMovePage) return;
+    if (isNoOpMove(destNotebookId, destParentPageId)) return;
+    onMovePage({
+      pageId: pageDrag.pageId,
+      notebookId: destNotebookId,
+      parentPageId: destParentPageId
+    });
+  };
   const color = cabinet ? cabinetColorFor(cabinet.id) : notesTheme.muted;
   const icon = cabinet?.icon ?? defaultCabinetIcon();
   // Pointer-driven resize. We attach window listeners only for the lifetime
@@ -255,6 +300,10 @@ export function Explorer({
               onDeletePage={onDeletePage}
               onNewPage={onNewPage}
               forceExpandIds={forceExpandIds}
+              pageDrag={pageDrag}
+              setPageDrag={setPageDrag}
+              commitMove={commitMove}
+              dropAllowed={!!onMovePage}
             />
           ))}
         {!loading && notebooks.length === 0 && cabinet && (
@@ -374,7 +423,11 @@ function NotebookRow({
   onArchivePage,
   onDeletePage,
   onNewPage,
-  forceExpandIds
+  forceExpandIds,
+  pageDrag,
+  setPageDrag,
+  commitMove,
+  dropAllowed
 }: {
   nb: NotebookWithPages;
   defaultOpen: boolean;
@@ -390,14 +443,25 @@ function NotebookRow({
   onDeletePage?: (page: PageTreeNodeDto) => void;
   onNewPage?: (target: NewPageTarget) => void;
   forceExpandIds?: ReadonlySet<string>;
+  pageDrag: PageDragInfo | null;
+  setPageDrag: (info: PageDragInfo | null) => void;
+  commitMove: (destNotebookId: string, destParentPageId: string | null) => void;
+  dropAllowed: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dropHover, setDropHover] = useState(false);
   const hasPages = nb.pages.length > 0;
   const controlsVisible = hover || menuOpen;
   const hasMenu = !!(onRename || onArchive || onDelete);
   const [titleRef, titleOverflowing] = useTextOverflow<HTMLSpanElement>(nb.name);
+  // Notebook is a valid drop target whenever a page is being dragged AND
+  // doing so wouldn't be a no-op (page already top-level in this notebook).
+  const isValidDropTarget =
+    dropAllowed &&
+    pageDrag != null &&
+    !(pageDrag.notebookId === nb.id && pageDrag.parentPageId == null);
 
   useEffect(() => {
     if (forceExpandIds?.has(nb.id)) setOpen(true);
@@ -429,6 +493,26 @@ function NotebookRow({
           }}
           onMouseEnter={() => setHover(true)}
           onMouseLeave={() => setHover(false)}
+          onDragOver={(e) => {
+            // Required to mark the row as a valid drop target — without this,
+            // the browser swallows the drop event entirely.
+            if (!isValidDropTarget) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (!dropHover) setDropHover(true);
+          }}
+          onDragLeave={() => setDropHover(false)}
+          onDrop={(e) => {
+            if (!isValidDropTarget) return;
+            e.preventDefault();
+            // Stop propagation so this drop doesn't double-fire on any
+            // ancestor drop zone (none exist today, but cheap insurance).
+            e.stopPropagation();
+            setDropHover(false);
+            commitMove(nb.id, null);
+            // Auto-expand the notebook so the user sees the page land here.
+            setOpen(true);
+          }}
           style={{
             position: "relative",
             width: "100%",
@@ -441,7 +525,9 @@ function NotebookRow({
             fontFamily: "inherit",
             textAlign: "left",
             color: notesTheme.dark,
-            borderRadius: 4
+            borderRadius: 4,
+            outline: dropHover ? `2px solid ${notesTheme.primary}` : undefined,
+            outlineOffset: -2
           }}
         >
           <i
@@ -540,6 +626,10 @@ function NotebookRow({
               onDelete={onDeletePage}
               onNewPage={onNewPage}
               forceExpandIds={forceExpandIds}
+              pageDrag={pageDrag}
+              setPageDrag={setPageDrag}
+              commitMove={commitMove}
+              dropAllowed={dropAllowed}
             />
           ))}
         </div>
@@ -558,7 +648,11 @@ function PageRow({
   onArchive,
   onDelete,
   onNewPage,
-  forceExpandIds
+  forceExpandIds,
+  pageDrag,
+  setPageDrag,
+  commitMove,
+  dropAllowed
 }: {
   page: PageTreeNode;
   activePageId: string | null;
@@ -570,15 +664,28 @@ function PageRow({
   onDelete?: (page: PageTreeNodeDto) => void;
   onNewPage?: (target: NewPageTarget) => void;
   forceExpandIds?: ReadonlySet<string>;
+  pageDrag: PageDragInfo | null;
+  setPageDrag: (info: PageDragInfo | null) => void;
+  commitMove: (destNotebookId: string, destParentPageId: string | null) => void;
+  dropAllowed: boolean;
 }) {
   const hasChildren = page.children.length > 0;
   const [open, setOpen] = useState(hasChildren);
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dropHover, setDropHover] = useState(false);
   const active = page.id === activePageId;
   const controlsVisible = hover || menuOpen;
   const hasMenu = !!(onRename || onArchive || onDelete);
   const [titleRef, titleOverflowing] = useTextOverflow<HTMLSpanElement>(page.title);
+  // Valid drop target when something is being dragged, this row isn't the
+  // dragged page (or one of its descendants), and the drop wouldn't be a
+  // no-op (page is already this row's direct child).
+  const isValidDropTarget =
+    dropAllowed &&
+    pageDrag != null &&
+    !pageDrag.excludedIds.has(page.id) &&
+    pageDrag.parentPageId !== page.id;
 
   useEffect(() => {
     if (forceExpandIds?.has(page.id)) setOpen(true);
@@ -596,12 +703,56 @@ function PageRow({
         withArrow
       >
         <div
+          draggable={dropAllowed}
           onClick={(e) => {
             e.stopPropagation();
             onPagePick(page.id);
           }}
           onMouseEnter={() => setHover(true)}
           onMouseLeave={() => setHover(false)}
+          onDragStart={(e) => {
+            if (!dropAllowed) return;
+            // excludedIds covers the dragged page + every descendant so drop
+            // targets can refuse cycles without re-walking on every dragover.
+            const excludedIds = new Set<string>();
+            const walk = (n: PageTreeNode) => {
+              excludedIds.add(n.id);
+              n.children.forEach(walk);
+            };
+            walk(page);
+            setPageDrag({
+              pageId: page.id,
+              notebookId: page.notebookId,
+              parentPageId: page.parentPageId ?? null,
+              excludedIds
+            });
+            e.dataTransfer.effectAllowed = "move";
+            // Some browsers refuse to start a drag unless dataTransfer has
+            // at least one payload — the value itself doesn't matter, we
+            // read drag state from the lifted React state instead.
+            e.dataTransfer.setData("text/plain", page.id);
+          }}
+          onDragEnd={() => setPageDrag(null)}
+          onDragOver={(e) => {
+            if (!isValidDropTarget) return;
+            e.preventDefault();
+            // Stop propagation so an outer page row (the visual parent in
+            // the tree) doesn't also light up as a drop target — we want
+            // the innermost row under the cursor to claim the drop.
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "move";
+            if (!dropHover) setDropHover(true);
+          }}
+          onDragLeave={() => setDropHover(false)}
+          onDrop={(e) => {
+            if (!isValidDropTarget) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setDropHover(false);
+            commitMove(page.notebookId, page.id);
+            // Auto-expand so the user sees the new child page appear.
+            setOpen(true);
+          }}
           style={{
             position: "relative",
             display: "flex",
@@ -616,7 +767,12 @@ function PageRow({
               : hover
                 ? notesTheme.hover
                 : "transparent",
-            color: active ? notesTheme.primary : notesTheme.dark
+            color: active ? notesTheme.primary : notesTheme.dark,
+            outline: dropHover ? `2px solid ${notesTheme.primary}` : undefined,
+            outlineOffset: -2,
+            // While this row is being dragged, dim it so the user has a
+            // visual anchor for "this is what I'm moving."
+            opacity: pageDrag?.pageId === page.id ? 0.45 : 1
           }}
         >
           <button
@@ -727,6 +883,10 @@ function PageRow({
               onDelete={onDelete}
               onNewPage={onNewPage}
               forceExpandIds={forceExpandIds}
+              pageDrag={pageDrag}
+              setPageDrag={setPageDrag}
+              commitMove={commitMove}
+              dropAllowed={dropAllowed}
             />
           ))}
         </>
