@@ -88,4 +88,9 @@ export type PageContent = {
   path: string;
   content: string;
   contentType: string;
+  // Carries the per-mount config from menu_items.config (minus the reserved
+  // templateKey / path / aliasPath fields). Templates that need mount-time
+  // configuration (e.g. dashboards with `isUserConfigurable` /
+  // `defaultLayout`) read it via useTemplateConfig().
+  config?: Record<string, unknown> | null;
 };

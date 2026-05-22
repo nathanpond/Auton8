@@ -94,6 +94,12 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<ProjectMember> ProjectMembers { get; set; }
 
+    public virtual DbSet<Dashboard> Dashboards { get; set; }
+
+    public virtual DbSet<DashboardWidget> DashboardWidgets { get; set; }
+
+    public virtual DbSet<DashboardShare> DashboardShares { get; set; }
+
     public virtual DbSet<Cabinet> Cabinets { get; set; }
 
     public virtual DbSet<Notebook> Notebooks { get; set; }
@@ -1163,6 +1169,81 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.AddedBy).HasColumnName("added_by");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Dashboard>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("dashboards_pkey");
+            entity.ToTable("dashboards");
+            entity.HasIndex(e => new { e.OwnerUserId, e.UpdatedAtUtc }, "ix_dashboards_owner_user_id_updated_at_utc")
+                .IsDescending(false, true);
+            entity.HasIndex(e => new { e.Visibility, e.Scope }, "ix_dashboards_visibility_scope");
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.OwnerUserId).HasColumnName("owner_user_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Visibility).HasColumnName("visibility").HasDefaultValue("private");
+            entity.Property(e => e.Scope).HasColumnName("scope").HasDefaultValue("user");
+            entity.Property(e => e.Source).HasColumnName("source").HasDefaultValue("user");
+            entity.Property(e => e.TemplateKey).HasColumnName("template_key");
+            entity.Property(e => e.SettingsJsonb)
+                .HasColumnName("settings_jsonb")
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<DashboardWidget>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("dashboard_widgets_pkey");
+            entity.ToTable("dashboard_widgets");
+            entity.HasIndex(e => e.DashboardId, "ix_dashboard_widgets_dashboard_id");
+
+            entity.HasOne<Dashboard>()
+                .WithMany()
+                .HasForeignKey(e => e.DashboardId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DashboardId).HasColumnName("dashboard_id");
+            entity.Property(e => e.WidgetType).HasColumnName("widget_type");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.ConfigJsonb)
+                .HasColumnName("config_jsonb")
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.GridX).HasColumnName("grid_x");
+            entity.Property(e => e.GridY).HasColumnName("grid_y");
+            entity.Property(e => e.GridW).HasColumnName("grid_w");
+            entity.Property(e => e.GridH).HasColumnName("grid_h");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<DashboardShare>(entity =>
+        {
+            entity.HasKey(e => new { e.DashboardId, e.PrincipalType, e.PrincipalId })
+                .HasName("dashboard_shares_pkey");
+            entity.ToTable("dashboard_shares");
+            entity.HasIndex(e => new { e.PrincipalType, e.PrincipalId }, "ix_dashboard_shares_principal");
+
+            entity.HasOne<Dashboard>()
+                .WithMany()
+                .HasForeignKey(e => e.DashboardId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.DashboardId).HasColumnName("dashboard_id");
+            entity.Property(e => e.PrincipalType).HasColumnName("principal_type");
+            entity.Property(e => e.PrincipalId).HasColumnName("principal_id");
+            entity.Property(e => e.Role).HasColumnName("role");
+            entity.Property(e => e.GrantedAtUtc).HasColumnName("granted_at_utc");
+            entity.Property(e => e.GrantedBy).HasColumnName("granted_by");
         });
 
         modelBuilder.Entity<Cabinet>(entity =>

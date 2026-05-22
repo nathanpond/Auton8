@@ -53,6 +53,29 @@
       <ProjectReference Include="..\AutoNate.Plugin.Abstractions\AutoNate.Plugin.Abstractions.csproj" />
     </ItemGroup>
 
+    <!--
+      Workaround for a .NET 10 SDK regression (10.0.201, Microsoft.NET.Publish.targets:851):
+      _ContentWithPublishMetadata expands `[MSBuild]::MakeRelative($(MSBuildProjectDirectory), %(Content.FullPath))`,
+      and the property-function parser splits the second argument on every comma it
+      finds — so any wwwroot file whose name contains a comma blows up the build with
+      "Method '[MSBuild]::MakeRelative' not found". The drawio stencil bundle ships
+      four SAP icons with commas in their filenames, and the drawio JS bundle
+      references those names verbatim (renaming the SVGs would break the diagrammer).
+      The expression is gated `Content.TargetPath == '' AND Content.Link == ''`, so
+      pre-setting TargetPath here keeps the broken branch from firing. `%2C` is the
+      MSBuild escape for `,` in Include/Update attributes.
+    -->
+    <ItemGroup>
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_ABAP_environment.svg"
+               TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_ABAP_environment.svg" />
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Cloud_Foundry_runtime.svg"
+               TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Cloud_Foundry_runtime.svg" />
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Kyma_runtime.svg"
+               TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Kyma_runtime.svg" />
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_Cloud_Identity%2C_SAP_Malware_Scanning_Service.svg"
+               TargetPath="wwwroot\drawio\img\lib\sap\SAP_Cloud_Identity%2C_SAP_Malware_Scanning_Service.svg" />
+    </ItemGroup>
+
     <Target Name="BuildReactSpa" BeforeTargets="ResolveStaticWebAssetsInputs;AssignTargetPaths;BeforeBuild" Condition="'$(BuildSpa)' == 'true'" Inputs="@(SpaInput)" Outputs="$(SpaPublishDir)index.html">
         <Message Importance="high" Text="Building React SPA at $(SpaRoot) (Configuration=$(Configuration))" />
         <!-- Vite owns its own static-asset bundle at public/vendor/bpmn-js. If it's missing

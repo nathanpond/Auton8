@@ -13,6 +13,7 @@ import {
   Select,
   Switch,
   Text,
+  Textarea,
   TextInput
 } from "@mantine/core";
 import { MenuItem, MenuItemType } from "@/types/menus";
@@ -488,6 +489,12 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
                         }
                       />
                     </Grid.Col>
+                    {selected?.key === "dashboard" && (
+                      <DashboardTemplateExtras
+                        config={config}
+                        setConfigField={setConfigField}
+                      />
+                    )}
                   </>
                 );
               })()}
@@ -613,6 +620,89 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
           }}
           onCancel={() => setPickerOpen(false)}
         />
+      )}
+    </>
+  );
+}
+
+// Per-mount extras shown when the dashboard template is selected. The
+// Switch flips `isUserConfigurable` (default true); when off, the textarea
+// lets the admin paste a defaultLayout.widgets JSON array that the locked
+// view renders read-only. A richer mini-canvas editor is a future
+// iteration — v1 keeps it as JSON so admins can configure the locked
+// layout without us shipping a second canvas.
+function DashboardTemplateExtras({
+  config,
+  setConfigField
+}: {
+  config: Record<string, unknown>;
+  setConfigField: (key: string, value: unknown) => void;
+}) {
+  const rawValue = config.isUserConfigurable;
+  const isUserConfigurable = rawValue === undefined ? true : Boolean(rawValue);
+  const defaultLayout = config.defaultLayout;
+  const [layoutText, setLayoutText] = useState(() =>
+    defaultLayout ? JSON.stringify(defaultLayout, null, 2) : ""
+  );
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+
+  // Keep the textarea in sync if config flips externally (e.g. picker
+  // re-selects the template).
+  useEffect(() => {
+    setLayoutText(defaultLayout ? JSON.stringify(defaultLayout, null, 2) : "");
+    setLayoutError(null);
+  }, [defaultLayout]);
+
+  const commitLayout = (text: string) => {
+    setLayoutText(text);
+    if (!text.trim()) {
+      setLayoutError(null);
+      setConfigField("defaultLayout", undefined);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      setLayoutError(null);
+      setConfigField("defaultLayout", parsed);
+    } catch (e) {
+      setLayoutError((e as Error).message);
+    }
+  };
+
+  return (
+    <>
+      <Grid.Col span={12}>
+        <Switch
+          label="User-configurable"
+          description={
+            isUserConfigurable
+              ? "Each viewer manages their own dashboards on this mount."
+              : "Viewers see only the locked default layout below — no selector, no editing."
+          }
+          checked={isUserConfigurable}
+          onChange={(e) =>
+            setConfigField(
+              "isUserConfigurable",
+              e.currentTarget.checked ? undefined : false
+            )
+          }
+        />
+      </Grid.Col>
+      {!isUserConfigurable && (
+        <Grid.Col span={12}>
+          <Textarea
+            label="Default layout (JSON)"
+            description={`Shape: { "widgets": [{ "widgetType": "data-table", "title": "...", "config": {...}, "gridX": 0, "gridY": 0, "gridW": 6, "gridH": 4 }] }`}
+            placeholder='{ "widgets": [] }'
+            value={layoutText}
+            onChange={(e) => commitLayout(e.currentTarget.value)}
+            error={layoutError}
+            autosize
+            minRows={4}
+            maxRows={14}
+            styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
+          />
+        </Grid.Col>
       )}
     </>
   );

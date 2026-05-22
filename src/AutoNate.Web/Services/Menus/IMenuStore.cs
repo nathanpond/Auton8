@@ -47,7 +47,12 @@ public sealed class MenuValidationException(string message) : Exception(message)
 
 public sealed record class PageRegistryEntry(Guid Id, string Path, string ContentType);
 
-public sealed record class PageContent(Guid Id, string Path, string Content, string ContentType);
+// Config carries mount-point-specific JSON from menu_items.config minus the
+// reserved templateKey / path / aliasPath fields. Templates that need
+// per-mount configuration (e.g. the dashboard template's
+// `isUserConfigurable` + `defaultLayout`) read it client-side via
+// useTemplateConfig(). Null when the mount has no extra config.
+public sealed record class PageContent(Guid Id, string Path, string Content, string ContentType, JsonElement? Config);
 
 public interface IMenuStore
 {

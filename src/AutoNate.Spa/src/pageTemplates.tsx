@@ -1,5 +1,13 @@
 import { ReactElement } from "react";
 
+// Side-effect import: registers every shipped widget into the registry
+// at module load. The dashboard template (registered below) relies on
+// the registry having a populated map by the time it renders. Importing
+// here (rather than from each widget consumer) means the registry is
+// warm regardless of which template the user lands on first.
+import "@/widgets";
+
+import Dashboard from "@/pages/dashboard/Dashboard";
 import Home from "@/pages/home/Home";
 import UserProfile from "@/pages/user-profile/UserProfile";
 import ManageUsers from "@/pages/manage-users/ManageUsers";
@@ -68,5 +76,6 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configForms: <FormsList />,
   configFormMappings: <FormsFormMappings />,
   configChatbotSettings: <SitewideChatbotSettings />,
-  configChatbotModels: <ModelCatalogPage />
+  configChatbotModels: <ModelCatalogPage />,
+  dashboard: <Dashboard />
 };

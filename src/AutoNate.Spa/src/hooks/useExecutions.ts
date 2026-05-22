@@ -13,6 +13,9 @@ import {
   getExecutionTasks,
   getTaskFormConfig,
   listExecutions,
+  listExecutionsPage,
+  ListExecutionsPageRequest,
+  ListExecutionsPageResult,
   listMyAssignedTasks,
   listTeamAssignedTasks,
   moveExecutionState,
@@ -42,6 +45,17 @@ export function useExecutions() {
   return useQuery<WorkflowExecutionSummary[]>({
     queryKey: EXECUTIONS_QUERY_KEY,
     queryFn: ({ signal }) => listExecutions(signal)
+  });
+}
+
+export const executionsPageQueryKey = (req: ListExecutionsPageRequest) =>
+  ["executions", "page", req] as const;
+
+export function useExecutionsPage(req: ListExecutionsPageRequest, enabled = true) {
+  return useQuery<ListExecutionsPageResult>({
+    queryKey: executionsPageQueryKey(req),
+    queryFn: ({ signal }) => listExecutionsPage(req, signal),
+    enabled
   });
 }
 

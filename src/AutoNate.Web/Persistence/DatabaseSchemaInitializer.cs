@@ -1361,7 +1361,8 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configForms', 'Forms (Site Config)', 'Define and manage form definitions.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configFormMappings', 'Form Mappings (Site Config)', 'Map forms to record types and fields.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configChatbotSettings', 'Chatbot Settings (Site Config)', 'Configure agent capabilities; applies to the next message.', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configChatbotModels', 'Chatbot Models (Site Config)', 'LLM model catalogue used by external connections and the agent loop.', TRUE, NOW(), NOW())
+              (gen_random_uuid(), 'configChatbotModels', 'Chatbot Models (Site Config)', 'LLM model catalogue used by external connections and the agent loop.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'dashboard', 'Dashboard', 'User-customizable dashboard with draggable, resizable widgets (data tables and charts).', TRUE, NOW(), NOW())
             ON CONFLICT (key) DO NOTHING;
 
             INSERT INTO menus (id, key, name, description, is_system,
@@ -1409,6 +1410,12 @@ internal static class DatabaseSchemaInitializer
             ) AS mapping(path, template_key)
             WHERE mi.item_type = 'route'
               AND mi.config->>'path' = mapping.path;
+
+            -- Surface the dashboard template under its own picker category so
+            -- it groups nicely when there are more dashboard-style templates.
+            UPDATE page_templates
+            SET category = 'Dashboards'
+            WHERE key = 'dashboard' AND category IS NULL;
         END $$;
         """;
 
@@ -1445,6 +1452,7 @@ internal static class DatabaseSchemaInitializer
         UPDATE page_templates SET thumbnail_url = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMTUwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCI+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIxNTAiIGZpbGw9IiNlZWVlZmEiLz48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyIiBmaWxsPSIjZmZmZmZmIi8+PHJlY3QgeT0iMjIiIHdpZHRoPSIyMDAiIGhlaWdodD0iMSIgZmlsbD0iI2RlZTJlNiIvPjxjaXJjbGUgY3g9IjExIiBjeT0iMTEiIHI9IjMiIGZpbGw9IiNmZjViNTciLz48Y2lyY2xlIGN4PSIyMiIgY3k9IjExIiByPSIzIiBmaWxsPSIjZjU5YzFhIi8+PGNpcmNsZSBjeD0iMzMiIGN5PSIxMSIgcj0iMyIgZmlsbD0iIzMyYTkzMiIvPjxyZWN0IHg9IjQ2IiB5PSI2IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjExIiByeD0iMiIgZmlsbD0iI2U5ZWNlZiIvPjxyZWN0IHg9IjE0IiB5PSIzNCIgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxMCIgcng9IjIiIGZpbGw9IiNlOWVjZWYiLz48cmVjdCB4PSIxNCIgeT0iNDgiIHdpZHRoPSI4MCIgaGVpZ2h0PSI0IiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjE0IiB5PSI2MiIgd2lkdGg9IjYiIGhlaWdodD0iNiIgZmlsbD0iIzAwYWNhYyIvPjxyZWN0IHg9IjI2IiB5PSI2MiIgd2lkdGg9IjYwIiBoZWlnaHQ9IjYiIHJ4PSIxIiBmaWxsPSIjNDk1MDU3Ii8+PHJlY3QgeD0iMjAiIHk9IjcyIiB3aWR0aD0iNiIgaGVpZ2h0PSI2IiBmaWxsPSIjMzQ4ZmUyIi8+PHJlY3QgeD0iMzIiIHk9IjcyIiB3aWR0aD0iNTAiIGhlaWdodD0iNSIgcng9IjEiIGZpbGw9IiNhZGI1YmQiLz48cmVjdCB4PSIyMCIgeT0iODIiIHdpZHRoPSI2IiBoZWlnaHQ9IjYiIGZpbGw9IiNmNTljMWEiLz48cmVjdCB4PSIzMiIgeT0iODIiIHdpZHRoPSI0NCIgaGVpZ2h0PSI1IiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjE0IiB5PSI5NCIgd2lkdGg9IjYiIGhlaWdodD0iNiIgZmlsbD0iIzMyYTkzMiIvPjxyZWN0IHg9IjI2IiB5PSI5NCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjUiIHJ4PSIxIiBmaWxsPSIjYWRiNWJkIi8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTQwLCA5MCkiPjxjaXJjbGUgY3g9IjAiIGN5PSIwIiByPSIyMiIgZmlsbD0iI2ZmZmZmZiIgc3Ryb2tlPSIjNzI3Y2I2IiBzdHJva2Utd2lkdGg9IjQiLz48bGluZSB4MT0iMTYiIHkxPSIxNiIgeDI9IjMyIiB5Mj0iMzIiIHN0cm9rZT0iIzcyN2NiNiIgc3Ryb2tlLXdpZHRoPSI2IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48cGF0aCBkPSJNIC04IDAgTCAtMiA2IEwgOCAtNiIgc3Ryb2tlPSIjMzJhOTMyIiBzdHJva2Utd2lkdGg9IjMiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjwvZz48L3N2Zz4=' WHERE key = 'configSecurityPermissionChecker' AND thumbnail_url IS NULL;
         UPDATE page_templates SET thumbnail_url = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMTUwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCI+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIxNTAiIGZpbGw9IiNmOGY5ZmEiLz48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyIiBmaWxsPSIjZmZmZmZmIi8+PHJlY3QgeT0iMjIiIHdpZHRoPSIyMDAiIGhlaWdodD0iMSIgZmlsbD0iI2RlZTJlNiIvPjxjaXJjbGUgY3g9IjExIiBjeT0iMTEiIHI9IjMiIGZpbGw9IiNmZjViNTciLz48Y2lyY2xlIGN4PSIyMiIgY3k9IjExIiByPSIzIiBmaWxsPSIjZjU5YzFhIi8+PGNpcmNsZSBjeD0iMzMiIGN5PSIxMSIgcj0iMyIgZmlsbD0iIzMyYTkzMiIvPjxyZWN0IHg9IjQ2IiB5PSI2IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjExIiByeD0iMiIgZmlsbD0iI2U5ZWNlZiIvPjxyZWN0IHg9IjE0IiB5PSIzNCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjQ4IiByeD0iNCIgZmlsbD0iIzAwYWNhYyIvPjxjaXJjbGUgY3g9IjY5IiBjeT0iNTgiIHI9IjYiIGZpbGw9IiNmOGY5ZmEiLz48Y2lyY2xlIGN4PSIxNCIgY3k9IjU4IiByPSI2IiBmaWxsPSIjZjhmOWZhIi8+PHJlY3QgeD0iMjAiIHk9IjQyIiB3aWR0aD0iMzAiIGhlaWdodD0iNCIgcng9IjEiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuOSIvPjxyZWN0IHg9IjIwIiB5PSI1MCIgd2lkdGg9IjIyIiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjY1Ii8+PHJlY3QgeD0iNzMiIHk9IjM0IiB3aWR0aD0iNTUiIGhlaWdodD0iNDgiIHJ4PSI0IiBmaWxsPSIjNzI3Y2I2Ii8+PGNpcmNsZSBjeD0iMTI4IiBjeT0iNTgiIHI9IjYiIGZpbGw9IiNmOGY5ZmEiLz48cmVjdCB4PSI3OSIgeT0iNDIiIHdpZHRoPSIzMCIgaGVpZ2h0PSI0IiByeD0iMSIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC45Ii8+PHJlY3QgeD0iNzkiIHk9IjUwIiB3aWR0aD0iMjIiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNjUiLz48cmVjdCB4PSIxMzIiIHk9IjM0IiB3aWR0aD0iNTUiIGhlaWdodD0iNDgiIHJ4PSI0IiBmaWxsPSIjZjU5YzFhIi8+PGNpcmNsZSBjeD0iMTMyIiBjeT0iNTgiIHI9IjYiIGZpbGw9IiNmOGY5ZmEiLz48cmVjdCB4PSIxMzgiIHk9IjQyIiB3aWR0aD0iMzAiIGhlaWdodD0iNCIgcng9IjEiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuOSIvPjxyZWN0IHg9IjEzOCIgeT0iNTAiIHdpZHRoPSIyMiIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC42NSIvPjxyZWN0IHg9IjE0IiB5PSI5MiIgd2lkdGg9Ijg0IiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iI2ZiNTU5NyIvPjxyZWN0IHg9IjIwIiB5PSIxMDAiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0IiByeD0iMSIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC45Ii8+PHJlY3QgeD0iMjAiIHk9IjEwOCIgd2lkdGg9IjYwIiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjciLz48cmVjdCB4PSIyMCIgeT0iMTE1IiB3aWR0aD0iNTAiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNyIvPjxyZWN0IHg9IjIwIiB5PSIxMjgiIHdpZHRoPSIzMCIgaGVpZ2h0PSI5IiByeD0iMiIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC44NSIvPjxyZWN0IHg9IjEwMiIgeT0iOTIiIHdpZHRoPSI4NCIgaGVpZ2h0PSI1MCIgcng9IjQiIGZpbGw9IiMzMmE5MzIiLz48cmVjdCB4PSIxMDgiIHk9IjEwMCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQiIHJ4PSIxIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjkiLz48cmVjdCB4PSIxMDgiIHk9IjEwOCIgd2lkdGg9IjYwIiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjciLz48cmVjdCB4PSIxMDgiIHk9IjExNSIgd2lkdGg9IjUwIiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjciLz48cmVjdCB4PSIxMDgiIHk9IjEyOCIgd2lkdGg9IjMwIiBoZWlnaHQ9IjkiIHJ4PSIyIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjg1Ii8+PC9zdmc+' WHERE key = 'configPlugins' AND thumbnail_url IS NULL;
         UPDATE page_templates SET thumbnail_url = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMTUwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCI+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIxNTAiIGZpbGw9IiNmOGY5ZmEiLz48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyIiBmaWxsPSIjZmZmZmZmIi8+PHJlY3QgeT0iMjIiIHdpZHRoPSIyMDAiIGhlaWdodD0iMSIgZmlsbD0iI2RlZTJlNiIvPjxjaXJjbGUgY3g9IjExIiBjeT0iMTEiIHI9IjMiIGZpbGw9IiNmZjViNTciLz48Y2lyY2xlIGN4PSIyMiIgY3k9IjExIiByPSIzIiBmaWxsPSIjZjU5YzFhIi8+PGNpcmNsZSBjeD0iMzMiIGN5PSIxMSIgcj0iMyIgZmlsbD0iIzMyYTkzMiIvPjxyZWN0IHg9IjQ2IiB5PSI2IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjExIiByeD0iMiIgZmlsbD0iI2U5ZWNlZiIvPjxyZWN0IHg9IjIwIiB5PSIzMiIgd2lkdGg9IjgwIiBoZWlnaHQ9IjExMCIgcng9IjMiIGZpbGw9IiNmZmZmZmYiIHN0cm9rZT0iI2RlZTJlNiIvPjxyZWN0IHg9IjEwMCIgeT0iMzIiIHdpZHRoPSI4MCIgaGVpZ2h0PSIxMTAiIHJ4PSIzIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9IiNkZWUyZTYiLz48bGluZSB4MT0iMTAwIiB5MT0iMzIiIHgyPSIxMDAiIHkyPSIxNDIiIHN0cm9rZT0iI2RlZTJlNiIvPjxyZWN0IHg9IjI2IiB5PSI0MCIgd2lkdGg9IjYwIiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjYWRiNWJkIi8+PHJlY3QgeD0iMjgiIHk9IjUwIiB3aWR0aD0iNTAiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNhZGI1YmQiLz48cmVjdCB4PSIyNiIgeT0iNjAiIHdpZHRoPSI2NSIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjI4IiB5PSI3OCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjYWRiNWJkIi8+PHJlY3QgeD0iMjYiIHk9Ijg4IiB3aWR0aD0iNzAiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNhZGI1YmQiLz48cmVjdCB4PSIyOCIgeT0iOTYiIHdpZHRoPSI0NSIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjI2IiB5PSIxMTAiIHdpZHRoPSI2MCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjI4IiB5PSIxMjAiIHdpZHRoPSI1MCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjI2IiB5PSIxMzAiIHdpZHRoPSI0MCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjEwNiIgeT0iNDAiIHdpZHRoPSI2OCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iIzcyN2NiNiIvPjxyZWN0IHg9IjEwNiIgeT0iNDgiIHdpZHRoPSI1MCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjEwNiIgeT0iNTYiIHdpZHRoPSI2MCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjEwNiIgeT0iNjgiIHdpZHRoPSI2OCIgaGVpZ2h0PSI0OCIgcng9IjMiIGZpbGw9IiMwZjE3MmEiLz48cmVjdCB4PSIxMTAiIHk9Ijc0IiB3aWR0aD0iMTQiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNmYjU1OTciLz48cmVjdCB4PSIxMjYiIHk9Ijc0IiB3aWR0aD0iMzIiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiM0OWI2ZDYiLz48cmVjdCB4PSIxMTAiIHk9IjgyIiB3aWR0aD0iNTAiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNmZmQyNGQiLz48cmVjdCB4PSIxMTAiIHk9IjkwIiB3aWR0aD0iMjAiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiMzMmE5MzIiLz48cmVjdCB4PSIxMzIiIHk9IjkwIiB3aWR0aD0iMzQiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiM0OWI2ZDYiLz48cmVjdCB4PSIxMTAiIHk9Ijk4IiB3aWR0aD0iNDAiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNhZGI1YmQiLz48cmVjdCB4PSIxMTAiIHk9IjEwNiIgd2lkdGg9IjU2IiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjNDliNmQ2Ii8+PHJlY3QgeD0iMTA2IiB5PSIxMjIiIHdpZHRoPSI2OCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iI2FkYjViZCIvPjxyZWN0IHg9IjEwNiIgeT0iMTMwIiB3aWR0aD0iNDAiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiNhZGI1YmQiLz48L3N2Zz4=' WHERE key = 'configPluginDocumentation' AND thumbnail_url IS NULL;
+        UPDATE page_templates SET thumbnail_url = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMTUwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCI+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIxNTAiIGZpbGw9IiNmOGY5ZmEiLz48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyIiBmaWxsPSIjZmZmZmZmIi8+PHJlY3QgeT0iMjIiIHdpZHRoPSIyMDAiIGhlaWdodD0iMSIgZmlsbD0iI2RlZTJlNiIvPjxjaXJjbGUgY3g9IjExIiBjeT0iMTEiIHI9IjMiIGZpbGw9IiNmZjViNTciLz48Y2lyY2xlIGN4PSIyMiIgY3k9IjExIiByPSIzIiBmaWxsPSIjZjU5YzFhIi8+PGNpcmNsZSBjeD0iMzMiIGN5PSIxMSIgcj0iMyIgZmlsbD0iIzMyYTkzMiIvPjxyZWN0IHg9IjQ2IiB5PSI2IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjExIiByeD0iMiIgZmlsbD0iI2U5ZWNlZiIvPjxyZWN0IHg9IjEwIiB5PSIzMCIgd2lkdGg9IjcwIiBoZWlnaHQ9IjEwIiByeD0iMiIgZmlsbD0iIzM0OGZlMiIvPjxyZWN0IHg9IjE0IiB5PSIzMyIgd2lkdGg9IjQyIiBoZWlnaHQ9IjQiIHJ4PSIxIiBmaWxsPSIjZmZmZmZmIi8+PHJlY3QgeD0iODQiIHk9IjMwIiB3aWR0aD0iMjAiIGhlaWdodD0iMTAiIHJ4PSIyIiBmaWxsPSIjMzJhOTMyIi8+PHJlY3QgeD0iMTAiIHk9IjQ2IiB3aWR0aD0iODQiIGhlaWdodD0iNDYiIHJ4PSIzIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9IiNkZWUyZTYiLz48cmVjdCB4PSIxNCIgeT0iNTAiIHdpZHRoPSIzNCIgaGVpZ2h0PSIzIiByeD0iMSIgZmlsbD0iIzcyN2NiNiIvPjxwb2x5bGluZSBwb2ludHM9IjE0LDgyIDI4LDcyIDQyLDc2IDU2LDYwIDcwLDY2IDg0LDU0IiBzdHJva2U9IiMwMGFjYWMiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIvPjxjaXJjbGUgY3g9IjE0IiBjeT0iODIiIHI9IjEuOCIgZmlsbD0iIzAwYWNhYyIvPjxjaXJjbGUgY3g9IjI4IiBjeT0iNzIiIHI9IjEuOCIgZmlsbD0iIzAwYWNhYyIvPjxjaXJjbGUgY3g9IjQyIiBjeT0iNzYiIHI9IjEuOCIgZmlsbD0iIzAwYWNhYyIvPjxjaXJjbGUgY3g9IjU2IiBjeT0iNjAiIHI9IjEuOCIgZmlsbD0iIzAwYWNhYyIvPjxjaXJjbGUgY3g9IjcwIiBjeT0iNjYiIHI9IjEuOCIgZmlsbD0iIzAwYWNhYyIvPjxjaXJjbGUgY3g9Ijg0IiBjeT0iNTQiIHI9IjEuOCIgZmlsbD0iIzAwYWNhYyIvPjxyZWN0IHg9Ijk4IiB5PSI0NiIgd2lkdGg9IjkyIiBoZWlnaHQ9IjQ2IiByeD0iMyIgZmlsbD0iI2ZmZmZmZiIgc3Ryb2tlPSIjZGVlMmU2Ii8+PHJlY3QgeD0iMTAyIiB5PSI1MCIgd2lkdGg9IjM0IiBoZWlnaHQ9IjMiIHJ4PSIxIiBmaWxsPSIjNzI3Y2I2Ii8+PHJlY3QgeD0iMTAyIiB5PSI1OCIgd2lkdGg9Ijg0IiBoZWlnaHQ9IjIiIHJ4PSIwLjUiIGZpbGw9IiNhZGI1YmQiLz48cmVjdCB4PSIxMDIiIHk9IjY0IiB3aWR0aD0iODQiIGhlaWdodD0iNiIgcng9IjEiIGZpbGw9IiNmOGY5ZmEiLz48cmVjdCB4PSIxMDQiIHk9IjY2IiB3aWR0aD0iMjAiIGhlaWdodD0iMiIgcng9IjAuNSIgZmlsbD0iIzQ5NTA1NyIvPjxyZWN0IHg9IjEzMCIgeT0iNjYiIHdpZHRoPSI0MCIgaGVpZ2h0PSIyIiByeD0iMC41IiBmaWxsPSIjYWRiNWJkIi8+PHJlY3QgeD0iMTc0IiB5PSI2NiIgd2lkdGg9IjEwIiBoZWlnaHQ9IjIiIHJ4PSIwLjUiIGZpbGw9IiMzMmE5MzIiLz48cmVjdCB4PSIxMDIiIHk9IjcyIiB3aWR0aD0iODQiIGhlaWdodD0iNiIgcng9IjEiIGZpbGw9IiNmZmZmZmYiLz48cmVjdCB4PSIxMDQiIHk9Ijc0IiB3aWR0aD0iMjAiIGhlaWdodD0iMiIgcng9IjAuNSIgZmlsbD0iIzQ5NTA1NyIvPjxyZWN0IHg9IjEzMCIgeT0iNzQiIHdpZHRoPSI0MCIgaGVpZ2h0PSIyIiByeD0iMC41IiBmaWxsPSIjYWRiNWJkIi8+PHJlY3QgeD0iMTc0IiB5PSI3NCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjIiIHJ4PSIwLjUiIGZpbGw9IiNmNTljMWEiLz48cmVjdCB4PSIxMDIiIHk9IjgwIiB3aWR0aD0iODQiIGhlaWdodD0iNiIgcng9IjEiIGZpbGw9IiNmOGY5ZmEiLz48cmVjdCB4PSIxMDQiIHk9IjgyIiB3aWR0aD0iMjAiIGhlaWdodD0iMiIgcng9IjAuNSIgZmlsbD0iIzQ5NTA1NyIvPjxyZWN0IHg9IjEzMCIgeT0iODIiIHdpZHRoPSI0MCIgaGVpZ2h0PSIyIiByeD0iMC41IiBmaWxsPSIjYWRiNWJkIi8+PHJlY3QgeD0iMTc0IiB5PSI4MiIgd2lkdGg9IjEwIiBoZWlnaHQ9IjIiIHJ4PSIwLjUiIGZpbGw9IiM3MjdjYjYiLz48cmVjdCB4PSIxMCIgeT0iOTYiIHdpZHRoPSIxODAiIGhlaWdodD0iNDYiIHJ4PSIzIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9IiNkZWUyZTYiLz48cmVjdCB4PSIxNCIgeT0iMTAwIiB3aWR0aD0iNDQiIGhlaWdodD0iMyIgcng9IjEiIGZpbGw9IiM3MjdjYjYiLz48cmVjdCB4PSIyMCIgeT0iMTIwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTgiIGZpbGw9IiMwMGFjYWMiLz48cmVjdCB4PSIzNCIgeT0iMTEyIiB3aWR0aD0iMTAiIGhlaWdodD0iMjYiIGZpbGw9IiMzNDhmZTIiLz48cmVjdCB4PSI0OCIgeT0iMTE4IiB3aWR0aD0iMTAiIGhlaWdodD0iMjAiIGZpbGw9IiNmNTljMWEiLz48cmVjdCB4PSI2MiIgeT0iMTA4IiB3aWR0aD0iMTAiIGhlaWdodD0iMzAiIGZpbGw9IiMzMmE5MzIiLz48cmVjdCB4PSI3NiIgeT0iMTI0IiB3aWR0aD0iMTAiIGhlaWdodD0iMTQiIGZpbGw9IiNmYjU1OTciLz48cmVjdCB4PSI5MCIgeT0iMTE1IiB3aWR0aD0iMTAiIGhlaWdodD0iMjMiIGZpbGw9IiMwMGFjYWMiLz48cmVjdCB4PSIxMDQiIHk9IjEyMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjE4IiBmaWxsPSIjMzQ4ZmUyIi8+PHJlY3QgeD0iMTE4IiB5PSIxMTAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIyOCIgZmlsbD0iI2Y1OWMxYSIvPjxyZWN0IHg9IjEzMiIgeT0iMTE4IiB3aWR0aD0iMTAiIGhlaWdodD0iMjAiIGZpbGw9IiMzMmE5MzIiLz48cmVjdCB4PSIxNDYiIHk9IjExNiIgd2lkdGg9IjEwIiBoZWlnaHQ9IjIyIiBmaWxsPSIjZmI1NTk3Ii8+PHJlY3QgeD0iMTYwIiB5PSIxMjIiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxNiIgZmlsbD0iIzAwYWNhYyIvPjxyZWN0IHg9IjE3NCIgeT0iMTEzIiB3aWR0aD0iMTAiIGhlaWdodD0iMjUiIGZpbGw9IiMzNDhmZTIiLz48L3N2Zz4=' WHERE key = 'dashboard' AND thumbnail_url IS NULL;
         """;
 
     // Track menu items inserted by a plugin via IPluginMenus, so disable/delete
@@ -2773,6 +2781,78 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // User-owned dashboards: a small content-style hierarchy of dashboards →
+    // widgets, plus a `dashboard_shares` table that is created in v1 for the
+    // future "share with user/group/role" feature but never written to yet.
+    // Block is idempotent (CREATE IF NOT EXISTS + ALTER…IF NOT EXISTS) so it
+    // is safe to run on every boot.
+    private const string DashboardsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS dashboards (
+            id UUID PRIMARY KEY,
+            owner_user_id UUID NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            visibility TEXT NOT NULL DEFAULT 'private',
+            scope TEXT NOT NULL DEFAULT 'user',
+            source TEXT NOT NULL DEFAULT 'user',
+            template_key TEXT NULL,
+            settings_jsonb JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL,
+            CONSTRAINT dashboards_visibility_check
+                CHECK (visibility IN ('private', 'shared', 'public')),
+            CONSTRAINT dashboards_scope_check
+                CHECK (scope IN ('user', 'team', 'site')),
+            CONSTRAINT dashboards_source_check
+                CHECK (source IN ('user', 'template'))
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_dashboards_owner_user_id_updated_at_utc
+            ON dashboards (owner_user_id, updated_at_utc DESC);
+
+        CREATE INDEX IF NOT EXISTS ix_dashboards_visibility_scope
+            ON dashboards (visibility, scope);
+
+        CREATE TABLE IF NOT EXISTS dashboard_widgets (
+            id UUID PRIMARY KEY,
+            dashboard_id UUID NOT NULL REFERENCES dashboards (id) ON DELETE CASCADE,
+            widget_type TEXT NOT NULL,
+            title TEXT NULL,
+            config_jsonb JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            grid_x INT NOT NULL DEFAULT 0,
+            grid_y INT NOT NULL DEFAULT 0,
+            grid_w INT NOT NULL DEFAULT 4,
+            grid_h INT NOT NULL DEFAULT 3,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_dashboard_widgets_dashboard_id
+            ON dashboard_widgets (dashboard_id);
+
+        CREATE TABLE IF NOT EXISTS dashboard_shares (
+            dashboard_id UUID NOT NULL REFERENCES dashboards (id) ON DELETE CASCADE,
+            principal_type TEXT NOT NULL,
+            principal_id UUID NOT NULL,
+            role TEXT NOT NULL,
+            granted_at_utc TIMESTAMPTZ NOT NULL,
+            granted_by UUID NOT NULL,
+            PRIMARY KEY (dashboard_id, principal_type, principal_id),
+            CONSTRAINT dashboard_shares_principal_type_check
+                CHECK (principal_type IN ('user', 'group', 'role')),
+            CONSTRAINT dashboard_shares_role_check
+                CHECK (role IN ('viewer', 'editor'))
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_dashboard_shares_principal
+            ON dashboard_shares (principal_type, principal_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -2829,6 +2909,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(PageFavoritesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(YjsDocumentsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DashboardsSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

@@ -6,6 +6,7 @@ import NotFound from "@/pages/not-found/NotFound";
 import { renderAppRoutes } from "@/routes/appRoutes";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
 import { JsxPage } from "./JsxPage";
+import { TemplateConfigProvider } from "./TemplateConfigContext";
 
 export default function DynamicPageRoute() {
   const location = useLocation();
@@ -48,9 +49,17 @@ export default function DynamicPageRoute() {
 
   // Template: look up the built-in component by its key. The registry contains
   // every template the SPA ships; missing keys fall through to NotFound.
+  // Wrapped in TemplateConfigProvider so the template can read per-mount
+  // config (e.g. dashboard isUserConfigurable + defaultLayout) via
+  // useTemplateConfig().
   if (page.contentType === "template") {
     const element = PAGE_TEMPLATES[page.content];
-    return element ?? <NotFound />;
+    if (!element) return <NotFound />;
+    return (
+      <TemplateConfigProvider value={page.config ?? null}>
+        {element}
+      </TemplateConfigProvider>
+    );
   }
 
   return (

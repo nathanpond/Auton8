@@ -529,9 +529,50 @@ public sealed class EfCoreMenuStore(
             // normalization). Today these always match.
             if (rowPath is null || !string.Equals(rowPath, path, StringComparison.Ordinal)) continue;
             if (!await IsAllowedAsync(row.PermissionRequired, permissionCache, actor, cancellationToken)) return null;
-            return new PageContent(row.Id, rowPath, content ?? string.Empty, contentType);
+            var mountConfig = ExtractMountConfig(row.Config);
+            return new PageContent(row.Id, rowPath, content ?? string.Empty, contentType, mountConfig);
         }
         return null;
+    }
+
+    // Returns the menu_items.config JSON minus the reserved fields the SPA
+    // already gets via Path/ContentType/Content. Null when the result is the
+    // empty object so the wire stays compact.
+    private static readonly HashSet<string> ReservedMountConfigKeys = new(StringComparer.Ordinal)
+    {
+        "templateKey", "path", "aliasPath"
+    };
+
+    private static JsonElement? ExtractMountConfig(string config)
+    {
+        if (string.IsNullOrWhiteSpace(config)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(config);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                var wrote = false;
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (ReservedMountConfigKeys.Contains(prop.Name)) continue;
+                    prop.WriteTo(writer);
+                    wrote = true;
+                }
+                writer.WriteEndObject();
+                if (!wrote) return null;
+            }
+            stream.Position = 0;
+            using var reduced = JsonDocument.Parse(stream);
+            return reduced.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     // Snapshot of every page_templates row referenced by a template-typed menu

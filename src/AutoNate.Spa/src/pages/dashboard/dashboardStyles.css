@@ -1,0 +1,87 @@
+/* Dashboard page styles. The grid itself uses react-grid-layout's base CSS
+   (imported by DashboardCanvas); the rules below only theme the widget
+   shells and override RGL classes where they fight Mantine defaults. */
+
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.dashboard-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dashboard-canvas {
+  position: relative;
+  min-height: 320px;
+}
+
+.dashboard-canvas .react-grid-item {
+  background: var(--mantine-color-body);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-canvas .react-grid-item.react-grid-placeholder {
+  background: var(--mantine-primary-color-light);
+  opacity: 0.4;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.widget-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.widget-frame-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-default-hover);
+  flex: 0 0 auto;
+}
+
+.widget-drag-handle {
+  flex: 1;
+  cursor: grab;
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-drag-handle:active {
+  cursor: grabbing;
+}
+
+.widget-frame-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.dashboard-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 48px 24px;
+  border: 1px dashed var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-dimmed);
+}

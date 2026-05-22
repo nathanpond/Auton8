@@ -13,6 +13,7 @@ import "@fortawesome/fontawesome-free/css/all.css";
 import "@mantine/core/styles.layer.css";
 import "@mantine/dropzone/styles.layer.css";
 import "@mantine/notifications/styles.layer.css";
+import "@mantine/charts/styles.layer.css";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import "@excalidraw/excalidraw/index.css";

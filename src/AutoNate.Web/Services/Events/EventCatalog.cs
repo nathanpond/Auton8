@@ -4,6 +4,7 @@ using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Content;
+using AutoNate.Web.Services.Dashboards;
 using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Notifications;
@@ -162,6 +163,20 @@ public static class EventCatalog
         new("details.locked", "boolean", "New value of deletions_locked for the toggle event.")
     ];
 
+    private static readonly EventCatalogPayloadField[] DashboardPayloadFields =
+    [
+        new("resource.id", "string (UUID)", "Primary key of the affected row (dashboard or widget)."),
+        new("resource.name", "string", "Dashboard name on dashboard.* events."),
+        new("resource.dashboardId", "string (UUID)", "Parent dashboard id on widget.* events."),
+        new("resource.widgetType", "string", "Widget registry key (e.g. 'data-table', 'mantine-chart') on widget.* events."),
+        new("details.fromMountPath", "string | null", "Mount-point path the dashboard was scaffolded from on dashboard.created."),
+        new("details.source", "'user' | 'template'", "Whether the row was scaffolded from a template default layout."),
+        new("details.widgetCount", "integer", "Count of joined widget rows on dashboard.viewed."),
+        new("details.updatedCount", "integer", "Number of widgets actually moved on layout.updated (positions sent vs. positions changed)."),
+        new("details.requestedCount", "integer", "Number of positions submitted on layout.updated."),
+        new("auditContext", "object", "Shared audit context — actor, IP, user-agent, request id, route template, authOutcome.")
+    ];
+
     private static readonly EventCatalogPayloadField[] ViewEventPayloadFields =
     [
         new("resourceKind", "string", "Domain-specific kind of the resource viewed (e.g. 'record', 'iam.user', 'workflow.model'). null/unset for cross-resource list events like list.viewed where there is no single resource."),
@@ -219,7 +234,11 @@ public static class EventCatalog
         new(
             ContentEventTopic.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
-            "AutoNate.Web — published from the content-hierarchy surface (projects, cabinets, notebooks, pages, page versions, page attachments, notes, note versions) whenever a row is created, edited, moved, archived/restored, or deleted, and whenever a project's membership or deletions-lock changes. Tiptap/Excalidraw/Draw.io payloads and attachment bytes never appear in events — only identifiers, file names, content types, sha256 prefixes, and audit-relevant scalars.")
+            "AutoNate.Web — published from the content-hierarchy surface (projects, cabinets, notebooks, pages, page versions, page attachments, notes, note versions) whenever a row is created, edited, moved, archived/restored, or deleted, and whenever a project's membership or deletions-lock changes. Tiptap/Excalidraw/Draw.io payloads and attachment bytes never appear in events — only identifiers, file names, content types, sha256 prefixes, and audit-relevant scalars."),
+        new(
+            DashboardEventTopic.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from the dashboards page-template surface whenever a user-owned dashboard or one of its widgets is created, edited, deleted, viewed, or reordered. Widget config blobs are never carried in events — only widget id + widget_type + dashboard id.")
     ];
 
     public static readonly EventCatalogCategory[] Categories =
@@ -1422,6 +1441,48 @@ public static class EventCatalog
                     "Caller removed a page from their favorites.",
                     "Fires from DELETE /api/content/pages/{id}/favorite. Idempotent — removing a non-favorited page still publishes.",
                     ["resource: { id, title }. details: null."])
+            ]),
+        new(
+            "Dashboards",
+            "Mutation and read events from the user-owned dashboards page-template surface. Dashboards belong to a single user (with a future-proof sharing seam in `dashboard_shares`). Mutation events fire post-commit. Widget config blobs are never inlined — only widget id, widget_type, and the parent dashboard id are surfaced.",
+            DashboardPayloadFields,
+            [
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.DashboardCreated,
+                    "A user created a dashboard. The creator owns it; if `fromMountPath` is set the widgets were copied from the menu mount's defaultLayout.",
+                    "Fires from POST /api/dashboards on the success path.",
+                    ["resource: { id, name }. details: { fromMountPath, source }."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.DashboardUpdated,
+                    "Dashboard name / description / settings were changed.",
+                    "Fires from PATCH /api/dashboards/{id} when at least one field changed.",
+                    ["resource: { id, name }. details: null."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.DashboardDeleted,
+                    "A dashboard was hard-deleted; widgets and share rows are CASCADE-removed.",
+                    "Fires from DELETE /api/dashboards/{id} on the success path.",
+                    ["resource: { id, name }. details: null."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.DashboardListViewed,
+                    "Caller listed dashboards visible to them (owned + shared).",
+                    "Fires from GET /api/dashboards on the success path.",
+                    ["resource: null. details: { resultCount }."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.DashboardViewed,
+                    "Caller fetched a single dashboard plus its widgets.",
+                    "Fires from GET /api/dashboards/{id} on the success path.",
+                    ["resource: { id, name }. details: { widgetCount }."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.WidgetAdded,
+                    "A widget was added to a dashboard via the picker.",
+                    "Fires from POST /api/dashboards/{id}/widgets on the success path.",
+                    ["resource: { id, dashboardId, widgetType }. details: null."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.WidgetUpdated,
+                    "A widget's title, config, or single-widget position changed.",
+                    "Fires from PATCH /api/dashboards/{id}/widgets/{widgetId} when at least one field changed.",
+                    ["resource: { id, dashboardId, widgetType }. details: null."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.WidgetRemoved,
+                    "A widget was removed from a dashboard.",
+                    "Fires from DELETE /api/dashboards/{id}/widgets/{widgetId} on the success path.",
+                    ["resource: { id, dashboardId }. details: null."]),
+                new EventCatalogEntry(DashboardEventTopic.TopicName, DashboardEventTypes.LayoutUpdated,
+                    "Bulk position update from the grid drag/resize handler.",
+                    "Fires from POST /api/dashboards/{id}/layout on the success path; one event per save regardless of how many widgets moved.",
+                    ["resource: { id }. details: { updatedCount, requestedCount }."])
             ])
     ];
 
