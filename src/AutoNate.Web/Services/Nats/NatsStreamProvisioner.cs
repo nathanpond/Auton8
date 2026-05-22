@@ -5,6 +5,7 @@ using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Content;
+using AutoNate.Web.Services.Dashboards;
 using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
@@ -71,7 +72,11 @@ public sealed class NatsStreamProvisioner(
             // events. Without this, publishes to `content.events` get
             // "no response from stream" → Dapr returns HTTP 500 to the
             // outbox dispatcher.
-            $"{ContentEventTopic.TopicRoot}.>"
+            $"{ContentEventTopic.TopicRoot}.>",
+            // User-owned dashboards lifecycle events (dashboards.dashboard.*,
+            // dashboards.widget.*, dashboards.layout.*). Without this, the
+            // outbox dispatcher loops with HTTP 500 on every dashboard CRUD.
+            $"{DashboardEventTopic.TopicRoot}.>"
         })
         {
             MaxAge = StreamMaxAge
