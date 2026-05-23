@@ -89,13 +89,17 @@ internal sealed class AqlValidator
         }
         else
         {
-            // Without GROUP, aggregates are illegal.
+            // Without GROUP, aggregates are illegal — except entity row
+            // functions, which are evaluated per row and never aggregate.
             void AssertNoAggregate(AqlSelectItem item, string ctx)
             {
-                if (item.IsAggregate)
+                if (!item.IsAggregate) return;
+                var fn = item.AggregateFn!;
+                if (entity.RowFunctions.Any(f => string.Equals(f, fn, StringComparison.OrdinalIgnoreCase)))
                 {
-                    errors.Add($"Aggregate '{item.AggregateFn}()' in {ctx} requires a GROUP(...) clause.");
+                    return;
                 }
+                errors.Add($"Aggregate '{fn}()' in {ctx} requires a GROUP(...) clause.");
             }
             foreach (var item in query.OrderBy) AssertNoAggregate(item.Item, "ORDER BY");
             if (query.Columns is not null)
@@ -136,6 +140,17 @@ internal sealed class AqlValidator
         if (item.IsAggregate)
         {
             var fn = item.AggregateFn!;
+            // Entity-specific row functions: no-arg scalar calls evaluated
+            // per row (e.g. COUNTCHILDREN() on Notes). These don't require
+            // a GROUP() clause; the entity computes the value per row.
+            if (entity.RowFunctions.Any(f => string.Equals(f, fn, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (item.AggregateField is not null)
+                {
+                    errors.Add($"{fn}() does not take an argument ({ctx}).");
+                }
+                return;
+            }
             if (fn is not ("COUNT" or "MIN" or "MAX" or "AVG" or "MEDIAN"))
             {
                 errors.Add($"Unknown aggregate function '{fn}' in {ctx}. " +

@@ -302,10 +302,13 @@ builder.Services.AddScoped<IFormStore, EfCoreFormStore>();
 // the public entry point and respects per-entity row authorization inside.
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.RecordsQueryEntity>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowModelsQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.NotesQueryEntity>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.RecordsQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowModelsQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.NotesQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntityRegistry,
     AutoNate.Web.Services.Query.Entities.QueryEntityRegistry>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlExecutor,
