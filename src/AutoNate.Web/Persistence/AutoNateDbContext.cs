@@ -100,6 +100,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<DashboardShare> DashboardShares { get; set; }
 
+    public virtual DbSet<SavedQuery> SavedQueries { get; set; }
+
     public virtual DbSet<Cabinet> Cabinets { get; set; }
 
     public virtual DbSet<Notebook> Notebooks { get; set; }
@@ -1244,6 +1246,26 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Role).HasColumnName("role");
             entity.Property(e => e.GrantedAtUtc).HasColumnName("granted_at_utc");
             entity.Property(e => e.GrantedBy).HasColumnName("granted_by");
+        });
+
+        modelBuilder.Entity<SavedQuery>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("saved_queries_pkey");
+            entity.ToTable("saved_queries");
+            entity.HasIndex(e => e.OwnerUserId, "ix_saved_queries_owner_user_id");
+            entity.HasIndex(e => e.IsShared, "ix_saved_queries_is_shared")
+                .HasFilter("is_shared = TRUE");
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.QueryText).HasColumnName("query_text");
+            entity.Property(e => e.IsShared).HasColumnName("is_shared").HasDefaultValue(false);
+            entity.Property(e => e.OwnerUserId).HasColumnName("owner_user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         modelBuilder.Entity<Cabinet>(entity =>

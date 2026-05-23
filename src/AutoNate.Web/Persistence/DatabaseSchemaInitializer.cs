@@ -2854,6 +2854,36 @@ internal static class DatabaseSchemaInitializer
             ON dashboard_shares (principal_type, principal_id);
         """;
 
+    // User-saved AQL queries (name, optional description, query text, shared
+    // flag). Owner-only edits/deletes; shared rows are visible to every
+    // authenticated user. Per-owner name uniqueness — different users can use
+    // the same name. Idempotent via CREATE IF NOT EXISTS and CREATE INDEX IF
+    // NOT EXISTS so re-running on each boot is safe.
+    private const string SavedQueriesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS saved_queries (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            query_text TEXT NOT NULL,
+            is_shared BOOLEAN NOT NULL DEFAULT FALSE,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_saved_queries_owner_user_id
+            ON saved_queries (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_saved_queries_is_shared
+            ON saved_queries (is_shared) WHERE is_shared = TRUE;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_queries_owner_name
+            ON saved_queries (owner_user_id, LOWER(name));
+        """;
+
     // Adds a top-level "Query" menu item to the main menu so the AQL query
     // page is reachable from every install. Idempotent via auth_seed_state.
     // The original 'main' menu seed at line 941 only runs when the menu
@@ -2956,6 +2986,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(YjsDocumentsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(DashboardsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SavedQueriesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(QueryMenuSeedSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider

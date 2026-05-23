@@ -9,6 +9,7 @@ public static class QueryEventTopic
 public static class QueryResourceKinds
 {
     public const string Query = "query";
+    public const string SavedQuery = "saved_query";
 }
 
 public static class QueryEventTypes
@@ -18,4 +19,11 @@ public static class QueryEventTypes
     // ops can spot abusive queries.
     public const string Executed = "query.executed";
     public const string Failed = "query.failed";
+
+    // Saved-query lifecycle. Fires post-commit from the /api/saved-queries
+    // endpoints. Resource carries id + name; details carry the boolean
+    // is_shared flag and (on saved/updated) the underlying query text.
+    public const string SavedQuerySaved = "query.saved_query.saved";
+    public const string SavedQueryUpdated = "query.saved_query.updated";
+    public const string SavedQueryDeleted = "query.saved_query.deleted";
 }

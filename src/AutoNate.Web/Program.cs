@@ -310,6 +310,8 @@ builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntityRegi
     AutoNate.Web.Services.Query.Entities.QueryEntityRegistry>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlExecutor,
     AutoNate.Web.Services.Query.AqlExecutor>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.ISavedQueryStore,
+    AutoNate.Web.Services.Query.EfCoreSavedQueryStore>();
 
 // External Connections — admin-managed config for outbound integrations
 // (LLM providers today, future SMTP/S3/IdP). DataProtection encrypts the
@@ -974,6 +976,7 @@ app.MapPageEndpoints();
 app.MapPageTemplateEndpoints();
 app.MapDashboardEndpoints();
 app.MapQueryEndpoints();
+app.MapSavedQueryEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();

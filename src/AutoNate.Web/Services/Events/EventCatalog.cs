@@ -1513,7 +1513,19 @@ public static class EventCatalog
                 new EventCatalogEntry(QueryEventTopic.TopicName, QueryEventTypes.Failed,
                     "A user submitted an AQL query that failed parsing or validation.",
                     "Fires from POST /api/query when the request returns 400 with a friendly error list.",
-                    ["resource: null. details: { queryText, errors }."])
+                    ["resource: null. details: { queryText, errors }."]),
+                new EventCatalogEntry(QueryEventTopic.TopicName, QueryEventTypes.SavedQuerySaved,
+                    "A user saved a new AQL query.",
+                    "Fires from POST /api/saved-queries on the success path.",
+                    ["resource: { id, name }. details: { isShared, queryText }."]),
+                new EventCatalogEntry(QueryEventTopic.TopicName, QueryEventTypes.SavedQueryUpdated,
+                    "A user updated one of their saved AQL queries (name, description, query text, or shared flag).",
+                    "Fires from PATCH /api/saved-queries/{id} when at least one field changed.",
+                    ["resource: { id, name }. details: { isShared, queryText }."]),
+                new EventCatalogEntry(QueryEventTopic.TopicName, QueryEventTypes.SavedQueryDeleted,
+                    "A user deleted one of their saved AQL queries.",
+                    "Fires from DELETE /api/saved-queries/{id} on the success path.",
+                    ["resource: { id, name }. details: null."])
             ])
     ];
 
