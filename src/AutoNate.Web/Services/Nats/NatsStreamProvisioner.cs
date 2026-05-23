@@ -8,6 +8,7 @@ using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Dashboards;
 using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Notifications;
+using AutoNate.Web.Services.Query;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.SiteSettings;
 using AutoNate.Web.Services.SystemIssues;
@@ -76,7 +77,11 @@ public sealed class NatsStreamProvisioner(
             // User-owned dashboards lifecycle events (dashboards.dashboard.*,
             // dashboards.widget.*, dashboards.layout.*). Without this, the
             // outbox dispatcher loops with HTTP 500 on every dashboard CRUD.
-            $"{DashboardEventTopic.TopicRoot}.>"
+            $"{DashboardEventTopic.TopicRoot}.>",
+            // AQL query.executed / query.failed events emitted by the /api/query
+            // endpoint. Same outbox-loop failure mode as the dashboards stream
+            // if this isn't registered.
+            $"{QueryEventTopic.TopicRoot}.>"
         })
         {
             MaxAge = StreamMaxAge

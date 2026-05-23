@@ -9,6 +9,7 @@ import "@/widgets";
 
 import Dashboard from "@/pages/dashboard/Dashboard";
 import Home from "@/pages/home/Home";
+import QueryPage from "@/pages/query/QueryPage";
 import UserProfile from "@/pages/user-profile/UserProfile";
 import ManageUsers from "@/pages/manage-users/ManageUsers";
 import BusWatcher from "@/pages/bus-watcher/BusWatcher";
@@ -77,5 +78,6 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configFormMappings: <FormsFormMappings />,
   configChatbotSettings: <SitewideChatbotSettings />,
   configChatbotModels: <ModelCatalogPage />,
-  dashboard: <Dashboard />
+  dashboard: <Dashboard />,
+  query: <QueryPage />
 };

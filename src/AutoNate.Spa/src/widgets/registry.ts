@@ -50,6 +50,11 @@ export type WidgetDefinition<TConfig = unknown> = {
   // AutoConfigForm. Use sparingly; the auto form should cover ~95% of
   // cases.
   ConfigForm?: ComponentType<WidgetConfigFormProps<TConfig>>;
+  // Keep the widget out of the "Add widget" picker. Used for back-compat
+  // entries that should still render existing dashboard rows but no longer
+  // appear as an option for new widgets (e.g. an old combined "Chart"
+  // entry replaced by per-chart-type entries).
+  hiddenFromPicker?: boolean;
 };
 
 // Module-level registry. Widgets self-register at import time by calling
@@ -66,10 +71,12 @@ export function getWidget(type: string): WidgetDefinition | undefined {
 }
 
 export function listWidgets(): WidgetDefinition[] {
-  return Array.from(REGISTRY.values()).sort((a, b) => {
-    const catCmp = a.category.localeCompare(b.category);
-    return catCmp !== 0 ? catCmp : a.title.localeCompare(b.title);
-  });
+  return Array.from(REGISTRY.values())
+    .filter((w) => !w.hiddenFromPicker)
+    .sort((a, b) => {
+      const catCmp = a.category.localeCompare(b.category);
+      return catCmp !== 0 ? catCmp : a.title.localeCompare(b.title);
+    });
 }
 
 // Recursively layer `stored` over `defaults` so widgets whose persisted

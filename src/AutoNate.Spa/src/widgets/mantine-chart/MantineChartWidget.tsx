@@ -1,6 +1,16 @@
 import { useMemo, type ReactNode } from "react";
 import { Alert, Box, Loader, Stack, Text } from "@mantine/core";
-import { AreaChart, BarChart, DonutChart, LineChart } from "@mantine/charts";
+import {
+  AreaChart,
+  BarChart,
+  BarsList,
+  DonutChart,
+  FunnelChart,
+  LineChart,
+  PieChart,
+  RadialBarChart,
+  Treemap
+} from "@mantine/charts";
 import { useRecords } from "@/hooks/useRecords";
 import { useRecordTypeFields } from "@/hooks/useRecordTypes";
 import { useExecutionsPage } from "@/hooks/useExecutions";
@@ -127,6 +137,71 @@ function renderChart(data: ChartPoint[], config: MantineChartWidgetConfig, group
         <DonutChart
           h="100%"
           chartLabel={groupByLabel}
+          data={data.map((d, i) => ({
+            name: d.label,
+            value: d.value,
+            color: DONUT_COLORS[i % DONUT_COLORS.length]
+          }))}
+        />
+      );
+    case "pie":
+      // PieChart has the same data shape as DonutChart but no ring hole.
+      return (
+        <PieChart
+          h="100%"
+          data={data.map((d, i) => ({
+            name: d.label,
+            value: d.value,
+            color: DONUT_COLORS[i % DONUT_COLORS.length]
+          }))}
+        />
+      );
+    case "radial-bar":
+      // RadialBarChart wants Record<string, any>[] with a dataKey naming
+      // the value field; one row per bucket renders as one concentric arc.
+      return (
+        <RadialBarChart
+          h="100%"
+          dataKey="value"
+          data={data.map((d, i) => ({
+            name: d.label,
+            value: d.value,
+            color: DONUT_COLORS[i % DONUT_COLORS.length]
+          }))}
+        />
+      );
+    case "funnel":
+      // FunnelChart treats the data as ordered top-to-bottom stages. We
+      // pre-sort by value desc in bucketize so the largest cohort sits on
+      // top — typical for sales-pipeline visualizations.
+      return (
+        <FunnelChart
+          h="100%"
+          data={data.map((d, i) => ({
+            name: d.label,
+            value: d.value,
+            color: DONUT_COLORS[i % DONUT_COLORS.length]
+          }))}
+        />
+      );
+    case "bars-list":
+      // BarsList is a horizontal-bar leaderboard; bars are sized relative
+      // to the largest entry.
+      return (
+        <BarsList
+          data={data.map((d, i) => ({
+            name: d.label,
+            value: d.value,
+            color: DONUT_COLORS[i % DONUT_COLORS.length]
+          }))}
+        />
+      );
+    case "treemap":
+      // Treemap supports nested children but our buckets are flat — one
+      // root level with sized rectangles.
+      return (
+        <Treemap
+          h="100%"
           data={data.map((d, i) => ({
             name: d.label,
             value: d.value,

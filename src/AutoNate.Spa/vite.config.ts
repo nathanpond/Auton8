@@ -1,38 +1,40 @@
-import { defineConfig } from "vite";
+import { createLogger, defineConfig } from "vite";
+
 import react from "@vitejs/plugin-react";
 import path from "node:path";
-import type { ProxyOptions } from "vite";
 
 const backendTarget = process.env.ASPNETCORE_URL ?? "http://localhost:5108";
 const wsBackendTarget = backendTarget.replace(/^http/, "ws");
 
-// Hard-refreshes (and React Strict Mode's mount/unmount churn) yank the
-// browser-side WebSocket without a clean close, and the http-proxy that
-// Vite uses logs the resulting socket error as a noisy stack trace.
-// The connection IS torn down, nothing's broken; the next page load
-// reconnects. Swallow the disconnect-related error codes so the dev
-// console stays readable. Any other proxy error still bubbles.
-type ProxyConfigureCallback = NonNullable<ProxyOptions["configure"]>;
-const QUIET_WS_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ECONNABORTED"]);
-const silenceWsResetNoise: ProxyConfigureCallback = (proxy) => {
-  const isQuietCode = (err: unknown) =>
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    QUIET_WS_ERROR_CODES.has((err as { code?: string }).code ?? "");
-  proxy.on("error", (err) => {
-    if (isQuietCode(err)) return;
-    console.error(err);
-  });
-  proxy.on("econnreset", () => {
-    // http-proxy emits this dedicated event when the upstream socket
-    // resets — silently consume so the default handler doesn't print.
-  });
+// Hard-refreshes, idle WebSocket timeouts on the .NET host, and React Strict
+// Mode's mount/unmount churn all yank the browser-side WebSocket without a
+// clean close. http-proxy emits an `error` event for each of these and Vite
+// always registers its own `error` listener AFTER any user-supplied
+// `configure` callback — so adding a second listener can't stop Vite from
+// logging. Filter at the logger layer instead: any `ws proxy …` or
+// `ws proxy socket …` message whose stack mentions ECONNRESET / EPIPE /
+// ECONNABORTED is the harmless disconnect noise and gets swallowed. Anything
+// else still prints.
+const QUIET_WS_PATTERNS = [
+  /ws proxy error/,
+  /ws proxy socket error/,
+  /econnreset/i,
+  /\bEPIPE\b/,
+  /\bECONNABORTED\b/
+];
+const wsNoiseLogger = createLogger();
+const upstreamError = wsNoiseLogger.error.bind(wsNoiseLogger);
+wsNoiseLogger.error = (msg, opts) => {
+  if (typeof msg === "string" && QUIET_WS_PATTERNS.some((p) => p.test(msg))) {
+    return;
+  }
+  upstreamError(msg, opts);
 };
 
 export default defineConfig({
   base: "/",
   plugins: [react()],
+  customLogger: wsNoiseLogger,
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src")
@@ -58,14 +60,12 @@ export default defineConfig({
       "/ws/bus-watcher": {
         target: wsBackendTarget,
         ws: true,
-        changeOrigin: false,
-        configure: silenceWsResetNoise
+        changeOrigin: false
       },
       "/ws/agent-model-default": {
         target: wsBackendTarget,
         ws: true,
-        changeOrigin: false,
-        configure: silenceWsResetNoise
+        changeOrigin: false
       },
       // DataOptions.PublicUrlPrefix — runtime data folder (page-template
       // thumbnails copied out of plugin zips, etc.). Without this proxy

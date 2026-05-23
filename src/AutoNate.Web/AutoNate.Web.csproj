@@ -26,6 +26,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <InternalsVisibleTo Include="AutoNate.Web.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
       <PackageReference Include="Dapr.AspNetCore" Version="1.17.9" />
       <PackageReference Include="Dapr.Client" Version="1.17.9" />
       <PackageReference Include="Dapr.Messaging" Version="1.17.9" />

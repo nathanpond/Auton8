@@ -6,13 +6,6 @@ import type { WidgetConfigFormProps } from "@/widgets/registry";
 import { ASSIGNEE_COUNT_GROUP_BY, CUSTOM_FIELD_GROUP_BY_PREFIX } from "./groupBy";
 import type { MantineChartWidgetConfig } from "./MantineChartWidget.config";
 
-const CHART_TYPE_OPTIONS = [
-  { value: "bar", label: "Bar" },
-  { value: "line", label: "Line" },
-  { value: "area", label: "Area" },
-  { value: "donut", label: "Donut" }
-];
-
 // Built-in RecordModel properties usable as a group-by axis. Excludes
 // fields that aren't useful to bucket on (id, createdBy, etc.).
 const BUILTIN_RECORD_GROUP_BY_OPTIONS = [
@@ -69,15 +62,6 @@ export function MantineChartConfigForm({
 
   return (
     <Stack gap="sm">
-      <Select
-        label="Chart type"
-        data={CHART_TYPE_OPTIONS}
-        value={value.chartType}
-        onChange={(v) => v && onChange({ ...value, chartType: v as MantineChartWidgetConfig["chartType"] })}
-        allowDeselect={false}
-        error={errors.chartType}
-        comboboxProps={{ zIndex: 1080 }}
-      />
       <DataSourcePicker
         value={value.dataSource}
         onChange={(next) => onChange({ ...value, dataSource: next })}

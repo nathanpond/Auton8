@@ -1362,7 +1362,8 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configFormMappings', 'Form Mappings (Site Config)', 'Map forms to record types and fields.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configChatbotSettings', 'Chatbot Settings (Site Config)', 'Configure agent capabilities; applies to the next message.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configChatbotModels', 'Chatbot Models (Site Config)', 'LLM model catalogue used by external connections and the agent loop.', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'dashboard', 'Dashboard', 'User-customizable dashboard with draggable, resizable widgets (data tables and charts).', TRUE, NOW(), NOW())
+              (gen_random_uuid(), 'dashboard', 'Dashboard', 'User-customizable dashboard with draggable, resizable widgets (data tables and charts).', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'query', 'Query', 'Run AQL queries against records, workflows, and other entities.', TRUE, NOW(), NOW())
             ON CONFLICT (key) DO NOTHING;
 
             INSERT INTO menus (id, key, name, description, is_system,
@@ -2853,6 +2854,51 @@ internal static class DatabaseSchemaInitializer
             ON dashboard_shares (principal_type, principal_id);
         """;
 
+    // Adds a top-level "Query" menu item to the main menu so the AQL query
+    // page is reachable from every install. Idempotent via auth_seed_state.
+    // The original 'main' menu seed at line 941 only runs when the menu
+    // doesn't exist yet, so existing databases need this separate block to
+    // pick up the new item without re-seeding the whole nav.
+    private const string QueryMenuSeedSql =
+        """
+        DO $$
+        DECLARE
+            main_id UUID := '00000000-0000-0000-0001-000000000001';
+            next_sort INT;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'query_menu_v1') THEN
+                IF EXISTS (SELECT 1 FROM menus WHERE id = main_id)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM menu_items
+                       WHERE menu_id = main_id
+                         AND config->>'templateKey' = 'query'
+                   )
+                THEN
+                    SELECT COALESCE(MAX(sort_order), -1) + 1 INTO next_sort
+                    FROM menu_items
+                    WHERE menu_id = main_id AND parent_id IS NULL;
+
+                    INSERT INTO menu_items (
+                        id, menu_id, parent_id, sort_order, display_name, icon,
+                        item_type, config, is_visible, is_system,
+                        created_at_utc, updated_at_utc
+                    )
+                    VALUES (
+                        gen_random_uuid(), main_id, NULL, next_sort,
+                        'Query', 'fa fa-magnifying-glass-chart',
+                        'template',
+                        '{{"templateKey":"query","path":"/query"}}'::jsonb,
+                        TRUE, TRUE, NOW(), NOW()
+                    );
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('query_menu_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -2910,6 +2956,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(YjsDocumentsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(DashboardsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(QueryMenuSeedSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

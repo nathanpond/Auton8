@@ -5,6 +5,7 @@ using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Dashboards;
+using AutoNate.Web.Services.Query;
 using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Notifications;
@@ -177,6 +178,18 @@ public static class EventCatalog
         new("auditContext", "object", "Shared audit context — actor, IP, user-agent, request id, route template, authOutcome.")
     ];
 
+    private static readonly EventCatalogPayloadField[] QueryPayloadFields =
+    [
+        new("details.queryText", "string", "The raw AQL query the caller submitted."),
+        new("details.entity", "string (optional)", "Entity the query targeted once parsed (e.g. 'Records', 'Workflows')."),
+        new("details.columnCount", "integer", "Number of columns in the result set."),
+        new("details.rowCount", "integer", "Number of rows returned (after the result cap)."),
+        new("details.truncated", "boolean", "True when the result was capped by the 1000-row safety limit."),
+        new("details.durationMs", "integer", "Server-side execution time in milliseconds."),
+        new("details.errors", "string[] (failure only)", "Friendly validation error messages on query.failed."),
+        new("auditContext", "object", "Shared audit context — actor, IP, user-agent, request id, route template, authOutcome.")
+    ];
+
     private static readonly EventCatalogPayloadField[] ViewEventPayloadFields =
     [
         new("resourceKind", "string", "Domain-specific kind of the resource viewed (e.g. 'record', 'iam.user', 'workflow.model'). null/unset for cross-resource list events like list.viewed where there is no single resource."),
@@ -238,7 +251,11 @@ public static class EventCatalog
         new(
             DashboardEventTopic.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
-            "AutoNate.Web — published from the dashboards page-template surface whenever a user-owned dashboard or one of its widgets is created, edited, deleted, viewed, or reordered. Widget config blobs are never carried in events — only widget id + widget_type + dashboard id.")
+            "AutoNate.Web — published from the dashboards page-template surface whenever a user-owned dashboard or one of its widgets is created, edited, deleted, viewed, or reordered. Widget config blobs are never carried in events — only widget id + widget_type + dashboard id."),
+        new(
+            QueryEventTopic.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from the AQL Query page-template surface once per /api/query call (success or validation failure). Carries the raw query text plus row/column counts and timing; never carries the result rows themselves.")
     ];
 
     public static readonly EventCatalogCategory[] Categories =
@@ -1483,6 +1500,20 @@ public static class EventCatalog
                     "Bulk position update from the grid drag/resize handler.",
                     "Fires from POST /api/dashboards/{id}/layout on the success path; one event per save regardless of how many widgets moved.",
                     ["resource: { id }. details: { updatedCount, requestedCount }."])
+            ]),
+        new(
+            "Query (AQL)",
+            "Audit events from the AQL query surface. One event fires per /api/query call — query.executed on success, query.failed when validation rejects the query. The result rows are never carried; only counts, timing, and the original query text.",
+            QueryPayloadFields,
+            [
+                new EventCatalogEntry(QueryEventTopic.TopicName, QueryEventTypes.Executed,
+                    "A user executed an AQL query that parsed, validated, and ran successfully.",
+                    "Fires from POST /api/query on the success path, regardless of whether any rows matched.",
+                    ["resource: null. details: { queryText, columnCount, rowCount, truncated, durationMs }."]),
+                new EventCatalogEntry(QueryEventTopic.TopicName, QueryEventTypes.Failed,
+                    "A user submitted an AQL query that failed parsing or validation.",
+                    "Fires from POST /api/query when the request returns 400 with a friendly error list.",
+                    ["resource: null. details: { queryText, errors }."])
             ])
     ];
 

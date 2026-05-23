@@ -297,6 +297,20 @@ builder.Services.AddScoped<ILocalUserStore, EfCoreLocalUserStore>();
 builder.Services.AddScoped<IWorkflowModelStore, EfCoreWorkflowModelStore>();
 builder.Services.AddScoped<IFormStore, EfCoreFormStore>();
 
+// AQL — AutoNate Query Language. The registry collects every IQueryEntity
+// registered as a scoped service into a single dispatcher; the executor is
+// the public entry point and respects per-entity row authorization inside.
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.RecordsQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowModelsQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.RecordsQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowModelsQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntityRegistry,
+    AutoNate.Web.Services.Query.Entities.QueryEntityRegistry>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlExecutor,
+    AutoNate.Web.Services.Query.AqlExecutor>();
+
 // External Connections — admin-managed config for outbound integrations
 // (LLM providers today, future SMTP/S3/IdP). DataProtection encrypts the
 // stored secret; the keyring lives under the host's content root by default
@@ -959,6 +973,7 @@ app.MapMenuEndpoints();
 app.MapPageEndpoints();
 app.MapPageTemplateEndpoints();
 app.MapDashboardEndpoints();
+app.MapQueryEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();
