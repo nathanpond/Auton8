@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Box, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import { useLocation } from "react-router-dom";
 import { useTemplateConfig } from "@/pages/dynamic-page/TemplateConfigContext";
+import ConfirmModal from "@/components/ConfirmModal";
 import { DashboardCanvas } from "./DashboardCanvas";
 import { DashboardSelector } from "./DashboardSelector";
 import { DeleteDashboardConfirm } from "./DeleteDashboardConfirm";
@@ -101,6 +102,7 @@ function ConfigurableDashboard({ mountPath }: { mountPath: string }) {
   const [configWidget, setConfigWidget] = useState<DashboardWidget | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [widgetToRemove, setWidgetToRemove] = useState<DashboardWidget | null>(null);
 
   const dashboardsQuery = useDashboards();
   const createDashboard = useCreateDashboard();
@@ -187,10 +189,7 @@ function ConfigurableDashboard({ mountPath }: { mountPath: string }) {
   };
 
   const handleRemoveWidget = (widget: DashboardWidget) => {
-    if (!window.confirm(`Remove "${widget.title ?? widget.widgetType}" from this dashboard?`)) {
-      return;
-    }
-    removeWidget.mutate(widget.id);
+    setWidgetToRemove(widget);
   };
 
   const handleLayoutChange = (positions: { widgetId: string; gridX: number; gridY: number; gridW: number; gridH: number }[]) => {
@@ -294,6 +293,28 @@ function ConfigurableDashboard({ mountPath }: { mountPath: string }) {
           });
         }}
       />
+
+      {widgetToRemove ? (
+        <ConfirmModal
+          title="Remove widget?"
+          message={
+            <p style={{ margin: 0 }}>
+              Remove <strong>{widgetToRemove.title ?? widgetToRemove.widgetType}</strong> from
+              this dashboard?
+            </p>
+          }
+          confirmLabel="Remove"
+          cancelLabel="Cancel"
+          variant="danger"
+          busy={removeWidget.isPending}
+          onConfirm={() =>
+            removeWidget.mutate(widgetToRemove.id, {
+              onSuccess: () => setWidgetToRemove(null)
+            })
+          }
+          onCancel={() => setWidgetToRemove(null)}
+        />
+      ) : null}
     </Stack>
   );
 }

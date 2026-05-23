@@ -53,6 +53,22 @@
   flex: 0 0 auto;
 }
 
+/* Header action icons (gear / trash) — hidden by default, revealed on
+   hover or keyboard focus of the parent card. Opacity (not visibility)
+   so the buttons keep their layout slot and the title doesn't shift
+   when the cursor enters / leaves. */
+.widget-frame-actions {
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+
+.widget-frame:hover .widget-frame-actions,
+.widget-frame:focus-within .widget-frame-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .widget-drag-handle {
   flex: 1;
   cursor: grab;

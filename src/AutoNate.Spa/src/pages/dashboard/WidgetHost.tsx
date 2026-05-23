@@ -36,7 +36,7 @@ export function WidgetHost({ widget, dashboardId, isEditable, onConfigure, onRem
           {title}
         </div>
         {isEditable ? (
-          <Group gap={4}>
+          <Group gap={4} className="widget-frame-actions">
             <Tooltip label="Configure widget">
               <ActionIcon
                 variant="subtle"
