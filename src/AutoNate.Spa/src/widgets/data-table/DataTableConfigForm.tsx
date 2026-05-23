@@ -42,6 +42,7 @@ export function DataTableConfigForm({
       <DataSourcePicker
         value={value.dataSource}
         onChange={(next) => onChange({ ...value, dataSource: next })}
+        allowedTypes={["records", "workflows"]}
         errors={{
           type: errors["dataSource.type"],
           recordTypeId: errors["dataSource.recordTypeId"],

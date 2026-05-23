@@ -10,7 +10,7 @@ import { z } from "zod";
 // `undefined` because Zod's optional handling + Mantine's Select-clear flow
 // both produce "" cleanly and we never need to distinguish "missing" from
 // "all".
-export const DATA_SOURCE_TYPES = ["records", "workflows"] as const;
+export const DATA_SOURCE_TYPES = ["records", "workflows", "savedQuery"] as const;
 export type DataSourceType = (typeof DATA_SOURCE_TYPES)[number];
 
 export const dataSourceSchema = z.object({
@@ -18,7 +18,10 @@ export const dataSourceSchema = z.object({
   // Only meaningful when type === "records". Empty string = "All records".
   recordTypeId: z.string().default(""),
   // Only meaningful when type === "workflows". Empty string = "All models".
-  workflowModelId: z.string().default("")
+  workflowModelId: z.string().default(""),
+  // Only meaningful when type === "savedQuery". Empty string = "no query
+  // selected" — runtime renders a "pick a query" prompt in that state.
+  savedQueryId: z.string().default("")
 });
 
 export type DataSourceConfig = z.infer<typeof dataSourceSchema>;
@@ -26,7 +29,8 @@ export type DataSourceConfig = z.infer<typeof dataSourceSchema>;
 export const DEFAULT_DATA_SOURCE: DataSourceConfig = {
   type: "records",
   recordTypeId: "",
-  workflowModelId: ""
+  workflowModelId: "",
+  savedQueryId: ""
 };
 
 // Human label for the "all" sentinel. Used inside DataSourcePicker and the

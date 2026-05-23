@@ -31,6 +31,20 @@ export const mantineChartWidgetSchema = z.object({
   dataSource: dataSourceSchema,
   recordGroupBy: z.string().default("status"),
   workflowGroupBy: workflowGroupByEnum.default("status"),
+  // Drill-down chain for the records source. Each entry is the next
+  // group-by axis applied after the user clicks a segment on the
+  // previous level. `recordGroupBy` remains the starting axis (level 0).
+  // Empty array = no drill. Stored as free-form strings because the
+  // custom-field axes (`field:<key>`) aren't enumerable at schema time.
+  recordDrillBy: z.array(z.string()).default([]),
+  workflowDrillBy: z.array(workflowGroupByEnum).default([]),
+  // Saved-query column mapping. The label column is the bucket key
+  // (x-axis / slice name); the value column is the magnitude. Empty
+  // value column = count rows per label (matches the records/workflows
+  // bucketize behaviour). Stored as free-form strings because the saved
+  // query's schema isn't known at widget-schema-definition time.
+  savedQueryLabelColumn: z.string().default(""),
+  savedQueryValueColumn: z.string().default(""),
   seriesLabel: attachMeta(z.string().default("Count"), { label: "Series label" }),
   seriesColor: attachMeta(z.string().default("teal.6"), {
     label: "Series color",
@@ -157,6 +171,10 @@ function makeChartDefinition(entry: ChartPickerEntry): WidgetDefinition<MantineC
       dataSource: DEFAULT_DATA_SOURCE,
       recordGroupBy: "status",
       workflowGroupBy: "status",
+      recordDrillBy: [],
+      workflowDrillBy: [],
+      savedQueryLabelColumn: "",
+      savedQueryValueColumn: "",
       seriesLabel: "Count",
       seriesColor: entry.defaultColor
     },
@@ -187,6 +205,10 @@ registerWidget<MantineChartWidgetConfig>({
     dataSource: DEFAULT_DATA_SOURCE,
     recordGroupBy: "status",
     workflowGroupBy: "status",
+    recordDrillBy: [],
+    workflowDrillBy: [],
+    savedQueryLabelColumn: "",
+    savedQueryValueColumn: "",
     seriesLabel: "Count",
     seriesColor: "teal.6"
   },
