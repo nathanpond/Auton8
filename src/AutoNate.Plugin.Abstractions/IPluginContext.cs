@@ -44,7 +44,14 @@ public interface IPluginContext
     // built-in projections.
     IPluginProjections Projections { get; }
 
-    // Host services for cross-cutting needs (logging, etc.). Avoid using this
-    // for data access; use `Data` instead.
+    // Host services for cross-cutting needs (logging, etc.). The host wraps
+    // its root provider in an allowlist before handing it over, so only a
+    // curated set of safe types resolve — currently ILoggerFactory,
+    // ILogger<T>, TimeProvider, IHostEnvironment. GetService on anything
+    // else returns null on purpose (it prevents a plugin from reaching
+    // IConfiguration, connection strings, data-protection keys, or shared
+    // secrets through this surface). Use `Data` for storage and ask the
+    // host to expand the allowlist if a legitimate cross-cutting need
+    // surfaces.
     IServiceProvider HostServices { get; }
 }

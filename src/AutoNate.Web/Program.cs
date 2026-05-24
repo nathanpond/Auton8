@@ -147,6 +147,50 @@ builder.Services.AddAntiforgery(options =>
         ? CookieSecurePolicy.SameAsRequest
         : CookieSecurePolicy.Always;
 });
+// ---------------------------------------------------------------------------
+// CSRF threat model (read this before adding a new endpoint)
+// ---------------------------------------------------------------------------
+// Most authenticated state-changing endpoints in this codebase call
+// `.DisableAntiforgery()`. That is deliberate, not an oversight. The CSRF
+// defense is layered as follows:
+//
+//   1. Auth cookie SameSite=Strict (see AddCookie above). The browser will
+//      not attach the cookie to ANY cross-origin request — including top-level
+//      form POSTs, image/script loads, and fetch with credentials: 'include'
+//      from another origin. A cross-site attacker therefore cannot forge an
+//      authenticated request to a JSON/POST endpoint at all.
+//
+//   2. Antiforgery tokens are still required on the pre-auth login endpoint
+//      (`POST /account/login`, see further down). SameSite cannot defend that
+//      one because the auth cookie does not exist yet — the attack is the
+//      cookie being SET, not replayed — so the token is the only defense
+//      against login CSRF (where an attacker silently logs the victim into
+//      an attacker-controlled account).
+//
+//   3. Server-to-server callback endpoints (`/api/workflow-behaviors/*/execute`,
+//      `/internal/yjs-*`) disable antiforgery and substitute an HMAC + shared
+//      secret check via `SharedSecretEndpointFilter` /
+//      `YjsInternalSecretEndpointFilter`. They are never reached from a
+//      browser, so no cookie is involved.
+//
+// Residual risks accepted under this model:
+//   * Same-site attackers (XSS on a sibling subdomain, malicious browser
+//     extension acting on the page, hostile JS injected via a vulnerable
+//     plugin's admin UI) can issue authenticated requests. We accept this:
+//     under any of those conditions the attacker already has full
+//     same-origin script execution and antiforgery tokens would not stop
+//     them either.
+//   * Pre-CSRF-aware browsers (no SameSite support) would not be protected.
+//     SameSite=Strict has been supported by every evergreen browser since
+//     2017; we do not target legacy browsers.
+//
+// When adding a NEW state-changing endpoint:
+//   * Authenticated mutation from the SPA → `.DisableAntiforgery()` is fine,
+//     SameSite=Strict carries it. Do NOT also `AllowAnonymous`.
+//   * Anonymous mutation (no auth cookie required) → MUST validate either an
+//     antiforgery token (preferred for browser-originated flows) OR a
+//     server-to-server shared secret via an endpoint filter. Never both off.
+// ---------------------------------------------------------------------------
 builder.Services.AddHttpContextAccessor();
 // IRequestContext is a thin facade over IHttpContextAccessor (singleton) — no
 // per-request state of its own, so it's safe as a singleton and avoids
@@ -478,6 +522,24 @@ builder.Services.AddOptions<AutoNate.Web.Services.Yjs.YjsServerOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<YjsInternalSecretEndpointFilter>();
 
+// Refuse to start in non-Development with a permissive AllowedHosts.
+// HostFiltering treats both "*" and "" (empty) as "allow all", which leaves
+// the app open to Host-header injection / cache poisoning if an operator
+// forgets to override per-environment. Development keeps "*" so localhost,
+// 127.0.0.1, the Hocuspocus sidecar host, etc. all work without ceremony.
+if (!builder.Environment.IsDevelopment())
+{
+    var allowedHosts = builder.Configuration["AllowedHosts"];
+    if (string.IsNullOrWhiteSpace(allowedHosts) || allowedHosts.Trim() == "*")
+    {
+        throw new InvalidOperationException(
+            "AllowedHosts must be set to a semicolon-separated list of expected " +
+            "host names outside Development (e.g. \"autonate.example.com\"). " +
+            "The base appsettings.json ships empty so deployments fail closed " +
+            "until an operator wires it up.");
+    }
+}
+
 builder.Services.AddSingleton<IRecordEventPublisher, DaprRecordEventPublisher>();
 builder.Services.AddSingleton<IApplicationEventPublisher, DaprApplicationEventPublisher>();
 builder.Services.AddSingleton<INotificationEventPublisher, DaprNotificationEventPublisher>();
@@ -730,7 +792,16 @@ app.UseUnhandledExceptionSystemIssues();
     {
         var forwardedHeadersOptions = new ForwardedHeadersOptions
         {
-            ForwardedHeaders = ForwardedHeaders.XForwardedFor,
+            // XForwardedProto is required behind a TLS-terminating proxy:
+            // without it Request.IsHttps reflects the proxy→app hop (http)
+            // and Cookie.SecurePolicy = Always (set on auth + antiforgery
+            // cookies) refuses to emit them — silently breaking sign-in.
+            // XForwardedHost keeps Request.Host pointing at the externally
+            // visible name so generated absolute URLs (password-reset
+            // emails, OAuth callbacks) don't leak the internal proxy hop.
+            ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                | ForwardedHeaders.XForwardedProto
+                | ForwardedHeaders.XForwardedHost,
             ForwardLimit = trustedProxyOptions.ForwardLimit
         };
         // ASP.NET defaults to trusting loopback (127.0.0.1, ::1) which

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using AutoNate.Web.Persistence;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -42,8 +43,27 @@ public sealed class PluginSchemaProvisioner
         _log = log;
     }
 
-    public static string SchemaNameFor(string code) => "plg_" + code;
-    public static string RoleNameFor(string code) => "plg_" + code;
+    // The code shape that GenerateCode emits and that every DDL site below
+    // assumes. Cross-checked at every site that interpolates code/role/schema
+    // into SQL — keeps a future loosening of GenerateCode from quietly
+    // opening an injection vector at the DDL boundary.
+    private static readonly Regex ValidCode =
+        new("^[a-z][a-z0-9]{7}$", RegexOptions.Compiled);
+
+    public static string SchemaNameFor(string code) => "plg_" + RequireValidCode(code);
+    public static string RoleNameFor(string code) => "plg_" + RequireValidCode(code);
+
+    private static string RequireValidCode(string code)
+    {
+        if (!ValidCode.IsMatch(code))
+        {
+            throw new ArgumentException(
+                $"Plugin code '{code}' does not match expected [a-z][a-z0-9]{{7}}. " +
+                "Refusing to interpolate it into a DDL statement.",
+                nameof(code));
+        }
+        return code;
+    }
 
     public string DecryptPassword(byte[] encrypted) =>
         Encoding.UTF8.GetString(_protector.Unprotect(encrypted));
@@ -132,10 +152,13 @@ public sealed class PluginSchemaProvisioner
             $"DROP SCHEMA IF EXISTS \"{schema}\" CASCADE;", ct);
 
         // REASSIGN any straggler ownership defensively before drop, then drop
-        // any remaining grants the role was party to.
+        // any remaining grants the role was party to. `role` flows through
+        // RoleNameFor → RequireValidCode, so the identifier-position uses
+        // below are safe; rolname is a literal-position so QuoteLiteral'd to
+        // match the rest of the file's pattern.
         await ExecuteNonQueryAsync(connection, transaction: null,
             $"DO $$ BEGIN " +
-            $"IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN " +
+            $"IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {QuoteLiteral(role)}) THEN " +
             $"  EXECUTE 'REASSIGN OWNED BY \"{role}\" TO CURRENT_USER'; " +
             $"  EXECUTE 'DROP OWNED BY \"{role}\"'; " +
             $"  EXECUTE 'DROP ROLE \"{role}\"'; " +

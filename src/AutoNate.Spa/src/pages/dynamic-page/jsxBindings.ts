@@ -8,6 +8,13 @@ import { useNavigate } from "react-router-dom";
 //
 // To register a new binding, add it to the returned object and document it
 // in the modal help text in MenuItemEditModal.tsx.
+//
+// Acceptable risk: `navigate` and `openInNewTab` take URLs straight from
+// admin-authored JSX and pass them to react-router / window.open without a
+// local-URL gate. The author is necessarily a user with permission to edit
+// dynamic pages; the same threat model that ratifies unvalidated menu
+// `href` (see NavMenu.tsx for the long form) applies here. /audit security
+// 2026-05-23.
 export function useJsxBindings(): Record<string, unknown> {
   const navigate = useNavigate();
 

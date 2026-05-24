@@ -210,7 +210,7 @@ public sealed class PluginRuntime
                 _scheduledJobRegistry?.RemoveForPlugin(row.Id);
 
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, _hostServices);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, new SafePluginServiceProvider(_hostServices));
                 instance.Configure(context);
 
                 var loaded = new LoadedPlugin(row.Id, instance.Name, instance.Version, alc, scoped, instance);
@@ -337,7 +337,7 @@ public sealed class PluginRuntime
                 // want a cleanup callback to leak hooks into a plugin that's
                 // about to be deleted.
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, _hostServices);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, new SafePluginServiceProvider(_hostServices));
 
                 try
                 {

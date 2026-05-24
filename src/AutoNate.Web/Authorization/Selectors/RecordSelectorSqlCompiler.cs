@@ -87,7 +87,13 @@ public sealed class RecordSelectorSqlCompiler
                 $"Tag '{tag.Tag}' currently supports only `=user`.");
         }
 
+        // Pass edgeKind as a bound parameter rather than concatenating into the
+        // SQL string. edgeKind is already a static EdgeKinds constant today
+        // (see CompileTag), but parameter-binding keeps a future addition from
+        // accidentally turning this into an injection vector if someone wires
+        // a non-constant edgeKind through.
         var aliasOuter = ctx.NextAlias();
+        var pEdgeKind = ctx.AddParameter(edgeKind);
 
         if (tag.Nested is null)
         {
@@ -95,7 +101,7 @@ public sealed class RecordSelectorSqlCompiler
             var pSubject = ctx.AddParameter(subjectId);
             var sb = new StringBuilder();
             sb.Append("EXISTS (SELECT 1 FROM entity_edges ").Append(aliasOuter)
-              .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = '").Append(edgeKind).Append('\'')
+              .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = ").Append(pEdgeKind)
               .Append(" AND ").Append(aliasOuter).Append(".from_kind = 'user'")
               .Append(" AND ").Append(aliasOuter).Append(".from_id = ").Append(pSubject)
               .Append(" AND ").Append(aliasOuter).Append(".to_kind = 'record'")
@@ -104,17 +110,18 @@ public sealed class RecordSelectorSqlCompiler
         }
 
         var (innerKind, innerSubject) = ParseNestedUserPredicate(tag.Nested, ctx);
+        var pInnerKind = ctx.AddParameter(innerKind);
         var pInner = ctx.AddParameter(innerSubject);
         var aliasInner = ctx.NextAlias();
 
         var multi = new StringBuilder();
         multi.Append("EXISTS (SELECT 1 FROM entity_edges ").Append(aliasOuter)
-             .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = '").Append(edgeKind).Append('\'')
+             .Append(" WHERE ").Append(aliasOuter).Append(".edge_kind = ").Append(pEdgeKind)
              .Append(" AND ").Append(aliasOuter).Append(".from_kind = 'user'")
              .Append(" AND ").Append(aliasOuter).Append(".to_kind = 'record'")
              .Append(" AND ").Append(aliasOuter).Append(".to_id = records.id::text")
              .Append(" AND EXISTS (SELECT 1 FROM entity_edges ").Append(aliasInner)
-             .Append(" WHERE ").Append(aliasInner).Append(".edge_kind = '").Append(innerKind).Append('\'')
+             .Append(" WHERE ").Append(aliasInner).Append(".edge_kind = ").Append(pInnerKind)
              .Append(" AND ").Append(aliasInner).Append(".from_kind = 'user'")
              .Append(" AND ").Append(aliasInner).Append(".from_id = ").Append(pInner)
              .Append(" AND ").Append(aliasInner).Append(".to_kind = 'user'")
@@ -173,9 +180,21 @@ public sealed class RecordSelectorSqlCompiler
                 "Nested tag values must reference the current user (=user).");
         }
 
-        return (
-            inner.Tag.ToLowerInvariant(),
-            innerUser.PinnedId ?? ctx.ActorUserId.ToString());
+        // Map the user-supplied tag name to a known EdgeKinds constant so we
+        // both reject unknown tags loudly (instead of silently never matching)
+        // and feed a vetted value into the bound parameter on the caller side.
+        var lowered = inner.Tag.ToLowerInvariant();
+        var innerKind = lowered switch
+        {
+            "assignee" => EdgeKinds.Assignee,
+            "creator" => EdgeKinds.Creator,
+            "supervisor" => EdgeKinds.Supervisor,
+            "owner" => EdgeKinds.Owner,
+            _ => throw new SelectorCompilationException(
+                $"Nested predicate tag '{inner.Tag}' is not a recognised edge kind.")
+        };
+
+        return (innerKind, innerUser.PinnedId ?? ctx.ActorUserId.ToString());
     }
 
     private static List<Guid> ParseGuids(IReadOnlyCollection<string> raw)

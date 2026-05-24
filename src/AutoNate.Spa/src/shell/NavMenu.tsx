@@ -27,6 +27,23 @@ import NotificationBell from "@/components/notifications/NotificationBell";
 import AgentChatTrigger from "@/agent/AgentChatTrigger";
 import { useUserPreferences } from "@/preferences/UserPreferencesContext";
 
+// ---------------------------------------------------------------------------
+// Menu link `href` trust model (acceptable risk)
+// ---------------------------------------------------------------------------
+// Every `item.itemType === "link"` render site in this file passes
+// `item.config.href` to an `<a href>` without a local-URL check. That is
+// intentional: admins use the Manage Menus UI to wire up external
+// destinations (Confluence pages, Grafana dashboards, Slack invite links,
+// vendor portals) and a local-URL gate would break the feature.
+//
+// Threat model: the only writer is a user with Menu.Edit permission. A
+// compromised admin account can already grant roles, edit forms, install
+// plugins, and create dynamic pages — pointing a menu item at a phishing
+// site is strictly smaller. The risk is accepted; do not add a local-URL
+// validator without first removing the external-link product capability.
+// (See /audit security 2026-05-23 for the audit that ratified this.)
+// ---------------------------------------------------------------------------
+
 // Tiny helper used by the silent-drop sites in IconMenuItem / DropdownEntry /
 // UserDropdownEntry. Reporting at the moment we drop the item is what makes
 // "the SPA can't render this" surface as a System Issue even when the row
@@ -252,6 +269,8 @@ function SubmenuEntry({
   const path = pathOf(item, templates);
   const active = path != null && fullPath === path;
   if (item.itemType === "link") {
+    // Admin-controlled href, intentionally not local-URL-gated; see the
+    // "Menu link `href` trust model" comment near the top of this file.
     const href = stringFrom(item.config?.href);
     const newTab = Boolean(item.config?.openInNewTab);
     if (!href) return reportUnconfigured(item, "missing href");
