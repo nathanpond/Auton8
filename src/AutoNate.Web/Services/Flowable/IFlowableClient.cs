@@ -57,6 +57,19 @@ public interface IFlowableClient
 
     Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default);
 
+    // Paged enumeration of every runtime task (active + claimed, not yet completed).
+    // Used by the projection-framework polling feed to seed the workflow_task_cache
+    // without per-user fan-out. `start` is 0-based; `size` caps each page.
+    Task<IReadOnlyList<FlowableTaskSummary>> GetRuntimeTasksAsync(int start, int size, CancellationToken cancellationToken = default);
+
+    // Paged enumeration of historic activity instances across every process.
+    // Used by the projection-framework history feed to populate the append-only
+    // workflow_event_log_cache. `sinceUtc` filters to entries that started after
+    // the given time — null means "page from the beginning". Sorted by start
+    // time ascending so the consumer can advance a watermark deterministically.
+    Task<IReadOnlyList<FlowableHistoricActivityEvent>> GetHistoricActivityEventsAsync(
+        int start, int size, DateTimeOffset? sinceUtc = null, CancellationToken cancellationToken = default);
+
     // Fan-out helper for "tasks assigned to anyone in this set." Used when a
     // supervisor needs to see tasks for the people they supervise without
     // assuming any back-end query supports list-of-assignees.

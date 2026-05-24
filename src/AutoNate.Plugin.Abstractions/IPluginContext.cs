@@ -38,6 +38,12 @@ public interface IPluginContext
     // tagged by plugin id and auto-removed on disable.
     IPluginBehaviors Behaviors { get; }
 
+    // Helpers for contributing projections (scheduled cache populators) to
+    // the host's projection framework. Each registered job appears on
+    // /api/admin/projections with the same health / pause surface as
+    // built-in projections.
+    IPluginProjections Projections { get; }
+
     // Host services for cross-cutting needs (logging, etc.). Avoid using this
     // for data access; use `Data` instead.
     IServiceProvider HostServices { get; }

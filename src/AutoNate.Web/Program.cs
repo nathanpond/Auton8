@@ -242,6 +242,8 @@ builder.Services.AddSingleton<ISelectorCompiler, RoleSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompiler, GroupSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompiler, RecordTypeSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompiler, WorkflowModelSelectorCompiler>();
+builder.Services.AddSingleton<ISelectorCompiler, WorkflowExecutionCacheSelectorCompiler>();
+builder.Services.AddSingleton<ISelectorCompiler, WorkflowTaskCacheSelectorCompiler>();
 builder.Services.AddSingleton<ISelectorCompiler, FormSelectorCompiler>();
 // User and ExternalConnection don't expose tag predicates today; a path-only
 // compiler keeps `/<kind>/<id>` and `/<kind>/*` grants working without
@@ -302,11 +304,32 @@ builder.Services.AddScoped<IFormStore, EfCoreFormStore>();
 // the public entry point and respects per-entity row authorization inside.
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.RecordsQueryEntity>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowModelsQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowExecutionsQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.FlowsQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowTasksQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowVariablesQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowHistoryQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.WorkflowAnalyticsQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.RecordActivityRollupQueryEntity>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.NotesQueryEntity>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.RecordsQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowModelsQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowExecutionsQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.FlowsQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowTasksQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowVariablesQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowHistoryQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.WorkflowAnalyticsQueryEntity>());
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.RecordActivityRollupQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.NotesQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntityRegistry,
@@ -550,8 +573,10 @@ builder.Services.AddSingleton<PluginRuntime>();
 builder.Services.AddSingleton<PluginSchemaProvisioner>();
 builder.Services.AddSingleton<PluginDataAccessRegistry>();
 builder.Services.AddSingleton<PluginMigrationRunner>();
+builder.Services.AddSingleton<AutoNate.Web.Plugins.PluginScheduledJobRegistry>();
 builder.Services.AddScoped<IPluginManagementService, PluginManagementService>();
 builder.Services.AddHostedService<PluginHostedService>();
+builder.Services.AddHostedService<AutoNate.Web.Plugins.PluginScheduledJobsHostedService>();
 builder.Services.AddHttpClient(); // DaprApplicationEventPublisher needs IHttpClientFactory
 builder.Services.Configure<FormOptions>(o =>
 {
@@ -571,7 +596,85 @@ builder.Services.AddHttpClient<IFlowableClient, FlowableClient>()
         FlowableClient.ConfigureHttpClient(httpClient, options);
     });
 
+// Projection framework — materializes external/expensive data into AQL-queryable
+// Postgres tables. AddProjectionFramework() wires the worker, registry, and
+// version/watermark stores. Each AddProjection<TSource, TProjection>() +
+// AddChangeFeed<TSource, TFeed>() pair registers one cache.
+builder.Services.Configure<AutoNate.Web.Services.Projections.ProjectionOptions>(
+    builder.Configuration.GetSection(AutoNate.Web.Services.Projections.ProjectionOptions.SectionName));
+builder.Services.Configure<AutoNate.Web.Services.Flowable.Cache.FlowableCacheOptions>(
+    builder.Configuration.GetSection(AutoNate.Web.Services.Flowable.Cache.FlowableCacheOptions.SectionName));
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddProjectionFramework(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddProjection<AutoNate.Web.Models.WorkflowExecutionSummary,
+        AutoNate.Web.Services.Flowable.Cache.FlowableExecutionProjection>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddProjection<AutoNate.Web.Models.FlowableTaskSummary,
+        AutoNate.Web.Services.Flowable.Cache.FlowableTaskProjection>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddProjection<AutoNate.Web.Services.Flowable.Cache.FlowableInstanceVariables,
+        AutoNate.Web.Services.Flowable.Cache.FlowableVariableProjection>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddProjection<AutoNate.Web.Models.FlowableHistoricActivityEvent,
+        AutoNate.Web.Services.Flowable.Cache.FlowableHistoryProjection>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddChangeFeed<AutoNate.Web.Models.WorkflowExecutionSummary,
+        AutoNate.Web.Services.Flowable.Cache.FlowableExecutionPollingFeed>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddChangeFeed<AutoNate.Web.Models.FlowableTaskSummary,
+        AutoNate.Web.Services.Flowable.Cache.FlowableTaskPollingFeed>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddChangeFeed<AutoNate.Web.Services.Flowable.Cache.FlowableInstanceVariables,
+        AutoNate.Web.Services.Flowable.Cache.FlowableVariablePollingFeed>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddChangeFeed<AutoNate.Web.Models.FlowableHistoricActivityEvent,
+        AutoNate.Web.Services.Flowable.Cache.FlowableHistoryPollingFeed>(builder.Services);
+
+// Internal-aggregate projection — first non-Flowable consumer of the
+// projection framework. Demonstrates the reusability that motivated lifting
+// the substrate out of Flowable-specific code in Phase 1.
+builder.Services.Configure<AutoNate.Web.Services.Records.Rollups.RecordActivityRollupOptions>(
+    builder.Configuration.GetSection(AutoNate.Web.Services.Records.Rollups.RecordActivityRollupOptions.SectionName));
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddProjection<AutoNate.Web.Services.Records.Rollups.RecordActivityRollupSnapshot,
+        AutoNate.Web.Services.Records.Rollups.RecordActivityRollupProjection>(builder.Services);
+AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
+    .AddChangeFeed<AutoNate.Web.Services.Records.Rollups.RecordActivityRollupSnapshot,
+        AutoNate.Web.Services.Records.Rollups.RecordActivityRollupFeed>(builder.Services);
+builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.IFlowableReadThrough,
+    AutoNate.Web.Services.Flowable.Cache.FlowableReadThrough>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.WorkflowCacheRetentionService>();
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Flowable.Cache.WorkflowCacheRetentionService>());
+
+// Cold tier (Phase 3) — Parquet archive of workflow_event_log_cache,
+// queried via DuckDB-in-process. ColdTierArchiverService is gated by
+// FlowableCache:ColdTier:Enabled (defaults to false) so installs without
+// disk persistence skip it cleanly.
+builder.Services.Configure<AutoNate.Web.Services.Flowable.Cache.ColdTier.ColdTierOptions>(
+    builder.Configuration.GetSection(AutoNate.Web.Services.Flowable.Cache.ColdTier.ColdTierOptions.SectionName));
+builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.ColdTier.ColdTierLayout>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.ColdTier.ColdTierArchiverService>();
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Flowable.Cache.ColdTier.ColdTierArchiverService>());
+
 var app = builder.Build();
+
+// Wire the projection.lag_seconds gauge to the health service. The ObservableGauge
+// callback fires per Prometheus scrape, so this just hands it a delegate that
+// snapshots the current state — no background timer needed.
+{
+    var rootProjections = app.Services.GetRequiredService<AutoNate.Web.Services.Projections.IProjectionRegistry>();
+    var rootHealth = app.Services.GetRequiredService<AutoNate.Web.Services.Projections.IProjectionHealthService>();
+    AutoNate.Web.Services.Projections.ProjectionMetrics.ConfigureLagSampler(() =>
+    {
+        var now = DateTimeOffset.UtcNow;
+        return rootHealth.Snapshot(rootProjections.Projections)
+            .Select(s => (s.Name, (now - (s.LastAppliedAtUtc ?? now)).TotalSeconds))
+            .ToList();
+    });
+}
 
 if (app.Environment.IsDevelopment()
     && !string.Equals(
@@ -984,6 +1087,7 @@ app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();
 app.MapAdminPluginsEndpoints();
+app.MapAdminProjectionsEndpoints();
 app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
 app.MapAgentModelEndpoints();

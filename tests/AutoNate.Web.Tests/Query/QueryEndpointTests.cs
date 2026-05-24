@@ -75,8 +75,13 @@ public sealed class QueryEndpointTests
     }
 
     [Fact]
-    public async Task NumExecutions_On_Workflows_Returns_Pending_Cache_Error()
+    public async Task NumExecutions_On_Workflows_Resolves_Against_Execution_Cache()
     {
+        // Replaces the prior "pending cache" gate. NUMEXECUTIONS / LASTEXECUTED
+        // are now resolved from workflow_execution_cache by the projection
+        // framework; with no cache rows, NUMEXECUTIONS() returns 0 for every
+        // workflow, so a predicate of `> 0` should return an empty result set
+        // rather than a validation error.
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
         var client = factory.CreateClient();
         await client.GetAsync("/api/auth/me");
@@ -86,11 +91,10 @@ public sealed class QueryEndpointTests
             query = "FROM Workflows WHERE NUMEXECUTIONS() > 0"
         });
 
-        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var doc = await resp.Content.ReadFromJsonAsync<JsonElement>();
-        var errors = doc.GetProperty("errors").EnumerateArray()
-            .Select(e => e.GetString()!).ToList();
-        Assert.Contains(errors, e => e.Contains("NUMEXECUTIONS", StringComparison.Ordinal));
+        var rows = doc.GetProperty("rows");
+        Assert.Equal(0, rows.GetArrayLength());
     }
 
     [Fact]

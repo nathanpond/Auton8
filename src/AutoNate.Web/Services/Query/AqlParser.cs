@@ -274,6 +274,36 @@ internal sealed class AqlParser
             };
         }
 
+        // SQL-style infix: `field IN (v1, v2, ...)`. The prefix form
+        // `IN(field, v1, v2, ...)` still works above and is identical.
+        // Case-insensitive match against the next token's text — IN is
+        // not a lexer keyword (we don't want to forbid it as a field name)
+        // so we recognize it positionally here instead.
+        if (Peek().Kind == TokenKind.Identifier
+            && string.Equals(Peek().Text, "IN", StringComparison.OrdinalIgnoreCase)
+            && PeekAt(1).Kind == TokenKind.LParen)
+        {
+            Advance(); // consume IN
+            Advance(); // consume (
+            var values = new List<AqlValue>();
+            if (Peek().Kind != TokenKind.RParen)
+            {
+                values.Add(ParseValue());
+                while (Peek().Kind == TokenKind.Comma)
+                {
+                    Advance();
+                    values.Add(ParseValue());
+                }
+            }
+            Expect(TokenKind.RParen, "Expected ')' to close IN(...) value list.");
+            if (values.Count == 0)
+            {
+                throw new AqlValidationException(
+                    $"IN(...) on field '{first.Text}' requires at least one value.");
+            }
+            return new AqlIn(first.Text, values);
+        }
+
         // Otherwise, expect a comparison operator.
         var opTok = Expect(TokenKind.Operator, $"Expected an operator after field '{first.Text}'.");
         var value = ParseValue();
@@ -352,6 +382,12 @@ internal sealed class AqlParser
     // ---- Helpers -----------------------------------------------------------
 
     private AqlToken Peek() => _tokens[_pos];
+
+    private AqlToken PeekAt(int offset)
+    {
+        var idx = _pos + offset;
+        return idx < _tokens.Count ? _tokens[idx] : _tokens[^1]; // last token is always Eof
+    }
 
     private AqlToken Advance() => _tokens[_pos++];
 

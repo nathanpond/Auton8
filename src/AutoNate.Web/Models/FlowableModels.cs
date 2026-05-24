@@ -35,6 +35,35 @@ public sealed record class FlowableProcessInstanceSummary
     public string? StartUserId { get; init; }
 }
 
+// Append-only history row emitted by the global Flowable
+// historic-activity-instances endpoint. The projection framework writes one
+// workflow_event_log_cache row per entry, keyed by a stable event_id derived
+// from (process instance, activity instance, kind, start time).
+public sealed record class FlowableHistoricActivityEvent
+{
+    public required string ProcessInstanceId { get; init; }
+
+    public string? ProcessDefinitionId { get; init; }
+
+    public string? ActivityId { get; init; }
+
+    public string? ActivityName { get; init; }
+
+    public string? ActivityType { get; init; }
+
+    public string? Assignee { get; init; }
+
+    public string? TaskId { get; init; }
+
+    public DateTimeOffset? StartTime { get; init; }
+
+    public DateTimeOffset? EndTime { get; init; }
+
+    public long? DurationMs { get; init; }
+
+    public string? DeleteReason { get; init; }
+}
+
 public sealed record class FlowableHistoricProcessInstanceSummary
 {
     public string Id { get; init; } = string.Empty;

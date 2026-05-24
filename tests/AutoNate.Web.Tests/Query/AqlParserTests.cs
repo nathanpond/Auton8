@@ -132,4 +132,52 @@ public sealed class AqlParserTests
         var q = AqlParser.Parse("FROM Records COLUMNS(Name as Display)");
         Assert.Equal("Display", q.Columns![0].Alias);
     }
+
+    [Fact]
+    public void Infix_IN_Single_Value_Parses()
+    {
+        var q = AqlParser.Parse("FROM Flows WHERE Status IN (\"In-progress\")");
+        var inFilter = Assert.IsType<AqlIn>(q.Where);
+        Assert.Equal("Status", inFilter.Field);
+        Assert.Single(inFilter.Values);
+        Assert.Equal("In-progress", Assert.IsType<AqlString>(inFilter.Values[0]).Value);
+    }
+
+    [Fact]
+    public void Infix_IN_Multiple_Values_Parses()
+    {
+        var q = AqlParser.Parse(
+            "FROM Flows WHERE Status IN (\"In-progress\", \"Errored\", \"Suspended\")");
+        var inFilter = Assert.IsType<AqlIn>(q.Where);
+        Assert.Equal(3, inFilter.Values.Count);
+        Assert.Equal("In-progress", Assert.IsType<AqlString>(inFilter.Values[0]).Value);
+        Assert.Equal("Errored",     Assert.IsType<AqlString>(inFilter.Values[1]).Value);
+        Assert.Equal("Suspended",   Assert.IsType<AqlString>(inFilter.Values[2]).Value);
+    }
+
+    [Fact]
+    public void Infix_IN_Is_Case_Insensitive()
+    {
+        var q = AqlParser.Parse("FROM Flows WHERE Status in (\"x\")");
+        Assert.IsType<AqlIn>(q.Where);
+    }
+
+    [Fact]
+    public void Prefix_IN_Still_Parses_The_Same_Way()
+    {
+        // Both syntaxes should produce the identical AqlIn node.
+        var infix = AqlParser.Parse("FROM Flows WHERE Status IN (\"a\", \"b\")");
+        var prefix = AqlParser.Parse("FROM Flows WHERE IN(Status, \"a\", \"b\")");
+        var ai = Assert.IsType<AqlIn>(infix.Where);
+        var ap = Assert.IsType<AqlIn>(prefix.Where);
+        Assert.Equal(ai.Field, ap.Field);
+        Assert.Equal(ai.Values.Count, ap.Values.Count);
+    }
+
+    [Fact]
+    public void Infix_IN_With_Empty_List_Throws()
+    {
+        Assert.Throws<AqlValidationException>(() =>
+            AqlParser.Parse("FROM Flows WHERE Status IN ()"));
+    }
 }

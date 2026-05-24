@@ -64,6 +64,7 @@ const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] 
   { path: "permission-checker", templateKey: "configSecurityPermissionChecker" },
   { path: "plugins", templateKey: "configPlugins" },
   { path: "plugins/documentation", templateKey: "configPluginDocumentation" },
+  { path: "projections", templateKey: "configProjections" },
   { path: "forms", templateKey: "configForms" },
   { path: "form-mappings", templateKey: "configFormMappings" },
   { path: "chatbot-settings", templateKey: "configChatbotSettings" },

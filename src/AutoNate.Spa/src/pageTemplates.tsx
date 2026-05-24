@@ -19,6 +19,7 @@ import AdminGrants from "@/pages/admin/Grants";
 import AdminHierarchy from "@/pages/admin/Hierarchy";
 import AdminExplain from "@/pages/admin/Explain";
 import AdminPlugins from "@/pages/admin/Plugins";
+import AdminProjections from "@/pages/admin/Projections";
 import StatusAppearance from "@/pages/admin/config/StatusAppearance";
 import ModelCatalogPage from "@/pages/admin/config/chatbot/ModelCatalogPage";
 import SiteAppearancePage from "@/pages/admin/config/SiteAppearance";
@@ -74,6 +75,7 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configSecurityPermissionChecker: <SecurityPermissionChecker />,
   configPlugins: <AdminPlugins />,
   configPluginDocumentation: <PluginDocumentation />,
+  configProjections: <AdminProjections />,
   configForms: <FormsList />,
   configFormMappings: <FormsFormMappings />,
   configChatbotSettings: <SitewideChatbotSettings />,

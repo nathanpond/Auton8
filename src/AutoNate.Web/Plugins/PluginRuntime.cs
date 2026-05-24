@@ -30,6 +30,7 @@ public sealed class PluginRuntime
     private readonly PluginMigrationRunner? _migrationRunner;
     private readonly IDbContextFactory<AutoNateDbContext>? _dbFactory;
     private readonly IWorkflowBehaviorRegistry? _behaviorRegistry;
+    private readonly PluginScheduledJobRegistry? _scheduledJobRegistry;
     private readonly IDataPaths _dataPaths;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginRuntime> _log;
@@ -54,7 +55,8 @@ public sealed class PluginRuntime
         PluginDataAccessRegistry? dataRegistry = null,
         PluginMigrationRunner? migrationRunner = null,
         IDbContextFactory<AutoNateDbContext>? dbFactory = null,
-        IWorkflowBehaviorRegistry? behaviorRegistry = null)
+        IWorkflowBehaviorRegistry? behaviorRegistry = null,
+        PluginScheduledJobRegistry? scheduledJobRegistry = null)
     {
         _registrar = registrar;
         _hostServices = hostServices;
@@ -62,6 +64,7 @@ public sealed class PluginRuntime
         _migrationRunner = migrationRunner;
         _dbFactory = dbFactory;
         _behaviorRegistry = behaviorRegistry;
+        _scheduledJobRegistry = scheduledJobRegistry;
         _dataPaths = dataPaths;
         _loggerFactory = loggerFactory;
         _log = loggerFactory.CreateLogger<PluginRuntime>();
@@ -201,8 +204,13 @@ public sealed class PluginRuntime
                 // mid-disable / reuse-of-pluginId-after-process-restart paths.
                 _behaviorRegistry?.RemoveAllForPlugin(row.Id);
 
+                IPluginProjections projections = _scheduledJobRegistry is not null
+                    ? new PluginProjections(_scheduledJobRegistry, row.Id)
+                    : new NoopPluginProjections();
+                _scheduledJobRegistry?.RemoveForPlugin(row.Id);
+
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, _hostServices);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, _hostServices);
                 instance.Configure(context);
 
                 var loaded = new LoadedPlugin(row.Id, instance.Name, instance.Version, alc, scoped, instance);
@@ -232,6 +240,7 @@ public sealed class PluginRuntime
             if (!_loaded.TryRemove(id, out var loaded)) return;
             loaded.ScopedRegistrar.RemoveAllForPlugin();
             _behaviorRegistry?.RemoveAllForPlugin(id);
+            _scheduledJobRegistry?.RemoveForPlugin(id);
             _log.LogInformation(
                 "Disabled plugin {Id} ({Name}); ALC remains loaded inert until process restart.",
                 id, loaded.Name);
@@ -319,12 +328,16 @@ public sealed class PluginRuntime
                     ? new PluginBehaviors(_behaviorRegistry, row.Id)
                     : new NoopPluginBehaviors();
 
+                IPluginProjections projections = _scheduledJobRegistry is not null
+                    ? new PluginProjections(_scheduledJobRegistry, row.Id)
+                    : new NoopPluginProjections();
+
                 // Wrap the registrar so anything Cleanup() accidentally
                 // subscribes to gets dropped immediately afterwards. We don't
                 // want a cleanup callback to leak hooks into a plugin that's
                 // about to be deleted.
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, _hostServices);
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, _hostServices);
 
                 try
                 {

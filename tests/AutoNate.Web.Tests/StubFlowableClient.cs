@@ -196,6 +196,34 @@ internal sealed class StubFlowableClient : IFlowableClient
             (IReadOnlyList<FlowableTaskSummary>?)tasks ?? Array.Empty<FlowableTaskSummary>());
     }
 
+    // Tests that exercise the projection-framework task polling feed populate
+    // RuntimeTasks; the projection upserts each entry into workflow_task_cache.
+    public List<FlowableTaskSummary> RuntimeTasks { get; } = new();
+
+    public Task<IReadOnlyList<FlowableTaskSummary>> GetRuntimeTasksAsync(
+        int start, int size, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"RuntimeTasks:start={start},size={size}");
+        if (start >= RuntimeTasks.Count) return Task.FromResult<IReadOnlyList<FlowableTaskSummary>>(Array.Empty<FlowableTaskSummary>());
+        var page = RuntimeTasks.Skip(start).Take(size).ToArray();
+        return Task.FromResult<IReadOnlyList<FlowableTaskSummary>>(page);
+    }
+
+    // Tests for the history projection seed this list; the global page method
+    // returns entries filtered by sinceUtc and paged by start/size.
+    public List<FlowableHistoricActivityEvent> HistoricActivityEvents { get; } = new();
+
+    public Task<IReadOnlyList<FlowableHistoricActivityEvent>> GetHistoricActivityEventsAsync(
+        int start, int size, DateTimeOffset? sinceUtc = null, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"HistoricActivities:start={start},size={size},since={sinceUtc?.UtcDateTime.ToString("o") ?? "<none>"}");
+        var src = sinceUtc is { } since
+            ? HistoricActivityEvents.Where(e => e.StartTime is { } st && st >= since)
+            : HistoricActivityEvents;
+        var page = src.OrderBy(e => e.StartTime ?? DateTimeOffset.MinValue).Skip(start).Take(size).ToArray();
+        return Task.FromResult<IReadOnlyList<FlowableHistoricActivityEvent>>(page);
+    }
+
     public Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(
         string userId, CancellationToken cancellationToken = default)
     {

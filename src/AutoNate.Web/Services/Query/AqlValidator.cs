@@ -145,7 +145,8 @@ internal sealed class AqlValidator
             // a GROUP() clause; the entity computes the value per row.
             if (entity.RowFunctions.Any(f => string.Equals(f, fn, StringComparison.OrdinalIgnoreCase)))
             {
-                if (item.AggregateField is not null)
+                if (item.AggregateField is not null
+                    && !entity.RowFunctionAcceptsArgument(fn))
                 {
                     errors.Add($"{fn}() does not take an argument ({ctx}).");
                 }

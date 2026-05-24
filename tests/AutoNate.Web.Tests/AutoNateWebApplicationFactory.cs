@@ -74,6 +74,13 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
                 // remediators (Phase 1 has none), but turning it off here
                 // keeps the host quieter and matches the detector switch.
                 ["SystemIssues:RemediationEnabled"] = "false",
+                // Projection framework: same rationale as the detectors.
+                // Tests that exercise projections call ApplyAsync directly;
+                // the retention janitor exposes RunOnceAsync. Letting the
+                // loops run across many parallel test factories would burn
+                // CPU and risk host crashes under xUnit parallelism.
+                ["Projections:WorkerEnabled"] = "false",
+                ["FlowableCache:RetentionEnabled"] = "false",
             };
 
             foreach (var (key, value) in _extraConfig)

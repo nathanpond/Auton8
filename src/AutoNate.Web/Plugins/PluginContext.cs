@@ -15,6 +15,7 @@ internal sealed class PluginContext : IPluginContext
         IPluginDataAccess data,
         IPluginMenus menus,
         IPluginBehaviors behaviors,
+        IPluginProjections projections,
         IServiceProvider hostServices)
     {
         PluginId = pluginId;
@@ -24,6 +25,7 @@ internal sealed class PluginContext : IPluginContext
         Data = data;
         Menus = menus;
         Behaviors = behaviors;
+        Projections = projections;
         HostServices = hostServices;
     }
 
@@ -34,5 +36,6 @@ internal sealed class PluginContext : IPluginContext
     public IPluginDataAccess Data { get; }
     public IPluginMenus Menus { get; }
     public IPluginBehaviors Behaviors { get; }
+    public IPluginProjections Projections { get; }
     public IServiceProvider HostServices { get; }
 }

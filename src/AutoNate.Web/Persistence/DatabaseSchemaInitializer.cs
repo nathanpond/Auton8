@@ -2929,6 +2929,214 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // Projection framework bookkeeping. projection_versions tracks active vs.
+    // shadow rows during reprojection; projection_watermarks holds per-feed
+    // poll cursors so a restart doesn't replay history.
+    private const string ProjectionFrameworkSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS projection_versions (
+            name TEXT NOT NULL,
+            version INT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('active', 'shadow', 'retired')),
+            started_at_utc TIMESTAMPTZ NOT NULL,
+            completed_at_utc TIMESTAMPTZ NULL,
+            PRIMARY KEY (name, version)
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_projection_versions_name_status
+            ON projection_versions (name, status);
+
+        CREATE TABLE IF NOT EXISTS projection_watermarks (
+            feed_name TEXT PRIMARY KEY,
+            watermark_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL
+        );
+        """;
+
+    // Flowable workflow cache — three tables that AQL queries hit directly,
+    // populated by the projection framework from the Flowable event bridge +
+    // polling sweeper. auth_tags is a JSONB bag the selector compilers turn
+    // into row predicates ({startedby, processkey, definitionkey, ...}).
+    //
+    // Time-partitioning is deferred to a later migration; at the data volumes
+    // we hit before partitioning matters, BRIN over start_time/created_time
+    // is enough and avoids the operational burden of monthly children.
+    private const string WorkflowCacheSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS workflow_execution_cache (
+            flowable_instance_id TEXT PRIMARY KEY,
+            process_definition_key TEXT NOT NULL,
+            process_definition_id TEXT NOT NULL,
+            process_definition_version INT NULL,
+            business_key TEXT NULL,
+            tenant_id TEXT NULL,
+            status TEXT NOT NULL,
+            start_time TIMESTAMPTZ NOT NULL,
+            end_time TIMESTAMPTZ NULL,
+            duration_ms BIGINT NULL,
+            started_by TEXT NULL,
+            current_activity_id TEXT NULL,
+            current_activity_name TEXT NULL,
+            record_id BIGINT NULL,
+            auth_tags JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            projection_version INT NOT NULL DEFAULT 1,
+            last_sync_at TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_started_by
+            ON workflow_execution_cache (started_by);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_def_status
+            ON workflow_execution_cache (process_definition_key, status);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_record_id
+            ON workflow_execution_cache (record_id) WHERE record_id IS NOT NULL;
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_auth_tags
+            ON workflow_execution_cache USING GIN (auth_tags jsonb_path_ops);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_execution_cache_start_time_brin
+            ON workflow_execution_cache USING BRIN (start_time);
+
+        CREATE TABLE IF NOT EXISTS workflow_task_cache (
+            flowable_task_id TEXT PRIMARY KEY,
+            flowable_instance_id TEXT NOT NULL,
+            process_definition_key TEXT NOT NULL,
+            task_definition_key TEXT NULL,
+            name TEXT NULL,
+            assignee TEXT NULL,
+            owner TEXT NULL,
+            candidate_users TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+            candidate_groups TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+            due_date TIMESTAMPTZ NULL,
+            created_time TIMESTAMPTZ NOT NULL,
+            claim_time TIMESTAMPTZ NULL,
+            completed_time TIMESTAMPTZ NULL,
+            form_key TEXT NULL,
+            priority INT NULL,
+            status TEXT NOT NULL,
+            auth_tags JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            projection_version INT NOT NULL DEFAULT 1,
+            last_sync_at TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_assignee_status
+            ON workflow_task_cache (assignee, status);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_instance
+            ON workflow_task_cache (flowable_instance_id);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_candidate_users
+            ON workflow_task_cache USING GIN (candidate_users);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_candidate_groups
+            ON workflow_task_cache USING GIN (candidate_groups);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_auth_tags
+            ON workflow_task_cache USING GIN (auth_tags jsonb_path_ops);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_task_cache_created_time_brin
+            ON workflow_task_cache USING BRIN (created_time);
+
+        -- Current-value snapshot of process variables per instance. History
+        -- of variable changes is owned by the (Phase 2) event log table; this
+        -- one is just "what's true right now."
+        CREATE TABLE IF NOT EXISTS workflow_variable_cache (
+            flowable_instance_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            value_text TEXT NULL,
+            value_long BIGINT NULL,
+            value_double DOUBLE PRECISION NULL,
+            value_bool BOOLEAN NULL,
+            value_json JSONB NULL,
+            type TEXT NOT NULL,
+            updated_time TIMESTAMPTZ NOT NULL,
+            projection_version INT NOT NULL DEFAULT 1,
+            last_sync_at TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (flowable_instance_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_variable_cache_value_json
+            ON workflow_variable_cache USING GIN (value_json jsonb_path_ops)
+            WHERE value_json IS NOT NULL;
+        """;
+
+    // Phase 2 — append-only history event log. One row per Flowable engine
+    // event (activity start/end, task lifecycle, variable change). Drives
+    // process-mining / time-series AQL queries. event_id is a stable hash
+    // composed by the history projection from (instance, activity_instance_id,
+    // kind, occurred_at) so re-emission from the polling feed is idempotent.
+    //
+    // BRIN on event_time keeps inserts cheap (no btree maintenance) and
+    // accelerates the time-range scans that dominate analytical queries.
+    private const string WorkflowEventLogSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS workflow_event_log_cache (
+            event_id TEXT PRIMARY KEY,
+            flowable_instance_id TEXT NOT NULL,
+            process_definition_key TEXT NOT NULL,
+            event_time TIMESTAMPTZ NOT NULL,
+            event_type TEXT NOT NULL,
+            activity_id TEXT NULL,
+            activity_name TEXT NULL,
+            activity_type TEXT NULL,
+            task_id TEXT NULL,
+            variable_name TEXT NULL,
+            actor TEXT NULL,
+            duration_ms BIGINT NULL,
+            payload JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            projection_version INT NOT NULL DEFAULT 1,
+            last_sync_at TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_event_log_instance_time
+            ON workflow_event_log_cache (flowable_instance_id, event_time DESC);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_event_log_def_type_time
+            ON workflow_event_log_cache (process_definition_key, event_type, event_time DESC);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_event_log_event_time_brin
+            ON workflow_event_log_cache USING BRIN (event_time);
+
+        CREATE INDEX IF NOT EXISTS ix_workflow_event_log_actor
+            ON workflow_event_log_cache (actor) WHERE actor IS NOT NULL;
+        """;
+
+    // Per-process retention overrides for the cache janitor. Missing rows
+    // mean "use the default" (7 years). Operators set this through the admin
+    // surface; the janitor reads it on every sweep.
+    private const string ProcessRetentionConfigSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS process_retention_config (
+            process_definition_key TEXT PRIMARY KEY,
+            retain_days INT NOT NULL CHECK (retain_days > 0),
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NULL
+        );
+        """;
+
+    // First non-Flowable consumer of the projection framework. Aggregates
+    // the records table on a (record_type_id, bucket_day) grain so dashboard
+    // widgets can read activity stats without re-aggregating per request.
+    // Filled by a polling feed that runs hourly; the row's last_sync_at
+    // tells the admin page how fresh the rollup is.
+    private const string RecordActivityRollupSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS record_activity_rollup_cache (
+            record_type_id UUID NOT NULL,
+            bucket_day DATE NOT NULL,
+            records_created INT NOT NULL DEFAULT 0,
+            records_updated INT NOT NULL DEFAULT 0,
+            records_archived INT NOT NULL DEFAULT 0,
+            projection_version INT NOT NULL DEFAULT 1,
+            last_sync_at TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (record_type_id, bucket_day)
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_record_activity_rollup_day
+            ON record_activity_rollup_cache (bucket_day DESC);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -2988,6 +3196,11 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(DashboardsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SavedQueriesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(QueryMenuSeedSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ProjectionFrameworkSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(WorkflowCacheSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(WorkflowEventLogSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ProcessRetentionConfigSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(RecordActivityRollupSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

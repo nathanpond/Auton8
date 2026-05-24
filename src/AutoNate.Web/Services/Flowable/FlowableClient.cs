@@ -833,6 +833,89 @@ public sealed class FlowableClient(
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<FlowableHistoricActivityEvent>> GetHistoricActivityEventsAsync(
+        int start, int size, DateTimeOffset? sinceUtc = null, CancellationToken cancellationToken = default)
+    {
+        if (size <= 0) return Array.Empty<FlowableHistoricActivityEvent>();
+        if (start < 0) start = 0;
+
+        var url = $"service/history/historic-activity-instances?sort=startTime&order=asc&start={start}&size={size}";
+        if (sinceUtc is { } since)
+        {
+            // Flowable expects ISO-8601 with milliseconds and a `Z` suffix; the
+            // server interprets the value as the lower bound for startTime.
+            url += $"&startedAfter={Uri.EscapeDataString(since.UtcDateTime.ToString("o"))}";
+        }
+
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "page through historic activity instances");
+
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableHistoricActivityInstanceResponse>>(response, cancellationToken);
+        if (payload.Data.Count == 0)
+        {
+            return Array.Empty<FlowableHistoricActivityEvent>();
+        }
+
+        return payload.Data
+            .Where(a => !string.IsNullOrEmpty(a.ProcessInstanceId))
+            .Select(a => new FlowableHistoricActivityEvent
+            {
+                ProcessInstanceId = a.ProcessInstanceId!,
+                ProcessDefinitionId = null,
+                ActivityId = a.ActivityId,
+                ActivityName = a.ActivityName,
+                ActivityType = a.ActivityType,
+                Assignee = a.Assignee,
+                TaskId = a.TaskId,
+                StartTime = a.StartTime,
+                EndTime = a.EndTime,
+                DurationMs = a.DurationInMillis,
+                DeleteReason = a.DeleteReason
+            })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<FlowableTaskSummary>> GetRuntimeTasksAsync(int start, int size, CancellationToken cancellationToken = default)
+    {
+        if (size <= 0) return Array.Empty<FlowableTaskSummary>();
+        if (start < 0) start = 0;
+
+        var url = $"service/runtime/tasks?sort=createTime&order=desc&start={start}&size={size}";
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, "page through runtime tasks");
+
+        var payload = await DeserializeAsync<FlowableListResponse<FlowableTaskResponse>>(response, cancellationToken);
+        if (payload.Data.Count == 0)
+        {
+            return Array.Empty<FlowableTaskSummary>();
+        }
+
+        var processDefinitionNames = await GetProcessDefinitionNamesByIdAsync(payload.Data, cancellationToken);
+        var processInstanceNames = await GetProcessInstanceNamesByIdAsync(payload.Data, cancellationToken);
+
+        return payload.Data
+            .Where(task => !string.IsNullOrWhiteSpace(task.Id))
+            .Select(task =>
+            {
+                processDefinitionNames.TryGetValue(task.ProcessDefinitionId ?? string.Empty, out var definitionName);
+                processInstanceNames.TryGetValue(task.ProcessInstanceId ?? string.Empty, out var instanceName);
+                return new FlowableTaskSummary
+                {
+                    Id = task.Id!,
+                    Name = task.Name ?? string.Empty,
+                    TaskDefinitionKey = task.TaskDefinitionKey,
+                    Assignee = task.Assignee,
+                    ProcessInstanceId = task.ProcessInstanceId,
+                    ProcessInstanceName = FirstNonEmpty(task.ProcessInstanceName, instanceName),
+                    ProcessDefinitionId = task.ProcessDefinitionId,
+                    ProcessDefinitionName = definitionName,
+                    CreatedAtUtc = task.CreateTime,
+                    DueDate = task.DueDate
+                };
+            })
+            .ToArray();
+    }
+
     public async Task<IReadOnlyList<FlowableTaskSummary>> GetTasksAssignedToUserAsync(string userId, CancellationToken cancellationToken = default)
     {
         var encodedUserId = Uri.EscapeDataString(userId);

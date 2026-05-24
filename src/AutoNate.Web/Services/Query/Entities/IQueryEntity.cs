@@ -38,6 +38,16 @@ public interface IQueryEntity
     // Called by the validator/executor to label result columns. Defaults to Number.
     QueryDataType RowFunctionDataType(string functionName) => QueryDataType.Number;
 
+    // Whether a row function accepts an argument. Most row functions are
+    // zero-arg (COUNTCHILDREN(), NUMNODES()), but some take a single field-
+    // shaped arg the entity uses to pick which value to return per row
+    // (e.g. CURRENTSTEP(Name) vs CURRENTSTEP(Assignee) on Flows). The
+    // default is `false` so existing entities don't change behavior; the
+    // validator emits "FN() does not take an argument" when false and
+    // the caller passes one anyway. Entities that opt in still own the
+    // arg's semantics — there's no validator-side allowlist of arg values.
+    bool RowFunctionAcceptsArgument(string functionName) => false;
+
     // Resolve the full schema (static + dynamic), resolve literal references
     // (e.g. RecordType names), and return a prepared query the validator can
     // run generic checks against and the executor can fire.

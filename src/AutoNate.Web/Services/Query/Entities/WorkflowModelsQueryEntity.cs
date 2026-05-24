@@ -45,6 +45,22 @@ public sealed class WorkflowModelsQueryEntity : IQueryEntity
         "NUMNODES", "USESNODE", "NUMEXECUTIONS", "LASTEXECUTED"
     };
 
+    // Scalar-per-row functions that can appear in COLUMNS()/ORDER BY without
+    // a GROUP(...) clause. NUMNODES counts BPMN nodes in the model's XML;
+    // NUMEXECUTIONS / LASTEXECUTED come from workflow_execution_cache via
+    // the executor's pre-aggregation (see _executionStats).
+    public IReadOnlyList<string> RowFunctions { get; } = new[]
+    {
+        "NUMNODES", "NUMEXECUTIONS", "LASTEXECUTED"
+    };
+
+    public QueryDataType RowFunctionDataType(string functionName) =>
+        functionName.ToUpperInvariant() switch
+        {
+            "LASTEXECUTED" => QueryDataType.Date,
+            _ => QueryDataType.Number
+        };
+
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         var errors = new List<string>();
@@ -77,12 +93,12 @@ public sealed class WorkflowModelsQueryEntity : IQueryEntity
 
     private static void BlockIfUnsupported(string fnName, List<string> errors)
     {
-        var name = fnName.ToUpperInvariant();
-        if (name == "NUMEXECUTIONS" || name == "LASTEXECUTED")
-        {
-            errors.Add($"{name}() is not yet supported — pending an execution-data cache. " +
-                       "For now use NUMNODES() or USESNODE() on Workflows.");
-        }
+        // NUMEXECUTIONS / LASTEXECUTED unblocked once the workflow_execution_cache
+        // landed (projection framework, phase 1). Both functions now resolve via a
+        // sub-query against the cache during WHERE evaluation; see
+        // EvalFunctionCompare below.
+        _ = fnName;
+        _ = errors;
     }
 }
 
@@ -92,6 +108,12 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
 
     private readonly IDbContextFactory<AutoNateDbContext> _dbFactory;
     private readonly IAuthorizer _authorizer;
+
+    // Populated in ExecuteAsync from workflow_execution_cache before EvalWhere
+    // runs, so NUMEXECUTIONS / LASTEXECUTED can be resolved per row without a
+    // per-row sub-query. Key is ProcessKey.
+    private IReadOnlyDictionary<string, (int Count, DateTime? Last)> _executionStats =
+        new Dictionary<string, (int, DateTime?)>(StringComparer.Ordinal);
 
     public WorkflowModelsPreparedQuery(
         IQueryEntity entity,
@@ -142,6 +164,33 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
         // Map to a record so the rest of the pipeline works against
         // a fixed shape without re-querying the BPMN per attribute access.
         var rows = entities.Select(MapRow).ToList();
+
+        // Pre-aggregate workflow_execution_cache so EvalWhere can resolve
+        // NUMEXECUTIONS / LASTEXECUTED per row from a single SQL round trip.
+        // Empty when the cache hasn't been populated yet — function calls
+        // collapse to 0 / null and the user's predicates evaluate normally.
+        var processKeys = rows
+            .Select(r => r.ProcessKey)
+            .Where(k => !string.IsNullOrEmpty(k))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (processKeys.Count > 0)
+        {
+            var stats = await db.WorkflowExecutionCache.AsNoTracking()
+                .Where(c => processKeys.Contains(c.ProcessDefinitionKey))
+                .GroupBy(c => c.ProcessDefinitionKey)
+                .Select(g => new
+                {
+                    Key = g.Key,
+                    Count = g.Count(),
+                    Last = (DateTime?)g.Max(c => c.StartTime)
+                })
+                .ToListAsync(cancellationToken);
+            _executionStats = stats.ToDictionary(
+                s => s.Key,
+                s => (s.Count, s.Last),
+                StringComparer.Ordinal);
+        }
 
         // Apply WHERE.
         if (Query.Where is not null)
@@ -215,7 +264,8 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
             Published: e.LastDeploymentId is not null || e.PublishedVersionNumber is not null,
             Version: e.PublishedVersionNumber,
             CreatedDate: DateTime.SpecifyKind(e.CreatedAtUtc, DateTimeKind.Utc),
-            BpmnXml: e.BpmnXml);
+            BpmnXml: e.BpmnXml,
+            ProcessKey: e.ProcessKey);
 
     // ---- Projection -------------------------------------------------------
 
@@ -233,7 +283,23 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
 
     private ProjItem SelectItemToProjection(AqlSelectItem item)
     {
-        // Aggregates are validated out before here when GROUP is absent.
+        // Row functions (NUMNODES / NUMEXECUTIONS / LASTEXECUTED) appear in
+        // COLUMNS with IsAggregate=true at the AST level — they share syntax
+        // with aggregates but evaluate per-row, no GROUP required. The entity
+        // declares their result type via RowFunctionDataType.
+        if (item.IsAggregate)
+        {
+            var fn = item.AggregateFn!.ToUpperInvariant();
+            if (Entity.RowFunctions.Any(f => string.Equals(f, fn, StringComparison.OrdinalIgnoreCase)))
+            {
+                return new ProjItem(item.DisplayName, Entity.RowFunctionDataType(fn), item);
+            }
+            // True aggregates would need GROUP — the validator catches that
+            // before we get here. Fall through to the field path so any
+            // miscategorized item throws the cleaner "field not found" rather
+            // than a NullReferenceException on AggregateFn.
+        }
+
         var col = Schema.First(c =>
             string.Equals(c.Name, item.Field, StringComparison.OrdinalIgnoreCase));
         // `AS <alias>` renames the result column; the underlying field still
@@ -241,7 +307,45 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
         return new ProjItem(item.DisplayName, col.DataType, item);
     }
 
-    private static object? ReadProjection(WorkflowRow row, ProjItem proj) => proj.Source.Field switch
+    private object? ReadProjection(WorkflowRow row, ProjItem proj)
+    {
+        if (proj.Source.IsAggregate)
+        {
+            return EvalRowFunction(proj.Source.AggregateFn!, row);
+        }
+        return ReadColumnValue(proj.Source.Field, row);
+    }
+
+    private object? EvalRowFunction(string fn, WorkflowRow row)
+    {
+        var upper = fn.ToUpperInvariant();
+        if (upper == "NUMNODES")
+        {
+            var counts = ParseBpmnNodeCounts(row.BpmnXml);
+            return (double)counts.Values.Sum();
+        }
+        if (string.IsNullOrEmpty(row.ProcessKey)
+            || !_executionStats.TryGetValue(row.ProcessKey, out var stats))
+        {
+            // No cache rows for this process — NUMEXECUTIONS is 0, LASTEXECUTED
+            // is null. Matches the WHERE-side semantics so the two surfaces
+            // agree on freshly-deployed (or never-run) workflows.
+            return upper switch
+            {
+                "NUMEXECUTIONS" => (object)0d,
+                "LASTEXECUTED" => null,
+                _ => null
+            };
+        }
+        return upper switch
+        {
+            "NUMEXECUTIONS" => (double)stats.Count,
+            "LASTEXECUTED" => stats.Last is { } d ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : null,
+            _ => null
+        };
+    }
+
+    private static object? ReadColumnValue(string? field, WorkflowRow row) => field switch
     {
         "ModelName" => row.Name,
         "Published" => row.Published,
@@ -270,13 +374,39 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
         _ => false
     };
 
-    private static bool EvalFunctionCompare(AqlFunctionCompare fcmp, WorkflowRow row)
+    private bool EvalFunctionCompare(AqlFunctionCompare fcmp, WorkflowRow row)
     {
         var fn = fcmp.FnName.ToUpperInvariant();
+        if (fn == "LASTEXECUTED")
+        {
+            DateTime? actualDate = null;
+            if (!string.IsNullOrEmpty(row.ProcessKey)
+                && _executionStats.TryGetValue(row.ProcessKey, out var stats))
+            {
+                actualDate = stats.Last;
+            }
+            if (actualDate is null) return false;
+            var expectedRaw = ResolveValue(fcmp.Value);
+            if (expectedRaw is not DateTime expectedDate) return false;
+            var c = actualDate.Value.CompareTo(expectedDate);
+            return fcmp.Op switch
+            {
+                "=" => c == 0,
+                "!=" => c != 0,
+                "<" => c < 0, "<=" => c <= 0,
+                ">" => c > 0, ">=" => c >= 0,
+                _ => false
+            };
+        }
+
         var counts = ParseBpmnNodeCounts(row.BpmnXml);
         double? actual = fn switch
         {
             "NUMNODES" => counts.Values.Sum(),
+            "NUMEXECUTIONS" => !string.IsNullOrEmpty(row.ProcessKey)
+                && _executionStats.TryGetValue(row.ProcessKey, out var stats)
+                    ? stats.Count
+                    : 0,
             _ => null
         };
         if (actual is null) return false;
@@ -472,4 +602,5 @@ internal sealed record WorkflowRow(
     bool Published,
     int? Version,
     DateTime CreatedDate,
-    string? BpmnXml);
+    string? BpmnXml,
+    string? ProcessKey);

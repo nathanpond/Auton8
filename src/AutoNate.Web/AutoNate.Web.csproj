@@ -41,6 +41,12 @@
       </PackageReference>
       <PackageReference Include="Npgsql" Version="9.0.3" />
       <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.0" />
+      <!-- DuckDB embeds in-process for the projection framework's cold tier:
+           Parquet archives of workflow_event_log_cache (older than 90 days)
+           are queried via WorkflowAnalyticsQueryEntity. The .Full variant
+           bundles the native libduckdb binaries for Linux x86_64, macOS,
+           and Windows so deploys don't need a separate install step. -->
+      <PackageReference Include="DuckDB.NET.Data.Full" Version="1.4.1" />
     </ItemGroup>
 
     <ItemGroup>
