@@ -26,7 +26,11 @@ public sealed class AqlSchemaEndpointTests
         bool HasDynamicFields,
         string? RecordTypeFilterField);
 
-    private sealed record RowFunctionDto(string Name, bool AcceptsArgument, string DataType);
+    private sealed record RowFunctionDto(
+        string Name,
+        bool AcceptsArgument,
+        string DataType,
+        List<string> Arguments);
 
     private sealed record ColumnDto(string Name, string DataType, bool IsAggregable, bool IsSystem);
 
@@ -85,6 +89,14 @@ public sealed class AqlSchemaEndpointTests
         Assert.Contains(wf.RowFunctions, f => f.Name == "NUMNODES");
         Assert.Contains(wf.RowFunctions, f => f.Name == "NUMEXECUTIONS");
         Assert.Contains(wf.RowFunctions, f => f.Name == "LASTEXECUTED");
+
+        // Flows.CURRENTSTEP publishes its closed-set argument vocabulary.
+        var flows = byName["Flows"];
+        var currentStep = flows.RowFunctions.Single(f => f.Name == "CURRENTSTEP");
+        Assert.True(currentStep.AcceptsArgument);
+        Assert.Equal(
+            new[] { "Name", "Assignee", "ActivityId", "TaskId", "DueDate", "CreatedTime", "Priority" },
+            currentStep.Arguments);
 
         // Static columns carry data type + aggregable + system flags.
         var records = byName["Records"];

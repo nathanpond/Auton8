@@ -93,7 +93,30 @@ function buildOptions(editorCtx: EditorContext, deps: CompletionDeps): Completio
     case "functionName":
       return functionOptions(editorCtx.expecting.scope, schema, entityContext);
 
-    case "functionArg":
+    case "functionArg": {
+      // Row functions that publish a closed-set arg vocabulary (e.g.
+      // Flows.CURRENTSTEP → Name/Assignee/...) get their own list.
+      // Anything else falls back to the entity's columns (the right
+      // answer for aggregates like COUNT/MIN/MAX/AVG/MEDIAN and for
+      // WHERE built-ins like IN/BETWEEN that take field references).
+      const fnName = editorCtx.expecting.fnName;
+      const entityMeta = entityContext
+        ? schema.entities.find(
+            (e) => e.name.toLowerCase() === entityContext.entity.toLowerCase()
+          )
+        : null;
+      const rowFn = entityMeta?.rowFunctions.find(
+        (f) => f.name.toLowerCase() === fnName.toLowerCase()
+      );
+      // Older backend revisions return rowFunctions without `arguments`;
+      // tolerate undefined so a stale schema doesn't crash the source.
+      const rowFnArgs = rowFn?.arguments ?? [];
+      if (rowFnArgs.length > 0) {
+        return rowFnArgs.map((arg) => ({
+          label: arg,
+          type: "enum"
+        }));
+      }
       return entityContext
         ? entityContext.columns.map((c) => ({
             label: c.name,
@@ -101,6 +124,7 @@ function buildOptions(editorCtx: EditorContext, deps: CompletionDeps): Completio
             detail: c.dataType
           }))
         : [];
+    }
 
     case "logicalOp":
       return [

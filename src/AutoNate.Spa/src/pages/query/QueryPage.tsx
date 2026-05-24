@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -20,6 +21,7 @@ import {
 } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import AqlEditor from "@/components/aql-editor/AqlEditor";
+import AqlHelpModal from "@/components/aql-editor/AqlHelpModal";
 import {
   DataTable,
   type DataTableColumn
@@ -189,6 +191,9 @@ export default function QueryPage() {
 
   // Saved query the user has loaded — its presence flips Save into "Update".
   const [selectedQueryId, setSelectedQueryId] = useState<string | null>(null);
+
+  // Help modal state.
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Save modal state.
   const [saveOpen, setSaveOpen] = useState(false);
@@ -405,6 +410,18 @@ export default function QueryPage() {
 
       <Paper p="md" withBorder>
         <Stack gap="sm">
+          <Group justify="flex-end" gap="xs">
+            <Tooltip label="AQL reference" withArrow position="left">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                onClick={() => setHelpOpen(true)}
+                aria-label="Open AQL help"
+              >
+                <i className="fa fa-circle-question" aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
           <Select
             label="Saved queries"
             placeholder="Pick a saved query to load…"
@@ -579,6 +596,8 @@ export default function QueryPage() {
           </Group>
         </Stack>
       </Modal>
+
+      <AqlHelpModal opened={helpOpen} onClose={() => setHelpOpen(false)} />
     </Stack>
   );
 }

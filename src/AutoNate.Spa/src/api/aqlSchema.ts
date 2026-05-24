@@ -10,6 +10,11 @@ export type AqlRowFunction = {
   name: string;
   acceptsArgument: boolean;
   dataType: AqlDataType;
+  // Closed-set argument vocabulary, when the entity publishes one
+  // (Flows.CURRENTSTEP returns Name, Assignee, ActivityId, ...).
+  // Empty array means the entity hasn't enumerated args — either the
+  // function is zero-arg or any identifier is allowed.
+  arguments: string[];
 };
 
 export type AqlColumnMeta = {

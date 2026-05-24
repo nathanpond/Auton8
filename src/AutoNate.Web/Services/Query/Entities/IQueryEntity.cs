@@ -48,6 +48,15 @@ public interface IQueryEntity
     // arg's semantics — there's no validator-side allowlist of arg values.
     bool RowFunctionAcceptsArgument(string functionName) => false;
 
+    // The closed set of legal argument tokens for a row function, when the
+    // entity wants to publish them (CURRENTSTEP(Name|Assignee|...) on Flows
+    // is the canonical case). Surfaced through the schema endpoint so the
+    // autocomplete and help modal can both list them. Default empty — an
+    // entity returning [] means "accepts any identifier" (the function is
+    // either zero-arg or the entity hasn't enumerated its arg vocabulary).
+    IReadOnlyList<string> RowFunctionArguments(string functionName) =>
+        Array.Empty<string>();
+
     // Closed-set value suggestions for a column. Keys are column names;
     // values are the legal labels (e.g. Flows.Status → "In-progress",
     // "Completed", ...). Powers the autocomplete UI's value dropdown after

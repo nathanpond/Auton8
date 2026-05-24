@@ -91,6 +91,19 @@ public sealed class FlowsQueryEntity : IQueryEntity
     public bool RowFunctionAcceptsArgument(string functionName) =>
         string.Equals(functionName, "CURRENTSTEP", StringComparison.OrdinalIgnoreCase);
 
+    // Legal argument tokens for CURRENTSTEP — matches the switch in
+    // EvalRowFunction below. Keep these two in sync; the autocomplete and
+    // help modal read this list verbatim.
+    private static readonly IReadOnlyList<string> CurrentStepArguments = new[]
+    {
+        "Name", "Assignee", "ActivityId", "TaskId", "DueDate", "CreatedTime", "Priority"
+    };
+
+    public IReadOnlyList<string> RowFunctionArguments(string functionName) =>
+        string.Equals(functionName, "CURRENTSTEP", StringComparison.OrdinalIgnoreCase)
+            ? CurrentStepArguments
+            : Array.Empty<string>();
+
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         IPreparedQuery prepared = new FlowsPreparedQuery(

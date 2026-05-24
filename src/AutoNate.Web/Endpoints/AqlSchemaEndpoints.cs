@@ -118,7 +118,8 @@ public static class AqlSchemaEndpoints
             .Select(fn => new RowFunctionDto(
                 Name: fn,
                 AcceptsArgument: entity.RowFunctionAcceptsArgument(fn),
-                DataType: DataTypeName(entity.RowFunctionDataType(fn))))
+                DataType: DataTypeName(entity.RowFunctionDataType(fn)),
+                Arguments: entity.RowFunctionArguments(fn).ToList()))
             .ToList();
 
         // Only Records has dynamic fields today. The RecordType column is the
@@ -194,7 +195,11 @@ public static class AqlSchemaEndpoints
         bool HasDynamicFields,
         string? RecordTypeFilterField);
 
-    public sealed record RowFunctionDto(string Name, bool AcceptsArgument, string DataType);
+    public sealed record RowFunctionDto(
+        string Name,
+        bool AcceptsArgument,
+        string DataType,
+        IReadOnlyList<string> Arguments);
 
     public sealed record ColumnDto(
         string Name,
