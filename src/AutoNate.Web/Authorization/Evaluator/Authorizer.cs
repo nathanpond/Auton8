@@ -95,7 +95,7 @@ public sealed class Authorizer : IAuthorizer
             return AuthDecision.Allow("authorization disabled");
         }
 
-        var userId = GetUserId(actor);
+        var userId = actor.TryGetUserId();
         if (userId is null)
         {
             return MaybeDryRun(AuthDecision.Deny("no user identity"), action, target);
@@ -246,7 +246,7 @@ public sealed class Authorizer : IAuthorizer
 
         ArgumentNullException.ThrowIfNull(db);
 
-        var userId = GetUserId(actor);
+        var userId = actor.TryGetUserId();
         if (userId is null)
         {
             return source.Where(_ => false);
@@ -332,7 +332,7 @@ public sealed class Authorizer : IAuthorizer
             return true;
         }
 
-        var userId = GetUserId(actor);
+        var userId = actor.TryGetUserId();
         if (userId is null)
         {
             return false;
@@ -381,7 +381,7 @@ public sealed class Authorizer : IAuthorizer
             return RecordSqlFilter.Open;
         }
 
-        var userId = GetUserId(actor);
+        var userId = actor.TryGetUserId();
         if (userId is null)
         {
             return RecordSqlFilter.Closed;
@@ -662,7 +662,7 @@ public sealed class Authorizer : IAuthorizer
         ClaimsPrincipal actor,
         CancellationToken cancellationToken = default)
     {
-        var userId = GetUserId(actor) ?? Guid.Empty;
+        var userId = actor.TryGetUserId() ?? Guid.Empty;
         if (!_options.Value.Enabled)
         {
             return Task.FromResult(new CapabilitySummary
@@ -881,12 +881,6 @@ public sealed class Authorizer : IAuthorizer
 
     private static bool MatchesKind(PathNode path, string kind) =>
         path.KindsAreWildcard || path.Kinds.Contains(kind);
-
-    private static Guid? GetUserId(ClaimsPrincipal actor)
-    {
-        var raw = actor.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : null;
-    }
 
     private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, bool>> BuildCapabilityMap(
         IEntityRegistry registry, bool allowed)

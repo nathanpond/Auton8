@@ -3,6 +3,10 @@
     "mantine": {
       "command": "npx",
       "args": ["-y", "@mantine/mcp-server"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--output-dir", "./temp"]
     }
   }
 }

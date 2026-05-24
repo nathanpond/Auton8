@@ -1,3 +1,4 @@
+using System.Xml;
 using AutoNate.Web.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -49,10 +50,10 @@ public sealed class EfCoreWorkflowSignalRegistry(
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             // Only published versions matter at runtime: drafts aren't deployed
             // to Flowable and can't trigger signal start events.
-            var publishedXmls = await dbContext.WorkflowModels
+            var publishedModels = await dbContext.WorkflowModels
                 .AsNoTracking()
                 .Where(model => model.PublishedVersionNumber != null)
-                .Select(model => model.BpmnXml)
+                .Select(model => new { model.Id, model.BpmnXml })
                 .ToListAsync(cancellationToken);
 
             // Build both the names-by-topic and registrations-by-topic indexes
@@ -60,9 +61,26 @@ public sealed class EfCoreWorkflowSignalRegistry(
             var byTopicNames = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
             var byTopicRegs = new Dictionary<string, List<WorkflowSignalRegistration>>(StringComparer.Ordinal);
 
-            foreach (var xml in publishedXmls)
+            foreach (var model in publishedModels)
             {
-                foreach (var registration in WorkflowBpmnXml.ExtractSignalRegistrations(xml))
+                IReadOnlyList<WorkflowSignalRegistration> registrationsForModel;
+                try
+                {
+                    registrationsForModel = WorkflowBpmnXml.ExtractSignalRegistrations(model.BpmnXml);
+                }
+                catch (XmlException ex)
+                {
+                    // Persisted XML failed to parse. Skip this workflow so the
+                    // rest of the index still builds, but warn loudly: signals
+                    // declared by this model will not fire until it is fixed
+                    // and re-published.
+                    _logger.LogWarning(ex,
+                        "Skipping signal registrations for workflow {WorkflowId}: BPMN XML failed to parse.",
+                        model.Id);
+                    continue;
+                }
+
+                foreach (var registration in registrationsForModel)
                 {
                     if (!byTopicNames.TryGetValue(registration.Topic, out var names))
                     {

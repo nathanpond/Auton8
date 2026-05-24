@@ -57,7 +57,7 @@ function ThumbnailBox({
   item: CardItem;
   size: "card" | "selected";
 }) {
-  const className = size === "card" ? "tp-card-thumb" : "tp-selected-thumb";
+  const className = size === "card" ? "tp-card-thumb" : undefined;
   if (typeof item.thumbnail === "string" && item.thumbnail) {
     return (
       <div className={className}>
@@ -211,7 +211,7 @@ export function CardPickerModal({
       opened
       onClose={onCancel}
       title={
-        <div className="tp-modal-title-block">
+        <div>
           <Text fw={600} size="lg">{title}</Text>
           {subtitle ? (
             <Text size="xs" c="dimmed" mt={4}>{subtitle}</Text>
@@ -231,7 +231,6 @@ export function CardPickerModal({
       }}
     >
       <div
-        className="tp-header-row"
         style={{
           display: "flex",
           gap: 8,
@@ -380,7 +379,6 @@ export function CardPickerModal({
       </div>
 
       <div
-        className="tp-footer"
         style={{
           display: "flex",
           gap: 8,

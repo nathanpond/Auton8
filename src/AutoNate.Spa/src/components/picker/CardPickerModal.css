@@ -1,70 +1,7 @@
 /* Template picker modal — categories rail, sticky-section template list,
-   thumbnail/list view toggle. Visual treatment from the Claude Design handoff
-   (see autonate/project/Template Picker.html); colours map onto the existing
-   ColorAdmin Bootstrap theme via --bs-* tokens so dark-mode inherits. */
-
-/* Sizing for .tp-modal-dialog and .tp-modal-content lives inline on the
-   element (calc(100vw - 60px) / calc(100vh - 60px)) so it reliably overrides
-   Bootstrap's .modal-dialog max-width: 500px regardless of CSS load order.
-   This file owns only the inner layout. */
-
-.tp-modal-content {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-/* Header row: title block on the left, search + toggle + close on the right.
-   The right group can shrink (its children handle their own truncation) so
-   the close button never gets pushed off-screen at narrower widths. */
-.tp-modal-content .modal-header {
-    align-items: center;
-    gap: 12px;
-}
-
-.tp-modal-content .modal-header > .tp-modal-title-block {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.tp-modal-content .modal-header > .tp-modal-title-block .modal-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.tp-modal-content .modal-header .btn-close {
-    /* Bootstrap pulls .btn-close into the header padding via negative margins;
-       we want it inline with the search/toggle group instead so it can't end
-       up under any other content at narrow widths. */
-    margin: 0;
-    flex-shrink: 0;
-}
-
-.tp-header-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.tp-search {
-    position: relative;
-}
-
-.tp-search .form-control {
-    width: 220px;
-    padding-left: 30px;
-}
-
-.tp-search .tp-search-icon {
-    position: absolute;
-    left: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--mantine-color-dimmed);
-    font-size: 12px;
-    pointer-events: none;
-}
+   thumbnail/list view toggle. Mantine Modal carries the chrome; this file
+   owns only the inner layout and pulls colour tokens through
+   `--mantine-color-*`. */
 
 .tp-body {
     flex: 1 1 auto;

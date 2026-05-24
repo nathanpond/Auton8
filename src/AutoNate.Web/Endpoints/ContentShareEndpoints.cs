@@ -3,6 +3,7 @@ using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Notifications;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Common;
 using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Notifications;
@@ -112,7 +113,8 @@ public static class ContentShareEndpoints
                 .Where(u => u.UserId == actorId)
                 .Select(u => new { u.FirstName, u.LastName, u.Username })
                 .FirstOrDefaultAsync(ct);
-            var actorName = ResolveDisplayName(actor?.FirstName, actor?.LastName, actor?.Username);
+            var actorName = UserDisplayExtensions.GetDisplayName(
+                actor?.FirstName, actor?.LastName, actor?.Username);
 
             var userIds = (request.UserIds ?? new List<Guid>())
                 .Distinct()
@@ -201,14 +203,6 @@ public static class ContentShareEndpoints
               "or returned in SkippedUserIds.");
 
         return app;
-    }
-
-    private static string ResolveDisplayName(string? first, string? last, string? username)
-    {
-        var name = $"{first} {last}".Trim();
-        if (!string.IsNullOrWhiteSpace(name)) return name;
-        if (!string.IsNullOrWhiteSpace(username)) return username!;
-        return "Someone";
     }
 
     public sealed record SharePreviewRequest(List<Guid> UserIds);

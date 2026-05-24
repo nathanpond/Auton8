@@ -42,7 +42,7 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             return AuthDecision.Deny($"kind '{kind}' is not a content kind");
         }
 
-        var userId = TryGetUserId(actor);
+        var userId = actor.TryGetUserId();
         if (userId is null)
         {
             return AuthDecision.Deny("no user identity");
@@ -330,7 +330,7 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             return ContentAccessSet.Empty;
         }
 
-        var userId = TryGetUserId(actor);
+        var userId = actor.TryGetUserId();
         if (userId is null)
         {
             return ContentAccessSet.Empty;
@@ -583,7 +583,7 @@ public sealed class ContentAuthorizer : IContentAuthorizer
     public async Task<ProjectRole?> GetProjectRoleAsync(
         ClaimsPrincipal actor, Guid projectId, CancellationToken ct)
     {
-        var userId = TryGetUserId(actor);
+        var userId = actor.TryGetUserId();
         if (userId is null) return null;
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var ctx = await LoadActorAsync(db, userId.Value, ct);
@@ -717,12 +717,6 @@ public sealed class ContentAuthorizer : IContentAuthorizer
     }
 
     // ---- private helpers ----
-
-    private static Guid? TryGetUserId(ClaimsPrincipal actor)
-    {
-        var raw = actor.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : null;
-    }
 
     private static AuthDecision EnforceDeletionLock(
         string action, string kind, bool locked, AuthDecision baseline)

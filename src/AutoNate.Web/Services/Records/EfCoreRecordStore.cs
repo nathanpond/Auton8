@@ -9,6 +9,7 @@ using AutoNate.Web.Configuration;
 using AutoNate.Web.Models.Notifications;
 using AutoNate.Web.Models.Records;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Common;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records.Fields;
 using Microsoft.EntityFrameworkCore;
@@ -156,7 +157,7 @@ public sealed class EfCoreRecordStore(
         var searchTerm = input.Search?.Trim();
         if (!string.IsNullOrEmpty(searchTerm))
         {
-            var pattern = "%" + EscapeLikePattern(searchTerm) + "%";
+            var pattern = "%" + SqlPatternEscaper.EscapeLike(searchTerm) + "%";
             parameters.Add(pattern);
             var idx = parameters.Count - 1;
             where.Append(" AND (key ILIKE {").Append(idx).Append('}')
@@ -903,19 +904,6 @@ public sealed class EfCoreRecordStore(
             "boolean" => $"NULLIF(values->>'{fieldKey}', '')::boolean",
             _ => $"values->>'{fieldKey}'"
         };
-
-    // ILIKE wildcard escape — back-slashes the % and _ literals so a user
-    // typing "50%" matches the literal string and not "50 anything".
-    private static string EscapeLikePattern(string input)
-    {
-        var sb = new StringBuilder(input.Length + 8);
-        foreach (var c in input)
-        {
-            if (c == '\\' || c == '%' || c == '_') sb.Append('\\');
-            sb.Append(c);
-        }
-        return sb.ToString();
-    }
 
     private record class CreateValidationResult(JsonElement NormalizedValues);
 

@@ -889,6 +889,9 @@ public static partial class WorkflowBpmnXml
     // tuples for every signal start event in the document. Used by the
     // runtime registry to know which Dapr topics to subscribe on, which
     // signal names to dispatch, and which workflow each one starts.
+    // Throws System.Xml.XmlException on malformed XML. Callers that iterate
+    // many workflows should catch per-workflow so one bad model doesn't sink
+    // the rest of the index (see EfCoreWorkflowSignalRegistry.RefreshAsync).
     public static IReadOnlyList<WorkflowSignalRegistration> ExtractSignalRegistrations(string xml)
     {
         if (string.IsNullOrWhiteSpace(xml))
@@ -896,15 +899,7 @@ public static partial class WorkflowBpmnXml
             return Array.Empty<WorkflowSignalRegistration>();
         }
 
-        XDocument document;
-        try
-        {
-            document = XDocument.Parse(xml);
-        }
-        catch (Exception)
-        {
-            return Array.Empty<WorkflowSignalRegistration>();
-        }
+        var document = XDocument.Parse(xml);
 
         var signalsById = document.Root?
             .Elements(BpmnNamespace + "signal")

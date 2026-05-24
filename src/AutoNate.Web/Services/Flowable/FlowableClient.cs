@@ -1557,6 +1557,7 @@ public sealed class FlowableClient(
         }
 
         httpClient.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
+        httpClient.Timeout = TimeSpan.FromSeconds(30);
 
         if (!string.IsNullOrWhiteSpace(options.Username))
         {

@@ -40,7 +40,7 @@ public sealed class WorkflowTaskInstanceAuthorizer : IInstanceAuthorizer
             return false;
         }
 
-        var actorId = GetUserId(actor);
+        var actorId = actor.TryGetUserId();
         if (actorId is null)
         {
             return false;
@@ -86,11 +86,6 @@ public sealed class WorkflowTaskInstanceAuthorizer : IInstanceAuthorizer
         return sep > 0 ? processDefinitionId[..sep] : processDefinitionId;
     }
 
-    private static Guid? GetUserId(ClaimsPrincipal actor)
-    {
-        var raw = actor.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : null;
-    }
 }
 
 public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
@@ -126,7 +121,7 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
             return false;
         }
 
-        var actorId = GetUserId(actor);
+        var actorId = actor.TryGetUserId();
         if (actorId is null)
         {
             return false;
@@ -166,11 +161,6 @@ public sealed class WorkflowExecutionInstanceAuthorizer : IInstanceAuthorizer
         return sep > 0 ? processDefinitionId[..sep] : processDefinitionId;
     }
 
-    private static Guid? GetUserId(ClaimsPrincipal actor)
-    {
-        var raw = actor.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(raw, out var id) ? id : null;
-    }
 }
 
 // Loads the actor's outbound user→user edges grouped by edge_kind. Used by

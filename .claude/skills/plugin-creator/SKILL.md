@@ -12,6 +12,7 @@ A plugin is a .NET 10 class library under `plugins/<Name>/` that the host loads 
 - **Menu items** — append to any of the host's menus, including JSX/HTML pages (`context.Menus`).
 - **Page templates** — ship reusable JSX page templates under `PageTemplates/` that admins pick from when creating menu items (`templates` map in `plugin.json`).
 - **Workflow behaviors** — contribute `IWorkflowBehavior` implementations the studio surfaces in the service-task picker (`context.Behaviors`).
+- **Projections** — register scheduled background tick jobs that show up on `/api/admin/projections` alongside host projections, with the same pause/resume/health surface (`context.Projections`). See the separate `add-projection` skill for the projection-side details. Caveat: registrations from `Configure()` only begin draining after the next host restart (dynamic registration is a Phase 5 enhancement).
 
 References:
 - `plugins/HelloPlugin/` — minimal worked example. Read first when in doubt.
@@ -20,10 +21,11 @@ References:
 ## Critical files
 
 - `src/AutoNate.Plugin.Abstractions/IAutoNatePlugin.cs` — the contract (`Configure` + `Cleanup`). Read-only; don't change unless you mean to change it for every plugin.
-- `src/AutoNate.Plugin.Abstractions/IPluginContext.cs` — what the host hands you (`Code`, `SchemaName`, `Hooks`, `Data`, `Menus`, `Behaviors`, `HostServices`).
+- `src/AutoNate.Plugin.Abstractions/IPluginContext.cs` — what the host hands you (`Code`, `SchemaName`, `Hooks`, `Data`, `Menus`, `Behaviors`, `Projections`, `HostServices`).
 - `src/AutoNate.Plugin.Abstractions/IPluginDataAccess.cs` — Dapper-style data API.
 - `src/AutoNate.Plugin.Abstractions/IPluginMenus.cs` — menu helpers (incl. `RemoveAll` / `RemoveMenuItem` for `Cleanup`).
 - `src/AutoNate.Plugin.Abstractions/IPluginBehaviors.cs` — workflow-behavior registration.
+- `src/AutoNate.Plugin.Abstractions/IPluginProjections.cs` — `RegisterScheduled(name, interval, tick)` for plugin-contributed projections; see also the `add-projection` skill.
 - `src/AutoNate.Plugin.Abstractions/HookPoints.cs` — canonical hook constants.
 - `src/AutoNate.Plugin.Abstractions/AuditEventNotification.cs` — payload received on the `HookPoints.AuditEventPublished` hook.
 - `src/AutoNate.Plugin.Abstractions/PluginDataRequest.cs` — request/response shape for `HookPoints.PluginDataHookFor(code)`.

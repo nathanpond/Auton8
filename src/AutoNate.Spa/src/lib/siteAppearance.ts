@@ -285,9 +285,8 @@ export function applySiteAppearanceToDocument(
 
   // SiteAppearance-owned tokens for the header/top-menu/sidebar surfaces.
   // Header chrome (`headerStyles.ts`) and the SiteAppearance preview read
-  // from these names. (Bootstrap's `--bs-*` namespace used to mirror these
-  // for ColorAdmin's sake — that overlay is gone, so we publish only the
-  // `--app-*` names plus the Mantine bridge vars below.)
+  // from these `--app-*` names; the Mantine bridge vars below cover everything
+  // Mantine components pick up automatically.
   setColorVar(rootStyle, "--app-header-bg", normalized.headerBg);
   setColorVar(rootStyle, "--app-header-color", normalized.headerColor);
   setColorVar(rootStyle, "--app-top-menu-bg", normalized.topMenuBg);

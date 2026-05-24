@@ -29,10 +29,8 @@
 }
 
 /* When the user picks "Show Chatbot Over Header" the sidebar covers the top
-   nav. Otherwise it slides down to start beneath the top-menu. Hardcoded to
-   the Mantine NavMenu height (56px) — the legacy --bs-app-top-menu-height
-   var is still set to 40px by ColorAdmin's SCSS, so using it as a fallback
-   would leave a 16px strip of the header poking through. */
+   nav. Otherwise it slides down to start beneath the top-menu — hardcoded
+   to the Mantine NavMenu height (56px). */
 .agent-sidebar--over-header {
   top: 0;
   z-index: 1030;

@@ -5,6 +5,7 @@ using System.Text;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Common;
 using AutoNate.Web.Services.Flowable.Cache.ColdTier;
 using Microsoft.EntityFrameworkCore;
 
@@ -355,7 +356,7 @@ internal sealed class WorkflowAnalyticsPreparedQuery : IPreparedQuery
             case AqlContains ct:
                 sb.Append(RequireFieldSql(ct.Field));
                 sb.Append(" ILIKE ");
-                AppendParameter(sb, parameters, "%" + EscapeLike(ct.Substr) + "%");
+                AppendParameter(sb, parameters, "%" + SqlPatternEscaper.EscapeLike(ct.Substr) + "%");
                 break;
             default:
                 throw new AqlValidationException(
@@ -368,9 +369,6 @@ internal sealed class WorkflowAnalyticsPreparedQuery : IPreparedQuery
         sb.Append('?');
         parameters.Add(($"p{parameters.Count + 1}", value));
     }
-
-    private static string EscapeLike(string raw) =>
-        raw.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     private static string NormalizeOp(string op) => op switch
     {

@@ -63,3 +63,10 @@ Test Results/
 /data/
 src/AutoNate.Web/data/
 
+# Root-level dev screenshots — preserved in git history, not in the tree.
+# Captured during UI work (mantine migration etc.). Anything worth keeping
+# long-term should move into docs/ alongside the prose it illustrates.
+# Scoped to repo root with the leading slash; PNGs under src/, public/, and
+# test fixture dirs are still tracked.
+/*.png
+

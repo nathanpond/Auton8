@@ -3,6 +3,7 @@ using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
+using AutoNate.Web.Services.Common;
 using AutoNate.Web.Services.Content;
 using Microsoft.EntityFrameworkCore;
 
@@ -1096,7 +1097,7 @@ internal sealed class NotesPreparedQuery : IPreparedQuery
             .ToListAsync(ct);
         return users.ToDictionary(
             u => u.UserId,
-            u => FormatDisplayName(u.FirstName, u.LastName, u.Username));
+            u => UserDisplayExtensions.GetDisplayName(u.FirstName, u.LastName, u.Username));
     }
 
     private static void ApplyUserDisplayNames(List<NoteRow> rows, Dictionary<Guid, string> map)
@@ -1108,12 +1109,6 @@ internal sealed class NotesPreparedQuery : IPreparedQuery
             string? updated = map.TryGetValue(r.UpdatedById, out var u) ? u : null;
             rows[i] = r with { CreatedBy = created, UpdatedBy = updated };
         }
-    }
-
-    private static string FormatDisplayName(string firstName, string lastName, string username)
-    {
-        var combined = $"{firstName} {lastName}".Trim();
-        return string.IsNullOrEmpty(combined) ? username : combined;
     }
 
     // ---- Row materialization --------------------------------------------

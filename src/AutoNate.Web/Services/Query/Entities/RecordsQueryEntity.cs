@@ -8,6 +8,7 @@ using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.Common;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
 using Microsoft.EntityFrameworkCore;
@@ -557,7 +558,7 @@ internal sealed class RecordsPreparedQuery : IPreparedQuery
                 {
                     if (op == "~")
                     {
-                        AppendParam(paramList, "%" + EscapeLike(s.Value) + "%", out var idx);
+                        AppendParam(paramList, "%" + SqlPatternEscaper.EscapeLike(s.Value) + "%", out var idx);
                         return $"{expr} ILIKE {{{idx}}}";
                     }
                     if (col.Name == "RecordType")
@@ -652,7 +653,7 @@ internal sealed class RecordsPreparedQuery : IPreparedQuery
     {
         var col = GetColumn(ct.Field);
         var expr = col.IsSystem ? SystemColumns.ToSqlExpr(col.Name) : FieldExprForRead(ct.Field);
-        AppendParam(paramList, "%" + EscapeLike(ct.Substr) + "%", out var idx);
+        AppendParam(paramList, "%" + SqlPatternEscaper.EscapeLike(ct.Substr) + "%", out var idx);
         return $"{expr} ILIKE {{{idx}}}";
     }
 
@@ -719,16 +720,6 @@ internal sealed class RecordsPreparedQuery : IPreparedQuery
     private static string QuoteIdent(string name) =>
         "\"" + name.Replace("\"", "\"\"") + "\"";
 
-    private static string EscapeLike(string s)
-    {
-        var sb = new StringBuilder(s.Length);
-        foreach (var c in s)
-        {
-            if (c == '\\' || c == '%' || c == '_') sb.Append('\\');
-            sb.Append(c);
-        }
-        return sb.ToString();
-    }
 }
 
 // ADO.NET helper: takes a SQL string with `{N}`-style placeholders and a

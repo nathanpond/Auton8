@@ -1,11 +1,6 @@
-/* Preferences modal — sidebar of categories + content pane. Adapted from the
-   Claude Design handoff (autonate/project/Preferences.html); colors map onto
-   the existing ColorAdmin Bootstrap theme via --bs-* tokens so dark-mode
-   inherits.
-
-   Sizing for .pref-modal-dialog and .pref-modal-content lives inline on the
-   element so it overrides Bootstrap's .modal-dialog max-width: 500px
-   regardless of CSS load order. This file owns only the inner layout. */
+/* Preferences modal — sidebar of categories + content pane. Mantine Modal
+   carries the chrome; this file owns only the inner layout and pulls colour
+   tokens through `--mantine-color-*`. */
 
 .pref-modal-content {
     display: flex;
@@ -19,27 +14,11 @@
     gap: 16px;
 }
 
-.pref-header .modal-title {
-    flex: 0 0 auto;
-}
-
-.pref-header .btn-close {
-    /* Bootstrap pulls .btn-close into the header padding via negative margins;
-       we want it inline with the search field instead. */
-    margin: 0;
-    flex-shrink: 0;
-}
-
 .pref-search {
     position: relative;
     flex: 1 1 auto;
     max-width: 420px;
     margin: 0 auto;
-}
-
-.pref-search .form-control {
-    padding-left: 32px;
-    padding-right: 28px;
 }
 
 .pref-search-icon {
@@ -466,10 +445,6 @@
 
 .pref-inline-control {
     flex: 0 0 auto;
-}
-
-.pref-inline .form-check.form-switch {
-    padding-left: 2.5em;
 }
 
 .pref-empty-state {

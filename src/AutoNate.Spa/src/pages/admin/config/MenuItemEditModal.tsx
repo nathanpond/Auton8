@@ -23,7 +23,10 @@ import { usePageTemplates } from "@/hooks/usePageTemplates";
 import { usePages } from "@/hooks/usePages";
 import { anchorPathForTemplateKey, findCollidingAppRoute } from "@/routes/appRoutes";
 import TemplatePickerModal from "./TemplatePickerModal";
-import "./TemplatePickerModal.css";
+// Same modal chrome as the generic CardPicker (the .tp-* class prefix is
+// "template picker" — the picker started here and got generalised; the CSS
+// lives next to the generic component now).
+import "@/components/picker/CardPickerModal.css";
 
 function extractIconName(stored: string | null | undefined): string {
   if (!stored) return "";

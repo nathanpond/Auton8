@@ -616,9 +616,15 @@ public sealed class WorkflowBpmnXmlTests
     }
 
     [Fact]
-    public void ExtractSignalRegistrations_ReturnsEmpty_OnMalformedXml()
+    public void ExtractSignalRegistrations_Throws_OnMalformedXml()
     {
-        Assert.Empty(WorkflowBpmnXml.ExtractSignalRegistrations("not really xml"));
+        Assert.Throws<System.Xml.XmlException>(
+            () => WorkflowBpmnXml.ExtractSignalRegistrations("not really xml"));
+    }
+
+    [Fact]
+    public void ExtractSignalRegistrations_ReturnsEmpty_OnBlankXml()
+    {
         Assert.Empty(WorkflowBpmnXml.ExtractSignalRegistrations(string.Empty));
     }
 
