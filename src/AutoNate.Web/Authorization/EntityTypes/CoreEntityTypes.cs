@@ -101,8 +101,12 @@ public static class CoreEntityTypes
         },
         tags: new[] { "processkey", "draft", "published" });
 
-    // Workflow executions and tasks live in Flowable. Phase 6 introduces the
-    // resolver that fetches metadata; for Phase 1 we register kind-only.
+    // Workflow executions and tasks live in Flowable, mirrored into the
+    // workflow_execution_cache / workflow_task_cache tables that the selector
+    // compilers query. The `tags` arrays here must match the predicates each
+    // cache compiler handles — if a compiler accepts a tag that's not listed
+    // here, the SPA grant authoring picker won't surface it (manually-typed
+    // selectors still work, but admins lose discoverability).
     public static EntityTypeDefinition WorkflowExecution { get; } = new(
         kind: EntityKinds.WorkflowExecution,
         clrType: typeof(object),
@@ -111,14 +115,16 @@ public static class CoreEntityTypes
         {
             Actions.View, Actions.Cancel, Actions.Delete, Actions.Override, Actions.MoveState, Actions.DeleteAll
         },
-        tags: new[] { "processkey", "definitionkey", "startedby" });
+        // Mirrors WorkflowExecutionCacheSelectorCompiler.CompileExpr.
+        tags: new[] { "processkey", "definitionkey", "startedby", "status", "tenant" });
 
     public static EntityTypeDefinition WorkflowTask { get; } = new(
         kind: EntityKinds.WorkflowTask,
         clrType: typeof(object),
         idClrType: typeof(string),
         actions: new[] { Actions.View, Actions.Complete },
-        tags: new[] { "processkey", "definitionkey", "assignee" });
+        // Mirrors WorkflowTaskCacheSelectorCompiler.CompileExpr.
+        tags: new[] { "processkey", "definitionkey", "assignee", "candidateuser", "candidategroup" });
 
     // Single coarse Manage action gates list/view/upload/enable/disable/delete
     // for plugins. Granular split is a v2 conversation if it ever comes up.
@@ -186,34 +192,49 @@ public static class CoreEntityTypes
     // action) pairs grantable through the standard Grants admin page; the
     // grants themselves are still stored in permission_grants. Selector
     // predicates / tags are not supported in this phase — selectors must be
-    // path-only (e.g. /cabinet/{id}). Project intentionally omits Create:
-    // project creation is gated by authentication alone (the creator becomes
-    // Owner). Note is intentionally absent — notes inherit their page's gate.
+    // path-only (e.g. /cabinet/{id}). Note is intentionally absent — notes
+    // inherit their page's gate.
+    //
+    // Action vocabulary intentionally narrow:
+    //   - Create is NOT declared on any of these kinds. Creation gates on
+    //     the parent resource's Edit (design D9): cabinets gate on
+    //     Project.Edit, notebooks on Cabinet.Edit, pages on Notebook.Edit
+    //     (and Page.Edit when nesting). Project creation is gated by
+    //     authentication alone (the creator becomes Owner).
+    //   - Archive is NOT declared. The "archive" toggle is a PATCH on the
+    //     same resource gated by Edit; there is no separate enforcement
+    //     path that would consult a (kind, Archive) grant. If a narrower
+    //     archive-vs-edit split is wanted, carve a dedicated PATCH endpoint
+    //     and re-add Archive to actions[] at the same time.
+    //   - Page.Delete IS declared: it gates page-version and page-attachment
+    //     deletes (PageVersionEndpoints, PageAttachmentEndpoints). The page
+    //     ROW delete is owner-only via IContentAuthorizer.IsProjectOwnerAsync
+    //     and intentionally narrower than this Contributor-class permission.
     public static EntityTypeDefinition Project { get; } = new(
         kind: EntityKinds.Project,
         clrType: typeof(ProjectModel),
         idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.Edit, Actions.Delete, Actions.Archive },
+        actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
         tags: Array.Empty<string>());
 
     public static EntityTypeDefinition Cabinet { get; } = new(
         kind: EntityKinds.Cabinet,
         clrType: typeof(CabinetModel),
         idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Archive },
+        actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
         tags: Array.Empty<string>());
 
     public static EntityTypeDefinition Notebook { get; } = new(
         kind: EntityKinds.Notebook,
         clrType: typeof(NotebookModel),
         idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Archive },
+        actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
         tags: Array.Empty<string>());
 
     public static EntityTypeDefinition Page { get; } = new(
         kind: EntityKinds.Page,
         clrType: typeof(PageModel),
         idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete, Actions.Archive },
+        actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
         tags: Array.Empty<string>());
 }
