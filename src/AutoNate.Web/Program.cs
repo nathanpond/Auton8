@@ -1082,6 +1082,7 @@ app.MapPageEndpoints();
 app.MapPageTemplateEndpoints();
 app.MapDashboardEndpoints();
 app.MapQueryEndpoints();
+app.MapAqlSchemaEndpoints();
 app.MapSavedQueryEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();

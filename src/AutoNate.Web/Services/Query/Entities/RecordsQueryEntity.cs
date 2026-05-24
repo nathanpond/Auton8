@@ -47,6 +47,29 @@ public sealed class RecordsQueryEntity : IQueryEntity
 
     public IReadOnlyList<string> AllowedFunctions => Array.Empty<string>();
 
+    // Dynamic enum source for the autocomplete UI: the live list of RecordType
+    // names. The `recordTypeFilter` argument is ignored here (Records doesn't
+    // scope its enums by a sibling literal — RecordType IS the scoping field).
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GetDynamicColumnEnumsAsync(
+        string? recordTypeFilter,
+        CancellationToken cancellationToken)
+    {
+        var names = await LoadRecordTypeNamesAsync(cancellationToken);
+        return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["RecordType"] = names
+        };
+    }
+
+    private async Task<IReadOnlyList<string>> LoadRecordTypeNamesAsync(CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.RecordTypes.AsNoTracking()
+            .Select(t => t.Name)
+            .OrderBy(n => n)
+            .ToListAsync(ct);
+    }
+
     public async Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         var errors = new List<string>();

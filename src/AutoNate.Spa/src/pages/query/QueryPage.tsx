@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Alert,
@@ -18,6 +19,7 @@ import {
   Tooltip
 } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
+import AqlEditor from "@/components/aql-editor/AqlEditor";
 import {
   DataTable,
   type DataTableColumn
@@ -74,6 +76,87 @@ function formatCell(value: unknown, dataType: AqlDataType): string {
     default:
       return typeof value === "object" ? JSON.stringify(value) : String(value);
   }
+}
+
+// Returns the deep-link path for a row when the column is an identity-bearing
+// field on a known entity. Returns null when no link applies (unknown entity,
+// non-identity column, or the required key/id sibling field isn't in the
+// projection). Hardcoded for the three entities the SPA can route to today.
+//
+// Workflows are linked to the studio's bare /workflow route since the studio
+// doesn't yet accept a per-model deep-link. Once it does, the right side of
+// the Workflows entry below grows a `?model=${id}` query string and the
+// metadata-driven approach (a per-column "linkable" flag returned by the
+// backend) becomes worth it.
+function deepLinkFor(
+  entity: string | null,
+  columnName: string,
+  row: AqlRow
+): string | null {
+  if (!entity) return null;
+  const e = entity.toLowerCase();
+  const c = columnName.toLowerCase();
+
+  if (e === "records" && (c === "name" || c === "id" || c === "key")) {
+    // The record-detail route is keyed by Key (not Id), so even when the
+    // user clicks an Id cell we route via the row's Key. If Key isn't in
+    // the projection we drop the link rather than invent a URL.
+    const key = row["Key"];
+    if (typeof key === "string" && key.length > 0) {
+      return `/record/${encodeURIComponent(key)}`;
+    }
+    return null;
+  }
+
+  if ((e === "flows" || e === "workflowexecutions")
+      && (c === "flowname" || c === "id")) {
+    const id = row["Id"];
+    if (typeof id === "string" && id.length > 0) {
+      return `/executions/${encodeURIComponent(id)}`;
+    }
+    return null;
+  }
+
+  if (e === "workflows" && c === "modelname") {
+    // No per-model deep-link target yet; the studio's bare route is the best
+    // we can do until WorkflowStudio learns to honor a query param.
+    return "/workflow";
+  }
+
+  return null;
+}
+
+function renderCell(
+  value: unknown,
+  dataType: AqlDataType,
+  columnName: string,
+  row: AqlRow,
+  entity: string | null
+): ReactNode {
+  const text = formatCell(value, dataType);
+  if (text === "") return text;
+  const link = deepLinkFor(entity, columnName, row);
+  if (link === null) return text;
+  return (
+    <Anchor component={Link} to={link}>
+      {text}
+    </Anchor>
+  );
+}
+
+// Extracts the entity name from the user's last successfully-executed query
+// text. Returns null when the FROM clause is missing (the AQL parser defaults
+// to "Records" in that case, so we mirror that here so deep-links still work
+// for shorthand queries like `Name = "x"`).
+function entityFromQueryText(queryText: string | null): string | null {
+  if (!queryText) return null;
+  const m = /\bfrom\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(queryText);
+  if (m) return m[1];
+  // The AQL grammar accepts a bare WHERE without a FROM, defaulting to Records.
+  if (/\bwhere\b|\border\s+by\b|\bcolumns\b|\bgroup\b/i.test(queryText)) {
+    return "Records";
+  }
+  return "Records";
 }
 
 // Mantine Select needs string values; we use the SavedQuery id as the value
@@ -156,16 +239,6 @@ export default function QueryPage() {
     }
   }, [queryText]);
 
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        e.preventDefault();
-        if (!running) void runQuery();
-      }
-    },
-    [running, runQuery]
-  );
-
   const indexedRows = useMemo<IndexedRow[]>(() => {
     if (!response) return [];
     return response.rows.map((row, idx) => ({
@@ -174,6 +247,14 @@ export default function QueryPage() {
     }));
   }, [response]);
 
+  // Drives the deep-link logic in renderCell — derived from the text the
+  // user last *executed* (not the editor's current contents) so a partial
+  // edit doesn't break the links for rows that came from the prior run.
+  const executedEntity = useMemo(
+    () => entityFromQueryText(lastSuccessfulText),
+    [lastSuccessfulText]
+  );
+
   const columns = useMemo<DataTableColumn<IndexedRow>[]>(() => {
     if (!response) return [];
     return response.columns.map((col) => ({
@@ -181,9 +262,10 @@ export default function QueryPage() {
       accessorFn: (row) => row[col.name],
       header: col.name,
       enableSorting: true,
-      cell: ({ row }) => formatCell(row.original[col.name], col.dataType)
+      cell: ({ row }) =>
+        renderCell(row.original[col.name], col.dataType, col.name, row.original, executedEntity)
     }));
-  }, [response]);
+  }, [response, executedEntity]);
 
   const columnWidths = useMemo(() => {
     if (!response) return [];
@@ -340,16 +422,14 @@ export default function QueryPage() {
             }
             disabled={running || saving}
           />
-          <Textarea
+          <AqlEditor
             value={queryText}
-            onChange={(e) => setQueryText(e.currentTarget.value)}
-            onKeyDown={onKeyDown}
-            autosize
-            minRows={4}
-            maxRows={14}
-            placeholder="FROM Records WHERE RecordType = &quot;Car&quot;"
-            styles={{ input: { fontFamily: "var(--mantine-font-family-monospace, monospace)" } }}
-            disabled={running}
+            onChange={setQueryText}
+            onExecute={() => { if (!running) void runQuery(); }}
+            readOnly={running}
+            placeholder='FROM Records WHERE RecordType = "Car"'
+            minHeight="6em"
+            maxHeight="22em"
           />
           <Group justify="space-between">
             <Group gap="xs" wrap="wrap">

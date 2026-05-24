@@ -86,6 +86,15 @@ public sealed class NotesQueryEntity : IQueryEntity
         "Project", "Cabinet", "Notebook", "Page", "Note"
     };
 
+    // Surface ValidTypes via the metadata contract so the autocomplete UI can
+    // suggest the five values after `Type = `. The list is stable and short
+    // enough to keep co-located here.
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> ColumnEnums { get; } =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Type"] = new[] { "Project", "Cabinet", "Notebook", "Page", "Note" }
+        };
+
     // Surface a friendly error for `Type = "Banana"` rather than silently
     // returning zero rows. Other string comparisons (Name, Description, etc.)
     // are free-form.

@@ -48,6 +48,23 @@ public interface IQueryEntity
     // arg's semantics — there's no validator-side allowlist of arg values.
     bool RowFunctionAcceptsArgument(string functionName) => false;
 
+    // Closed-set value suggestions for a column. Keys are column names;
+    // values are the legal labels (e.g. Flows.Status → "In-progress",
+    // "Completed", ...). Powers the autocomplete UI's value dropdown after
+    // `Status = `. Default empty — entities opt in only for columns whose
+    // domain is fixed at compile time.
+    IReadOnlyDictionary<string, IReadOnlyList<string>> ColumnEnums =>
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+
+    // DB-backed variant. Records overrides this to return the live list of
+    // RecordType names (and may use the recordTypeFilter to scope further).
+    // Defaults to whatever ColumnEnums returns so non-dynamic entities get
+    // the right behavior for free.
+    Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GetDynamicColumnEnumsAsync(
+        string? recordTypeFilter,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(ColumnEnums);
+
     // Resolve the full schema (static + dynamic), resolve literal references
     // (e.g. RecordType names), and return a prepared query the validator can
     // run generic checks against and the executor can fire.

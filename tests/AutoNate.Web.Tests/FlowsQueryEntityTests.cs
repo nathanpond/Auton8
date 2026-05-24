@@ -569,4 +569,102 @@ public sealed class FlowsQueryEntityTests
         Assert.Equal("In-progress", (string?)result.Rows[2]["Status"]);
         Assert.Equal(3L,            (long?)result.Rows[2]["Count"]);
     }
+
+    [Fact]
+    public async Task CURRENTSTEP_Assignee_resolves_guid_to_FirstName_LastName_username()
+    {
+        // Real-world shape: Flowable assignee is the AutoNate user's Guid
+        // string. CURRENTSTEP(Assignee) should resolve it through local_users
+        // and return "FirstName LastName (username)". Falls back to the raw
+        // value when the id doesn't parse or no LocalUser matches.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = factory.CreateClient();
+
+        var knownUserId = Guid.Parse("aaaaaaaa-1111-2222-3333-444444444444");
+        var unknownUserId = Guid.Parse("bbbbbbbb-1111-2222-3333-444444444444");
+
+        using (var seedScope = factory.Services.CreateScope())
+        {
+            var dbFactory = seedScope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+            var execProjection = seedScope.ServiceProvider.GetRequiredService<FlowableExecutionProjection>();
+            var taskProjection = seedScope.ServiceProvider.GetRequiredService<FlowableTaskProjection>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO local_users (
+                    username, password_hash, password_salt, email,
+                    first_name, last_name, user_id, created_date, idp_key)
+                VALUES (
+                    'alice.j', 'x', 'y', 'alice@example.com',
+                    'Alice', 'Johnson', {knownUserId}, NOW(), 'idp:alice.j')
+                """);
+
+            await execProjection.ApplyAsync(new[]
+            {
+                MakeExec("inst-known",   knownUserId.ToString()),
+                MakeExec("inst-unknown", unknownUserId.ToString()),
+                MakeExec("inst-rawname", "legacy-non-guid-assignee"),
+            }, db, CancellationToken.None);
+
+            await taskProjection.ApplyAsync(new[]
+            {
+                MakeTask("tsk-known",   "inst-known",   knownUserId.ToString()),
+                MakeTask("tsk-unknown", "inst-unknown", unknownUserId.ToString()),
+                MakeTask("tsk-rawname", "inst-rawname", "legacy-non-guid-assignee"),
+            }, db, CancellationToken.None);
+        }
+
+        using var scope = factory.Services.CreateScope();
+        var entity = scope.ServiceProvider.GetRequiredService<FlowsQueryEntity>();
+        var aql = new AqlQuery(
+            Entity: "Flows",
+            Where: new AqlCompare("ProcessKey", "=", new AqlString("assignee-test")),
+            OrderBy: Array.Empty<AqlOrderItem>(),
+            Columns: new[]
+            {
+                new AqlSelectItem(Field: "Id", AggregateFn: null, AggregateField: null),
+                new AqlSelectItem(Field: null, AggregateFn: "CURRENTSTEP", AggregateField: "Assignee"),
+            },
+            Group: null,
+            Limit: null);
+        var prepared = await entity.PrepareAsync(aql, CancellationToken.None);
+        var result = await prepared.ExecuteAsync(Actor, hardCap: 100, CancellationToken.None);
+
+        var byId = result.Rows.ToDictionary(
+            r => (string)r["Id"]!,
+            r => (string?)r["CURRENTSTEP(Assignee)"]);
+
+        // Known Guid → formatted display name.
+        Assert.Equal("Alice Johnson (alice.j)", byId["inst-known"]);
+        // Guid that isn't in local_users → raw Guid string passes through.
+        Assert.Equal(unknownUserId.ToString(), byId["inst-unknown"]);
+        // Non-Guid assignee (legacy / externally-provisioned) → unchanged.
+        Assert.Equal("legacy-non-guid-assignee", byId["inst-rawname"]);
+    }
+
+    private static ChangeEvent<WorkflowExecutionSummary> MakeExec(string id, string startedBy) =>
+        new(ChangeOp.Upsert, id,
+            new WorkflowExecutionSummary
+            {
+                Id = id,
+                StartedAtUtc = DateTimeOffset.UtcNow.AddHours(-1),
+                Status = "Running",
+                ProcessDefinitionId = "assignee-test:1:abc",
+                StartUserId = startedBy
+            },
+            DateTimeOffset.UtcNow);
+
+    private static ChangeEvent<FlowableTaskSummary> MakeTask(string taskId, string instanceId, string assignee) =>
+        new(ChangeOp.Upsert, taskId,
+            new FlowableTaskSummary
+            {
+                Id = taskId,
+                Name = "Step",
+                TaskDefinitionKey = "stepKey",
+                Assignee = assignee,
+                ProcessInstanceId = instanceId,
+                ProcessDefinitionId = "assignee-test:1:abc",
+                CreatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5)
+            },
+            DateTimeOffset.UtcNow);
 }

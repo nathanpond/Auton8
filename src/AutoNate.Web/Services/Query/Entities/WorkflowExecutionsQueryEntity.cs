@@ -48,6 +48,15 @@ public sealed class WorkflowExecutionsQueryEntity : IQueryEntity
 
     public IReadOnlyList<string> AllowedFunctions { get; } = Array.Empty<string>();
 
+    // Raw cache labels stored in workflow_execution_cache.status. Surfaced as
+    // value suggestions after `Status = ` in this entity (sibling FlowsQueryEntity
+    // exposes its own display-label variant on its own Status column).
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> ColumnEnums { get; } =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Status"] = new[] { "active", "completed", "cancelled", "suspended", "terminated" }
+        };
+
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         IPreparedQuery prepared = new WorkflowExecutionsPreparedQuery(

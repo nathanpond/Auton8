@@ -59,6 +59,21 @@ public sealed class FlowsQueryEntity : IQueryEntity
         "CURRENTSTEP"
     };
 
+    // The set of display labels FlowsPreparedQuery.StatusDisplay maps to.
+    // Keep in sync with that switch — the autocomplete surfaces these as
+    // suggestions after `Status = `, and NormalizeStatusInput accepts every
+    // common spelling and folds back to this set.
+    private static readonly IReadOnlyList<string> StatusDisplayLabels = new[]
+    {
+        "In-progress", "Completed", "Cancelled", "Suspended", "Terminated", "Errored"
+    };
+
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> ColumnEnums { get; } =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Status"] = StatusDisplayLabels
+        };
+
     public QueryDataType RowFunctionDataType(string functionName) =>
         functionName.ToUpperInvariant() switch
         {
@@ -169,14 +184,23 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
                     .ToListAsync(cancellationToken),
                 StringComparer.Ordinal);
 
-        // 5. Build FlowRow projection objects so the WHERE/ORDER BY/GROUP
+        // 5. Resolve assignee Guids → "FirstName LastName (username)" via
+        //    a single bulk lookup against local_users. The Flowable
+        //    assignee field is a Guid string per AutoNate's auth-startup
+        //    convention; non-Guid values pass through unchanged so
+        //    externally-provisioned assignees aren't lost.
+        var assigneeDisplayByRawId = await ResolveAssigneeDisplayNamesAsync(
+            db, currentByInstance.Values, cancellationToken);
+
+        // 6. Build FlowRow projection objects so the WHERE/ORDER BY/GROUP
         //    pipeline operates on a stable shape.
         var rows = cacheRows
             .Select(c => new FlowRow(
                 c,
                 nameByKey.GetValueOrDefault(c.ProcessDefinitionKey) ?? c.ProcessDefinitionKey,
                 currentByInstance.GetValueOrDefault(c.FlowableInstanceId),
-                Errored: erroredSet.Contains(c.FlowableInstanceId)))
+                Errored: erroredSet.Contains(c.FlowableInstanceId),
+                AssigneeDisplayByRawId: assigneeDisplayByRawId))
             .ToList();
 
         // 5. WHERE.
@@ -242,6 +266,79 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
         return byInstance;
     }
 
+    // Bulk-resolves Flowable assignee strings → "FirstName LastName (username)".
+    // The Flowable assignee field is a Guid string per AutoNate convention,
+    // so we filter out non-Guid values (preserved as-is at lookup time) and
+    // hit local_users in a single bulk query. Returns a dictionary keyed by
+    // the raw assignee string so CURRENTSTEP(Assignee)'s switch can do a
+    // straight TryGetValue without re-parsing the Guid per row.
+    private static async Task<IReadOnlyDictionary<string, string>> ResolveAssigneeDisplayNamesAsync(
+        AutoNateDbContext db,
+        IEnumerable<WorkflowTaskCache> tasks,
+        CancellationToken ct)
+    {
+        var assigneeStrings = tasks
+            .Select(t => t.Assignee)
+            .Where(a => !string.IsNullOrEmpty(a))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (assigneeStrings.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var guidByRaw = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        foreach (var raw in assigneeStrings)
+        {
+            if (Guid.TryParse(raw, out var g) && g != Guid.Empty)
+            {
+                guidByRaw[raw!] = g;
+            }
+        }
+        if (guidByRaw.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var guidList = guidByRaw.Values.Distinct().ToList();
+        var users = await db.LocalUsers.AsNoTracking()
+            .Where(u => guidList.Contains(u.UserId))
+            .Select(u => new { u.UserId, u.FirstName, u.LastName, u.Username })
+            .ToListAsync(ct);
+        var displayByUserId = users.ToDictionary(
+            u => u.UserId,
+            u => FormatAssigneeDisplay(u.FirstName, u.LastName, u.Username));
+
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (raw, userId) in guidByRaw)
+        {
+            if (displayByUserId.TryGetValue(userId, out var display))
+            {
+                result[raw] = display;
+            }
+        }
+        return result;
+    }
+
+    // "FirstName LastName (username)" — full name with username in parens.
+    // Falls back gracefully when name parts are missing: a user with only
+    // a first name renders "First (username)"; missing both renders just
+    // the username (with no parens, since the bare username carries the
+    // same info).
+    private static string FormatAssigneeDisplay(string? firstName, string? lastName, string username)
+    {
+        var fn = (firstName ?? string.Empty).Trim();
+        var ln = (lastName ?? string.Empty).Trim();
+        var fullName = (fn, ln) switch
+        {
+            ("", "") => string.Empty,
+            ("", _) => ln,
+            (_, "") => fn,
+            _ => $"{fn} {ln}"
+        };
+        return fullName.Length == 0 ? username : $"{fullName} ({username})";
+    }
+
     private bool QueryReferencesFunction(string functionName)
     {
         bool MatchesAggregate(AqlSelectItem item) =>
@@ -265,7 +362,14 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
         WorkflowExecutionCache Cache,
         string FlowName,
         WorkflowTaskCache? CurrentTask,
-        bool Errored);
+        bool Errored,
+        // Shared across every row in the query so CURRENTSTEP(Assignee) can
+        // dereference the raw Flowable assignee string (a Guid in the
+        // typical case) into "FirstName LastName (username)" without a
+        // per-row DB hit. Keys are raw assignee strings; values are the
+        // formatted display name (or the original key if no LocalUser row
+        // matched, e.g. externally-provisioned assignees).
+        IReadOnlyDictionary<string, string> AssigneeDisplayByRawId);
 
     private sealed record ProjItem(string DisplayName, QueryDataType DataType, AqlSelectItem Source);
 
@@ -539,7 +643,13 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
         return which switch
         {
             "name" => task.Name,
-            "assignee" => task.Assignee,
+            // Assignee is bulk-resolved at execute time so this is a dict
+            // lookup, not a per-row DB call. Falls back to the raw string
+            // when no LocalUser row matched (e.g. externally-provisioned
+            // assignees where the id isn't a Guid we recognize).
+            "assignee" => task.Assignee is { } a && row.AssigneeDisplayByRawId.TryGetValue(a, out var display)
+                ? display
+                : task.Assignee,
             "activityid" => task.TaskDefinitionKey,
             "taskid" => task.FlowableTaskId,
             "duedate" => task.DueDate is { } d ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : null,
