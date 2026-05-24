@@ -37,9 +37,14 @@ public sealed class BackfillRunner
         var projection = _registry.TryGet(projectionName)
             ?? throw new InvalidOperationException($"Projection '{projectionName}' is not registered.");
 
+        // NonPublic by design — RunGenericAsync is the internal generic-method
+        // dispatch path; promoting it to public would surface an API the
+        // framework's own consumers wouldn't usefully call.
+#pragma warning disable S3011 // intentional reflection: private generic dispatch
         var runMethod = typeof(BackfillRunner)
             .GetMethod(nameof(RunGenericAsync), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .MakeGenericMethod(projection.SourceType);
+#pragma warning restore S3011
 
         var task = (Task<int>)runMethod.Invoke(this, new object[] { projection, chunkSize, cancellationToken })!;
         return await task;

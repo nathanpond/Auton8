@@ -516,7 +516,7 @@ internal sealed class RecordsPreparedQuery : IPreparedQuery
         return TranslateDynamicCompare(c.Field, c.Op, c.Value, paramList);
     }
 
-    private string TranslateSystemCompare(
+    private static string TranslateSystemCompare(
         QueryColumn col, string op, AqlValue value, List<object?> paramList)
     {
         var expr = SystemColumns.ToSqlExpr(col.Name);
@@ -749,7 +749,7 @@ internal static class RawSqlRunner
             var dict = new Dictionary<string, object?>(fieldCount, StringComparer.Ordinal);
             for (var i = 0; i < fieldCount; i++)
             {
-                var v = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                var v = await reader.IsDBNullAsync(i, cancellationToken) ? null : reader.GetValue(i);
                 dict[names[i]] = v;
             }
             rows.Add(dict);

@@ -93,9 +93,14 @@ public sealed class ProjectionWorker : BackgroundService
     {
         // Build a typed delegate to call Drain<TSource> via reflection once,
         // then invoke it forever. The reflection happens at startup only.
+        // The NonPublic binding flag is intentional — DrainLoopAsync is a
+        // private generic-method dispatch path; exposing it would surface
+        // an API the framework's own consumers can't usefully call.
+#pragma warning disable S3011 // intentional reflection: private generic dispatch
         var drain = typeof(ProjectionWorker)
             .GetMethod(nameof(DrainLoopAsync), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .MakeGenericMethod(projection.SourceType);
+#pragma warning restore S3011
 
         try
         {
@@ -137,7 +142,7 @@ public sealed class ProjectionWorker : BackgroundService
         }
     }
 
-    private async IAsyncEnumerable<ChangeEvent<TSource>> BatchAsync<TSource>(
+    private static async IAsyncEnumerable<ChangeEvent<TSource>> BatchAsync<TSource>(
         IAsyncEnumerable<ChangeEvent<TSource>> source,
         ProjectionOptions opts,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)

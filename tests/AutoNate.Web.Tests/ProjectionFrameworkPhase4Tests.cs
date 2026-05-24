@@ -177,6 +177,6 @@ public sealed class ProjectionFrameworkPhase4Tests
 
         var removed = registry.RemoveForPlugin(pluginId);
         Assert.Equal(1, removed);
-        Assert.Empty(registry.Snapshot().Where(j => j.Name == "plugin.job.test-a"));
+        Assert.DoesNotContain(registry.Snapshot(), j => j.Name == "plugin.job.test-a");
     }
 }

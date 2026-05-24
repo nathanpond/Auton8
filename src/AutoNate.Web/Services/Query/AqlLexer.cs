@@ -16,7 +16,7 @@ internal static class AqlLexer
 
     public static IReadOnlyList<AqlToken> Tokenize(string source)
     {
-        if (source is null) throw new ArgumentNullException(nameof(source));
+        ArgumentNullException.ThrowIfNull(source);
 
         var tokens = new List<AqlToken>();
         var i = 0;

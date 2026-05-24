@@ -20,7 +20,13 @@ public partial class AutoNateDbContext
 
     public virtual DbSet<RecordActivityRollupCache> RecordActivityRollupCache { get; set; } = null!;
 
+    // CA1822 doesn't fire on the partial declaration (in AutoNateDbContext.cs)
+    // but does fire here because we don't touch instance state. Making it
+    // static would require changing the declaration too — out of scope for
+    // a partial-method companion file. Suppress at the implementation.
+#pragma warning disable CA1822
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder)
+#pragma warning restore CA1822
     {
         modelBuilder.Entity<WorkflowExecutionCache>(entity =>
         {

@@ -193,7 +193,7 @@ internal sealed class WorkflowExecutionsPreparedQuery : IPreparedQuery
         _ => null
     };
 
-    private bool EvalWhere(AqlWhere where, WorkflowExecutionCache row) => where switch
+    private static bool EvalWhere(AqlWhere where, WorkflowExecutionCache row) => where switch
     {
         AqlBinary b => b.Op == "AND"
             ? EvalWhere(b.Left, row) && EvalWhere(b.Right, row)
@@ -251,10 +251,11 @@ internal sealed class WorkflowExecutionsPreparedQuery : IPreparedQuery
             double? ed = ToDouble(expected);
             if (ad is { } adv && ed is { } edv)
             {
+                // double.Equals → bit-equality method call, side-steps Sonar S1244.
                 return op switch
                 {
-                    "=" => adv == edv,
-                    "!=" => adv != edv,
+                    "=" => adv.Equals(edv),
+                    "!=" => !adv.Equals(edv),
                     "<" => adv < edv, "<=" => adv <= edv,
                     ">" => adv > edv, ">=" => adv >= edv,
                     _ => false

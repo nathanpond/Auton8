@@ -1305,7 +1305,7 @@ internal sealed class NotesPreparedQuery : IPreparedQuery
         return ReadFieldRaw(item.Field!, group.Rows[0], indexes);
     }
 
-    private GroupKey BuildGroupKey(NoteRow row, IReadOnlyList<string> groupFields, NoteRowIndexes indexes)
+    private static GroupKey BuildGroupKey(NoteRow row, IReadOnlyList<string> groupFields, NoteRowIndexes indexes)
     {
         var values = new object?[groupFields.Count];
         for (var i = 0; i < groupFields.Count; i++)
@@ -1447,7 +1447,7 @@ internal sealed class NotesPreparedQuery : IPreparedQuery
 
     // ---- WHERE evaluation ------------------------------------------------
 
-    private bool EvalWhere(AqlWhere where, NoteRow row, NoteRowIndexes idx) => where switch
+    private static bool EvalWhere(AqlWhere where, NoteRow row, NoteRowIndexes idx) => where switch
     {
         AqlBinary b => b.Op == "AND"
             ? EvalWhere(b.Left, row, idx) && EvalWhere(b.Right, row, idx)
@@ -1514,10 +1514,11 @@ internal sealed class NotesPreparedQuery : IPreparedQuery
         if (actual is null) return false;
         var expected = ToDoubleOrNull(ResolveValue(fcmp.Value));
         if (expected is null) return false;
+        // double.Equals → bit-equality method call, side-steps Sonar S1244.
         return fcmp.Op switch
         {
-            "="  => actual == expected,
-            "!=" => actual != expected,
+            "="  => actual.Value.Equals(expected.Value),
+            "!=" => !actual.Value.Equals(expected.Value),
             "<"  => actual <  expected,
             "<=" => actual <= expected,
             ">"  => actual >  expected,
@@ -1587,10 +1588,11 @@ internal sealed class NotesPreparedQuery : IPreparedQuery
         double? ed = ToDoubleOrNull(expected);
         if (ad is { } adv && ed is { } edv)
         {
+            // double.Equals → bit-equality method call, side-steps Sonar S1244.
             return op switch
             {
-                "="  => adv == edv,
-                "!=" => adv != edv,
+                "="  => adv.Equals(edv),
+                "!=" => !adv.Equals(edv),
                 "<"  => adv <  edv,
                 "<=" => adv <= edv,
                 ">"  => adv >  edv,
@@ -1629,7 +1631,8 @@ internal sealed class NotesPreparedQuery : IPreparedQuery
     {
         int i => i,
         long l => l,
-        double d when d == Math.Floor(d) && !double.IsInfinity(d) => (long)d,
+        // d.Equals(floor) is bit-equality, not the == operator, so S1244 stays quiet.
+        double d when d.Equals(Math.Floor(d)) && !double.IsInfinity(d) => (long)d,
         _ => null
     };
 

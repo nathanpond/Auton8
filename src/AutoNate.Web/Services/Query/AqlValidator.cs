@@ -190,7 +190,7 @@ internal sealed class AqlValidator
         }
     }
 
-    private void ValidateWhere(
+    private static void ValidateWhere(
         AqlWhere where,
         IQueryEntity entity,
         IReadOnlyDictionary<string, QueryColumn> byName,

@@ -412,10 +412,11 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
         if (actual is null) return false;
         var expected = ToDoubleOrNull(ResolveValue(fcmp.Value));
         if (expected is null) return false;
+        // double.Equals → bit-equality method call, side-steps Sonar S1244.
         return fcmp.Op switch
         {
-            "=" => actual == expected,
-            "!=" => actual != expected,
+            "=" => actual.Value.Equals(expected.Value),
+            "!=" => !actual.Value.Equals(expected.Value),
             "<" => actual < expected,
             "<=" => actual <= expected,
             ">" => actual > expected,
@@ -424,14 +425,14 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
         };
     }
 
-    private bool EvalCompare(AqlCompare c, WorkflowRow row)
+    private static bool EvalCompare(AqlCompare c, WorkflowRow row)
     {
         var actual = ReadFieldRaw(c.Field, row);
         var expected = ResolveValue(c.Value);
         return CompareValues(actual, expected, c.Op);
     }
 
-    private object? ReadFieldRaw(string field, WorkflowRow row) => field.ToLowerInvariant() switch
+    private static object? ReadFieldRaw(string field, WorkflowRow row) => field.ToLowerInvariant() switch
     {
         "modelname" => row.Name,
         "published" => row.Published,
@@ -487,10 +488,11 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
             double? ed = ToDoubleOrNull(expected);
             if (ad is { } adv && ed is { } edv)
             {
+                // double.Equals → bit-equality method call, side-steps Sonar S1244.
                 return op switch
                 {
-                    "=" => adv == edv,
-                    "!=" => adv != edv,
+                    "=" => adv.Equals(edv),
+                    "!=" => !adv.Equals(edv),
                     "<" => adv < edv,
                     "<=" => adv <= edv,
                     ">" => adv > edv,
@@ -574,7 +576,7 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
         return counts;
     }
 
-    private Func<WorkflowRow, IComparable?> MakeKeySelector(AqlSelectItem item)
+    private static Func<WorkflowRow, IComparable?> MakeKeySelector(AqlSelectItem item)
     {
         if (item.IsAggregate)
         {

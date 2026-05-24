@@ -17,10 +17,16 @@ public sealed class EfCoreSavedQueryStore(
         Guid actorId, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        // Npgsql translates string.ToLower() to SQL LOWER() server-side —
+        // the CLR culture is never consulted, so CA1304/CA1311 are false
+        // positives here. ToLowerInvariant() is NOT translated by Npgsql
+        // and throws at query time, hence the explicit suppression.
+#pragma warning disable CA1304, CA1311
         return await db.SavedQueries.AsNoTracking()
             .Where(q => q.OwnerUserId == actorId || q.IsShared)
             .OrderBy(q => q.Name.ToLower())
             .ToListAsync(cancellationToken);
+#pragma warning restore CA1304, CA1311
     }
 
     public async Task<SavedQuery?> GetForActorAsync(

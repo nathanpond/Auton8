@@ -193,8 +193,10 @@ public sealed class ProjectionFrameworkPhase2Tests
 
         using var scope = factory.Services.CreateScope();
         var entity = scope.ServiceProvider.GetRequiredService<WorkflowHistoryQueryEntity>();
-        var lo = DateTime.SpecifyKind(now.AddHours(-3), DateTimeKind.Utc);
-        var hi = DateTime.SpecifyKind(now.AddHours(-1), DateTimeKind.Utc);
+        // The lo/hi are resolved at AqlRelativeDate.Resolve() time inside the
+        // entity — no local variables needed at the test boundary. Keeping a
+        // reference to `now` for the assertion narrative below.
+        _ = now;
         var aql = new AqlQuery(
             Entity: "WorkflowHistory",
             Where: new AqlBetween("EventTime",

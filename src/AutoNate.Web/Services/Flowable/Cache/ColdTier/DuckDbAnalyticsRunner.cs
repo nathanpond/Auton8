@@ -137,7 +137,9 @@ public sealed class DuckDbAnalyticsRunner : IAsyncDisposable
             for (var i = 0; i < reader.FieldCount; i++)
             {
                 var name = reader.GetName(i);
-                var value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                var value = await reader.IsDBNullAsync(i, cancellationToken)
+                    ? null
+                    : reader.GetValue(i);
                 if (value is DateTime dt)
                 {
                     value = DateTime.SpecifyKind(dt, DateTimeKind.Utc);

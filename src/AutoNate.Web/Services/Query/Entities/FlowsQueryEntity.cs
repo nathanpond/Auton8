@@ -217,7 +217,7 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
 
     // ---- Pre-load helpers ------------------------------------------------
 
-    private async Task<Dictionary<string, WorkflowTaskCache>> LoadCurrentStepsAsync(
+    private static async Task<Dictionary<string, WorkflowTaskCache>> LoadCurrentStepsAsync(
         AutoNateDbContext db,
         List<WorkflowExecutionCache> cacheRows,
         CancellationToken ct)
@@ -409,7 +409,7 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
         return (resultRows, truncated);
     }
 
-    private GroupKey BuildGroupKey(FlowRow row, IReadOnlyList<string> groupFields)
+    private static GroupKey BuildGroupKey(FlowRow row, IReadOnlyList<string> groupFields)
     {
         var values = new object?[groupFields.Count];
         for (var i = 0; i < groupFields.Count; i++)
@@ -456,7 +456,7 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
         return ProjectionValue(item, group.Rows[0]);
     }
 
-    private object? EvalAggregateForGroup(AqlSelectItem item, List<FlowRow> groupRows)
+    private static object? EvalAggregateForGroup(AqlSelectItem item, List<FlowRow> groupRows)
     {
         var fn = item.AggregateFn!.ToUpperInvariant();
         if (fn == "COUNT")
@@ -551,7 +551,7 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
 
     // ---- WHERE evaluator -------------------------------------------------
 
-    private bool EvalWhere(AqlWhere where, FlowRow row) => where switch
+    private static bool EvalWhere(AqlWhere where, FlowRow row) => where switch
     {
         AqlBinary b => b.Op == "AND"
             ? EvalWhere(b.Left, row) && EvalWhere(b.Right, row)
@@ -632,9 +632,12 @@ internal sealed class FlowsPreparedQuery : IPreparedQuery
         double? ad = ToDoubleOrNull(actual); double? ed = ToDoubleOrNull(expected);
         if (ad is { } adv && ed is { } edv)
         {
+            // double.Equals is bit-equality (method call, not the == operator),
+            // which gives the right semantics for the int/long values that
+            // dominate cache columns and side-steps Sonar S1244.
             return op switch
             {
-                "=" => adv == edv, "!=" => adv != edv,
+                "=" => adv.Equals(edv), "!=" => !adv.Equals(edv),
                 "<" => adv < edv, "<=" => adv <= edv,
                 ">" => adv > edv, ">=" => adv >= edv,
                 _ => false
