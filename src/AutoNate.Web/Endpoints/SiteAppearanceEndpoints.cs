@@ -11,21 +11,31 @@ namespace AutoNate.Web.Endpoints;
 
 public static partial class SiteAppearanceEndpoints
 {
-    private static readonly Guid AppearanceSettingsId = Guid.Parse("00000000-0000-0000-0001-000000000005");
+    // Shared with SiteAppearanceSnapshotCache (the hot-path public GET reads
+    // through the cache; the admin PATCH writes through the DbContext directly
+    // and invalidates the cache so the next read refreshes).
+    internal static readonly Guid SettingsId = Guid.Parse("00000000-0000-0000-0001-000000000005");
     private static readonly Guid SeedActorId = Guid.Parse("00000000-0000-0000-0000-000000000000");
+
+    // Pre-baked default DTO so the cache can return it without ever touching
+    // the DB when the row isn't seeded yet.
+    internal static readonly SiteAppearanceDto DefaultDto = ToDto(CreateDefaultEntity());
 
     public static IEndpointRouteBuilder MapSiteAppearanceEndpoints(this IEndpointRouteBuilder app)
     {
         var publicGroup = app.MapGroup("/api/appearance").AllowAnonymous();
-        publicGroup.MapGet("/", async (AutoNateDbContext db, CancellationToken ct) =>
-            Results.Ok(await GetDtoAsync(db, ct)));
+        publicGroup.MapGet("/", async (
+            SiteAppearanceSnapshotCache cache, CancellationToken ct) =>
+            Results.Ok(await cache.GetAsync(ct)));
 
         var adminGroup = app.MapGroup("/api/admin/appearance").RequireAuthorization();
 
         adminGroup.MapGet("/", async (
-            AutoNateDbContext db, IAuditEventPublisher auditPublisher, CancellationToken ct) =>
+            SiteAppearanceSnapshotCache cache,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
             {
-                var dto = await GetDtoAsync(db, ct);
+                var dto = await cache.GetAsync(ct);
                 await auditPublisher.PublishAsync(
                     SiteEventTopic.TopicName,
                     SiteEventTypes.AppearanceViewed,
@@ -41,6 +51,7 @@ public static partial class SiteAppearanceEndpoints
             UpdateSiteAppearanceRequest request,
             HttpContext http,
             AutoNateDbContext db,
+            SiteAppearanceSnapshotCache cache,
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
@@ -51,7 +62,7 @@ public static partial class SiteAppearanceEndpoints
             }
 
             var entity = await db.SiteAppearanceSettings.FirstOrDefaultAsync(
-                x => x.Id == AppearanceSettingsId,
+                x => x.Id == SettingsId,
                 ct);
 
             if (entity is null)
@@ -62,6 +73,7 @@ public static partial class SiteAppearanceEndpoints
 
             Apply(entity, request, http.GetActorId());
             await db.SaveChangesAsync(ct);
+            cache.Invalidate();
             await auditPublisher.PublishAsync(
                 SiteEventTopic.TopicName,
                 SiteEventTypes.AppearanceUpdated,
@@ -76,14 +88,10 @@ public static partial class SiteAppearanceEndpoints
         return app;
     }
 
-    private static async Task<SiteAppearanceDto> GetDtoAsync(AutoNateDbContext db, CancellationToken ct)
-    {
-        var entity = await db.SiteAppearanceSettings
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == AppearanceSettingsId, ct);
-
-        return entity is null ? ToDto(CreateDefaultEntity()) : ToDto(entity);
-    }
+    // Used by SiteAppearanceSnapshotCache to map a freshly-read entity into the
+    // wire DTO so callers can cache an immutable record instead of a tracked
+    // EF entity.
+    internal static SiteAppearanceDto EntityToDto(SiteAppearanceSettings entity) => ToDto(entity);
 
     private static void Apply(
         SiteAppearanceSettings entity,
@@ -133,7 +141,7 @@ public static partial class SiteAppearanceEndpoints
     private static SiteAppearanceSettings CreateDefaultEntity() =>
         new()
         {
-            Id = AppearanceSettingsId,
+            Id = SettingsId,
             SiteName = "Auto Nate",
             LogoMode = "icon",
             LogoImageUrl = null,

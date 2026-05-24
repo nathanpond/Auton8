@@ -119,6 +119,206 @@ public sealed class ContentAuthorizer : IContentAuthorizer
             AuthDecision.Allow($"role '{role}' baseline"));
     }
 
+    public async Task<IReadOnlyDictionary<Guid, AuthDecision>> AuthorizeManyAsync(
+        IReadOnlyCollection<Guid> userIds,
+        string kind,
+        Guid resourceId,
+        string action,
+        CancellationToken ct)
+    {
+        var distinct = userIds.Distinct().ToList();
+        var result = new Dictionary<Guid, AuthDecision>(distinct.Count);
+        if (distinct.Count == 0) return result;
+
+        if (!ContentKinds.IsContentKind(kind))
+        {
+            foreach (var u in distinct) result[u] = AuthDecision.Deny($"kind '{kind}' is not a content kind");
+            return result;
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        // Resource shape is shared across all callers — one query each for
+        // project + ancestor chain.
+        var project = await db.ContentAncestors.AsNoTracking()
+            .Where(ca => ca.DescendantKind == kind
+                         && ca.DescendantId == resourceId
+                         && ca.AncestorKind == ContentKinds.Project)
+            .Join(db.Projects, ca => ca.AncestorId, p => p.Id,
+                (ca, p) => new { p.Id, p.DeletionsLocked })
+            .FirstOrDefaultAsync(ct);
+        if (project is null)
+        {
+            foreach (var u in distinct) result[u] = AuthDecision.Deny("no project ancestor for resource");
+            return result;
+        }
+        var chainRows = await db.ContentAncestors.AsNoTracking()
+            .Where(ca => ca.DescendantKind == kind && ca.DescendantId == resourceId)
+            .Select(ca => new { ca.AncestorKind, ca.AncestorId, ca.Depth })
+            .ToListAsync(ct);
+        var chainSet = chainRows.ToDictionary(c => (c.AncestorKind, c.AncestorId), c => c.Depth);
+
+        // Per-user direct group memberships.
+        var groupRows = await db.GroupMembers.AsNoTracking()
+            .Where(m => distinct.Contains(m.UserId))
+            .Select(m => new { m.UserId, m.GroupId })
+            .ToListAsync(ct);
+        var userGroups = distinct.ToDictionary(u => u, _ => new List<Guid>());
+        var allGroupIds = new HashSet<Guid>();
+        foreach (var g in groupRows)
+        {
+            userGroups[g.UserId].Add(g.GroupId);
+            allGroupIds.Add(g.GroupId);
+        }
+
+        // Role assignments for all (user, group) principals in one query.
+        var userIdStrings = distinct.Select(u => u.ToString()).ToList();
+        var allGroupIdStrings = allGroupIds.Select(g => g.ToString()).ToList();
+        var roleRows = await db.RoleAssignments.AsNoTracking()
+            .Where(a =>
+                (a.PrincipalKind == EntityKinds.User && userIdStrings.Contains(a.PrincipalId))
+                || (a.PrincipalKind == EntityKinds.Group && allGroupIdStrings.Contains(a.PrincipalId)))
+            .Select(a => new { a.PrincipalKind, a.PrincipalId, a.RoleId })
+            .ToListAsync(ct);
+        var userRoles = distinct.ToDictionary(u => u, _ => new HashSet<Guid>());
+        var superAdmins = new HashSet<Guid>();
+        foreach (var r in roleRows)
+        {
+            if (r.PrincipalKind == EntityKinds.User)
+            {
+                if (!Guid.TryParse(r.PrincipalId, out var uid)) continue;
+                if (!userRoles.TryGetValue(uid, out var rs)) continue;
+                rs.Add(r.RoleId);
+                if (r.RoleId == SystemRoles.SuperAdminId) superAdmins.Add(uid);
+            }
+            else if (r.PrincipalKind == EntityKinds.Group)
+            {
+                if (!Guid.TryParse(r.PrincipalId, out var gid)) continue;
+                foreach (var (u, gs) in userGroups)
+                {
+                    if (!gs.Contains(gid)) continue;
+                    userRoles[u].Add(r.RoleId);
+                    if (r.RoleId == SystemRoles.SuperAdminId) superAdmins.Add(u);
+                }
+            }
+        }
+        foreach (var u in superAdmins) result[u] = AuthDecision.Allow("super admin");
+
+        var remaining = distinct.Where(u => !superAdmins.Contains(u)).ToList();
+        if (remaining.Count == 0) return result;
+
+        // Single permission_grants load covering every relevant principal —
+        // direct user, every group the users are in, every role attached.
+        var remainingUserStrings = remaining.Select(u => u.ToString()).ToList();
+        var allRoleIdStrings = userRoles.Values.SelectMany(s => s).Distinct()
+            .Select(r => r.ToString()).ToList();
+        var grantRows = await db.PermissionGrants.AsNoTracking()
+            .Where(pg =>
+                (pg.Action == action || pg.Action == Actions.Wildcard)
+                && (
+                    (pg.PrincipalKind == EntityKinds.User && remainingUserStrings.Contains(pg.PrincipalId))
+                    || (pg.PrincipalKind == EntityKinds.Group && allGroupIdStrings.Contains(pg.PrincipalId))
+                    || (pg.PrincipalKind == EntityKinds.Role && allRoleIdStrings.Contains(pg.PrincipalId))
+                ))
+            .Select(pg => new { pg.PrincipalKind, pg.PrincipalId, pg.SelectorString, pg.Effect })
+            .ToListAsync(ct);
+
+        var grantsByUser = new Dictionary<Guid, List<ParsedGrant>>();
+        var grantsByGroup = new Dictionary<Guid, List<ParsedGrant>>();
+        var grantsByRole = new Dictionary<Guid, List<ParsedGrant>>();
+        foreach (var g in grantRows)
+        {
+            SelectorAst ast;
+            try { ast = SelectorParser.Parse(g.SelectorString); }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "Skipping unparseable content grant '{Selector}'", g.SelectorString);
+                continue;
+            }
+            var effect = string.Equals(g.Effect, "deny", StringComparison.OrdinalIgnoreCase)
+                ? AuthEffect.Deny : AuthEffect.Allow;
+            var parsed = new ParsedGrant(ast, effect);
+            if (!Guid.TryParse(g.PrincipalId, out var pid)) continue;
+            var bucket = g.PrincipalKind switch
+            {
+                EntityKinds.User => grantsByUser,
+                EntityKinds.Group => grantsByGroup,
+                EntityKinds.Role => grantsByRole,
+                _ => null
+            };
+            if (bucket is null) continue;
+            if (!bucket.TryGetValue(pid, out var list))
+            {
+                list = new List<ParsedGrant>();
+                bucket[pid] = list;
+            }
+            list.Add(parsed);
+        }
+
+        // Single project_members lookup for the role baseline.
+        var memberRows = await db.ProjectMembers.AsNoTracking()
+            .Where(m => m.ProjectId == project.Id && remaining.Contains(m.UserId))
+            .Select(m => new { m.UserId, m.Role })
+            .ToListAsync(ct);
+        var rolesByUser = memberRows.ToDictionary(m => m.UserId, m => (string?)m.Role);
+
+        foreach (var u in remaining)
+        {
+            var userGrants = new List<ParsedGrant>();
+            if (grantsByUser.TryGetValue(u, out var ug)) userGrants.AddRange(ug);
+            foreach (var gid in userGroups[u])
+            {
+                if (grantsByGroup.TryGetValue(gid, out var gg)) userGrants.AddRange(gg);
+            }
+            foreach (var rid in userRoles[u])
+            {
+                if (grantsByRole.TryGetValue(rid, out var rg)) userGrants.AddRange(rg);
+            }
+
+            var hasWildcardAllow = HasGlobalContentAllow(userGrants);
+            var overrides = new List<OverrideRow>();
+            foreach (var g in userGrants)
+            {
+                if (!TryGetPathTarget(g.Ast, out var pathKind, out var pathId)) continue;
+                if (!ContentKinds.IsContentKind(pathKind)) continue;
+                if (pathId is null) continue;
+                if (chainSet.TryGetValue((pathKind, pathId.Value), out var depth))
+                {
+                    overrides.Add(new OverrideRow(resourceId, depth, g.Effect));
+                }
+            }
+
+            AuthDecision decision;
+            if (overrides.Count > 0)
+            {
+                var bestDepth = overrides.Min(g => g.Depth);
+                var hasDeny = overrides.Any(g => g.Depth == bestDepth && g.Effect == AuthEffect.Deny);
+                decision = hasDeny
+                    ? AuthDecision.Deny($"override deny at depth {bestDepth}")
+                    : AuthDecision.Allow($"override allow at depth {bestDepth}");
+            }
+            else if (hasWildcardAllow)
+            {
+                decision = AuthDecision.Allow("wildcard grant");
+            }
+            else
+            {
+                var role = rolesByUser.TryGetValue(u, out var r) ? r : null;
+                var baselineAllowed = role is not null && RoleAllowsAction(role, action);
+                decision = !baselineAllowed
+                    ? AuthDecision.Deny(role is null
+                        ? "no project membership"
+                        : $"role '{role}' does not grant '{action}'")
+                    : AuthDecision.Allow($"role '{role}' baseline");
+            }
+
+            result[u] = EnforceDeletionLock(action, kind, project.DeletionsLocked, decision);
+        }
+
+        return result;
+    }
+
     public async Task<ContentAccessSet> GetAllowedIdsAsync(
         ClaimsPrincipal actor,
         string kind,

@@ -58,13 +58,16 @@ public sealed class EfCoreNotificationStore(
         int? limit,
         CancellationToken cancellationToken = default)
     {
+        // Hard cap at the store boundary so a future caller that forgets to
+        // pass a limit can't page-bomb the inbox. NotificationEndpoints already
+        // clamps to 100; this is defense-in-depth.
+        var effectiveLimit = limit ?? 100;
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var query = dbContext.Notifications.AsNoTracking()
+        var rows = await dbContext.Notifications.AsNoTracking()
             .Where(n => n.UserId == userId)
-            .OrderByDescending(n => n.CreatedAtUtc);
-        var rows = limit.HasValue
-            ? await query.Take(limit.Value).ToListAsync(cancellationToken)
-            : await query.ToListAsync(cancellationToken);
+            .OrderByDescending(n => n.CreatedAtUtc)
+            .Take(effectiveLimit)
+            .ToListAsync(cancellationToken);
         return rows.Select(ToModel).ToList();
     }
 
@@ -238,19 +241,12 @@ public sealed class EfCoreNotificationStore(
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow.UtcDateTime;
-        var rows = await dbContext.Notifications
+        return await dbContext.Notifications
             .Where(n => n.UserId == userId && !n.IsRead)
-            .ToListAsync(cancellationToken);
-        foreach (var row in rows)
-        {
-            row.IsRead = true;
-            row.ReadAtUtc = now;
-        }
-        if (rows.Count > 0)
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        return rows.Count;
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(n => n.IsRead, true)
+                      .SetProperty(n => n.ReadAtUtc, now),
+                cancellationToken);
     }
 
     private static Notification ToModel(NotificationEntity entity) => new()

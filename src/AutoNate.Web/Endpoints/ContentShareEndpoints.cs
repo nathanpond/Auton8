@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models.Notifications;
@@ -57,14 +56,14 @@ public static class ContentShareEndpoints
 
             var isOwner = await authorizer.IsProjectOwnerAsync(http.User, projectId.Value, ct);
 
-            var users = new List<UserAccess>();
-            foreach (var userId in (request.UserIds ?? new List<Guid>()).Distinct())
-            {
-                var decision = await authorizer.AuthorizeAsync(
-                    SyntheticPrincipal(userId),
-                    ContentKinds.Page, pageId, Actions.View, ct);
-                users.Add(new UserAccess(userId, decision.IsAllowed));
-            }
+            var candidateIds = (request.UserIds ?? new List<Guid>()).Distinct().ToList();
+            var decisions = await authorizer.AuthorizeManyAsync(
+                candidateIds, ContentKinds.Page, pageId, Actions.View, ct);
+            var users = candidateIds
+                .Select(uid => new UserAccess(
+                    uid,
+                    decisions.TryGetValue(uid, out var d) && d.IsAllowed))
+                .ToList();
 
             return Results.Ok(new SharePreviewResponse(isOwner, users));
         }).RequirePermission(EntityKinds.Page, Actions.View, "pageId")
@@ -123,11 +122,16 @@ public static class ContentShareEndpoints
             var skipped = new List<Guid>();
             var granted = new List<Guid>();
 
+            // Batch the per-recipient view check up front instead of running
+            // it inside the loop — IContentAuthorizer doesn't share a per-actor
+            // cache the way IAuthorizer does, so the loop variant was O(N) DB
+            // round trips on share lists with N recipients.
+            var viewDecisions = await authorizer.AuthorizeManyAsync(
+                userIds, ContentKinds.Page, pageId, Actions.View, ct);
+
             foreach (var userId in userIds)
             {
-                var canView = (await authorizer.AuthorizeAsync(
-                    SyntheticPrincipal(userId),
-                    ContentKinds.Page, pageId, Actions.View, ct)).IsAllowed;
+                var canView = viewDecisions.TryGetValue(userId, out var d) && d.IsAllowed;
 
                 if (!canView && request.GrantAccess)
                 {
@@ -197,17 +201,6 @@ public static class ContentShareEndpoints
               "or returned in SkippedUserIds.");
 
         return app;
-    }
-
-    // Builds a ClaimsPrincipal carrying just the user's NameIdentifier claim
-    // so we can reuse IContentAuthorizer.AuthorizeAsync to evaluate access
-    // on behalf of arbitrary users (preview is a check, not a real call from
-    // them — the actor is the sharer).
-    private static ClaimsPrincipal SyntheticPrincipal(Guid userId)
-    {
-        var identity = new ClaimsIdentity("synthetic");
-        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, userId.ToString()));
-        return new ClaimsPrincipal(identity);
     }
 
     private static string ResolveDisplayName(string? first, string? last, string? username)

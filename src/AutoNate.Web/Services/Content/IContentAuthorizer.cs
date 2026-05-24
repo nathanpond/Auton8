@@ -20,6 +20,19 @@ public interface IContentAuthorizer
         string action,
         CancellationToken ct);
 
+    // Batch variant of AuthorizeAsync that evaluates the same (kind, resourceId,
+    // action) against many user ids. Loads project + ancestor chain + grants +
+    // memberships in a fixed number of queries (independent of userIds.Count)
+    // and decides each user in-memory. Used by share-recipient flows where
+    // running the single-resource path in a loop would be O(N) round trips.
+    // Returns one entry per distinct user id (callers can re-look-up by id).
+    Task<IReadOnlyDictionary<Guid, AuthDecision>> AuthorizeManyAsync(
+        IReadOnlyCollection<Guid> userIds,
+        string kind,
+        Guid resourceId,
+        string action,
+        CancellationToken ct);
+
     // Set of resource IDs of the given kind that `actor` may perform `action`
     // on. Used by list endpoints to filter their query. Unrestricted=true
     // indicates a super-admin actor (no filtering needed). The caller is
