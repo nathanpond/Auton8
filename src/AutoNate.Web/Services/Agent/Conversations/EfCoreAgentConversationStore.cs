@@ -72,9 +72,23 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
             query = query.Where(c => c.PageKey == pageKey);
         }
 
+        // Pull each conversation header along with the ContentJson of its
+        // most recent non-summary message in a single round trip. EF Core
+        // translates the correlated subquery to a LATERAL join on Postgres,
+        // so cost stays O(take) rather than O(take + 1) queries.
         var rows = await query
             .OrderByDescending(c => c.LastMessageAtUtc ?? c.CreatedAtUtc)
             .Take(take)
+            .Select(c => new
+            {
+                Conversation = c,
+                LastMessageContent = dbContext.AgentMessages
+                    .AsNoTracking()
+                    .Where(m => m.ConversationId == c.Id && m.Kind != "summary")
+                    .OrderByDescending(m => m.CreatedAtUtc)
+                    .Select(m => m.ContentJson)
+                    .FirstOrDefault()
+            })
             .ToListAsync(cancellationToken);
 
         await _auditPublisher.PublishAsync(
@@ -85,7 +99,43 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
             details: new { count = rows.Count },
             cancellationToken);
 
-        return rows.Select(ToConversationDto).ToList();
+        return rows
+            .Select(r => ToConversationDto(r.Conversation, ExtractPreview(r.LastMessageContent)))
+            .ToList();
+    }
+
+    // First text-block of the message, normalized to a single line and capped
+    // at 200 chars so it can be rendered as a single preview line without
+    // shipping huge payloads down to every chat list refresh.
+    private static string? ExtractPreview(string? contentJson)
+    {
+        if (string.IsNullOrWhiteSpace(contentJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(contentJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
+            foreach (var element in doc.RootElement.EnumerateArray())
+            {
+                if (!element.TryGetProperty("type", out var typeProp)) continue;
+                if (typeProp.ValueKind != JsonValueKind.String) continue;
+                if (typeProp.GetString() != "text") continue;
+                if (!element.TryGetProperty("text", out var textProp)) continue;
+                if (textProp.ValueKind != JsonValueKind.String) continue;
+                var text = textProp.GetString();
+                if (string.IsNullOrWhiteSpace(text)) continue;
+                // Collapse whitespace so multi-line markdown doesn't ruin the
+                // single-line preview slot in the UI.
+                var collapsed = System.Text.RegularExpressions.Regex
+                    .Replace(text.Trim(), @"\s+", " ");
+                return collapsed.Length > 200 ? collapsed[..200] + "…" : collapsed;
+            }
+        }
+        catch (JsonException)
+        {
+            // Bad content blob is a row-local problem; render the chat with
+            // no preview rather than failing the whole list.
+        }
+        return null;
     }
 
     public async Task<AgentConversationDetailDto?> GetForUserAsync(
@@ -490,7 +540,9 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
         return doc.RootElement.Clone();
     }
 
-    private static AgentConversationDto ToConversationDto(AgentConversation entity) => new(
+    private static AgentConversationDto ToConversationDto(
+        AgentConversation entity,
+        string? lastMessagePreview = null) => new(
         Id: entity.Id,
         UserId: entity.UserId,
         PageKey: entity.PageKey,
@@ -500,7 +552,8 @@ public sealed class EfCoreAgentConversationStore : IAgentConversationStore
         ConnectionId: entity.ConnectionId,
         CreatedAtUtc: entity.CreatedAtUtc,
         UpdatedAtUtc: entity.UpdatedAtUtc,
-        LastMessageAtUtc: entity.LastMessageAtUtc);
+        LastMessageAtUtc: entity.LastMessageAtUtc,
+        LastMessagePreview: lastMessagePreview);
 
     private static AgentMessageDto ToMessageDto(AgentMessage entity)
     {

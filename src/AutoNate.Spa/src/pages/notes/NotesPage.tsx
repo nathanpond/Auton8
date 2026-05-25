@@ -55,6 +55,7 @@ import { EditorTab, NotebookWithPages, PageTreeNode, flattenToTree, tabsForPage 
 import { useYjsNotesList } from "@/lib/yjs/useYjsNotesList";
 import { WireNoteKind, notesTheme } from "./notesTheme";
 import { useNotesPagePageContext } from "./useNotesPagePageContext";
+import { useNotesLiveUpdates } from "./useNotesLiveUpdates";
 import "./notes.css";
 
 // Notes page — the SPA entry point at /notes. Lives inside <AppShell.Main>
@@ -235,6 +236,13 @@ export default function NotesPage() {
 
   const notebooksQuery = useNotebooks(activeCabinetId);
   const notebooks = notebooksQuery.data ?? [];
+
+  // Live updates: subscribe to the active project + cabinet on the bus so
+  // tree mutations made from another tab (or by the chatbot's manage-notes
+  // skill, or by another user) appear in the rail without a manual reload.
+  // Server-side IContentAuthorizer gates the channel; no-op if either id is
+  // null.
+  useNotesLiveUpdates(activeProjectId, activeCabinetId);
 
   // Fetch page trees for every notebook in the active cabinet in parallel.
   // We used to only fetch the first notebook's tree, which broke URL-restore

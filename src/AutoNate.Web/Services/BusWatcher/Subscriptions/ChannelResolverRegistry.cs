@@ -37,7 +37,10 @@ public sealed class ChannelResolverRegistry
         _anyTopic = anyTopic;
     }
 
-    public IReadOnlyList<ResolvedDelivery> Resolve(BusWatcherStreamService.BusWatcherMessage message)
+    public async Task<IReadOnlyList<ResolvedDelivery>> ResolveAsync(
+        BusWatcherStreamService.BusWatcherMessage message,
+        IServiceProvider services,
+        CancellationToken cancellationToken)
     {
         var deliveries = new List<ResolvedDelivery>();
 
@@ -45,13 +48,13 @@ public sealed class ChannelResolverRegistry
         {
             foreach (var resolver in topicResolvers)
             {
-                deliveries.AddRange(resolver.Resolve(message));
+                deliveries.AddRange(await resolver.ResolveAsync(message, services, cancellationToken));
             }
         }
 
         foreach (var resolver in _anyTopic)
         {
-            deliveries.AddRange(resolver.Resolve(message));
+            deliveries.AddRange(await resolver.ResolveAsync(message, services, cancellationToken));
         }
 
         return deliveries;

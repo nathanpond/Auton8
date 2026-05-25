@@ -661,15 +661,13 @@ public sealed class AgentSession : IAgentSession
     // snapshot is unsafe — page key mismatch, oversized, or otherwise
     // malformed. Conversation flow proceeds without page awareness rather
     // than failing the message; the user can retry.
-    private PageContextSnapshot? TryNormalizeSnapshot(PageContextInput input, string conversationPageKey)
+    private PageContextSnapshot? TryNormalizeSnapshot(PageContextInput input, string _conversationPageKey)
     {
-        if (!string.Equals(input.PageKey, conversationPageKey, StringComparison.Ordinal))
-        {
-            _logger.LogInformation(
-                "Dropping page snapshot: pageKey mismatch (snapshot={SnapshotKey}, conversation={ConvKey})",
-                input.PageKey, conversationPageKey);
-            return null;
-        }
+        // The snapshot is the user's CURRENT page, not the conversation's
+        // original page. A mismatch is expected when the user opened the
+        // conversation from another page via "Search every page" — we still
+        // forward the snapshot so the model can act on the current view.
+        // The conversation's stored pageKey stays as metadata only.
 
         var summary = input.Summary;
         if (!string.IsNullOrEmpty(summary) && summary.Length > MaxSnapshotSummaryChars)

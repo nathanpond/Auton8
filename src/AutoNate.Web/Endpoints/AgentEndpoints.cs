@@ -113,22 +113,17 @@ public static class AgentEndpoints
                     await http.Response.WriteAsync("pageContext.pageKey is required.", ct);
                     return;
                 }
-                // Header-only lookup — we just need PageKey + ownership.
-                // GetForUserAsync would also pull every message + tool call
-                // and emit a ConversationViewed audit, neither of which
-                // belongs on the precondition path for a send.
+                // Header-only lookup is still useful for ownership (404 vs 200
+                // before opening the SSE stream), but we no longer enforce
+                // pageKey-match: a chat opened from another page must still be
+                // able to see + act on whatever page the user is currently
+                // viewing. The conversation's stored pageKey is metadata about
+                // where the chat was first started; the active snapshot follows
+                // the user.
                 var header = await store.GetHeaderForUserAsync(id, userId, ct);
                 if (header is null)
                 {
                     http.Response.StatusCode = StatusCodes.Status404NotFound;
-                    return;
-                }
-                if (!string.Equals(pc.PageKey, header.PageKey, StringComparison.Ordinal))
-                {
-                    http.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    await http.Response.WriteAsync(
-                        $"pageContext.pageKey '{pc.PageKey}' does not match conversation pageKey '{header.PageKey}'.",
-                        ct);
                     return;
                 }
                 // Size cap on Data. GetRawText returns the underlying JSON

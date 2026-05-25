@@ -20,6 +20,10 @@ import {
   clearPageEditorSignal,
   setPageEditorSignal
 } from "@/lib/blocknote/pageEditorSignal";
+import {
+  registerPageBodyEditor,
+  unregisterPageBodyEditor
+} from "@/lib/blocknote/pageBodyEditorRegistry";
 
 interface Props {
   handle: YjsDocumentHandle;
@@ -127,7 +131,11 @@ function YjsEditorInner({
   useEffect(() => {
     if (!pageId) return;
     setPageEditorSignal(editor, { pageId, editable });
-    return () => clearPageEditorSignal(editor);
+    registerPageBodyEditor(pageId, editor);
+    return () => {
+      clearPageEditorSignal(editor);
+      unregisterPageBodyEditor(pageId, editor);
+    };
   }, [editor, pageId, editable]);
 
   // We take manual control of:

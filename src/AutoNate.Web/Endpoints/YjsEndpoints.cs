@@ -363,6 +363,24 @@ public static class YjsEndpoints
                     return Results.NoContent();
                 }
 
+                // Defend against the cold-load empty-clobber: if the incoming
+                // Y.Doc materialized to no blocks but the mirror has real
+                // content, refuse the write. This used to lose chatbot- or
+                // REST-created bodies the first time the page was opened
+                // before the Hocuspocus sidecar's seed-from-mirror hook ran
+                // (the editor would mount on an empty Y.Doc, autosave the
+                // blank state, and overwrite body_jsonb). Belt and suspenders
+                // for the sidecar's onLoadDocument seeding.
+                if (IsEffectivelyEmptyBlockNote(payload.BodyJsonb)
+                    && !IsEffectivelyEmptyBlockNote(page.BodyJsonb))
+                {
+                    log.LogWarning(
+                        "Rejected empty Yjs autosave for page {PageId}: would have clobbered existing body_jsonb. Source likely a cold-load editor mount before the sidecar seeded the doc.",
+                        page.Id);
+                    await tx.CommitAsync(ct);
+                    return Results.NoContent();
+                }
+
                 newVersionNumber = await versions.SnapshotPageBeforeChangeAsync(
                     db, page.Id, page.Title, page.BodyJsonb,
                     ContentVersionKinds.Autosave, null, actorId, now, ct);
@@ -416,6 +434,21 @@ public static class YjsEndpoints
                 }
                 if (note.ContentJsonb == payload.BodyJsonb)
                 {
+                    await tx.CommitAsync(ct);
+                    return Results.NoContent();
+                }
+
+                // Same cold-load guard as the page branch above: don't let an
+                // empty Y.Doc materialization wipe a populated mirror.
+                // Drawings/diagrams use non-BlockNote content shapes, so this
+                // check only fires for richtext notes.
+                if (string.Equals(note.NoteKind, "richtext", StringComparison.Ordinal)
+                    && IsEffectivelyEmptyBlockNote(payload.BodyJsonb)
+                    && !IsEffectivelyEmptyBlockNote(note.ContentJsonb))
+                {
+                    log.LogWarning(
+                        "Rejected empty Yjs autosave for note {NoteId}: would have clobbered existing content_jsonb.",
+                        note.Id);
                     await tx.CommitAsync(ct);
                     return Results.NoContent();
                 }
@@ -648,6 +681,43 @@ public static class YjsEndpoints
     private static readonly JsonSerializerOptions WebhookJsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly string[] PageBodyFields = { "bodyJsonb" };
     private static readonly string[] NoteContentFields = { "contentJsonb" };
+
+    // True if `raw` is null, empty, the default-row sentinel "{}", an empty
+    // BlockNote block array, or a single placeholder paragraph with no
+    // content. Used by the webhook handler to refuse an empty-Y.Doc autosave
+    // that would overwrite a populated mirror — see callers for context.
+    private static bool IsEffectivelyEmptyBlockNote(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+        var trimmed = raw.AsSpan().Trim();
+        if (trimmed.SequenceEqual("{}")) return true;
+        if (trimmed.SequenceEqual("[]")) return true;
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return false;
+            if (doc.RootElement.GetArrayLength() == 0) return true;
+            if (doc.RootElement.GetArrayLength() > 1) return false;
+            var only = doc.RootElement[0];
+            if (only.ValueKind != JsonValueKind.Object) return false;
+            // A bare placeholder paragraph with no inline runs is what
+            // BlockNote injects on mount when there's no content yet.
+            if (!only.TryGetProperty("type", out var typeEl)) return false;
+            var type = typeEl.GetString();
+            if (type != "paragraph") return false;
+            if (only.TryGetProperty("content", out var contentEl)
+                && contentEl.ValueKind == JsonValueKind.Array
+                && contentEl.GetArrayLength() > 0)
+            {
+                return false;
+            }
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     // Synthetic ClaimsPrincipal so the yjs-auth callback (no cookie session)
     // can re-run the ContentAuthorizer. Only the NameIdentifier claim is

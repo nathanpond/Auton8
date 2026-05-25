@@ -1,6 +1,7 @@
 import type { Extension } from "@hocuspocus/server";
 import * as Y from "yjs";
 import pg from "pg";
+import { trySeedFromBodyMirror } from "./materializers.js";
 
 // Postgres-backed persistence for Y.Doc binary state. Matches the
 // `yjs_documents` table created by AutoNate's DatabaseSchemaInitializer —
@@ -28,7 +29,44 @@ export function createPostgresPersistence(config: pg.PoolConfig): Extension & {
           "SELECT data FROM yjs_documents WHERE name = $1",
           [data.documentName]
         );
-        if (result.rowCount === 0) return null;
+        if (result.rowCount === 0) {
+          // First open of this doc — see if the `pages.body_jsonb` /
+          // `notes.content_jsonb` mirror has pre-existing block content
+          // (e.g. a chatbot-created page whose markdown was already
+          // rendered to BlockNote JSON at create time). If so, hydrate
+          // the Y.Doc from the mirror and persist the encoded state so
+          // subsequent loads are O(1) and the autosave debounce doesn't
+          // need to fire first.
+          let seeded = false;
+          try {
+            seeded = await trySeedFromBodyMirror(pool, data.documentName, data.document);
+          } catch (seedErr) {
+            console.error(
+              `[persistence] seed-from-mirror(${data.documentName}) failed:`,
+              seedErr
+            );
+          }
+          if (seeded) {
+            try {
+              const state = Buffer.from(Y.encodeStateAsUpdate(data.document));
+              await pool.query(
+                `INSERT INTO yjs_documents (name, data, updated_at_utc)
+                 VALUES ($1, $2, NOW())
+                 ON CONFLICT (name) DO NOTHING`,
+                [data.documentName, state]
+              );
+            } catch (writeErr) {
+              // Persisting the seed is an optimization, not a correctness
+              // requirement — if it fails, the autosave path will still
+              // store on the first edit. Log and move on.
+              console.error(
+                `[persistence] persisting seeded state for ${data.documentName} failed:`,
+                writeErr
+              );
+            }
+          }
+          return null;
+        }
         const buf = result.rows[0].data;
         // Copy the BYTEA bytes into a fresh Uint8Array. Node's pg driver
         // can return Buffers backed by pooled allocations; passing those

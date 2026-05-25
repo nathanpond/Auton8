@@ -111,7 +111,12 @@ public sealed record class AgentConversationDto(
     Guid? ConnectionId,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc,
-    DateTime? LastMessageAtUtc);
+    DateTime? LastMessageAtUtc,
+    // First ~200 chars of the most recent non-summary message — used by the
+    // sidebar + cross-page palette to render a preview line under the title.
+    // Populated by ListForUserAsync; other reads leave it null since they
+    // don't need it.
+    string? LastMessagePreview = null);
 
 public sealed record class AgentConversationDetailDto(
     AgentConversationDto Conversation,

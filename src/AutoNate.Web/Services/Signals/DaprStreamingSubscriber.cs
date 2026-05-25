@@ -4,6 +4,8 @@ using AutoNate.Web.Configuration;
 using AutoNate.Web.Services.ApplicationEvents;
 using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.BusWatcher;
+using AutoNate.Web.Services.Content;
+using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Workflow;
@@ -393,7 +395,17 @@ public sealed class DaprStreamingSubscriber(
                 // Self-healing platform Phase 5: RepeatedAuthFailureDetector
                 // listens to auth.events in-process. Subscribing here is the
                 // only way to fan that topic into BusWatcherStreamService.
-                AuthEventTopic.TopicName
+                AuthEventTopic.TopicName,
+                // ContentChannelResolver fans content.events out to per-
+                // project/cabinet/notebook/page channels so the SPA notes
+                // explorer refreshes live. Without subscribing here, the
+                // outbox dispatcher publishes successfully but the message
+                // never re-enters the in-process pipeline, so no fan-out
+                // ever runs.
+                ContentEventTopic.TopicName,
+                // ExternalConnectionChannelResolver runs against this topic.
+                // Adding here so its fan-out runs without operator config.
+                ExternalConnectionEventTopic.TopicName
             };
 
             foreach (var topic in desired)

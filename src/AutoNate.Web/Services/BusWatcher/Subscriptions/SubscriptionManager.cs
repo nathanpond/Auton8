@@ -132,7 +132,14 @@ public sealed class SubscriptionManager
     // connections, applying per-recipient gates.
     public async Task PublishAsync(BusWatcherStreamService.BusWatcherMessage message, CancellationToken cancellationToken)
     {
-        var deliveries = _resolvers.Resolve(message);
+        // ResolveAsync owns its own scope creation for resolvers that need
+        // I/O (e.g. ContentChannelResolver's ancestor closure lookup). We
+        // pass the root provider through; per-resolver scopes are short-lived.
+        IReadOnlyList<ResolvedDelivery> deliveries;
+        await using (var scope = _scopeFactory.CreateAsyncScope())
+        {
+            deliveries = await _resolvers.ResolveAsync(message, scope.ServiceProvider, cancellationToken);
+        }
         if (deliveries.Count == 0)
         {
             return;
@@ -200,6 +207,15 @@ public sealed class SubscriptionManager
             EntityKinds.Page when Guid.TryParse(target.Id, out var pageId) =>
                 await scope.ServiceProvider.GetRequiredService<IContentAuthorizer>()
                     .AuthorizeAsync(subscriber.Principal, EntityKinds.Page, pageId, Actions.View, cancellationToken),
+            EntityKinds.Notebook when Guid.TryParse(target.Id, out var notebookId) =>
+                await scope.ServiceProvider.GetRequiredService<IContentAuthorizer>()
+                    .AuthorizeAsync(subscriber.Principal, EntityKinds.Notebook, notebookId, Actions.View, cancellationToken),
+            EntityKinds.Cabinet when Guid.TryParse(target.Id, out var cabinetId) =>
+                await scope.ServiceProvider.GetRequiredService<IContentAuthorizer>()
+                    .AuthorizeAsync(subscriber.Principal, EntityKinds.Cabinet, cabinetId, Actions.View, cancellationToken),
+            EntityKinds.Project when Guid.TryParse(target.Id, out var projectId) =>
+                await scope.ServiceProvider.GetRequiredService<IContentAuthorizer>()
+                    .AuthorizeAsync(subscriber.Principal, EntityKinds.Project, projectId, Actions.View, cancellationToken),
             _ =>
                 await scope.ServiceProvider.GetRequiredService<IAuthorizer>()
                     .AuthorizeAsync(subscriber.Principal, Actions.View, target, cancellationToken),

@@ -20,7 +20,9 @@ import {
   Group,
   Stack,
   Text,
-  Textarea
+  Textarea,
+  TextInput,
+  Tooltip
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import {
@@ -42,6 +44,8 @@ import { useUserPreferences } from "@/preferences/UserPreferencesContext";
 import { MarkdownView } from "./MarkdownView";
 import { useActivePageSummary, usePageContextRegistry } from "./pageContext/PageContextRegistry";
 import { useAgentModelDefault } from "@/hooks/useAgentModelDefault";
+import { ChatPaletteModal } from "./ChatPaletteModal";
+import { pageKeyCrumb, pageKeyLabel } from "./pageLabels";
 import "./AgentSidebar.css";
 
 // Smallest usable sidebar width — the original hardcoded value. Anything
@@ -160,13 +164,58 @@ export function AgentSidebar() {
     );
   }, []);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  // The pageKey the currently-active conversation belongs to. When this
+  // differs from `pageKey` (the current page), the user has pulled in a
+  // cross-page chat via the palette and we show the "Loaded from" banner.
+  const [activeConversationPageKey, setActiveConversationPageKey] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteInitialQ, setPaletteInitialQ] = useState("");
   const queryClient = useQueryClient();
 
-  // When the page key changes, drop the active conversation so the user sees
-  // the conversation list scoped to where they are now.
+  // When the page key actually changes (not when the active chat's pageKey
+  // changes), drop the active conversation — UNLESS it was pulled in from
+  // another page via the palette, in which case it travels with the user.
+  //
+  // Reading activeConversationPageKey via a ref instead of an effect dep so
+  // selecting a same-page chat (which sets the active pageKey to match the
+  // current page) doesn't immediately re-fire the effect and reset state.
+  const activeConversationPageKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    setConversationId(null);
+    activeConversationPageKeyRef.current = activeConversationPageKey;
+  }, [activeConversationPageKey]);
+
+  const prevPageKeyRef = useRef(pageKey);
+  useEffect(() => {
+    const prev = prevPageKeyRef.current;
+    if (prev === pageKey) return;
+    prevPageKeyRef.current = pageKey;
+    const activePK = activeConversationPageKeyRef.current;
+    // Drop only if the active chat belonged to the page we're leaving.
+    // Cross-page chats (activePK didn't match prev) stay loaded.
+    if (activePK == null || activePK === prev) {
+      setConversationId(null);
+      setActiveConversationPageKey(null);
+    }
   }, [pageKey]);
+
+  // ⌘K / Ctrl+K opens the cross-page chat palette from anywhere in the app.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteInitialQ(search);
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [search]);
+
+  const openPalette = useCallback((q?: string) => {
+    setPaletteInitialQ(q ?? "");
+    setPaletteOpen(true);
+  }, []);
 
   const listKey = useMemo(() => ["agent", "conversations", pageKey] as const, [pageKey]);
   const detailKey = useMemo(() => ["agent", "conversation", conversationId] as const, [conversationId]);
@@ -176,6 +225,33 @@ export function AgentSidebar() {
     queryFn: ({ signal }) => listConversations(pageKey, signal),
     enabled: isOpen
   });
+
+  // Lightweight cross-page hits surfaced inline below the on-page list when
+  // the user types a query into the sidebar's search input. The palette uses
+  // its own copy of the full list with richer filtering; this query keeps the
+  // sidebar inline preview fast and bounded.
+  const elsewhereQuery = useQuery({
+    queryKey: ["agent", "conversations", "all"],
+    queryFn: ({ signal }) => listConversations(null, signal),
+    enabled: isOpen && search.trim().length > 0,
+    staleTime: 30_000
+  });
+
+  const filteredOnPage = useMemo<AgentConversation[]>(() => {
+    const all = conversationsQuery.data ?? [];
+    const q = search.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((c) => (c.title ?? "").toLowerCase().includes(q));
+  }, [conversationsQuery.data, search]);
+
+  const filteredElsewhere = useMemo<AgentConversation[]>(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    const all = elsewhereQuery.data ?? [];
+    return all
+      .filter((c) => c.pageKey !== pageKey && (c.title ?? "").toLowerCase().includes(q))
+      .slice(0, 4);
+  }, [elsewhereQuery.data, pageKey, search]);
 
   const detailQuery = useQuery<AgentConversationDetail>({
     queryKey: detailKey,
@@ -188,6 +264,7 @@ export function AgentSidebar() {
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["agent", "conversations"] });
       setConversationId(created.id);
+      setActiveConversationPageKey(created.pageKey);
     }
   });
 
@@ -196,8 +273,19 @@ export function AgentSidebar() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agent", "conversations"] });
       setConversationId(null);
+      setActiveConversationPageKey(null);
     }
   });
+
+  const selectConversation = useCallback((c: AgentConversation) => {
+    setConversationId(c.id);
+    setActiveConversationPageKey(c.pageKey);
+  }, []);
+
+  const unloadCrossPageChat = useCallback(() => {
+    setConversationId(null);
+    setActiveConversationPageKey(null);
+  }, []);
 
   const stream = useAgentStream();
   const modelDefault = useAgentModelDefault();
@@ -233,6 +321,12 @@ export function AgentSidebar() {
     setComposer("");
     setPendingUserText(text);
     try {
+      // Always send the current page's snapshot + query/action callbacks,
+      // even when the active conversation was started on a different page
+      // (e.g. user picked it from the "Search every page" list). The chat
+      // is a tool; whatever page the user is currently viewing is the page
+      // they want the model to see and act on. The server-side mismatch
+      // check that used to 400 here has been removed accordingly.
       const pageContext = pageContextRegistry.getActiveSnapshot(pageKey);
       await stream.send(id, text, {
         pageContext,
@@ -289,51 +383,80 @@ export function AgentSidebar() {
       )}
       {isOpen && (
         <div className="agent-sidebar__inner">
-          <Box
-            className="agent-sidebar__header"
-            px="sm"
-            py="xs"
-            style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
-          >
-            <Group gap="xs" wrap="nowrap" align="center">
-              <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
-                <Text fw={600} size="sm">
-                  AutoNate Assistant
-                </Text>
-                <Text size="xs" c="dimmed" lineClamp={1} title={activePageSummary ?? undefined}>
-                  {activePageSummary
-                    ? `page: ${pageKey} · ${truncate(activePageSummary, 60)}`
-                    : `page: ${pageKey}`}
-                </Text>
-              </Stack>
-              <Button
-                variant="subtle"
-                size="compact-sm"
-                leftSection={<i className="fa fa-plus" />}
-                onClick={() => createMutation.mutate()}
-                loading={createMutation.isPending}
-              >
-                New chat
-              </Button>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                onClick={close}
-                aria-label="Close assistant"
-                title="Close"
-              >
-                <i className="fa fa-times" />
-              </ActionIcon>
+          <Box className="agent-sidebar__header" px="sm" py={8}>
+            <Group gap={4} wrap="nowrap" align="center">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <PageCrumb pageKey={pageKey} summary={activePageSummary} />
+              </div>
+              <Tooltip label="Close assistant">
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  onClick={close}
+                  aria-label="Close assistant"
+                >
+                  <i className="fa fa-times" />
+                </ActionIcon>
+              </Tooltip>
             </Group>
           </Box>
+
+          {!conversationId && (
+            <Box className="agent-sidebar__search" px="sm" pb={8}>
+              <TextInput
+                value={search}
+                onChange={(e) => setSearch(e.currentTarget.value)}
+                placeholder="Search chats…"
+                leftSection={<i className="fa fa-magnifying-glass" />}
+                rightSection={
+                  search ? (
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="sm"
+                      onClick={() => setSearch("")}
+                      aria-label="Clear search"
+                    >
+                      <i className="fa fa-times" />
+                    </ActionIcon>
+                  ) : (
+                    <span className="agent-sidebar__kbd" aria-hidden>
+                      ⌘K
+                    </span>
+                  )
+                }
+                size="sm"
+              />
+            </Box>
+          )}
+
+          {conversationId && activeConversationPageKey && activeConversationPageKey !== pageKey && (
+            <div className="agent-sidebar__loaded-banner">
+              <i className="fa fa-link" aria-hidden />
+              <span>Loaded from</span>
+              <PageCrumb pageKey={activeConversationPageKey} compact />
+              <button
+                type="button"
+                className="agent-sidebar__loaded-unload"
+                onClick={unloadCrossPageChat}
+                title="Unload from this page"
+              >
+                <i className="fa fa-times" aria-hidden /> Unload
+              </button>
+            </div>
+          )}
 
           <div className="agent-sidebar__body">
             {!conversationId && (
               <ConversationList
-                conversations={conversationsQuery.data ?? []}
+                conversations={filteredOnPage}
+                elsewhereChats={filteredElsewhere}
+                elsewhereLoading={elsewhereQuery.isLoading}
+                searchActive={search.trim().length > 0}
                 loading={conversationsQuery.isLoading}
-                onSelect={(id) => setConversationId(id)}
+                onSelect={selectConversation}
                 onDelete={confirmDeleteConversation}
+                onOpenPalette={() => openPalette(search)}
               />
             )}
 
@@ -347,7 +470,10 @@ export function AgentSidebar() {
                 toolCalls={stream.state.toolCalls}
                 errorText={stream.state.error}
                 pendingUserText={pendingUserText}
-                onBack={() => setConversationId(null)}
+                onBack={() => {
+                  setConversationId(null);
+                  setActiveConversationPageKey(null);
+                }}
                 onDelete={() => confirmDeleteConversation(conversationId)}
               />
             )}
@@ -400,7 +526,57 @@ export function AgentSidebar() {
           </Box>
         </div>
       )}
+      <ChatPaletteModal
+        open={paletteOpen}
+        initialQuery={paletteInitialQ}
+        onClose={() => setPaletteOpen(false)}
+        onPick={(chat) => {
+          selectConversation(chat);
+          setPaletteOpen(false);
+        }}
+      />
     </aside>
+  );
+}
+
+type PageCrumbProps = {
+  pageKey: string;
+  summary?: string | null;
+  compact?: boolean;
+};
+
+// Lightweight breadcrumb display for the sidebar header and the
+// "Loaded from" banner. The chat data model only carries a pageKey, so this
+// renders the friendly label (with `·` split into segments) and optionally
+// folds in the page provider's live summary as a trailing segment.
+function PageCrumb({ pageKey, summary, compact }: PageCrumbProps) {
+  const parts = pageKeyCrumb(pageKey);
+  const trail = summary && summary.trim().length > 0 ? truncate(summary.trim(), 40) : null;
+  const segments = trail ? [...parts, trail] : parts;
+  return (
+    <div
+      className={"agent-crumb" + (compact ? " agent-crumb--compact" : "")}
+      title={segments.join(" › ")}
+    >
+      {segments.map((seg, i) => (
+        <span key={i} className="agent-crumb__row">
+          {i > 0 && (
+            <i
+              className="fa-solid fa-chevron-right agent-crumb__sep"
+              aria-hidden
+            />
+          )}
+          <span
+            className={
+              "agent-crumb__seg" +
+              (i === segments.length - 1 ? " agent-crumb__seg--active" : "")
+            }
+          >
+            {seg}
+          </span>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -457,70 +633,169 @@ function ModelInUseLabel({ current, status }: ModelInUseLabelProps) {
 
 type ConversationListProps = {
   conversations: AgentConversation[];
+  elsewhereChats: AgentConversation[];
+  elsewhereLoading: boolean;
+  searchActive: boolean;
   loading: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (c: AgentConversation) => void;
   onDelete: (id: string) => void;
+  onOpenPalette: () => void;
 };
 
-function ConversationList({ conversations, loading, onSelect, onDelete }: ConversationListProps) {
+function ConversationList({
+  conversations,
+  elsewhereChats,
+  elsewhereLoading,
+  searchActive,
+  loading,
+  onSelect,
+  onDelete,
+  onOpenPalette
+}: ConversationListProps) {
   if (loading)
     return (
       <Text c="dimmed" p="md" size="sm">
         Loading…
       </Text>
     );
-  if (conversations.length === 0) {
-    return (
-      <Text c="dimmed" p="md" size="sm">
-        No chats on this page yet. Send a message below to start a new one.
-      </Text>
-    );
-  }
   return (
     <Stack gap={0} className="agent-conversations">
-      {conversations.map((c) => (
-        <Group
-          key={c.id}
-          gap="xs"
-          wrap="nowrap"
-          align="flex-start"
-          px="sm"
-          py="xs"
-          style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
+      <div className="agent-conversations__lbl">
+        <span>On this page · {conversations.length}</span>
+        <button
+          type="button"
+          className="agent-conversations__link"
+          onClick={onOpenPalette}
         >
-          <Box
-            component="button"
-            type="button"
-            onClick={() => onSelect(c.id)}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              textAlign: "left",
-              background: "transparent",
-              border: 0,
-              padding: 0,
-              cursor: "pointer"
-            }}
-          >
-            <Text fw={600} size="sm" truncate>
-              {c.title ?? "Untitled chat"}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {c.lastMessageAtUtc ? new Date(c.lastMessageAtUtc).toLocaleString() : "(empty)"}
-            </Text>
-          </Box>
-          <ActionIcon
-            variant="subtle"
-            color="red"
-            size="sm"
-            aria-label={`Delete ${c.title ?? "chat"}`}
-            onClick={() => onDelete(c.id)}
-          >
-            <i className="fa fa-trash" />
-          </ActionIcon>
-        </Group>
+          <i className="fa fa-layer-group" aria-hidden /> Search every page
+        </button>
+      </div>
+
+      {conversations.length === 0 && (
+        <div className="agent-conversations__empty">
+          <i className="fa-regular fa-comment-dots" aria-hidden />
+          <div>
+            {searchActive
+              ? "No chats on this page match."
+              : "No chats on this page yet."}
+          </div>
+          <Text size="xs" c="dimmed">
+            {searchActive ? (
+              <button
+                type="button"
+                className="agent-conversations__link"
+                onClick={onOpenPalette}
+              >
+                Try searching every page →
+              </button>
+            ) : (
+              "Send a message below to start a new one."
+            )}
+          </Text>
+        </div>
+      )}
+
+      {conversations.map((c) => (
+        <ChatRow key={c.id} chat={c} onSelect={onSelect} onDelete={onDelete} />
       ))}
+
+      {searchActive && (
+        <>
+          <div className="agent-conversations__lbl">
+            <span>
+              Across the system ·{" "}
+              {elsewhereLoading ? "…" : elsewhereChats.length}
+            </span>
+            <button
+              type="button"
+              className="agent-conversations__link"
+              onClick={onOpenPalette}
+            >
+              Open search <i className="fa fa-arrow-right" aria-hidden />
+            </button>
+          </div>
+          {elsewhereChats.map((c) => (
+            <ChatRow
+              key={c.id}
+              chat={c}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              showCrumb
+            />
+          ))}
+        </>
+      )}
     </Stack>
+  );
+}
+
+type ChatRowProps = {
+  chat: AgentConversation;
+  showCrumb?: boolean;
+  onSelect: (c: AgentConversation) => void;
+  onDelete: (id: string) => void;
+};
+
+function ChatRow({ chat, showCrumb, onSelect, onDelete }: ChatRowProps) {
+  return (
+    <Group
+      gap="xs"
+      wrap="nowrap"
+      align="flex-start"
+      px="sm"
+      py={8}
+      className="agent-conversations__row"
+    >
+      <Box
+        component="button"
+        type="button"
+        onClick={() => onSelect(chat)}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          textAlign: "left",
+          background: "transparent",
+          border: 0,
+          padding: 0,
+          cursor: "pointer"
+        }}
+      >
+        <Text fw={600} size="sm" truncate>
+          {chat.title ?? "Untitled chat"}
+        </Text>
+        {chat.lastMessagePreview && (
+          <Text size="xs" c="dimmed" lineClamp={2} className="agent-conversations__row-preview">
+            {chat.lastMessagePreview}
+          </Text>
+        )}
+        <div className="agent-conversations__row-meta">
+          <Text size="xs" c="dimmed" component="span">
+            {chat.lastMessageAtUtc
+              ? new Date(chat.lastMessageAtUtc).toLocaleString()
+              : "(empty)"}
+          </Text>
+          {showCrumb && (
+            <>
+              <Text size="xs" c="dimmed" component="span">
+                ·
+              </Text>
+              <span className="agent-conversations__row-crumb">
+                <i className="fa fa-link" aria-hidden /> {pageKeyLabel(chat.pageKey)}
+              </span>
+            </>
+          )}
+        </div>
+      </Box>
+      <ActionIcon
+        variant="subtle"
+        color="red"
+        size="sm"
+        aria-label={`Delete ${chat.title ?? "chat"}`}
+        onClick={() => onDelete(chat.id)}
+      >
+        <i className="fa fa-trash" />
+      </ActionIcon>
+    </Group>
   );
 }
 

@@ -9,6 +9,9 @@ export type AgentConversation = {
   createdAtUtc: string;
   updatedAtUtc: string;
   lastMessageAtUtc: string | null;
+  // First ~200 chars of the most recent non-summary message. Populated by
+  // /api/agent/conversations list calls; null for other endpoints.
+  lastMessagePreview: string | null;
 };
 
 export type AgentMessageContentBlock =

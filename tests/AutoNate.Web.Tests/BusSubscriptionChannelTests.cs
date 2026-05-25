@@ -309,6 +309,126 @@ public sealed class BusSubscriptionChannelTests
         AssertOnlyRejected(ack, expectedCode: "forbidden");
     }
 
+    // ---------- Project / cabinet / notebook ancestor fan-out ----------
+
+    [Fact]
+    public async Task Cabinet_Project_Notebook_Rejected_For_NonSuperAdmin_Without_View()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(AuthFull);
+        using var ws = await ConnectAsync(factory);
+        using var cts = TestTimeout();
+
+        foreach (var channel in new[]
+        {
+            $"project:{Guid.NewGuid()}",
+            $"cabinet:{Guid.NewGuid()}",
+            $"notebook:{Guid.NewGuid()}",
+        })
+        {
+            var ack = await SubscribeAsync(ws, channel, new[] { channel }, cts.Token);
+            AssertOnlyRejected(ack, expectedCode: "forbidden");
+        }
+    }
+
+    [Fact]
+    public async Task NotebookCreated_Event_FansOutToCabinetAndProjectChannels()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(AuthFull);
+        await PromoteToSuperAdmin(factory);
+        var (projectId, cabinetId, notebookId) = await SeedProjectCabinetNotebookAsync(factory);
+
+        using var ws = await ConnectAsync(factory);
+        using var cts = TestTimeout();
+
+        var channels = new[]
+        {
+            $"project:{projectId}",
+            $"cabinet:{cabinetId}",
+            $"notebook:{notebookId}",
+        };
+        var ack = await SubscribeAsync(ws, "ancestor-fanout", channels, cts.Token);
+        foreach (var c in channels) AssertSubscribed(ack, c);
+
+        // NotebookCreated event for the seeded notebook should fan out to:
+        //   notebook:{notebookId} (the leaf itself)
+        //   cabinet:{cabinetId}   (closure ancestor)
+        //   project:{projectId}   (closure ancestor)
+        var payload = JsonSerializer.Serialize(new
+        {
+            eventType = "content.notebook.created",
+            resourceKind = "notebook",
+            resource = new { id = notebookId.ToString(), cabinetId = cabinetId.ToString(), name = "Test Notebook" },
+        });
+        await PublishBusMessageAsync(factory, ContentEventTopic.TopicName, payload);
+
+        var received = new HashSet<string>(StringComparer.Ordinal);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(3);
+        while (received.Count < 3 && DateTimeOffset.UtcNow < deadline)
+        {
+            var frame = await ReceiveJsonAsync(ws, cts.Token);
+            if (frame.GetProperty("type").GetString() == "event")
+            {
+                received.Add(frame.GetProperty("channel").GetString()!);
+            }
+        }
+        Assert.Contains($"notebook:{notebookId}", received);
+        Assert.Contains($"cabinet:{cabinetId}", received);
+        Assert.Contains($"project:{projectId}", received);
+    }
+
+    private static async Task<(Guid ProjectId, Guid CabinetId, Guid NotebookId)>
+        SeedProjectCabinetNotebookAsync(AutoNateWebApplicationFactory factory)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider
+            .GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+        var treeService = scope.ServiceProvider.GetRequiredService<IContentTreeService>();
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var now = DateTime.UtcNow;
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Name = "FanoutProject",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedBy = AdminUserId,
+            UpdatedBy = AdminUserId,
+            DeletionsLocked = false,
+            IsArchived = false,
+        };
+        var cabinet = new Cabinet
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = project.Id,
+            Name = "FanoutCabinet",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedBy = AdminUserId,
+            UpdatedBy = AdminUserId,
+            IsArchived = false,
+        };
+        var notebook = new Notebook
+        {
+            Id = Guid.NewGuid(),
+            CabinetId = cabinet.Id,
+            Name = "FanoutNotebook",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedBy = AdminUserId,
+            UpdatedBy = AdminUserId,
+            IsArchived = false,
+        };
+        db.Projects.Add(project);
+        db.Cabinets.Add(cabinet);
+        db.Notebooks.Add(notebook);
+        await db.SaveChangesAsync();
+        await treeService.InsertSelfWithAncestorsAsync(db, ContentKinds.Project, project.Id, default);
+        await treeService.InsertSelfWithAncestorsAsync(db, ContentKinds.Cabinet, cabinet.Id, default);
+        await treeService.InsertSelfWithAncestorsAsync(db, ContentKinds.Notebook, notebook.Id, default);
+        return (project.Id, cabinet.Id, notebook.Id);
+    }
+
     // ---------- helpers ----------
 
     private static CancellationTokenSource TestTimeout() =>

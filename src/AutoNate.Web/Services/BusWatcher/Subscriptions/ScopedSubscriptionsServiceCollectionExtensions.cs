@@ -13,6 +13,7 @@ public static class ScopedSubscriptionsServiceCollectionExtensions
         services.AddSingleton<ChannelSubscribeGateRegistry>();
         services.AddSingleton<SubscriptionManager>();
         services.AddSingleton<AuthChangeListener>();
+        services.AddSingleton<ContentAncestorCache>();
 
         // Resolvers (per-topic and the firehose fallback). New resolvers are
         // added here as later phases land their channels.
@@ -35,6 +36,9 @@ public static class ScopedSubscriptionsServiceCollectionExtensions
         services.AddSingleton<IChannelSubscribeGate, WorkflowTasksListChannelSubscribeGate>();
         services.AddSingleton<IChannelSubscribeGate, MyTasksListChannelSubscribeGate>();
         services.AddSingleton<IChannelSubscribeGate, PageChannelSubscribeGate>();
+        services.AddSingleton<IChannelSubscribeGate, NotebookChannelSubscribeGate>();
+        services.AddSingleton<IChannelSubscribeGate, CabinetChannelSubscribeGate>();
+        services.AddSingleton<IChannelSubscribeGate, ProjectChannelSubscribeGate>();
         services.AddSingleton<IChannelSubscribeGate, ExternalConnectionChannelSubscribeGate>();
 
         return services;

@@ -1,7 +1,8 @@
 import * as Y from "yjs";
 import { ServerBlockNoteEditor } from "@blocknote/server-util";
-import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
+import { BlockNoteSchema, defaultBlockSpecs, type PartialBlock } from "@blocknote/core";
 import { noteEmbedServerSpec } from "./noteEmbedStub.js";
+import type pg from "pg";
 
 // Each materializer reads a Yjs document and produces the JSON string that
 // .NET will store in `body_jsonb` (pages) or `content_jsonb` (notes). The
@@ -88,6 +89,66 @@ function yMapToPojo(map: Y.Map<unknown>): Record<string, unknown> {
     out[key] = value;
   });
   return out;
+}
+
+// First-load seeding: when Hocuspocus opens a `page:` or `note:` Y.Doc for
+// the first time (no row in `yjs_documents`) and the corresponding
+// `pages.body_jsonb` / `notes.content_jsonb` mirror already has BlockNote
+// blocks (typically because the page was created via the chatbot's
+// `create_page_from_markdown` tool or the REST POST with a populated
+// bodyJsonb), hydrate the Y.Doc from that mirror so the editor opens with
+// content instead of a blank canvas. Returns true if seeding ran (caller
+// should persist the seeded state to `yjs_documents`), false otherwise.
+//
+// Only `page:<uuid>` and `note:<uuid>` (richtext notes) are seeded — the
+// drawing/diagram note kinds have different content shapes and aren't on
+// the chatbot's create path.
+export async function trySeedFromBodyMirror(
+  pool: pg.Pool,
+  documentName: string,
+  targetDoc: Y.Doc
+): Promise<boolean> {
+  const sep = documentName.indexOf(":");
+  if (sep <= 0) return false;
+  const prefix = documentName.slice(0, sep);
+  const id = documentName.slice(sep + 1);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return false;
+
+  let bodyJson: string | null = null;
+  if (prefix === "page") {
+    const r = await pool.query<{ body_jsonb: string | null }>(
+      "SELECT body_jsonb::text AS body_jsonb FROM pages WHERE id = $1",
+      [id]
+    );
+    if (r.rowCount === 1) bodyJson = r.rows[0].body_jsonb;
+  } else if (prefix === "note") {
+    const r = await pool.query<{ content_jsonb: string | null; note_kind: string }>(
+      "SELECT content_jsonb::text AS content_jsonb, note_kind FROM notes WHERE id = $1",
+      [id]
+    );
+    if (r.rowCount === 1 && r.rows[0].note_kind === "richtext") {
+      bodyJson = r.rows[0].content_jsonb;
+    }
+  } else {
+    return false;
+  }
+  if (!bodyJson) return false;
+
+  let blocks: PartialBlock[];
+  try {
+    const parsed = JSON.parse(bodyJson);
+    if (!Array.isArray(parsed) || parsed.length === 0) return false;
+    blocks = parsed as PartialBlock[];
+  } catch {
+    return false;
+  }
+
+  // blocksToYDoc returns a fresh Y.Doc; we encode it as an update and apply
+  // it to the target doc that Hocuspocus handed us. Fragment name MUST
+  // match the SPA-side `useBlockNoteWithYjs` ("document-store").
+  const seedDoc = serverBlockNoteEditor.blocksToYDoc(blocks, "document-store");
+  Y.applyUpdate(targetDoc, Y.encodeStateAsUpdate(seedDoc));
+  return true;
 }
 
 // Picks the right materializer for a given document name. Unknown

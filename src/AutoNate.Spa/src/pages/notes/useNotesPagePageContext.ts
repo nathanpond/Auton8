@@ -6,6 +6,7 @@ import type {
   PageQueryResult,
   PageSnapshot
 } from "@/agent/pageContext/types";
+import { getPageBodyEditor } from "@/lib/blocknote/pageBodyEditorRegistry";
 
 const PAGE_KEY = "notes";
 const SCHEMA_VERSION = 1;
@@ -78,7 +79,21 @@ export function useNotesPagePageContext(options: Options): void {
         notebooksInCabinet: o.notebooks.filter((n) => n.cabinetId === o.activeCabinetId),
         pagesInActiveNotebook: activeNotebook
           ? o.pages.filter((p) => p.notebookId === activeNotebook.id)
-          : []
+          : [],
+        // Topics the model can fetch via query_page. Listing them in the
+        // snapshot is what lets the model discover them without us having
+        // to bake them into the system prompt.
+        queryTopics: [
+          {
+            topic: "page_body",
+            description:
+              "Live BlockNote body of the currently open page (or a specified pageId), including unsaved edits. args: { format?: 'markdown'|'blocks'|'text' = 'markdown', pageId?: string }."
+          },
+          {
+            topic: "selection.live",
+            description: "Latest activeProjectId / activeCabinetId / activePageId selections."
+          }
+        ]
       }
     };
   }, []);
@@ -95,6 +110,44 @@ export function useNotesPagePageContext(options: Options): void {
             activePageId: o.activePageId
           }
         };
+      }
+      case "page_body": {
+        // Read the live BlockNote document for the active page — including
+        // any unsaved edits. Optional args.format = "markdown" | "blocks"
+        // (default "markdown") trades fidelity (blocks JSON) for size and
+        // model-friendliness (markdown). Optional args.pageId targets a
+        // specific page; defaults to the active page.
+        const o = optsRef.current;
+        const format =
+          typeof req.args?.format === "string"
+            ? (req.args.format as "markdown" | "blocks" | "text")
+            : "markdown";
+        const targetPageId =
+          typeof req.args?.pageId === "string" ? req.args.pageId : o.activePageId;
+        if (!targetPageId) {
+          return { ok: false, error: "no_active_page", message: "No page is currently open in the editor." };
+        }
+        const editor = getPageBodyEditor(targetPageId);
+        if (!editor) {
+          return {
+            ok: false,
+            error: "editor_unavailable",
+            message: `No live editor is mounted for page '${targetPageId}'. Open the page in the Notes tab and retry, or fetch the saved body via the records API.`
+          };
+        }
+        const blocks = editor.document;
+        if (format === "blocks") {
+          return { ok: true, data: { pageId: targetPageId, format, blocks } };
+        }
+        if (format === "text") {
+          // Flatten to plain text — strips formatting, useful for token-tight
+          // summarisation prompts.
+          const text = await editor.blocksToMarkdownLossy(blocks);
+          return { ok: true, data: { pageId: targetPageId, format, text } };
+        }
+        // Default: markdown.
+        const markdown = await editor.blocksToMarkdownLossy(blocks);
+        return { ok: true, data: { pageId: targetPageId, format: "markdown", markdown } };
       }
       default:
         return { ok: false, error: "unknown_topic", message: `NotesPage does not handle topic '${req.topic}'.` };

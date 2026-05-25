@@ -164,4 +164,61 @@ public sealed class MarkdownToBlockNoteConverterTests
         // single text run.
         Assert.Equal(1, content.GetArrayLength());
     }
+
+    [Fact]
+    public void pipe_table_converts_to_blocknote_table_block_with_header_row()
+    {
+        const string md = """
+            | Name | Score |
+            | ---- | ----- |
+            | Alpha | 10 |
+            | Beta  | 20 |
+            """;
+        var doc = Converter.Convert(md);
+        Assert.Equal(1, doc.GetArrayLength());
+        var table = doc[0];
+        Assert.Equal("table", table.GetProperty("type").GetString());
+
+        var content = table.GetProperty("content");
+        Assert.Equal("tableContent", content.GetProperty("type").GetString());
+        Assert.Equal(1, content.GetProperty("headerRows").GetInt32());
+
+        // 3 rows total: 1 header + 2 body.
+        var rows = content.GetProperty("rows");
+        Assert.Equal(3, rows.GetArrayLength());
+
+        // columnWidths has one entry per column.
+        Assert.Equal(2, content.GetProperty("columnWidths").GetArrayLength());
+
+        // First cell of the header row is "Name", as a tableCell with one
+        // text run inside its content array.
+        var firstCell = rows[0].GetProperty("cells")[0];
+        Assert.Equal("tableCell", firstCell.GetProperty("type").GetString());
+        var firstCellContent = firstCell.GetProperty("content");
+        Assert.Equal(JsonValueKind.Array, firstCellContent.ValueKind);
+        Assert.Equal("Name", firstCellContent[0].GetProperty("text").GetString());
+
+        // Body cell "Alpha" sits in row 1, column 0.
+        var alpha = rows[1].GetProperty("cells")[0].GetProperty("content")[0];
+        Assert.Equal("Alpha", alpha.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public void pipe_table_preserves_inline_styles_inside_cells()
+    {
+        // Bold + code styling should round-trip through the cell's inline content.
+        const string md = """
+            | A | B |
+            | --- | --- |
+            | **bold** | `code` |
+            """;
+        var doc = Converter.Convert(md);
+        var rows = doc[0].GetProperty("content").GetProperty("rows");
+        var boldCell = rows[1].GetProperty("cells")[0].GetProperty("content")[0];
+        Assert.Equal("bold", boldCell.GetProperty("text").GetString());
+        Assert.True(boldCell.GetProperty("styles").GetProperty("bold").GetBoolean());
+        var codeCell = rows[1].GetProperty("cells")[1].GetProperty("content")[0];
+        Assert.Equal("code", codeCell.GetProperty("text").GetString());
+        Assert.True(codeCell.GetProperty("styles").GetProperty("code").GetBoolean());
+    }
 }

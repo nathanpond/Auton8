@@ -179,24 +179,56 @@ public sealed class MarkdownToBlockNoteConverter : IMarkdownToBlockNoteConverter
                 break;
             case Table table:
                 {
-                    // Tables degrade to a paragraph with the cell text joined by
-                    // pipes — keeps the data visible while a proper table block
-                    // mapping waits for a future phase. (BlockNote tables have a
-                    // very different content model.)
+                    // Render as a BlockNote `table` block. Cell inline content
+                    // mirrors what a `paragraph` would produce, so bold/italic/
+                    // code/link runs inside cells round-trip. Markdig marks the
+                    // first row(s) of a GFM pipe table with IsHeader=true; we
+                    // count those into headerRows so BlockNote shades them.
+                    var rowsOut = new List<object>();
+                    int columnCount = 0;
+                    int headerRows = 0;
+                    bool stillHeader = true;
                     foreach (var row in table)
                     {
                         if (row is not TableRow tr) continue;
-                        var cells = new List<string>();
-                        foreach (var cell in tr)
+                        if (tr.IsHeader && stillHeader) headerRows++;
+                        else stillHeader = false;
+
+                        var cellsOut = new List<object>();
+                        foreach (var child in tr)
                         {
-                            if (cell is TableCell tc)
-                            {
-                                cells.Add(ExtractPlainText(tc));
-                            }
+                            if (child is not TableCell tc) continue;
+                            cellsOut.Add(BuildTableCell(tc));
                         }
-                        var line = string.Join(" | ", cells);
-                        output.Add(MakeBlock("paragraph", new[] { MakeText(line, styles: null) }));
+                        if (cellsOut.Count > columnCount) columnCount = cellsOut.Count;
+                        rowsOut.Add(new Dictionary<string, object?>
+                        {
+                            ["cells"] = cellsOut
+                        });
                     }
+
+                    if (rowsOut.Count == 0) break;
+
+                    // BlockNote expects one columnWidths entry per column. Use
+                    // null so it auto-sizes — matches what the editor produces
+                    // for tables created in the UI.
+                    var columnWidths = new object?[columnCount];
+
+                    var tableContent = new Dictionary<string, object?>
+                    {
+                        ["type"] = "tableContent",
+                        ["columnWidths"] = columnWidths,
+                        ["headerRows"] = headerRows,
+                        ["rows"] = rowsOut
+                    };
+                    output.Add(new Dictionary<string, object?>
+                    {
+                        ["id"] = Guid.NewGuid().ToString("N"),
+                        ["type"] = "table",
+                        ["props"] = new Dictionary<string, object?>(),
+                        ["content"] = tableContent,
+                        ["children"] = Array.Empty<object>()
+                    });
                     break;
                 }
             default:
@@ -205,6 +237,43 @@ public sealed class MarkdownToBlockNoteConverter : IMarkdownToBlockNoteConverter
                 output.Add(MakeBlock("paragraph", Array.Empty<object>()));
                 break;
         }
+    }
+
+    // Build a single BlockNote table cell. Cells in markdig pipe tables are
+    // ContainerBlocks containing a ParagraphBlock with the cell's inlines;
+    // we extract those inlines so styled runs (bold/italic/code/link) survive
+    // the round-trip. If the cell has multiple paragraphs (rare — GFM doesn't
+    // really allow it), join their inline content with newlines.
+    private static Dictionary<string, object?> BuildTableCell(TableCell cell)
+    {
+        var inlines = new List<object>();
+        foreach (var child in cell)
+        {
+            if (child is ParagraphBlock p)
+            {
+                if (inlines.Count > 0) inlines.Add(MakeText("\n", styles: null));
+                inlines.AddRange(InlineContent(p.Inline));
+            }
+        }
+        if (inlines.Count == 0)
+        {
+            // BlockNote rejects fully empty cell content arrays during parse;
+            // emit an empty-text run so the cell renders as blank.
+            inlines.Add(MakeText(string.Empty, styles: null));
+        }
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "tableCell",
+            ["props"] = new Dictionary<string, object?>
+            {
+                ["backgroundColor"] = "default",
+                ["textColor"] = "default",
+                ["textAlignment"] = "left",
+                ["colspan"] = 1,
+                ["rowspan"] = 1
+            },
+            ["content"] = inlines
+        };
     }
 
     private static IReadOnlyList<object> InlineContent(ContainerInline? container)

@@ -29,6 +29,16 @@ public interface IChannelResolver
     string Topic { get; }
 
     IReadOnlyList<ResolvedDelivery> Resolve(BusWatcherStreamService.BusWatcherMessage message);
+
+    // Async hook for resolvers that need I/O (e.g. ancestor closure lookups)
+    // to decide their channel fan-out. The default falls through to the sync
+    // path so existing resolvers don't need updating. Override only when the
+    // delivery list can't be computed purely from the payload.
+    Task<IReadOnlyList<ResolvedDelivery>> ResolveAsync(
+        BusWatcherStreamService.BusWatcherMessage message,
+        IServiceProvider services,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(Resolve(message));
 }
 
 public static class ChannelResolverTopics
