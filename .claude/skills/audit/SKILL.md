@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run a focused codebase audit. Sub-audits today are `security`, `authorization`, `performance`, `stability`, `cleanup`. Type `/audit` with no argument (or `/audit --help`) to see the current menu. Designed as a dispatcher so adding a new audit type only requires creating a sibling `audit-<name>` skill and a one-line entry below.
+description: Run a focused codebase audit. Sub-audits today are `security`, `authorization`, `performance`, `stability`, `cleanup`, `508`. Type `/audit` with no argument (or `/audit --help`) to see the current menu. Designed as a dispatcher so adding a new audit type only requires creating a sibling `audit-<name>` skill and a one-line entry below.
 ---
 
 # /audit dispatcher
@@ -16,6 +16,7 @@ description: Run a focused codebase audit. Sub-audits today are `security`, `aut
 | `performance` | Hot-path scaling: N+1 queries, load-all-then-filter, missing/unused indexes, per-request DB calls that should be cached, sync-over-async, unbounded materialization, threadpool starvation. |
 | `stability` | Crash/hang/leak/silent-failure surface: async void, BackgroundService loops without try/catch, swallowed exceptions, fire-and-forget Task.Run, IDisposable misuse, race conditions on singleton state, missing timeouts/cancellation, cancellation-token propagation. |
 | `cleanup` | Maintenance debt: dead code (C# + TS, with mandatory verification protocol), files that don't belong in source control, stale comments referencing renamed/removed APIs, duplicated helpers, TODO/FIXME markers in shipped paths, skill/code drift, broken file references, stale auto-memory entries. |
+| `508` | Section 508 / WCAG 2.0 AA accessibility: missing alt text, icon-only buttons without accessible names, keyboard traps, focus management in modals/menus, heading hierarchy, form-label association, color contrast in `SiteAppearance`, ARIA landmarks, live-region usage on toasts/loading, `mantine-datatable` semantics, `prefers-reduced-motion` honoring, tooling gaps (`eslint-plugin-jsx-a11y`, `axe-core`). |
 
 ## Dispatch
 
@@ -31,11 +32,12 @@ The user invoked this skill with the trailing argument string captured by the ha
    Skill(skill="audit-performance")     # for /audit performance
    Skill(skill="audit-stability")       # for /audit stability
    Skill(skill="audit-cleanup")         # for /audit cleanup
+   Skill(skill="audit-508")             # for /audit 508 (also accept aliases: a11y, accessibility, wcag)
    ```
 
    The sub-skill's instructions take over from there. Pass any remaining arguments through if the sub-audit accepts them (e.g. `/audit security --since=v1.4` would forward `--since=v1.4`).
 
-3. **An unknown sub-audit** — don't guess. Print the available list, suggest the closest match if one is obvious (Levenshtein-ish judgment is fine; `secur` → `security`, `auth` → `authorization`, `perf` → `performance`, `clean` → `cleanup`), and stop.
+3. **An unknown sub-audit** — don't guess. Print the available list, suggest the closest match if one is obvious (Levenshtein-ish judgment is fine; `secur` → `security`, `auth` → `authorization`, `perf` → `performance`, `clean` → `cleanup`, `a11y`/`accessibility`/`wcag` → `508`), and stop.
 
 ## Adding a new sub-audit
 
