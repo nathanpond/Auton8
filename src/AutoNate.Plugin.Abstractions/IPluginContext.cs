@@ -44,6 +44,12 @@ public interface IPluginContext
     // built-in projections.
     IPluginProjections Projections { get; }
 
+    // Helpers for contributing chatbot tools to the host's agent. Each
+    // registered tool appears in the host's tool catalog on the next
+    // request after Configure completes; disabling the plugin sweeps every
+    // tool the plugin added.
+    IPluginAgentSkills AgentSkills { get; }
+
     // Host services for cross-cutting needs (logging, etc.). The host wraps
     // its root provider in an allowlist before handing it over, so only a
     // curated set of safe types resolve — currently ILoggerFactory,

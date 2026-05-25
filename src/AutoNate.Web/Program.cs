@@ -32,6 +32,7 @@ using AutoNate.Web.Services.Flowable;
 using AutoNate.Web.Services.Forms;
 using AutoNate.Web.Services.Menus;
 using AutoNate.Web.Services.Nats;
+using AutoNate.Web.Services.Notes;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Records.Fields;
@@ -455,6 +456,52 @@ builder.Services.AddHttpClient("agent.websearch", c =>
 // query_page) self-degrade when no snapshot is present on the conversation.
 builder.Services.AddScoped<IAgentSkill, InspectPageSkill>();
 
+// Phase 1 read-coverage skills. Each tool routes through stores that already
+// gate by the caller's principal (IContentAuthorizer for notes, ILocal*Store
+// for users, IPermissionGrantStore for grants, IFlowableClient + the
+// IInstanceAuthorizer registry for executions, INotificationStore for
+// per-user inbox).
+builder.Services.AddScoped<IAgentSkill, LookupNotesSkill>();
+builder.Services.AddScoped<IAgentSkill, LookupAqlSkill>();
+builder.Services.AddScoped<IAgentSkill, LookupWorkflowExecutionsSkill>();
+builder.Services.AddScoped<IAgentSkill, LookupPermissionsSkill>();
+builder.Services.AddScoped<IAgentSkill, LookupDirectorySkill>();
+builder.Services.AddScoped<IAgentSkill, LookupNotificationsSkill>();
+
+// Phase 2 AQL write-help. Pairs with LookupAqlSkill (grammar + schema) and
+// InspectPageSkill.apply_page_action (insert into the QueryPage editor).
+builder.Services.AddScoped<IAgentSkill, AqlAssistSkill>();
+
+// Phase 3 Markdown → BlockNote converter. Pure (no I/O); used by
+// ManageNotesSkill.create_page_from_markdown so the agent can drop a
+// markdown summary into a new BlockNote page in one tool call. Existing
+// pages are Yjs-managed, so edits on already-mounted pages go through
+// the NotesPage page-action handler (SPA-side BlockNote markdown parse).
+builder.Services.AddSingleton<IMarkdownToBlockNoteConverter, MarkdownToBlockNoteConverter>();
+
+// Phase 3 manage-skills. Each follows the same confirm-gate envelope
+// (Skills/Internal/ConfirmGate.cs) and gates writes through the same
+// authorizer paths the corresponding REST endpoints use.
+builder.Services.AddScoped<IAgentSkill, ManageNotesSkill>();
+builder.Services.AddScoped<IAgentSkill, ManageSavedQueriesSkill>();
+builder.Services.AddScoped<IAgentSkill, OperateWorkflowExecutionsSkill>();
+builder.Services.AddScoped<IAgentSkill, ManagePermissionsSkill>();
+builder.Services.AddScoped<IAgentSkill, SendNotificationsSkill>();
+
+// Phase 5a — operate gaps (projections, plugins admin, external connections,
+// site settings + event catalog, record edges). Each mirrors the existing
+// REST endpoint's authorization gate.
+builder.Services.AddScoped<IAgentSkill, ProjectionsSkill>();
+builder.Services.AddScoped<IAgentSkill, PluginsAdminSkill>();
+builder.Services.AddScoped<IAgentSkill, ExternalConnectionsSkill>();
+builder.Services.AddScoped<IAgentSkill, SiteSettingsSkill>();
+builder.Services.AddScoped<IAgentSkill, ManageRecordEdgesSkill>();
+
+// Phase 5b — design-surface read coverage (dashboards / forms / workflow
+// models / appearance). Writes for these surfaces go through the SPA editors;
+// form-fill auto-discovery handles the rest via InspectPageSkill.
+builder.Services.AddScoped<IAgentSkill, DesignSurfacesLookupSkill>();
+
 builder.Services.AddScoped<ISkillRegistry, SkillRegistry>();
 
 // Page-query bridge: a singleton router that holds in-flight TaskCompletionSource
@@ -637,6 +684,13 @@ builder.Services.AddSingleton<PluginSchemaProvisioner>();
 builder.Services.AddSingleton<PluginDataAccessRegistry>();
 builder.Services.AddSingleton<PluginMigrationRunner>();
 builder.Services.AddSingleton<AutoNate.Web.Plugins.PluginScheduledJobRegistry>();
+// Singleton store of plugin-contributed chatbot tools. Read per-request via
+// the scoped PluginContributedSkill below, so newly-enabled plugin tools
+// surface in the next conversation turn without a restart.
+builder.Services.AddSingleton<AutoNate.Web.Plugins.PluginAgentSkillRegistry>();
+// Single IAgentSkill aggregator that snapshots the plugin registry on each
+// per-request construction. SkillRegistry picks it up like any other skill.
+builder.Services.AddScoped<IAgentSkill, PluginContributedSkill>();
 builder.Services.AddScoped<IPluginManagementService, PluginManagementService>();
 builder.Services.AddHostedService<PluginHostedService>();
 builder.Services.AddHostedService<AutoNate.Web.Plugins.PluginScheduledJobsHostedService>();

@@ -33,6 +33,7 @@
       <PackageReference Include="Dapr.AspNetCore" Version="1.17.9" />
       <PackageReference Include="Dapr.Client" Version="1.17.9" />
       <PackageReference Include="Dapr.Messaging" Version="1.17.9" />
+      <PackageReference Include="Markdig" Version="0.37.0" />
       <PackageReference Include="Microsoft.AspNetCore.SpaProxy" Version="10.0.7" />
       <PackageReference Include="NATS.Client.JetStream" Version="2.5.10" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
@@ -76,14 +77,10 @@
       MSBuild escape for `,` in Include/Update attributes.
     -->
     <ItemGroup>
-      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_ABAP_environment.svg"
-               TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_ABAP_environment.svg" />
-      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Cloud_Foundry_runtime.svg"
-               TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Cloud_Foundry_runtime.svg" />
-      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Kyma_runtime.svg"
-               TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Kyma_runtime.svg" />
-      <Content Update="wwwroot\drawio\img\lib\sap\SAP_Cloud_Identity%2C_SAP_Malware_Scanning_Service.svg"
-               TargetPath="wwwroot\drawio\img\lib\sap\SAP_Cloud_Identity%2C_SAP_Malware_Scanning_Service.svg" />
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_ABAP_environment.svg" TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_ABAP_environment.svg" />
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Cloud_Foundry_runtime.svg" TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Cloud_Foundry_runtime.svg" />
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Kyma_runtime.svg" TargetPath="wwwroot\drawio\img\lib\sap\SAP_BTP%2C_Kyma_runtime.svg" />
+      <Content Update="wwwroot\drawio\img\lib\sap\SAP_Cloud_Identity%2C_SAP_Malware_Scanning_Service.svg" TargetPath="wwwroot\drawio\img\lib\sap\SAP_Cloud_Identity%2C_SAP_Malware_Scanning_Service.svg" />
     </ItemGroup>
 
     <Target Name="BuildReactSpa" BeforeTargets="ResolveStaticWebAssetsInputs;AssignTargetPaths;BeforeBuild" Condition="'$(BuildSpa)' == 'true'" Inputs="@(SpaInput)" Outputs="$(SpaPublishDir)index.html">

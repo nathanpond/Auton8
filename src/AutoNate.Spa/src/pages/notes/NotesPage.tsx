@@ -54,6 +54,7 @@ import { ProjectSettingsModal } from "./ProjectSettingsModal";
 import { EditorTab, NotebookWithPages, PageTreeNode, flattenToTree, tabsForPage } from "./types";
 import { useYjsNotesList } from "@/lib/yjs/useYjsNotesList";
 import { WireNoteKind, notesTheme } from "./notesTheme";
+import { useNotesPagePageContext } from "./useNotesPagePageContext";
 import "./notes.css";
 
 // Notes page — the SPA entry point at /notes. Lives inside <AppShell.Main>
@@ -592,6 +593,27 @@ export default function NotesPage() {
       };
     });
   };
+
+  // Chatbot page-awareness. Exposes the user's current selection (project →
+  // cabinet → notebook → page) so manage-notes tools can default-fill ids.
+  // No imperative actions yet — page-body edits live in Yjs and require a
+  // dedicated editor-binding pass (see useNotesPagePageContext header).
+  useNotesPagePageContext({
+    activeProjectId,
+    activeCabinetId,
+    activePageId,
+    projects: projects.map((p) => ({ id: p.id, name: p.name })),
+    cabinets: cabinets.map((c) => ({ id: c.id, projectId: c.projectId, name: c.name })),
+    notebooks: notebooksWithPages.map((n) => ({ id: n.id, cabinetId: n.cabinetId, name: n.name })),
+    pages: notebooksWithPages.flatMap((nb) =>
+      nb.pages.map((p) => ({
+        id: p.id,
+        notebookId: nb.id,
+        parentPageId: p.parentPageId ?? null,
+        title: p.title
+      }))
+    )
+  });
 
   return (
     <div

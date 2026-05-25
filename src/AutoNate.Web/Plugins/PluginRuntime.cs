@@ -31,6 +31,7 @@ public sealed class PluginRuntime
     private readonly IDbContextFactory<AutoNateDbContext>? _dbFactory;
     private readonly IWorkflowBehaviorRegistry? _behaviorRegistry;
     private readonly PluginScheduledJobRegistry? _scheduledJobRegistry;
+    private readonly PluginAgentSkillRegistry? _agentSkillRegistry;
     private readonly IDataPaths _dataPaths;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginRuntime> _log;
@@ -56,7 +57,8 @@ public sealed class PluginRuntime
         PluginMigrationRunner? migrationRunner = null,
         IDbContextFactory<AutoNateDbContext>? dbFactory = null,
         IWorkflowBehaviorRegistry? behaviorRegistry = null,
-        PluginScheduledJobRegistry? scheduledJobRegistry = null)
+        PluginScheduledJobRegistry? scheduledJobRegistry = null,
+        PluginAgentSkillRegistry? agentSkillRegistry = null)
     {
         _registrar = registrar;
         _hostServices = hostServices;
@@ -65,6 +67,7 @@ public sealed class PluginRuntime
         _dbFactory = dbFactory;
         _behaviorRegistry = behaviorRegistry;
         _scheduledJobRegistry = scheduledJobRegistry;
+        _agentSkillRegistry = agentSkillRegistry;
         _dataPaths = dataPaths;
         _loggerFactory = loggerFactory;
         _log = loggerFactory.CreateLogger<PluginRuntime>();
@@ -209,8 +212,16 @@ public sealed class PluginRuntime
                     : new NoopPluginProjections();
                 _scheduledJobRegistry?.RemoveForPlugin(row.Id);
 
+                IPluginAgentSkills agentSkills = _agentSkillRegistry is not null
+                    ? new PluginAgentSkills(_agentSkillRegistry, row.Id)
+                    : new NoopPluginAgentSkills();
+                // Sweep any stale plugin-contributed chatbot tools left over
+                // from a prior enable (crash-mid-disable etc.) before
+                // Configure() runs.
+                _agentSkillRegistry?.RemoveForPlugin(row.Id);
+
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, new SafePluginServiceProvider(_hostServices));
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, agentSkills, new SafePluginServiceProvider(_hostServices));
                 instance.Configure(context);
 
                 var loaded = new LoadedPlugin(row.Id, instance.Name, instance.Version, alc, scoped, instance);
@@ -241,6 +252,7 @@ public sealed class PluginRuntime
             loaded.ScopedRegistrar.RemoveAllForPlugin();
             _behaviorRegistry?.RemoveAllForPlugin(id);
             _scheduledJobRegistry?.RemoveForPlugin(id);
+            _agentSkillRegistry?.RemoveForPlugin(id);
             _log.LogInformation(
                 "Disabled plugin {Id} ({Name}); ALC remains loaded inert until process restart.",
                 id, loaded.Name);
@@ -332,12 +344,18 @@ public sealed class PluginRuntime
                     ? new PluginProjections(_scheduledJobRegistry, row.Id)
                     : new NoopPluginProjections();
 
+                // Cleanup() path: hand the plugin a noop AgentSkills surface.
+                // Any attempted re-registration during teardown is silently
+                // dropped so we don't reintroduce skills after the host has
+                // already swept them.
+                IPluginAgentSkills agentSkills = new NoopPluginAgentSkills();
+
                 // Wrap the registrar so anything Cleanup() accidentally
                 // subscribes to gets dropped immediately afterwards. We don't
                 // want a cleanup callback to leak hooks into a plugin that's
                 // about to be deleted.
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, new SafePluginServiceProvider(_hostServices));
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, agentSkills, new SafePluginServiceProvider(_hostServices));
 
                 try
                 {

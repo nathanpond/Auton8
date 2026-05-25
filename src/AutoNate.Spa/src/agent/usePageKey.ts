@@ -11,6 +11,17 @@ const PATTERNS: Array<{ pattern: string; key: string }> = [
   { pattern: "/executions/:id", key: "workflow-executions" },
   { pattern: "/records", key: "records" },
   { pattern: "/records/:id", key: "records" },
+  { pattern: "/query", key: "aql-query" },
+  { pattern: "/notes/*", key: "notes" },
+  { pattern: "/notifications", key: "notifications" },
+  // Phase 5b — design-surface routes. Form-fill auto-discovery already
+  // gives the chatbot a usable surface on these pages without explicit
+  // providers; per-page selection / dirty-state providers are a follow-up.
+  { pattern: "/dashboard", key: "dashboard" },
+  { pattern: "/dashboard/:id", key: "dashboard" },
+  { pattern: "/formdev/:shortCode", key: "form-editor" },
+  { pattern: "/admin/config/forms/:id", key: "form-editor" },
+  { pattern: "/admin/config/appearance", key: "appearance-editor" },
   { pattern: "/record-types", key: "record-types" },
   { pattern: "/admin/config/system-issues", key: "system-issues" },
   { pattern: "/admin/config/external-connections", key: "admin-config:external-connections" },

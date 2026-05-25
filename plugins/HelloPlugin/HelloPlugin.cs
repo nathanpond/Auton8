@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AutoNate.Plugins.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -43,6 +44,67 @@ public sealed class HelloPlugin : IAutoNatePlugin
         catch (Exception ex)
         {
             logger?.LogWarning(ex, "HelloPlugin failed to register its config menu item.");
+        }
+
+        // Register a sample chatbot tool the plugin contributes. Demonstrates
+        // the Phase 4 IPluginAgentSkills surface: a single skill named
+        // "hello-plugin" with one echo tool that returns the args it received,
+        // gated by an authorization probe on EntityKinds.SiteConfig:view (so
+        // the model can see the CanAsync path exercised).
+        try
+        {
+            using var schemaDoc = JsonDocument.Parse("""
+                {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "description": "Text to echo back." }
+                  },
+                  "required": ["message"],
+                  "additionalProperties": false
+                }
+                """);
+            var schema = schemaDoc.RootElement.Clone();
+
+            context.AgentSkills.Register(
+                skillName: "hello-plugin",
+                skillDescription: "Demo plugin-contributed tool (echoes the message back).",
+                tools: new[]
+                {
+                    new PluginAgentTool(
+                        Name: "hello_echo",
+                        Description:
+                            "Returns the supplied message back as a structured envelope. " +
+                            "Demonstrates plugin-contributed chatbot tools.",
+                        JsonSchema: schema,
+                        Invoke: async (args, ctx, ct) =>
+                        {
+                            // Exercise the authorization probe — useful for the
+                            // multi-cycle enable/disable test to verify the
+                            // CanAsync wrapper still works after a reload.
+                            var canViewSite = await ctx.Session.CanAsync("siteconfig", "view", null, ct);
+                            var message = args.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
+                                ? (m.GetString() ?? string.Empty)
+                                : string.Empty;
+                            return JsonSerializer.SerializeToElement(new
+                            {
+                                kind = "hello_echo",
+                                source = "HelloPlugin",
+                                data = new
+                                {
+                                    message,
+                                    userId = ctx.Session.UserId,
+                                    pageKey = ctx.Session.PageKey,
+                                    callerCanViewSiteConfig = canViewSite
+                                }
+                            });
+                        })
+                },
+                systemPromptFragment: session =>
+                    "HelloPlugin contributes the `hello_echo` tool; use it as a connectivity test for plugin-contributed skills.");
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "HelloPlugin failed to register its sample agent skill.");
         }
 
         context.Hooks.AddFilterAsync<AuthorizeFilterContext>(

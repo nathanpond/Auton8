@@ -39,6 +39,7 @@ import {
   listSavedQueries,
   updateSavedQuery
 } from "@/api/savedQueries";
+import { useQueryPagePageContext } from "@/pages/query/useQueryPagePageContext";
 import { AxiosError } from "axios";
 
 type IndexedRow = AqlRow & { __rowId: string };
@@ -326,19 +327,22 @@ export default function QueryPage() {
     lastSuccessfulText !== null &&
     lastSuccessfulText === queryText;
 
-  const openSaveModal = useCallback(() => {
-    setSaveError(null);
-    if (selectedQuery && canUpdateSelected) {
-      setSaveName(selectedQuery.name);
-      setSaveDescription(selectedQuery.description ?? "");
-      setSaveShared(selectedQuery.isShared);
-    } else {
-      setSaveName("");
-      setSaveDescription("");
-      setSaveShared(false);
-    }
-    setSaveOpen(true);
-  }, [selectedQuery, canUpdateSelected]);
+  const openSaveModal = useCallback(
+    (defaults?: { name?: string; description?: string; isShared?: boolean }) => {
+      setSaveError(null);
+      if (selectedQuery && canUpdateSelected) {
+        setSaveName(defaults?.name ?? selectedQuery.name);
+        setSaveDescription(defaults?.description ?? selectedQuery.description ?? "");
+        setSaveShared(defaults?.isShared ?? selectedQuery.isShared);
+      } else {
+        setSaveName(defaults?.name ?? "");
+        setSaveDescription(defaults?.description ?? "");
+        setSaveShared(defaults?.isShared ?? false);
+      }
+      setSaveOpen(true);
+    },
+    [selectedQuery, canUpdateSelected]
+  );
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -400,6 +404,21 @@ export default function QueryPage() {
 
   const saving = createMutation.isPending || updateMutation.isPending;
   const isUpdate = Boolean(selectedQuery && canUpdateSelected);
+
+  // Chatbot page-awareness: expose editor + last-result state and a small
+  // catalog of mutating actions (set/append/run/save) the assistant can
+  // call via apply_page_action with confirmed=true semantics.
+  useQueryPagePageContext({
+    queryText,
+    lastSuccessfulText,
+    response,
+    errors,
+    running,
+    selectedQuery,
+    setQueryText,
+    runQuery,
+    openSaveModal
+  });
 
   return (
     <Stack gap="md">
@@ -481,7 +500,7 @@ export default function QueryPage() {
               >
                 <Button
                   variant="default"
-                  onClick={openSaveModal}
+                  onClick={() => openSaveModal()}
                   disabled={!saveEnabled}
                   leftSection={<i className="fa fa-floppy-disk" aria-hidden />}
                 >
