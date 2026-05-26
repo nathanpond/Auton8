@@ -22,8 +22,7 @@ import {
   Text,
   TextInput,
   Textarea,
-  Title,
-  UnstyledButton
+  Title
 } from "@mantine/core";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
 import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
@@ -1057,15 +1056,18 @@ export default function WorkflowStudio() {
             to Flowable, and start new executions from the current model.
           </Text>
         </Stack>
-        <UnstyledButton
-          className="workflow-bpmn-support-badge"
+        <Button
+          variant="gradient"
+          gradient={{ from: "#2680c2", to: "#0f609b", deg: 135 }}
+          radius="xl"
+          size="sm"
           onClick={() => setShowBpmnTypesModal(true)}
           title="View supported BPMN node types"
+          leftSection={<i className="fa fa-sitemap" aria-hidden="true" />}
+          rightSection={<i className="fa fa-arrow-right" aria-hidden="true" />}
         >
-          <i className="fa fa-sitemap" aria-hidden="true"></i>
-          <span>Supported BPMN Types</span>
-          <i className="fa fa-arrow-right" aria-hidden="true"></i>
-        </UnstyledButton>
+          Supported BPMN Types
+        </Button>
       </Group>
 
       {error && (
