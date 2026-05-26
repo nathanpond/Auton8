@@ -79,7 +79,13 @@ public sealed class LookupAqlSkill : IAgentSkill
     }
 
     public string? SystemPromptFragment(AgentSessionContext context) =>
-        "When asked about AQL: call get_aql_grammar to learn syntax (clauses, operators, functions) and describe_aql_entity to learn the columns an entity exposes. The grammar and schemas are the source of truth — do not improvise function names or column names. Use list_saved_queries to find an existing query the user has previously saved.";
+        "When asked about AQL: call get_aql_grammar to learn syntax (clauses, operators, " +
+        "where-functions, relative-date forms, and the DON'T list of common mistakes), then " +
+        "call describe_aql_entity for the target entity to read its columns, row functions, " +
+        "value enums, and worked `examples` array. Pattern-match your draft against the " +
+        "entity's examples — they are the canonical idioms. Never improvise function names, " +
+        "column names, or date syntax from memory. Use list_saved_queries to find an existing " +
+        "query the user has previously saved.";
 
     private static async Task<JsonElement> InvokeListSavedQueriesAsync(
         JsonElement args, AgentToolContext context, CancellationToken ct)
@@ -159,11 +165,68 @@ public sealed class LookupAqlSkill : IAgentSkill
                 operatorsByDataType = OperatorsByDataType,
                 relativeDateUnits = RelativeDateUnits,
                 entityNames = registry.EntityNames,
-                syntaxHint = "Shape: FROM <Entity> [WHERE <expr>] [ORDER BY <col> [ASC|DESC]] [COLUMNS <c1>, ...] [GROUP <col>] [LIMIT <n>]. Strings in double quotes. Relative dates as `now - 7d`. Use describe_aql_entity for per-entity columns and row-function vocabularies."
+                syntaxHint = SyntaxHint,
+                relativeDateSyntax = RelativeDateSyntax,
+                worked_examples = WorkedExamples,
+                doNot = DoNotPatterns
             }
         };
         return Task.FromResult(JsonSerializer.SerializeToElement(result));
     }
+
+    // The grammar response is the chatbot's primary reference for "how do I
+    // write AQL". The shape and worked examples below are tuned for what
+    // LLMs actually get wrong: relative-date syntax (no `now - 7d`, no
+    // `"2w ago"` strings) and BETWEEN bounds (must be date values, not
+    // quoted strings). See LookupAqlSkill comment + AqlAssistSkill prompt.
+    private const string SyntaxHint =
+        "Shape: FROM <Entity> [WHERE <expr>] [ORDER BY <col> [ASC|DESC]] " +
+        "[COLUMNS(<c1>, ...)] [GROUP(<col>, ...)] [LIMIT <n>]. " +
+        "Clauses MUST appear in this order. String literals use double quotes. " +
+        "Call describe_aql_entity for per-entity columns, row functions, value enums, " +
+        "and entity-specific worked examples — prefer those over inventing field names.";
+
+    private const string RelativeDateSyntax =
+        "Date literals are RELATIVE to now. Three legal forms:\n" +
+        "  -7d       integer + unit (h/d/w/m/y), negative = past, positive = future\n" +
+        "  2w ago    positive integer + unit + 'ago', desugars to a negative offset\n" +
+        "  NOW       current timestamp (equivalent to a zero-offset date)\n" +
+        "There is NO 'now - 7d' arithmetic, NO bare 'today'/'yesterday'/'last week' keywords, " +
+        "and NO string-quoted date forms like \"2w ago\" or \"now\". " +
+        "BETWEEN/IN/comparison values on a date column MUST be one of the three forms above " +
+        "(or NULL). A string literal compared to a date column is a validation error.";
+
+    private static readonly object[] WorkedExamples = new object[]
+    {
+        new { intent = "Past two weeks of workflow executions",
+              query = "FROM Flows WHERE StartDate >= -2w ORDER BY StartDate DESC" },
+        new { intent = "Same idea using BETWEEN (date window)",
+              query = "FROM Flows WHERE BETWEEN(StartDate, 2w ago, NOW) ORDER BY StartDate DESC" },
+        new { intent = "Records of a specific type created today",
+              query = "FROM Records WHERE RecordType = \"Car\" AND CreatedDate >= -1d" },
+        new { intent = "Substring search",
+              query = "FROM Records WHERE CONTAINS(Name, \"acme\")" },
+        new { intent = "Status filter with enum value",
+              query = "FROM Flows WHERE Status = \"In-progress\" ORDER BY StartDate DESC" },
+        new { intent = "Top N by a numeric column",
+              query = "FROM Flows WHERE Status = \"Completed\" ORDER BY DurationMs DESC LIMIT 10" },
+        new { intent = "Counts grouped by a column",
+              query = "FROM Flows COLUMNS(Status, COUNT() AS Total) GROUP(Status) ORDER BY Total DESC" }
+    };
+
+    private static readonly object[] DoNotPatterns = new object[]
+    {
+        new { wrong = "BETWEEN(StartDate, \"2w ago\", \"now\")",
+              why   = "String literals are not date values. Use BETWEEN(StartDate, 2w ago, NOW) — unquoted." },
+        new { wrong = "StartDate > now - 7d",
+              why   = "AQL has no 'now' keyword and no infix date arithmetic. Write StartDate > -7d, or StartDate > 7d ago." },
+        new { wrong = "StartDate >= \"2026-05-01\"",
+              why   = "ISO date strings are not supported on date columns. Express the window relative to now: StartDate >= -3w (or whatever offset)." },
+        new { wrong = "WHERE today() OR WHERE yesterday()",
+              why   = "There are no date-keyword shortcuts. Use relative-date literals: today = >= -1d, yesterday = between -2d and -1d, etc." },
+        new { wrong = "SELECT Name FROM ...",
+              why   = "Projection is COLUMNS(Name), not SELECT. The shape is FROM/WHERE/ORDER BY/COLUMNS/GROUP/LIMIT — not SQL." }
+    };
 
     private static async Task<JsonElement> InvokeDescribeEntityAsync(
         JsonElement args, AgentToolContext context, CancellationToken ct)
@@ -236,6 +299,16 @@ public sealed class LookupAqlSkill : IAgentSkill
                 allowedWhereFunctions = entity.AllowedFunctions,
                 rowFunctions,
                 valueEnums = enums.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
+                // Canonical idioms for this entity — the chatbot should pattern-
+                // match against these instead of inventing syntax from the column
+                // and operator lists alone. Empty for entities that haven't opted
+                // in; in that case fall back to the global syntax hint in
+                // get_aql_grammar.
+                examples = entity.Examples.Select(ex => new
+                {
+                    description = ex.Description,
+                    query = ex.Query
+                }).ToArray(),
                 hasDynamicFields = string.Equals(entity.Name, "Records", StringComparison.OrdinalIgnoreCase)
             }
         });

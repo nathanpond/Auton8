@@ -73,6 +73,26 @@ public sealed class NotesQueryEntity : IQueryEntity
             _ => QueryDataType.Number
         };
 
+    // Verified Notes shapes the chatbot can copy. Type values are constrained
+    // to the hierarchy kinds (Project, Cabinet, Notebook, Page, Note); the
+    // ValidateTypeLiterals walk rejects anything else, so these stay safe to
+    // suggest verbatim.
+    public IReadOnlyList<QueryExample> Examples { get; } = new[]
+    {
+        new QueryExample(
+            "Recently updated pages, newest first",
+            "FROM Notes WHERE Type = \"Page\" AND DateUpdated >= -1w ORDER BY DateUpdated DESC"),
+        new QueryExample(
+            "All notebooks under a project (by locator id)",
+            "FROM Notes WHERE Type = \"Notebook\" AND ISDESCENDENTOF(123)"),
+        new QueryExample(
+            "Cabinets with no children",
+            "FROM Notes WHERE Type = \"Cabinet\" AND COUNTCHILDREN() = 0"),
+        new QueryExample(
+            "Counts grouped by Type",
+            "FROM Notes COLUMNS(Type, COUNT() AS Total) GROUP(Type) ORDER BY Total DESC")
+    };
+
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         var errors = new List<string>();

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AutoNate.Web.Services.Query;
 using AutoNate.Web.Services.Query.Entities;
 using Microsoft.Extensions.DependencyInjection;
@@ -65,11 +66,20 @@ public sealed class AqlAssistSkill : IAgentSkill
     }
 
     public string? SystemPromptFragment(AgentSessionContext context) =>
-        "AQL assistance protocol: " +
-        "(1) Call get_aql_grammar and describe_aql_entity FIRST to learn syntax + columns — never improvise function names or columns from memory. " +
-        "(2) Draft a query in your reply, then call validate_aql to catch errors; fix and revalidate until clean. " +
-        "(3) Only call run_aql when the user has asked for actual results. " +
-        "(4) When the user is on the QueryPage, propose insertion via apply_page_action set_aql_text with confirmed=false first; commit only after explicit user approval. " +
+        "AQL assistance protocol — every step is mandatory:\n" +
+        "(1) BEFORE drafting any AQL, call get_aql_grammar AND describe_aql_entity for the target entity. " +
+        "Read its `examples` array and the grammar's `worked_examples` + `doNot` list. " +
+        "Pattern-match your draft against those — never improvise field names, function names, " +
+        "or date syntax from memory. Date literals are only `-7d` / `2w ago` / `NOW` — never " +
+        "string-quoted (`\"now\"`, `\"2w ago\"`) and never infix arithmetic (`now - 7d`).\n" +
+        "(2) AFTER drafting, ALWAYS call validate_aql on the EXACT query text before showing it to " +
+        "the user or proposing it via apply_page_action. Treat ok=false as a hard block: read the " +
+        "errors and the `hints` array, fix the query, and revalidate. Repeat until ok=true. " +
+        "Never propose, paste, or commit an unvalidated query.\n" +
+        "(3) Only call run_aql when the user has explicitly asked for actual results — not while " +
+        "drafting, not to \"check\" a query (validate_aql is for that).\n" +
+        "(4) On the QueryPage, propose insertion via apply_page_action set_aql_text with " +
+        "confirmed=false first; commit only after explicit user approval.\n" +
         "(5) Never run a query as a side effect of drafting.";
 
     private static async Task<JsonElement> InvokeValidateAsync(
@@ -82,7 +92,8 @@ public sealed class AqlAssistSkill : IAgentSkill
             {
                 queryText = string.Empty,
                 ok = false,
-                errors = QueryTextRequiredErrors
+                errors = QueryTextRequiredErrors,
+                hints = Array.Empty<string>()
             });
         }
 
@@ -93,10 +104,11 @@ public sealed class AqlAssistSkill : IAgentSkill
             var validator = new AqlValidator(registry);
             var prepared = await validator.ValidateAsync(ast, hardCap: 1000, ct);
 
+            var ok = prepared.ValidationErrors.Count == 0;
             return Envelope("aql_validation", new
             {
                 queryText,
-                ok = prepared.ValidationErrors.Count == 0,
+                ok,
                 entity = prepared.Entity.Name,
                 columns = prepared.Schema.Select(c => new
                 {
@@ -105,7 +117,8 @@ public sealed class AqlAssistSkill : IAgentSkill
                     isAggregable = c.IsAggregable,
                     isSystem = c.IsSystem
                 }).ToArray(),
-                errors = prepared.ValidationErrors
+                errors = prepared.ValidationErrors,
+                hints = ok ? Array.Empty<string>() : BuildRemediationHints(queryText, prepared.ValidationErrors)
             });
         }
         catch (AqlValidationException ex)
@@ -114,19 +127,94 @@ public sealed class AqlAssistSkill : IAgentSkill
             {
                 queryText,
                 ok = false,
-                errors = ex.Errors
+                errors = ex.Errors,
+                hints = BuildRemediationHints(queryText, ex.Errors)
             });
         }
         catch (Exception ex)
         {
+            var errors = new[] { $"Parse error: {ex.Message}" };
             return Envelope("aql_validation", new
             {
                 queryText,
                 ok = false,
-                errors = new[] { $"Parse error: {ex.Message}" }
+                errors,
+                hints = BuildRemediationHints(queryText, errors)
             });
         }
     }
+
+    // When validation fails, scan the original query text and error messages
+    // for the patterns LLMs most often produce, and return actionable fixes.
+    // These are hints, not authoritative — the errors array stays the source
+    // of truth. Each hint should point at a specific correction the model
+    // can apply mechanically (e.g. "replace X with Y"), not generic advice.
+    private static IReadOnlyList<string> BuildRemediationHints(
+        string queryText, IReadOnlyList<string> errors)
+    {
+        var hints = new List<string>();
+
+        // Quoted date keywords — the canonical failure this skill was tuned to
+        // catch (BETWEEN(StartDate, "2w ago", "now") returned zero rows).
+        bool quotedNow = ContainsQuoted(queryText, "now")
+                      || ContainsQuoted(queryText, "today")
+                      || ContainsQuoted(queryText, "yesterday")
+                      || ContainsQuoted(queryText, "tomorrow");
+        bool quotedRelativeDate = Regex.IsMatch(
+            queryText,
+            "\"\\s*[+\\-]?\\d+\\s*[hdwmyHDWMY]\\s*(ago)?\\s*\"",
+            RegexOptions.IgnoreCase);
+        if (quotedNow || quotedRelativeDate)
+        {
+            hints.Add(
+                "Date values are NOT strings. Drop the quotes: write NOW instead of \"now\", " +
+                "2w ago instead of \"2w ago\", and -7d instead of \"-7d\". " +
+                "Example fix: BETWEEN(StartDate, \"2w ago\", \"now\") → BETWEEN(StartDate, 2w ago, NOW).");
+        }
+
+        // ISO date string in a place AQL won't accept it.
+        if (Regex.IsMatch(queryText, "\"\\d{4}-\\d{2}-\\d{2}"))
+        {
+            hints.Add(
+                "ISO date strings (\"2026-05-01\") are not accepted on date columns. " +
+                "Express the window relative to now: e.g. StartDate >= -3w, or " +
+                "BETWEEN(StartDate, 3w ago, 1w ago).");
+        }
+
+        // Infix date arithmetic — `now - 7d` is the second-most-common mistake.
+        if (Regex.IsMatch(queryText, @"\bnow\s*[+\-]\s*\d+\s*[hdwmy]\b", RegexOptions.IgnoreCase))
+        {
+            hints.Add(
+                "AQL has no infix date arithmetic and no `now` keyword in expressions. " +
+                "Replace `now - 7d` with `-7d` (or `7d ago`), and bare `now` with the NOW value literal.");
+        }
+
+        // SQL leakage.
+        if (Regex.IsMatch(queryText, @"\bSELECT\b", RegexOptions.IgnoreCase))
+        {
+            hints.Add(
+                "AQL is not SQL. Use COLUMNS(col1, col2) for projection, not SELECT. " +
+                "Clause order is FROM → WHERE → ORDER BY → COLUMNS → GROUP → LIMIT.");
+        }
+
+        // Unknown field/entity — point the model at the introspection tool.
+        if (errors.Any(e => e.Contains("Unknown field", StringComparison.OrdinalIgnoreCase)))
+        {
+            hints.Add(
+                "Call describe_aql_entity with the FROM entity to see the exact column list " +
+                "(case-insensitive). Field names are not free-form — only the listed columns work.");
+        }
+        if (errors.Any(e => e.Contains("Unknown entity", StringComparison.OrdinalIgnoreCase)))
+        {
+            hints.Add(
+                "Call get_aql_grammar to see the full list of queryable entity names, then use one of them after FROM.");
+        }
+
+        return hints;
+    }
+
+    private static bool ContainsQuoted(string source, string keyword) =>
+        source.Contains($"\"{keyword}\"", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<JsonElement> InvokeRunAsync(
         JsonElement args, AgentToolContext context, CancellationToken ct)

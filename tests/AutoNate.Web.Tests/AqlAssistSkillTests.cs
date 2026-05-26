@@ -110,6 +110,84 @@ public sealed class AqlAssistSkillTests
         Assert.Equal("Unknown column 'Foo'.", data.GetProperty("errors")[0].GetString());
     }
 
+    [Fact]
+    public async Task validate_aql_returns_remediation_hint_for_quoted_now_or_ago_strings()
+    {
+        // The canonical chatbot regression: BETWEEN(StartDate, "2w ago", "now")
+        // parses but the strings can't satisfy a date column. We don't need a
+        // real registry to produce the hint — the regex-based remediation in
+        // BuildRemediationHints fires on the queryText alone, regardless of
+        // why validation failed.
+        var skill = new AqlAssistSkill();
+        var sp = ServicesWith<IQueryEntityRegistry>(new FakeRegistry());
+
+        var result = await Invoke(skill, AqlAssistSkill.ValidateToolName, new
+        {
+            queryText = "FROM Flows WHERE BETWEEN(StartDate, \"2w ago\", \"now\") ORDER BY StartDate DESC"
+        }, sp);
+
+        var hints = result.GetProperty("data").GetProperty("hints").EnumerateArray()
+            .Select(h => h.GetString() ?? "").ToList();
+        Assert.Contains(hints, h => h.Contains("Drop the quotes", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(hints, h => h.Contains("BETWEEN(StartDate, 2w ago, NOW)", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task validate_aql_returns_remediation_hint_for_infix_now_arithmetic()
+    {
+        var skill = new AqlAssistSkill();
+        var sp = ServicesWith<IQueryEntityRegistry>(new FakeRegistry());
+
+        var result = await Invoke(skill, AqlAssistSkill.ValidateToolName, new
+        {
+            queryText = "FROM Flows WHERE StartDate > now - 7d"
+        }, sp);
+
+        var hints = result.GetProperty("data").GetProperty("hints").EnumerateArray()
+            .Select(h => h.GetString() ?? "").ToList();
+        Assert.Contains(hints, h => h.Contains("no infix date arithmetic", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task validate_aql_returns_remediation_hint_for_select_keyword()
+    {
+        var skill = new AqlAssistSkill();
+        var sp = ServicesWith<IQueryEntityRegistry>(new FakeRegistry());
+
+        var result = await Invoke(skill, AqlAssistSkill.ValidateToolName, new
+        {
+            queryText = "SELECT Name FROM Records"
+        }, sp);
+
+        var hints = result.GetProperty("data").GetProperty("hints").EnumerateArray()
+            .Select(h => h.GetString() ?? "").ToList();
+        Assert.Contains(hints, h => h.Contains("AQL is not SQL", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task validate_aql_returns_empty_hints_for_a_correct_query_when_registry_is_real()
+    {
+        // Sanity check that the ok-path doesn't accidentally surface hints.
+        // We can't reach the validator's happy path without a real registry,
+        // but we can hit the "ok=false, no triggering patterns" branch.
+        var skill = new AqlAssistSkill();
+        var sp = ServicesWith<IQueryEntityRegistry>(new FakeRegistry());
+
+        var result = await Invoke(skill, AqlAssistSkill.ValidateToolName, new
+        {
+            // Well-formed shape; FakeRegistry's TryGet returns false so this
+            // fails with "Unknown entity" but no quoted-date / infix / SQL
+            // patterns to flag.
+            queryText = "FROM Flows WHERE StartDate >= -2w ORDER BY StartDate DESC"
+        }, sp);
+
+        var hints = result.GetProperty("data").GetProperty("hints").EnumerateArray()
+            .Select(h => h.GetString() ?? "").ToList();
+        Assert.DoesNotContain(hints, h => h.Contains("Drop the quotes", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(hints, h => h.Contains("AQL is not SQL", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(hints, h => h.Contains("no infix date arithmetic", StringComparison.OrdinalIgnoreCase));
+    }
+
     // --- helpers ---
 
     private static async Task<JsonElement> Invoke(AqlAssistSkill skill, string toolName, object args, IServiceProvider sp)

@@ -178,6 +178,13 @@ internal static class AqlLexer
         {
             return new AqlToken(TokenKind.Null, "NULL", start);
         }
+        // NOW is desugared at parse time into AqlRelativeDate(0,'d') so every
+        // entity's existing relative-date plumbing handles it for free. The
+        // lexeme stays "NOW" so error messages quote what the user wrote.
+        if (upper == "NOW")
+        {
+            return new AqlToken(TokenKind.RelativeDate, "NOW", start);
+        }
         if (Keywords.Contains(upper))
         {
             return new AqlToken(TokenKind.Keyword, upper, start);

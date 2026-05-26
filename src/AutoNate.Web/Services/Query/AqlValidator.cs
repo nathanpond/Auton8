@@ -322,7 +322,13 @@ internal sealed class AqlValidator
     private static bool IsValueCompatible(QueryDataType type, AqlValue value) => value switch
     {
         AqlNull => true,
-        AqlString => type is QueryDataType.String or QueryDataType.Date or QueryDataType.Json,
+        // Strings are NOT compatible with date columns: AQL has no ISO-date
+        // string syntax, and accepting them here was the bug that let
+        // BETWEEN(StartDate, "2w ago", "now") pass validation and then
+        // silently return zero rows because no row's DateTime ever equals a
+        // string. Json columns still accept strings (the value is serialized
+        // to a JSON literal at the SQL layer).
+        AqlString => type is QueryDataType.String or QueryDataType.Json,
         AqlNumber => type is QueryDataType.Number,
         AqlBool => type is QueryDataType.Bool,
         AqlRelativeDate => type is QueryDataType.Date,

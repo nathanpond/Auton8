@@ -86,4 +86,16 @@ public sealed class AqlLexerTests
         var ex = Assert.Throws<AqlValidationException>(() => AqlLexer.Tokenize("Name = \"oops"));
         Assert.Contains("Unterminated", ex.Message);
     }
+
+    [Theory]
+    [InlineData("now")]
+    [InlineData("NOW")]
+    [InlineData("Now")]
+    public void Now_Lexes_As_RelativeDate_Preserving_Case(string source)
+    {
+        var tokens = AqlLexer.Tokenize($"StartDate < {source}");
+        // StartDate, <, NOW, EOF
+        Assert.Equal(TokenKind.RelativeDate, tokens[2].Kind);
+        Assert.Equal("NOW", tokens[2].Text);
+    }
 }

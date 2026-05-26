@@ -61,6 +61,22 @@ public sealed class WorkflowModelsQueryEntity : IQueryEntity
             _ => QueryDataType.Number
         };
 
+    public IReadOnlyList<QueryExample> Examples { get; } = new[]
+    {
+        new QueryExample(
+            "Published workflows with most-recent execution time",
+            "FROM Workflows WHERE Published = true COLUMNS(ModelName, Version, LASTEXECUTED() AS LastRun) ORDER BY LASTEXECUTED() DESC"),
+        new QueryExample(
+            "Workflows updated in the last month",
+            "FROM Workflows WHERE CreatedDate >= -1m ORDER BY CreatedDate DESC"),
+        new QueryExample(
+            "Workflows that use a specific BPMN node type",
+            "FROM Workflows WHERE USESNODE(\"userTask\") ORDER BY ModelName"),
+        new QueryExample(
+            "Workflows ranked by execution count",
+            "FROM Workflows COLUMNS(ModelName, NUMEXECUTIONS() AS Runs) ORDER BY NUMEXECUTIONS() DESC LIMIT 10")
+    };
+
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         var errors = new List<string>();

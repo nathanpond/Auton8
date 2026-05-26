@@ -11,6 +11,12 @@ public sealed record QueryColumn(
     bool IsAggregable,
     bool IsSystem);
 
+// A canonical, ready-to-run AQL example for an entity, paired with a one-line
+// natural-language description. Surfaced through describe_aql_entity so the
+// chatbot pattern-matches against verified idioms instead of inventing syntax
+// from the operator/function lists alone.
+public sealed record QueryExample(string Description, string Query);
+
 // An entity adapter knows how to validate references against its own schema
 // and how to translate a validated AST into a QueryResult. Each entity also
 // declares which AQL functions (NUMNODES, USESNODE, etc.) it supports so the
@@ -73,6 +79,13 @@ public interface IQueryEntity
         string? recordTypeFilter,
         CancellationToken cancellationToken) =>
         Task.FromResult(ColumnEnums);
+
+    // Canonical example queries for this entity — the shapes a writer actually
+    // reaches for. Surfaced through describe_aql_entity so the chatbot drafts
+    // against verified idioms instead of inventing syntax from the operator
+    // and function lists alone. Default empty — entities opt in only when
+    // they have well-trodden patterns worth advertising.
+    IReadOnlyList<QueryExample> Examples => Array.Empty<QueryExample>();
 
     // Resolve the full schema (static + dynamic), resolve literal references
     // (e.g. RecordType names), and return a prepared query the validator can

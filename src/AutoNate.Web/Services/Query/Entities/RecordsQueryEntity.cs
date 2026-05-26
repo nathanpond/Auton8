@@ -48,6 +48,25 @@ public sealed class RecordsQueryEntity : IQueryEntity
 
     public IReadOnlyList<string> AllowedFunctions => Array.Empty<string>();
 
+    // Verified Records shapes the chatbot can copy. RecordType filters scope
+    // the dynamic schema, so the first example primes the bot to ask for one
+    // before drafting deep field-level queries.
+    public IReadOnlyList<QueryExample> Examples { get; } = new[]
+    {
+        new QueryExample(
+            "Records of a specific type (scopes dynamic fields too)",
+            "FROM Records WHERE RecordType = \"Car\""),
+        new QueryExample(
+            "Records created in the last week, newest first",
+            "FROM Records WHERE CreatedDate >= -1w ORDER BY CreatedDate DESC"),
+        new QueryExample(
+            "Substring search on Name",
+            "FROM Records WHERE CONTAINS(Name, \"acme\")"),
+        new QueryExample(
+            "Counts grouped by RecordType",
+            "FROM Records COLUMNS(RecordType, COUNT() AS Total) GROUP(RecordType) ORDER BY Total DESC")
+    };
+
     // Dynamic enum source for the autocomplete UI: the live list of RecordType
     // names. The `recordTypeFilter` argument is ignored here (Records doesn't
     // scope its enums by a sibling literal — RecordType IS the scoping field).

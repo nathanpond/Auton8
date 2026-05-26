@@ -104,6 +104,35 @@ public sealed class FlowsQueryEntity : IQueryEntity
             ? CurrentStepArguments
             : Array.Empty<string>();
 
+    // Verified shapes the chatbot can copy directly. Each one parses and
+    // validates against this entity's schema. Keep these idiomatic — the
+    // model uses them as a "what does correct AQL look like for Flows?"
+    // template, so prefer the natural phrasing over showing every operator.
+    public IReadOnlyList<QueryExample> Examples { get; } = new[]
+    {
+        new QueryExample(
+            "Workflows started in the past two weeks, newest first",
+            "FROM Flows WHERE StartDate >= -2w ORDER BY StartDate DESC"),
+        new QueryExample(
+            "Workflows started in a date window using BETWEEN",
+            "FROM Flows WHERE BETWEEN(StartDate, 2w ago, NOW) ORDER BY StartDate DESC"),
+        new QueryExample(
+            "Active (in-progress) workflows",
+            "FROM Flows WHERE Status = \"In-progress\" ORDER BY StartDate DESC"),
+        new QueryExample(
+            "Workflows currently in an error state",
+            "FROM Flows WHERE Status = \"Errored\" ORDER BY StartDate DESC"),
+        new QueryExample(
+            "Top 10 longest-running completed workflows",
+            "FROM Flows WHERE Status = \"Completed\" ORDER BY DurationMs DESC LIMIT 10"),
+        new QueryExample(
+            "Counts grouped by status",
+            "FROM Flows COLUMNS(Status, COUNT() AS Total) GROUP(Status) ORDER BY Total DESC"),
+        new QueryExample(
+            "In-progress workflows with their current step and assignee",
+            "FROM Flows WHERE Status = \"In-progress\" COLUMNS(Id, FlowName, CURRENTSTEP(Name) AS Step, CURRENTSTEP(Assignee) AS Assignee) ORDER BY StartDate DESC")
+    };
+
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         IPreparedQuery prepared = new FlowsPreparedQuery(

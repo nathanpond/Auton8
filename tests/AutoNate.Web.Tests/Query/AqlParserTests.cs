@@ -180,4 +180,58 @@ public sealed class AqlParserTests
         Assert.Throws<AqlValidationException>(() =>
             AqlParser.Parse("FROM Flows WHERE Status IN ()"));
     }
+
+    [Fact]
+    public void Now_Parses_As_Zero_Offset_Relative_Date()
+    {
+        var q = AqlParser.Parse("FROM Flows WHERE StartDate <= NOW");
+        var cmp = Assert.IsType<AqlCompare>(q.Where);
+        var rel = Assert.IsType<AqlRelativeDate>(cmp.Value);
+        Assert.Equal(0, rel.Magnitude);
+        Assert.Equal('d', char.ToLowerInvariant(rel.Unit));
+    }
+
+    [Fact]
+    public void Ago_Suffix_Flips_Positive_Magnitude_To_Negative()
+    {
+        var q = AqlParser.Parse("FROM Flows WHERE StartDate >= 2w ago");
+        var cmp = Assert.IsType<AqlCompare>(q.Where);
+        var rel = Assert.IsType<AqlRelativeDate>(cmp.Value);
+        Assert.Equal(-2, rel.Magnitude);
+        Assert.Equal('w', char.ToLowerInvariant(rel.Unit));
+    }
+
+    [Fact]
+    public void Ago_Suffix_On_Negative_Magnitude_Throws_Contradictory_Error()
+    {
+        var ex = Assert.Throws<AqlValidationException>(() =>
+            AqlParser.Parse("FROM Flows WHERE StartDate >= -2w ago"));
+        Assert.Contains("contradictory", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Ago_Suffix_On_Now_Throws_Because_There_Is_No_Offset_To_Flip()
+    {
+        // NOW desugars to (0,'d') — flipping the sign of zero is meaningless,
+        // so we surface a friendly error pointing the user at NOW.
+        var ex = Assert.Throws<AqlValidationException>(() =>
+            AqlParser.Parse("FROM Flows WHERE StartDate <= NOW ago"));
+        Assert.Contains("no offset", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Between_With_Ago_And_Now_Parses_Past_Two_Weeks_Window()
+    {
+        // The exact LLM-natural shape we want to support now that the bot
+        // is being taught to draft this syntax (see AqlAssistSkill prompt).
+        var q = AqlParser.Parse(
+            "FROM Flows WHERE BETWEEN(StartDate, 2w ago, NOW) ORDER BY StartDate DESC");
+        var bw = Assert.IsType<AqlBetween>(q.Where);
+        Assert.Equal("StartDate", bw.Field);
+        var lo = Assert.IsType<AqlRelativeDate>(bw.Lo);
+        var hi = Assert.IsType<AqlRelativeDate>(bw.Hi);
+        Assert.Equal(-2, lo.Magnitude);
+        Assert.Equal('w', char.ToLowerInvariant(lo.Unit));
+        Assert.Equal(0, hi.Magnitude);
+    }
 }

@@ -333,7 +333,30 @@ internal sealed class AqlParser
                 return new AqlNull();
             case TokenKind.RelativeDate:
                 Advance();
-                return ParseRelativeDate(t.Text);
+                var rel = ParseRelativeDate(t.Text);
+                // Optional "ago" sugar: `2w ago` → `-2w`. Matches how the
+                // typical LLM and human phrase past-relative dates. We flip
+                // sign only on positive magnitudes; `-2w ago` and `NOW ago`
+                // are contradictory and rejected with a friendly error.
+                if (Peek().Kind == TokenKind.Identifier
+                    && string.Equals(Peek().Text, "ago", StringComparison.OrdinalIgnoreCase))
+                {
+                    Advance();
+                    if (rel.Magnitude < 0)
+                    {
+                        throw new AqlValidationException(
+                            $"'{t.Text} ago' is contradictory — drop the sign or drop 'ago'. " +
+                            "For past dates write either '2w ago' or '-2w'.");
+                    }
+                    if (rel.Magnitude == 0)
+                    {
+                        throw new AqlValidationException(
+                            $"'{t.Text} ago' has no offset. Use NOW for the current time, " +
+                            "or a positive magnitude with 'ago' (e.g. 2w ago).");
+                    }
+                    rel = rel with { Magnitude = -rel.Magnitude };
+                }
+                return rel;
             default:
                 throw new AqlValidationException(
                     $"Expected a value (string, number, bool, null, or relative date) at position {t.Position}; got '{t.Text}'.");
@@ -342,6 +365,12 @@ internal sealed class AqlParser
 
     private static AqlRelativeDate ParseRelativeDate(string lexeme)
     {
+        // NOW is a parser-level alias for "zero offset from now"; AqlRelativeDate
+        // already resolves (0,'d') to DateTime.UtcNow.AddDays(0) = now.
+        if (string.Equals(lexeme, "NOW", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AqlRelativeDate(0, 'd');
+        }
         // RelativeDate token already conformed to [+-]?\d+[hdwmy].
         var suffix = char.ToLowerInvariant(lexeme[^1]);
         var numPart = lexeme[..^1];
