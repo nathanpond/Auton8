@@ -26,6 +26,7 @@ public static class ContentResourceKinds
     public const string Comment = "comment";
     public const string Folder = "folder";
     public const string Document = "document";
+    public const string DocumentVersion = "document.version";
 }
 
 public static class ContentEventTypes
@@ -129,4 +130,24 @@ public static class ContentEventTypes
     public const string FolderDeleted = "content.folder.deleted";
     public const string FolderListViewed = "content.folder.list.viewed";
     public const string FolderViewed = "content.folder.viewed";
+
+    // Document (Documents subsystem — Phase 2). Mirrors the Page lifecycle
+    // shape (which is the closest analogue: content with body + versions).
+    // Templates fire the same events with details.kind='template'; callers
+    // don't need a separate event type per document kind.
+    public const string DocumentCreated = "content.document.created";
+    public const string DocumentUpdated = "content.document.updated";
+    public const string DocumentMoved = "content.document.moved";
+    public const string DocumentArchived = "content.document.archived";
+    public const string DocumentRestored = "content.document.restored";
+    public const string DocumentDeleted = "content.document.deleted";
+    public const string DocumentListViewed = "content.document.list.viewed";
+    public const string DocumentViewed = "content.document.viewed";
+
+    // Document versions
+    public const string DocumentVersionCreated = "content.document.version.created";
+    public const string DocumentVersionRestored = "content.document.version.restored";
+    public const string DocumentVersionDeleted = "content.document.version.deleted";
+    public const string DocumentVersionListViewed = "content.document.version.list.viewed";
+    public const string DocumentVersionViewed = "content.document.version.viewed";
 }

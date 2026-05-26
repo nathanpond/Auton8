@@ -118,6 +118,10 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<Folder> Folders { get; set; }
 
+    public virtual DbSet<Document> Documents { get; set; }
+
+    public virtual DbSet<DocumentVersion> DocumentVersions { get; set; }
+
     public virtual DbSet<ContentAncestor> ContentAncestors { get; set; }
 
     public virtual DbSet<PageFavorite> PageFavorites { get; set; }
@@ -1404,6 +1408,81 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Document>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("documents_pkey");
+            entity.ToTable("documents");
+            entity.HasIndex(e => e.ProjectId, "ix_documents_project_id");
+            entity.HasIndex(e => e.FolderId, "ix_documents_folder_id");
+            entity.HasIndex(e => e.TemplateId, "ix_documents_template_id");
+            entity.HasIndex(e => e.Locator, "documents_locator_key").IsUnique();
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne<Folder>()
+                .WithMany()
+                .HasForeignKey(e => e.FolderId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
+
+            // Self-reference: a document created from a template carries the
+            // template's id; we keep the link soft (SET NULL) so deleting the
+            // template doesn't cascade through real documents that were
+            // already cloned off it.
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.TemplateId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.ProjectId).HasColumnName("project_id");
+            entity.Property(e => e.FolderId).HasColumnName("folder_id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.TemplateId).HasColumnName("template_id");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.BodyJsonb).HasColumnName("body_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.CurrentVersionNumber).HasColumnName("current_version_number");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<DocumentVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("document_versions_pkey");
+            entity.ToTable("document_versions");
+            entity.HasIndex(e => new { e.DocumentId, e.VersionNumber },
+                "document_versions_document_id_version_number_key").IsUnique();
+            entity.HasIndex(e => e.DocumentId, "ix_document_versions_document_id");
+
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DocumentId).HasColumnName("document_id");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.BodyJsonb).HasColumnName("body_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
         });
 
         modelBuilder.Entity<PageVersion>(entity =>

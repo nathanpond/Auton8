@@ -5,6 +5,7 @@ import AuthShell from "./shell/AuthShell";
 import ProtectedRoute from "./shell/ProtectedRoute";
 import Login from "./pages/login/Login";
 import DynamicPageRoute from "./pages/dynamic-page/DynamicPageRoute";
+import DocumentEditorPage from "./pages/documents/DocumentEditorPage";
 import { renderAppRoutes } from "./routes/appRoutes";
 
 export default function Router() {
@@ -13,6 +14,20 @@ export default function Router() {
       <Route element={<AuthShell />}>
         <Route index element={<Login />} />
       </Route>
+
+      {/* Document editor lives OUTSIDE the AppShell so the editor has full
+          bleed — no NavMenu, no footer, no shell padding. The folder/grid
+          views opening into here use target="_blank", which combined with
+          this route shape gives the Google-Docs-style "editor opens in a
+          new tab without the app chrome" experience. */}
+      <Route
+        path="/documents/edit/:documentId"
+        element={
+          <ProtectedRoute>
+            <DocumentEditorPage />
+          </ProtectedRoute>
+        }
+      />
 
       <Route element={<AppShell />}>
         {renderAppRoutes()}

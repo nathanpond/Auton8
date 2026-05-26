@@ -1,12 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  DocumentDto,
+  DocumentKind,
+  DocumentVersionsResponse,
+  FolderChildrenResponse,
   FolderDto,
+  UpdateDocumentRequest,
   UpdateFolderRequest,
+  createDocument,
   createFolder,
+  deleteDocument,
+  deleteDocumentVersion,
   deleteFolder,
+  fetchDocument,
   fetchFolder,
   fetchFolderChildren,
+  listDocumentVersions,
+  listDocumentsPage,
   listFoldersPage,
+  restoreDocumentVersion,
+  updateDocument,
   updateFolder
 } from "@/api/documents";
 
@@ -39,15 +52,16 @@ export function useProjectRootFolders(projectId: string | null) {
   });
 }
 
-// Direct children of a folder. Used by the folder tree when an ancestor is
-// expanded so we never materialise the entire project's folder graph upfront.
+// Direct children of a folder — sub-folders + contained documents in one
+// envelope. Used by the folder tree (which only reads the .folders array)
+// AND by the Drive-style folder view (which renders both arrays).
 export function useFolderChildren(folderId: string | null) {
-  return useQuery<FolderDto[]>({
+  return useQuery<FolderChildrenResponse>({
     queryKey: folderChildrenKey(folderId),
     enabled: folderId != null,
     queryFn: async ({ signal }) => {
       const result = await fetchFolderChildren(folderId!, signal);
-      return result.folders;
+      return result;
     }
   });
 }
@@ -124,6 +138,149 @@ export function useDeleteFolder() {
         qc.invalidateQueries({ queryKey: projectRootFoldersKey(vars.projectId) });
       }
       qc.removeQueries({ queryKey: folderKey(vars.id) });
+    }
+  });
+}
+
+// ── Documents ──────────────────────────────────────────────────────────────
+
+export const projectRootDocumentsKey = (projectId: string | null, kind: DocumentKind) =>
+  ["documents", "documents", "root", projectId, kind] as const;
+export const documentKey = (documentId: string | null) =>
+  ["documents", "document", documentId] as const;
+export const documentVersionsKey = (documentId: string | null) =>
+  ["documents", "document-versions", documentId] as const;
+
+// All top-level documents in a project (folder_id IS NULL). The kind filter
+// keeps document and template lists separate so the template gallery doesn't
+// surface live documents (and vice versa).
+export function useProjectRootDocuments(
+  projectId: string | null,
+  kind: DocumentKind = "document"
+) {
+  return useQuery<DocumentDto[]>({
+    queryKey: projectRootDocumentsKey(projectId, kind),
+    enabled: projectId != null,
+    queryFn: async ({ signal }) => {
+      const result = await listDocumentsPage(
+        { projectId: projectId!, atProjectRoot: true, kind, pageSize: 200 },
+        signal
+      );
+      return result.items;
+    }
+  });
+}
+
+export function useDocument(documentId: string | null) {
+  return useQuery<DocumentDto | null>({
+    queryKey: documentKey(documentId),
+    enabled: documentId != null,
+    queryFn: ({ signal }) => fetchDocument(documentId!, signal)
+  });
+}
+
+export function useDocumentVersions(documentId: string | null) {
+  return useQuery<DocumentVersionsResponse>({
+    queryKey: documentVersionsKey(documentId),
+    enabled: documentId != null,
+    queryFn: ({ signal }) => listDocumentVersions(documentId!, signal)
+  });
+}
+
+export function useCreateDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createDocument,
+    onSuccess: (created) => {
+      if (created.folderId) {
+        qc.invalidateQueries({ queryKey: folderChildrenKey(created.folderId) });
+      } else {
+        qc.invalidateQueries({
+          queryKey: projectRootDocumentsKey(created.projectId, created.kind)
+        });
+      }
+    }
+  });
+}
+
+export function useUpdateDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    // Pass prior folder/project so a move-induced PATCH invalidates the
+    // location the document was *removed* from too.
+    mutationFn: (vars: {
+      id: string;
+      previousProjectId: string;
+      previousFolderId: string | null;
+      patch: UpdateDocumentRequest;
+    }) => updateDocument(vars.id, vars.patch),
+    onSuccess: (updated, vars) => {
+      qc.invalidateQueries({ queryKey: documentKey(updated.id) });
+      qc.invalidateQueries({ queryKey: documentVersionsKey(updated.id) });
+      if (updated.folderId) {
+        qc.invalidateQueries({ queryKey: folderChildrenKey(updated.folderId) });
+      } else {
+        qc.invalidateQueries({
+          queryKey: projectRootDocumentsKey(updated.projectId, updated.kind)
+        });
+      }
+      const movedFolder = vars.previousFolderId !== updated.folderId;
+      const movedProject = vars.previousProjectId !== updated.projectId;
+      if (movedFolder || movedProject) {
+        if (vars.previousFolderId) {
+          qc.invalidateQueries({ queryKey: folderChildrenKey(vars.previousFolderId) });
+        } else {
+          qc.invalidateQueries({
+            queryKey: projectRootDocumentsKey(vars.previousProjectId, updated.kind)
+          });
+        }
+      }
+    }
+  });
+}
+
+export function useDeleteDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      id: string;
+      projectId: string;
+      folderId: string | null;
+      kind: DocumentKind;
+    }) => deleteDocument(vars.id),
+    onSuccess: (_void, vars) => {
+      if (vars.folderId) {
+        qc.invalidateQueries({ queryKey: folderChildrenKey(vars.folderId) });
+      } else {
+        qc.invalidateQueries({
+          queryKey: projectRootDocumentsKey(vars.projectId, vars.kind)
+        });
+      }
+      qc.removeQueries({ queryKey: documentKey(vars.id) });
+      qc.removeQueries({ queryKey: documentVersionsKey(vars.id) });
+    }
+  });
+}
+
+export function useRestoreDocumentVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { documentId: string; versionNumber: number; note?: string }) =>
+      restoreDocumentVersion(vars.documentId, vars.versionNumber, vars.note),
+    onSuccess: (_void, vars) => {
+      qc.invalidateQueries({ queryKey: documentKey(vars.documentId) });
+      qc.invalidateQueries({ queryKey: documentVersionsKey(vars.documentId) });
+    }
+  });
+}
+
+export function useDeleteDocumentVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { documentId: string; versionNumber: number }) =>
+      deleteDocumentVersion(vars.documentId, vars.versionNumber),
+    onSuccess: (_void, vars) => {
+      qc.invalidateQueries({ queryKey: documentVersionsKey(vars.documentId) });
     }
   });
 }

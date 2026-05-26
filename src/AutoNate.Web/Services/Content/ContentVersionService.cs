@@ -241,4 +241,116 @@ public sealed class ContentVersionService : IContentVersionService
         }
         db.NoteVersions.Remove(target);
     }
+
+    public async Task<int?> SnapshotDocumentBeforeChangeAsync(
+        AutoNateDbContext db, Guid documentId, string priorTitle, string priorBodyJsonb,
+        string kind, string? note, Guid actorId, DateTime nowUtc, CancellationToken ct)
+    {
+        // Mirrors the page session-rollup: an autosave PATCH inside an
+        // active editing session doesn't write a new row — the previous
+        // session-start row already captures the pre-session state. A new
+        // row is only written when the most recent row is from a different
+        // session (different author, different kind, or stale > SessionGap).
+        if (kind == ContentVersionKinds.Autosave)
+        {
+            var mostRecent = await db.DocumentVersions.AsNoTracking()
+                .Where(v => v.DocumentId == documentId)
+                .OrderByDescending(v => v.VersionNumber)
+                .Select(v => new { v.Kind, v.CreatedBy, v.CreatedAtUtc })
+                .FirstOrDefaultAsync(ct);
+            if (mostRecent != null
+                && mostRecent.Kind == ContentVersionKinds.Autosave
+                && mostRecent.CreatedBy == actorId
+                && (nowUtc - mostRecent.CreatedAtUtc) < _options.Value.SessionGap)
+            {
+                return null;
+            }
+        }
+
+        var doc = await db.Documents.FirstAsync(d => d.Id == documentId, ct);
+        var versionNumber = doc.CurrentVersionNumber;
+        db.DocumentVersions.Add(new DocumentVersion
+        {
+            Id = Guid.NewGuid(),
+            DocumentId = documentId,
+            VersionNumber = versionNumber,
+            Title = priorTitle,
+            BodyJsonb = priorBodyJsonb,
+            Kind = kind,
+            Note = note,
+            CreatedAtUtc = nowUtc,
+            CreatedBy = actorId
+        });
+        doc.CurrentVersionNumber = versionNumber + 1;
+        return versionNumber + 1;
+    }
+
+    public async Task<int> RestoreDocumentAsync(
+        AutoNateDbContext db, Guid documentId, int targetVersionNumber, string? note,
+        Guid actorId, DateTime nowUtc, CancellationToken ct)
+    {
+        var doc = await db.Documents.FirstAsync(d => d.Id == documentId, ct);
+        var target = await db.DocumentVersions.AsNoTracking()
+            .FirstOrDefaultAsync(v => v.DocumentId == documentId && v.VersionNumber == targetVersionNumber, ct);
+        if (target is null)
+        {
+            throw new InvalidOperationException(
+                $"Document {documentId} has no version {targetVersionNumber}.");
+        }
+
+        // Snapshot current as kind='restore' first so the restore is itself
+        // reversible.
+        var snapshotNumber = doc.CurrentVersionNumber;
+        db.DocumentVersions.Add(new DocumentVersion
+        {
+            Id = Guid.NewGuid(),
+            DocumentId = documentId,
+            VersionNumber = snapshotNumber,
+            Title = doc.Title,
+            BodyJsonb = doc.BodyJsonb,
+            Kind = ContentVersionKinds.Restore,
+            Note = note,
+            CreatedAtUtc = nowUtc,
+            CreatedBy = actorId
+        });
+
+        doc.Title = target.Title;
+        doc.BodyJsonb = target.BodyJsonb;
+        doc.CurrentVersionNumber = snapshotNumber + 1;
+        doc.UpdatedAtUtc = nowUtc;
+        doc.UpdatedBy = actorId;
+        return snapshotNumber;
+    }
+
+    public async Task DeleteDocumentVersionAsync(
+        AutoNateDbContext db, Guid documentId, int versionNumber, CancellationToken ct)
+    {
+        var doc = await db.Documents.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == documentId, ct);
+        if (doc is null) return;
+
+        var currentLive = doc.CurrentVersionNumber - 1;
+        if (versionNumber == currentLive)
+        {
+            throw new InvalidOperationException(
+                "Cannot delete the current version.");
+        }
+
+        var existingCount = await db.DocumentVersions
+            .CountAsync(v => v.DocumentId == documentId, ct);
+        if (existingCount <= 1)
+        {
+            throw new InvalidOperationException(
+                "Cannot delete the only version of a document.");
+        }
+
+        var target = await db.DocumentVersions
+            .FirstOrDefaultAsync(v => v.DocumentId == documentId && v.VersionNumber == versionNumber, ct);
+        if (target is null)
+        {
+            throw new InvalidOperationException(
+                $"Document {documentId} has no version {versionNumber}.");
+        }
+        db.DocumentVersions.Remove(target);
+    }
 }

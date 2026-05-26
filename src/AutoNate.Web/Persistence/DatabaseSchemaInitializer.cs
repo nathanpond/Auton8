@@ -2751,6 +2751,54 @@ internal static class DatabaseSchemaInitializer
             DEFAULT nextval('content_locator_seq');
         CREATE UNIQUE INDEX IF NOT EXISTS folders_locator_key
             ON folders (locator);
+
+        -- Documents (Phase 2 of the Documents feature). One entity covers
+        -- documents AND templates, distinguished by `kind`. folder_id is
+        -- nullable so a document can live at the project root.
+        -- template_id is a soft self-reference: documents created from a
+        -- template carry that link, but they own their own body copy.
+        CREATE TABLE IF NOT EXISTS documents (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            folder_id UUID NULL REFERENCES folders (id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('document','template')),
+            template_id UUID NULL REFERENCES documents (id) ON DELETE SET NULL,
+            title TEXT NOT NULL,
+            description TEXT NULL,
+            body_jsonb JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            current_version_number INT NOT NULL DEFAULT 1,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_documents_project_id ON documents (project_id);
+        CREATE INDEX IF NOT EXISTS ix_documents_folder_id ON documents (folder_id);
+        CREATE INDEX IF NOT EXISTS ix_documents_template_id ON documents (template_id);
+
+        ALTER TABLE documents
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS documents_locator_key
+            ON documents (locator);
+
+        CREATE TABLE IF NOT EXISTS document_versions (
+            id UUID PRIMARY KEY,
+            document_id UUID NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+            version_number INT NOT NULL,
+            title TEXT NOT NULL,
+            body_jsonb JSONB NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('autosave','manual','restore')),
+            note TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS document_versions_document_id_version_number_key
+            ON document_versions (document_id, version_number);
+        CREATE INDEX IF NOT EXISTS ix_document_versions_document_id
+            ON document_versions (document_id);
         """;
 
     // Adds a 'Documents' top-level item to the seeded 'main' menu. Separate

@@ -93,11 +93,14 @@ public static class ContentFolderEndpoints
             "Result set filtered by GetAllowedIdsAsync(Folder.View); " +
             "unauthorized folders never enter the response.");
 
-        // Returns the direct children of a folder — for Phase 1 just sub-folders;
-        // documents will be added here once the document subsystem ships
-        // (the Drive-style folder view will consume this single endpoint).
+        // Returns the direct children of a folder — sub-folders + documents
+        // in one envelope. The Drive-style grid in the SPA iterates each
+        // array independently (folders render as folder cards, documents as
+        // document rows), which is why this returns two arrays instead of
+        // a discriminated-union array.
         group.MapGet("/{id:guid}/children", async (
             Guid id,
+            bool? includeArchived,
             HttpContext http,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IContentAuthorizer authorizer,
@@ -107,19 +110,39 @@ public static class ContentFolderEndpoints
             var parent = await db.Folders.AsNoTracking().FirstOrDefaultAsync(f => f.Id == id, ct);
             if (parent is null) return Results.NotFound();
 
-            var access = await authorizer.GetAllowedIdsAsync(
+            var folderAccess = await authorizer.GetAllowedIdsAsync(
                 http.User, ContentKinds.Folder, Actions.View, ct);
-            var query = db.Folders.AsNoTracking()
+            var folderQuery = db.Folders.AsNoTracking()
                 .Where(f => f.ParentFolderId == id);
-            if (!access.Unrestricted)
+            if (!folderAccess.Unrestricted)
             {
-                var ids = access.AllowedIds;
-                query = query.Where(f => ids.Contains(f.Id));
+                var ids = folderAccess.AllowedIds;
+                folderQuery = folderQuery.Where(f => ids.Contains(f.Id));
             }
-            var folders = await query
+            var folders = await folderQuery
                 .OrderBy(f => f.SortOrder).ThenBy(f => f.Name)
                 .ToListAsync(ct);
-            return Results.Ok(new FolderChildrenResponse(folders.Select(MapDto).ToList()));
+
+            var docAccess = await authorizer.GetAllowedIdsAsync(
+                http.User, ContentKinds.Document, Actions.View, ct);
+            var docQuery = db.Documents.AsNoTracking()
+                .Where(d => d.FolderId == id);
+            if (includeArchived != true)
+            {
+                docQuery = docQuery.Where(d => !d.IsArchived);
+            }
+            if (!docAccess.Unrestricted)
+            {
+                var ids = docAccess.AllowedIds;
+                docQuery = docQuery.Where(d => ids.Contains(d.Id));
+            }
+            var documents = await docQuery
+                .OrderBy(d => d.SortOrder).ThenBy(d => d.Title)
+                .ToListAsync(ct);
+
+            return Results.Ok(new FolderChildrenResponse(
+                folders.Select(MapDto).ToList(),
+                documents.Select(ContentDocumentEndpoints.MapDto).ToList()));
         }).RequirePermission(EntityKinds.Folder, Actions.View);
 
         group.MapGet("/{id:guid}", async (
@@ -454,5 +477,7 @@ public static class ContentFolderEndpoints
 
     public sealed record FolderPageResponse(List<FolderDto> Items, int TotalCount);
 
-    public sealed record FolderChildrenResponse(List<FolderDto> Folders);
+    public sealed record FolderChildrenResponse(
+        List<FolderDto> Folders,
+        List<ContentDocumentEndpoints.DocumentDto> Documents);
 }

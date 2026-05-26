@@ -115,7 +115,9 @@ function FolderNode({
   onDeleteFolder
 }: FolderNodeProps) {
   const [expanded, setExpanded] = useState(false);
-  const { data: children, isFetching } = useFolderChildren(expanded ? folder.id : null);
+  const { data: childResponse, isFetching } = useFolderChildren(expanded ? folder.id : null);
+  // Tree shows folders only — documents render inside the right-side grid.
+  const children = childResponse?.folders;
 
   const isSelected = selectedFolderId === folder.id;
   // Indent each level by 16px; chevron column reserves another 18px so labels

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  ActionIcon,
   Anchor,
   Box,
   Breadcrumbs,
@@ -8,6 +9,7 @@ import {
   Card,
   Group,
   Loader,
+  Menu,
   Modal,
   Stack,
   Text,
@@ -16,15 +18,19 @@ import {
   UnstyledButton
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { FolderDto, fetchFolder } from "@/api/documents";
+import { DocumentDto, FolderDto, fetchFolder } from "@/api/documents";
 import { useQueries } from "@tanstack/react-query";
 import FolderTree from "@/components/documents/FolderTree";
 import {
+  useCreateDocument,
   useCreateFolder,
+  useDeleteDocument,
   useDeleteFolder,
   useFolder,
   useFolderChildren,
+  useProjectRootDocuments,
   useProjectRootFolders,
+  useUpdateDocument,
   useUpdateFolder,
   folderKey
 } from "@/hooks/useDocuments";
@@ -53,12 +59,15 @@ export default function ProjectDocumentsPage() {
     }
   };
 
-  // Folder-mutation dialog state. All three (create / rename / delete) share
-  // the same modal mount so we only ever have one dialog up at a time.
+  // Folder + document mutation dialog state. All variants share the same
+  // modal mount so we only ever have one dialog up at a time.
   const [dialog, setDialog] = useState<
-    | { kind: "create"; parent: FolderDto | null }
-    | { kind: "rename"; folder: FolderDto }
-    | { kind: "delete"; folder: FolderDto }
+    | { kind: "folder-create"; parent: FolderDto | null }
+    | { kind: "folder-rename"; folder: FolderDto }
+    | { kind: "folder-delete"; folder: FolderDto }
+    | { kind: "doc-create"; parent: FolderDto | null }
+    | { kind: "doc-rename"; document: DocumentDto }
+    | { kind: "doc-delete"; document: DocumentDto }
     | null
   >(null);
 
@@ -95,9 +104,9 @@ export default function ProjectDocumentsPage() {
           projectId={projectId}
           selectedFolderId={currentFolderId}
           onSelectFolder={goToFolder}
-          onCreateChild={(parent) => setDialog({ kind: "create", parent })}
-          onRenameFolder={(folder) => setDialog({ kind: "rename", folder })}
-          onDeleteFolder={(folder) => setDialog({ kind: "delete", folder })}
+          onCreateChild={(parent) => setDialog({ kind: "folder-create", parent })}
+          onRenameFolder={(folder) => setDialog({ kind: "folder-rename", folder })}
+          onDeleteFolder={(folder) => setDialog({ kind: "folder-delete", folder })}
         />
       </Box>
 
@@ -117,14 +126,23 @@ export default function ProjectDocumentsPage() {
               />
               {currentFolder.name}
             </Title>
-            <Button
-              size="xs"
-              variant="default"
-              leftSection={<i className="fa fa-folder-plus" aria-hidden />}
-              onClick={() => setDialog({ kind: "create", parent: currentFolder })}
-            >
-              New subfolder
-            </Button>
+            <Group gap="xs">
+              <Button
+                size="xs"
+                variant="default"
+                leftSection={<i className="fa fa-folder-plus" aria-hidden />}
+                onClick={() => setDialog({ kind: "folder-create", parent: currentFolder })}
+              >
+                New subfolder
+              </Button>
+              <Button
+                size="xs"
+                leftSection={<i className="fa fa-file-circle-plus" aria-hidden />}
+                onClick={() => setDialog({ kind: "doc-create", parent: currentFolder })}
+              >
+                New document
+              </Button>
+            </Group>
           </Group>
         ) : (
           <Group justify="space-between" mt="sm" mb="md">
@@ -136,14 +154,23 @@ export default function ProjectDocumentsPage() {
               />
               Project root
             </Title>
-            <Button
-              size="xs"
-              variant="default"
-              leftSection={<i className="fa fa-folder-plus" aria-hidden />}
-              onClick={() => setDialog({ kind: "create", parent: null })}
-            >
-              New folder
-            </Button>
+            <Group gap="xs">
+              <Button
+                size="xs"
+                variant="default"
+                leftSection={<i className="fa fa-folder-plus" aria-hidden />}
+                onClick={() => setDialog({ kind: "folder-create", parent: null })}
+              >
+                New folder
+              </Button>
+              <Button
+                size="xs"
+                leftSection={<i className="fa fa-file-circle-plus" aria-hidden />}
+                onClick={() => setDialog({ kind: "doc-create", parent: null })}
+              >
+                New document
+              </Button>
+            </Group>
           </Group>
         )}
 
@@ -151,23 +178,25 @@ export default function ProjectDocumentsPage() {
           projectId={projectId}
           folderId={currentFolderId}
           onOpenFolder={goToFolder}
+          onRenameDocument={(d) => setDialog({ kind: "doc-rename", document: d })}
+          onDeleteDocument={(d) => setDialog({ kind: "doc-delete", document: d })}
         />
       </Box>
 
       <CreateFolderModal
-        open={dialog?.kind === "create"}
+        open={dialog?.kind === "folder-create"}
         projectId={projectId}
-        parent={dialog?.kind === "create" ? dialog.parent : null}
+        parent={dialog?.kind === "folder-create" ? dialog.parent : null}
         onClose={() => setDialog(null)}
       />
       <RenameFolderModal
-        open={dialog?.kind === "rename"}
-        folder={dialog?.kind === "rename" ? dialog.folder : null}
+        open={dialog?.kind === "folder-rename"}
+        folder={dialog?.kind === "folder-rename" ? dialog.folder : null}
         onClose={() => setDialog(null)}
       />
       <DeleteFolderModal
-        open={dialog?.kind === "delete"}
-        folder={dialog?.kind === "delete" ? dialog.folder : null}
+        open={dialog?.kind === "folder-delete"}
+        folder={dialog?.kind === "folder-delete" ? dialog.folder : null}
         onClose={() => setDialog(null)}
         onDeleted={(deleted) => {
           // If we deleted the folder we were viewing, navigate to its parent
@@ -176,6 +205,22 @@ export default function ProjectDocumentsPage() {
             goToFolder(deleted.parentFolderId ?? null);
           }
         }}
+      />
+      <CreateDocumentModal
+        open={dialog?.kind === "doc-create"}
+        projectId={projectId}
+        parent={dialog?.kind === "doc-create" ? dialog.parent : null}
+        onClose={() => setDialog(null)}
+      />
+      <RenameDocumentModal
+        open={dialog?.kind === "doc-rename"}
+        document={dialog?.kind === "doc-rename" ? dialog.document : null}
+        onClose={() => setDialog(null)}
+      />
+      <DeleteDocumentModal
+        open={dialog?.kind === "doc-delete"}
+        document={dialog?.kind === "doc-delete" ? dialog.document : null}
+        onClose={() => setDialog(null)}
       />
     </Box>
   );
@@ -247,21 +292,39 @@ function FolderBreadcrumbs({
   );
 }
 
-// Drive-style grid of the current folder's direct child folders. Documents
-// will land here in a later phase via a unified `/children` endpoint.
+// Drive-style grid of the current folder's direct children — sub-folders
+// AND documents. Sub-folders render as folder cards that navigate; documents
+// render as cards that open in the editor route. At the project root, root
+// folders + root documents are fetched separately (the folder /children
+// endpoint requires a folder id); inside a folder, both arrays come from the
+// single /children response so we never two-step the wire.
 function FolderChildGrid({
   projectId,
   folderId,
-  onOpenFolder
+  onOpenFolder,
+  onRenameDocument,
+  onDeleteDocument
 }: {
   projectId: string;
   folderId: string | null;
   onOpenFolder: (id: string) => void;
+  onRenameDocument: (d: DocumentDto) => void;
+  onDeleteDocument: (d: DocumentDto) => void;
 }) {
-  const rootQuery = useProjectRootFolders(folderId === null ? projectId : null);
+  const rootFoldersQuery = useProjectRootFolders(folderId === null ? projectId : null);
+  const rootDocumentsQuery = useProjectRootDocuments(folderId === null ? projectId : null);
   const childQuery = useFolderChildren(folderId);
-  const isLoading = folderId === null ? rootQuery.isLoading : childQuery.isLoading;
-  const folders = (folderId === null ? rootQuery.data : childQuery.data) ?? [];
+
+  const isLoading = folderId === null
+    ? rootFoldersQuery.isLoading || rootDocumentsQuery.isLoading
+    : childQuery.isLoading;
+
+  const folders = folderId === null
+    ? (rootFoldersQuery.data ?? [])
+    : (childQuery.data?.folders ?? []);
+  const documents = folderId === null
+    ? (rootDocumentsQuery.data ?? [])
+    : (childQuery.data?.documents ?? []);
 
   if (isLoading) {
     return (
@@ -271,11 +334,11 @@ function FolderChildGrid({
     );
   }
 
-  if (folders.length === 0) {
+  if (folders.length === 0 && documents.length === 0) {
     return (
       <Card withBorder padding="lg" mt="md">
         <Text c="dimmed" ta="center">
-          This folder is empty. Use "New subfolder" to add one.
+          This folder is empty. Use "New subfolder" or "New document" to add something.
         </Text>
       </Card>
     );
@@ -316,6 +379,14 @@ function FolderChildGrid({
             </Group>
           </Card>
         </UnstyledButton>
+      ))}
+      {documents.map((doc) => (
+        <DocumentCard
+          key={doc.id}
+          doc={doc}
+          onRename={() => onRenameDocument(doc)}
+          onDelete={() => onDeleteDocument(doc)}
+        />
       ))}
     </Box>
   );
@@ -504,6 +575,263 @@ function DeleteFolderModal({
             Cancel
           </Button>
           <Button color="red" onClick={submit} loading={deleteFolder.isPending}>
+            Delete
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// Renders a single document card in the folder grid. Click navigates to
+// the distraction-free editor; the kebab menu surfaces rename + delete.
+// Per the plan, the editor opens in a new tab so the AppShell stays put.
+function DocumentCard({
+  doc,
+  onRename,
+  onDelete
+}: {
+  doc: DocumentDto;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <Card withBorder padding="md" style={{ height: "100%" }}>
+      <Group gap={10} wrap="nowrap" align="flex-start">
+        <i
+          className="fa fa-file-lines"
+          style={{ fontSize: 24, color: "var(--mantine-color-blue-7)" }}
+          aria-hidden
+        />
+        <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
+          <Anchor
+            component={Link}
+            to={`/documents/edit/${doc.id}`}
+            target="_blank"
+            rel="noopener"
+            fw={600}
+          >
+            {doc.title}
+          </Anchor>
+          {doc.description ? (
+            <Text size="xs" c="dimmed" truncate>
+              {doc.description}
+            </Text>
+          ) : null}
+          <Text size="xs" c="dimmed">
+            v{doc.currentVersionNumber - 1} · {new Date(doc.updatedAtUtc).toLocaleString()}
+          </Text>
+        </Stack>
+        <Menu position="bottom-end" shadow="sm">
+          <Menu.Target>
+            <ActionIcon size="sm" variant="subtle" aria-label="Document menu">
+              <i className="fa fa-ellipsis-vertical" aria-hidden />
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item
+              leftSection={<i className="fa fa-pen-to-square" aria-hidden />}
+              onClick={onRename}
+            >
+              Rename
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              color="red"
+              leftSection={<i className="fa fa-trash" aria-hidden />}
+              onClick={onDelete}
+            >
+              Delete document
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+      </Group>
+    </Card>
+  );
+}
+
+function CreateDocumentModal({
+  open,
+  projectId,
+  parent,
+  onClose
+}: {
+  open: boolean;
+  projectId: string;
+  parent: FolderDto | null;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const [title, setTitle] = useState("");
+  const createDocument = useCreateDocument();
+  const submit = async () => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    try {
+      const created = await createDocument.mutateAsync({
+        projectId,
+        folderId: parent?.id ?? null,
+        title: trimmed
+      });
+      notifications.show({ message: `Document "${trimmed}" created.`, color: "green" });
+      setTitle("");
+      onClose();
+      // Open the new doc in a new tab so the user sees the editor while the
+      // current folder view stays put — matches the same-tab semantics of
+      // clicking a document card.
+      window.open(`/documents/edit/${created.id}`, "_blank", "noopener");
+    } catch (err) {
+      notifications.show({
+        message: extractErrorMessage(err) ?? "Failed to create document.",
+        color: "red"
+      });
+    }
+  };
+  return (
+    <Modal
+      opened={open}
+      onClose={() => {
+        setTitle("");
+        onClose();
+      }}
+      title={parent ? `New document in "${parent.name}"` : "New document at project root"}
+    >
+      <Stack>
+        <TextInput
+          label="Title"
+          value={title}
+          onChange={(e) => setTitle(e.currentTarget.value)}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={!title.trim()}
+            loading={createDocument.isPending}
+          >
+            Create
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+function RenameDocumentModal({
+  open,
+  document,
+  onClose
+}: {
+  open: boolean;
+  document: DocumentDto | null;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(document?.title ?? "");
+  useEffect(() => {
+    if (document) setTitle(document.title);
+  }, [document]);
+  const updateDocument = useUpdateDocument();
+  if (!document) return null;
+  const submit = async () => {
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === document.title) {
+      onClose();
+      return;
+    }
+    try {
+      await updateDocument.mutateAsync({
+        id: document.id,
+        previousProjectId: document.projectId,
+        previousFolderId: document.folderId,
+        patch: { title: trimmed }
+      });
+      notifications.show({ message: `Document renamed to "${trimmed}".`, color: "green" });
+      onClose();
+    } catch (err) {
+      notifications.show({
+        message: extractErrorMessage(err) ?? "Failed to rename document.",
+        color: "red"
+      });
+    }
+  };
+  return (
+    <Modal opened={open} onClose={onClose} title={`Rename "${document.title}"`}>
+      <Stack>
+        <TextInput
+          label="Title"
+          value={title}
+          onChange={(e) => setTitle(e.currentTarget.value)}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={!title.trim() || title.trim() === document.title}
+            loading={updateDocument.isPending}
+          >
+            Rename
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+function DeleteDocumentModal({
+  open,
+  document,
+  onClose
+}: {
+  open: boolean;
+  document: DocumentDto | null;
+  onClose: () => void;
+}) {
+  const deleteDocument = useDeleteDocument();
+  if (!document) return null;
+  const submit = async () => {
+    try {
+      await deleteDocument.mutateAsync({
+        id: document.id,
+        projectId: document.projectId,
+        folderId: document.folderId,
+        kind: document.kind
+      });
+      notifications.show({
+        message: `Document "${document.title}" deleted.`,
+        color: "green"
+      });
+      onClose();
+    } catch (err) {
+      notifications.show({
+        message: extractErrorMessage(err) ?? "Failed to delete document.",
+        color: "red"
+      });
+    }
+  };
+  return (
+    <Modal opened={open} onClose={onClose} title="Delete document">
+      <Stack>
+        <Text>
+          Delete <strong>{document.title}</strong>? Its version history will also be
+          removed. This action cannot be undone.
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button color="red" onClick={submit} loading={deleteDocument.isPending}>
             Delete
           </Button>
         </Group>
