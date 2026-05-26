@@ -739,7 +739,8 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         {
             ProjectRole.Owner => true,
             ProjectRole.Contributor => action is Actions.View or Actions.Create
-                or Actions.Edit or Actions.Delete or Actions.Archive or Actions.Comment,
+                or Actions.Edit or Actions.Delete or Actions.Archive or Actions.Comment
+                or Actions.RefreshBindings,
             ProjectRole.Commenter => action is Actions.View or Actions.Comment,
             ProjectRole.Viewer => action == Actions.View,
             _ => false

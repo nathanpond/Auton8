@@ -2827,6 +2827,28 @@ internal static class DatabaseSchemaInitializer
             ON document_comments (document_id, thread_id);
         CREATE INDEX IF NOT EXISTS ix_document_comments_open
             ON document_comments (document_id) WHERE resolved_at_utc IS NULL;
+
+        -- Document bindings (Phase 5). The document body carries only a
+        -- placeholder `{{binding:<id>}}`; the resolved value lives here
+        -- in last_resolved_value_jsonb. Snapshot-on-open semantics —
+        -- per-binding refresh + a global refresh-all explicitly trigger
+        -- re-resolution. CASCADE on document delete prunes orphans.
+        CREATE TABLE IF NOT EXISTS document_bindings (
+            id UUID PRIMARY KEY,
+            document_id UUID NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('record-field','aql-table')),
+            config_jsonb JSONB NOT NULL,
+            last_resolved_value_jsonb JSONB NULL,
+            last_resolved_at_utc TIMESTAMPTZ NULL,
+            last_resolved_by_user_id UUID NULL,
+            label TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_document_bindings_document_id
+            ON document_bindings (document_id);
         """;
 
     // Adds a 'Documents' top-level item to the seeded 'main' menu. Separate

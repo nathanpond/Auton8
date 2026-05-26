@@ -1,6 +1,8 @@
-import { useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DocxEditor, createEmptyDocument } from "@eigenpal/docx-editor-react";
 import { ySyncPlugin, yCursorPlugin } from "y-prosemirror";
+import type { EditorView } from "prosemirror-view";
+import { Box, Group } from "@mantine/core";
 import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
 import { useMe } from "@/hooks/useMe";
 import {
@@ -10,6 +12,11 @@ import {
   useReplyToDocumentComment,
   useResolveDocumentComment
 } from "@/hooks/useDocumentComments";
+import { useDocumentBindings } from "@/hooks/useDocumentBindings";
+import type { DocumentBindingDto } from "@/api/documentBindings";
+import { updateBindingsRegistry } from "./bindingsRegistry";
+import { bindingPlaceholderText, createBindingsPlugin } from "./bindingsPlugin";
+import BindingsSidePanel from "./BindingsSidePanel";
 import "@eigenpal/docx-editor-react/styles.css";
 // Local override file MUST be imported AFTER the library's stylesheet so
 // our scoped button reset wins the cascade.
@@ -178,6 +185,46 @@ export default function DocxDocumentEditor({
     role === "editor" ? "editing" : "viewing";
   const readOnly = role === "viewer";
 
+  // Phase 5: live data bindings. The document body carries
+  // `{{binding:UUID}}` placeholders; the decoration plugin paints
+  // resolved values over them. Bindings live in REST; we push the
+  // current list into a module-level registry so the plugin can read
+  // them without a React context plumb. The plugin auto-rebuilds
+  // decorations when the registry changes.
+  const { data: bindingRows = [] } = useDocumentBindings(documentId);
+  useEffect(() => {
+    updateBindingsRegistry(documentId, bindingRows);
+  }, [documentId, bindingRows]);
+
+  // Hold onto the EditorView so the side panel's "Insert at cursor"
+  // action can dispatch a ProseMirror transaction that drops a
+  // `{{binding:UUID}}` placeholder where the cursor is.
+  const editorViewRef = useRef<EditorView | null>(null);
+
+  const insertBindingPlaceholder = (binding: DocumentBindingDto) => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    const placeholder = bindingPlaceholderText(binding.id);
+    const from = view.state.selection.from;
+    const tr = view.state.tr.insertText(placeholder, from);
+    // Strip every mark from the inserted range. Without this, marks
+    // that were active at the cursor (bold, italic, link, color, etc.)
+    // get applied to the new text, which causes ProseMirror to split
+    // the placeholder across multiple text nodes — and our regex
+    // decoration scan, which walks one text node at a time, will only
+    // hide the prefix that lives in the first node. Visible symptom:
+    // tail of the UUID + `}}` showing after the chip.
+    const to = from + placeholder.length;
+    for (const markType of Object.values(view.state.schema.marks)) {
+      tr.removeMark(from, to, markType);
+    }
+    // Also clear stored marks so the next character the user types
+    // doesn't pick up a stale mark from before the insertion.
+    tr.setStoredMarks([]);
+    view.dispatch(tr);
+    view.focus();
+  };
+
   // Build the y-prosemirror plugin list once the Y.Doc + awareness are
   // available. The fragment name "default" matches the sidecar
   // materializer; changing it would silently break body_jsonb snapshots.
@@ -191,7 +238,10 @@ export default function DocxDocumentEditor({
   const externalPlugins = useMemo(() => {
     if (!handle) return [];
     const fragment = handle.doc.getXmlFragment("default");
-    const plugins = [ySyncPlugin(fragment)];
+    // Order matters slightly here: ySyncPlugin first (it owns content
+    // sync), then the bindings decoration plugin (only adds visual
+    // decorations, no state writes), then yCursorPlugin (awareness).
+    const plugins = [ySyncPlugin(fragment), createBindingsPlugin()];
     // HocuspocusProvider types awareness as `Awareness | null`. The null
     // state is theoretical at runtime (the constructor populates it
     // eagerly), but yCursorPlugin's signature won't accept null, so
@@ -239,7 +289,9 @@ export default function DocxDocumentEditor({
   }
 
   return (
-    <DocxEditor
+    <Box style={{ display: "flex", height: "100%", minHeight: 0 }}>
+      <Box style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+        <DocxEditor
       // Force a remount when role transitions. docx-editor latches the
       // readOnly prop at mount and ignores subsequent changes — without
       // this key the editor would stay locked at the pessimistic
@@ -329,10 +381,25 @@ export default function DocxDocumentEditor({
       documentNameEditable={role === "editor" && Boolean(onRenameDocument)}
       onDocumentNameChange={onRenameDocument}
       renderTitleBarRight={titleBarRight ? () => titleBarRight : undefined}
+      // Capture the EditorView so the side panel can dispatch
+      // transactions to insert binding placeholders at the cursor.
+      onEditorViewReady={(view) => {
+        editorViewRef.current = view;
+      }}
       // Match Mantine surface tokens so the editor blends with the rest
       // of the app shell. The library inherits CSS vars for finer
       // control; this `style` just sets the outer container fill.
       style={{ height: "100%", background: "var(--mantine-color-gray-0)" }}
-    />
+        />
+      </Box>
+      {/* Bindings side panel — only visible while there's a Yjs handle
+          (i.e. the editor is mounted). For viewers we still surface it
+          so they can see live data their grants permit. */}
+      <BindingsSidePanel
+        documentId={documentId}
+        canEdit={role === "editor"}
+        onInsert={insertBindingPlaceholder}
+      />
+    </Box>
   );
 }

@@ -27,6 +27,7 @@ public static class ContentResourceKinds
     public const string Folder = "folder";
     public const string Document = "document";
     public const string DocumentVersion = "document.version";
+    public const string DocumentBinding = "document.binding";
 }
 
 public static class ContentEventTypes
@@ -120,6 +121,15 @@ public static class ContentEventTypes
     public const string CommentReopened = "content.comment.reopened";
     public const string CommentDeleted = "content.comment.deleted";
     public const string DocumentCommentListViewed = "content.document.comment.list.viewed";
+
+    // Document bindings (Phase 5). Created/Refreshed/Deleted fire on the
+    // single-binding endpoints; RefreshedAll fires once per /refresh-all
+    // call with the total binding count in details.
+    public const string DocumentBindingCreated = "content.document.binding.created";
+    public const string DocumentBindingRefreshed = "content.document.binding.refreshed";
+    public const string DocumentBindingDeleted = "content.document.binding.deleted";
+    public const string DocumentBindingsRefreshedAll = "content.document.bindings.refreshed_all";
+    public const string DocumentBindingListViewed = "content.document.binding.list.viewed";
 
     // Folder (Documents subsystem — Phase 1). Mirrors the Cabinet lifecycle
     // shape: created/updated/moved/archived/restored/deleted + list/view.

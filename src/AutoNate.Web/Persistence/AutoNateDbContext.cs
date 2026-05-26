@@ -124,6 +124,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<DocumentComment> DocumentComments { get; set; }
 
+    public virtual DbSet<DocumentBinding> DocumentBindings { get; set; }
+
     public virtual DbSet<ContentAncestor> ContentAncestors { get; set; }
 
     public virtual DbSet<PageFavorite> PageFavorites { get; set; }
@@ -1522,6 +1524,31 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.ResolvedByUserId).HasColumnName("resolved_by_user_id");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<DocumentBinding>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("document_bindings_pkey");
+            entity.ToTable("document_bindings");
+            entity.HasIndex(e => e.DocumentId, "ix_document_bindings_document_id");
+
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DocumentId).HasColumnName("document_id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.ConfigJsonb).HasColumnName("config_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.LastResolvedValueJsonb).HasColumnName("last_resolved_value_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.LastResolvedAtUtc).HasColumnName("last_resolved_at_utc");
+            entity.Property(e => e.LastResolvedByUserId).HasColumnName("last_resolved_by_user_id");
+            entity.Property(e => e.Label).HasColumnName("label");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         modelBuilder.Entity<PageVersion>(entity =>

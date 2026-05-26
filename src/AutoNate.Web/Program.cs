@@ -324,6 +324,18 @@ builder.Services.AddScoped<AutoNate.Web.Services.Content.IProjectMembershipServi
     AutoNate.Web.Services.Content.ProjectMembershipService>();
 builder.Services.AddScoped<AutoNate.Web.Services.Content.IContentVersionService,
     AutoNate.Web.Services.Content.ContentVersionService>();
+
+// Document binding resolvers (Phase 5). Per-kind implementations are
+// scoped because they depend on scoped services (IAuthorizer for the
+// record-field resolver, IAqlExecutor for the aql-table resolver). The
+// registry is also scoped so DI can inject the matching lifetime of
+// resolvers; resolution lookup is a single dictionary read.
+builder.Services.AddScoped<AutoNate.Web.Services.Content.Bindings.IDocumentBindingResolver,
+    AutoNate.Web.Services.Content.Bindings.RecordFieldBindingResolver>();
+builder.Services.AddScoped<AutoNate.Web.Services.Content.Bindings.IDocumentBindingResolver,
+    AutoNate.Web.Services.Content.Bindings.AqlTableBindingResolver>();
+builder.Services.AddScoped<AutoNate.Web.Services.Content.Bindings.IDocumentBindingResolverRegistry,
+    AutoNate.Web.Services.Content.Bindings.DocumentBindingResolverRegistry>();
 builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentVersioningOptions>()
     .BindConfiguration(AutoNate.Web.Services.Content.ContentVersioningOptions.SectionName);
 builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentAttachmentOptions>()
@@ -1231,6 +1243,7 @@ app.MapContentFolderEndpoints();
 app.MapContentDocumentEndpoints();
 app.MapDocumentVersionEndpoints();
 app.MapContentDocumentCommentEndpoints();
+app.MapContentDocumentBindingEndpoints();
 app.MapContentPageEndpoints();
 app.MapPageVersionEndpoints();
 app.MapPageAttachmentEndpoints();
