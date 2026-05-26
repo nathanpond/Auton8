@@ -233,23 +233,33 @@ internal static class SystemColumns
         "COALESCE(lu.first_name,'') || ' ' || COALESCE(lu.last_name,'')), ''), lu.username) " +
         "FROM local_users lu";
 
-    public static string ToSqlExpr(string name) => name switch
+    public static string ToSqlExpr(string name)
     {
-        "Id"          => "records.id",
-        "Key"         => "records.key",
-        "KeyNumber"   => "records.key_number",
-        "Name"        => "records.name",
-        "RecordType"  => "rt.name",
-        "Status"      => "records.status",
-        "DueDate"     => "records.due_date",
-        "CreatedDate" => "records.created_at_utc",
-        "UpdatedDate" => "records.updated_at_utc",
-        "CreatedBy"   => $"({UserDisplayNameSelect} WHERE lu.user_id = records.created_by)",
-        "UpdatedBy"   => $"({UserDisplayNameSelect} WHERE lu.user_id = records.updated_by)",
-        "Assignees"   => $"(SELECT string_agg(({UserDisplayNameSelect} WHERE lu.user_id = a), ', ') FROM unnest(records.assignee_ids) AS a)",
-        "IsArchived"  => "records.is_archived",
-        _ => throw new InvalidOperationException($"Unknown system column '{name}'.")
-    };
+        // Canonicalize through the case-insensitive ByName map so callers can
+        // pass field names in any casing (matches the rest of the AQL pipeline,
+        // which treats identifiers as case-insensitive).
+        if (!ByName.TryGetValue(name, out var col))
+        {
+            throw new InvalidOperationException($"Unknown system column '{name}'.");
+        }
+        return col.Name switch
+        {
+            "Id"          => "records.id",
+            "Key"         => "records.key",
+            "KeyNumber"   => "records.key_number",
+            "Name"        => "records.name",
+            "RecordType"  => "rt.name",
+            "Status"      => "records.status",
+            "DueDate"     => "records.due_date",
+            "CreatedDate" => "records.created_at_utc",
+            "UpdatedDate" => "records.updated_at_utc",
+            "CreatedBy"   => $"({UserDisplayNameSelect} WHERE lu.user_id = records.created_by)",
+            "UpdatedBy"   => $"({UserDisplayNameSelect} WHERE lu.user_id = records.updated_by)",
+            "Assignees"   => $"(SELECT string_agg(({UserDisplayNameSelect} WHERE lu.user_id = a), ', ') FROM unnest(records.assignee_ids) AS a)",
+            "IsArchived"  => "records.is_archived",
+            _ => throw new InvalidOperationException($"Unknown system column '{col.Name}'.")
+        };
+    }
 }
 
 // A prepared query owns the resolved state: the schema, the resolved

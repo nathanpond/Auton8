@@ -131,6 +131,41 @@ public sealed class QueryEndpointTests
     }
 
     [Fact]
+    public async Task FromRecords_Columns_AreCaseInsensitive()
+    {
+        // Regression: lowercase/mixed-case names like `key`, `recordtype` used
+        // to throw an unhandled InvalidOperationException out of
+        // SystemColumns.ToSqlExpr and surface as a 500.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync("/api/query", new
+        {
+            query = "FROM Records COLUMNS(key, name, recordtype)"
+        });
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        var body = await resp.Content.ReadFromJsonAsync<ExecuteQueryResponseDto>();
+        Assert.NotNull(body);
+        Assert.Equal(3, body!.Columns.Count);
+    }
+
+    [Fact]
+    public async Task FromRecords_Where_FieldName_IsCaseInsensitive()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        var resp = await client.PostAsJsonAsync("/api/query", new
+        {
+            query = "FROM Records WHERE isarchived = false COLUMNS(key)"
+        });
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+    }
+
+    [Fact]
     public async Task QueryMenu_IsSeeded_OnFreshInstall()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();

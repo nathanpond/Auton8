@@ -19,6 +19,7 @@ public static class QueryEndpoints
             HttpContext http,
             IAqlExecutor executor,
             IAuditEventPublisher auditPublisher,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var queryText = request.Query ?? string.Empty;
@@ -58,6 +59,39 @@ public static class QueryEndpoints
                     details: new { queryText, errors = ex.Errors },
                     ct);
                 return Results.BadRequest(new { errors = ex.Errors });
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Catch-all so unexpected failures (bugs, DB errors) return a
+                // friendly message instead of a 500 with a stack trace. The
+                // full exception is logged + audited so we can still diagnose.
+                var logger = loggerFactory.CreateLogger("AutoNate.Web.Endpoints.QueryEndpoints");
+                logger.LogError(ex, "AQL query failed unexpectedly: {Query}", queryText);
+
+                await auditPublisher.PublishAsync(
+                    QueryEventTopic.TopicName,
+                    QueryEventTypes.Failed,
+                    QueryResourceKinds.Query,
+                    resource: null,
+                    details: new
+                    {
+                        queryText,
+                        exceptionType = ex.GetType().FullName,
+                        exceptionMessage = ex.Message
+                    },
+                    ct);
+
+                return Results.BadRequest(new
+                {
+                    errors = new[]
+                    {
+                        $"The query could not be executed: {ex.Message}"
+                    }
+                });
             }
         }).DisableAntiforgery()
           .AuthorizedInHandler(

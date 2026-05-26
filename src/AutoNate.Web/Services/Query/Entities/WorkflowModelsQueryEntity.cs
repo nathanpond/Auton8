@@ -345,13 +345,13 @@ internal sealed class WorkflowModelsPreparedQuery : IPreparedQuery
         };
     }
 
-    private static object? ReadColumnValue(string? field, WorkflowRow row) => field switch
+    private static object? ReadColumnValue(string? field, WorkflowRow row) => field?.ToLowerInvariant() switch
     {
-        "ModelName" => row.Name,
-        "Published" => row.Published,
-        "Version" => row.Version,
-        "CreatedDate" => row.CreatedDate,
-        "CreatedBy" => null,
+        "modelname" => row.Name,
+        "published" => row.Published,
+        "version" => row.Version,
+        "createddate" => row.CreatedDate,
+        "createdby" => null,
         _ => null
     };
 
