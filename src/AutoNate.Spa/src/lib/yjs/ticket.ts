@@ -1,10 +1,15 @@
 import { api } from "@/api/client";
 
-// "editor" → full read/write Y.Doc connection. "viewer" → Hocuspocus opens
-// the socket as readOnly and rejects any write message. .NET decides the
-// role from the live Page.Edit grant; the SPA uses it to render read-only
-// editor chrome up front.
-export type YjsRole = "editor" | "viewer";
+// "editor" → full read/write Y.Doc connection.
+// "commenter" → Hocuspocus opens readOnly; the SPA puts docx-editor in
+//   mode='viewing' so the body is locked but the comments sidebar (which
+//   talks to REST, not Yjs) stays interactive. Only emitted for the
+//   `documents:` prefix (Phase 4); pages/notes still flip editor↔viewer.
+// "viewer" → readOnly everywhere; no body edits, no comments.
+//
+// .NET decides the role from the live Document/Page grants; the SPA uses
+// it to render read-only chrome up front.
+export type YjsRole = "editor" | "commenter" | "viewer";
 
 // Short-lived single-use ticket the SPA hands to HocuspocusProvider via the
 // `token` field. Hocuspocus's onAuthenticate hook hands the same ticket

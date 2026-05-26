@@ -1,8 +1,15 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { DocxEditor, createEmptyDocument } from "@eigenpal/docx-editor-react";
 import { ySyncPlugin, yCursorPlugin } from "y-prosemirror";
 import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
 import { useMe } from "@/hooks/useMe";
+import {
+  useCreateDocumentComment,
+  useDeleteDocumentComment,
+  useDocumentComments,
+  useReplyToDocumentComment,
+  useResolveDocumentComment
+} from "@/hooks/useDocumentComments";
 import "@eigenpal/docx-editor-react/styles.css";
 // Local override file MUST be imported AFTER the library's stylesheet so
 // our scoped button reset wins the cascade.
@@ -48,6 +55,45 @@ type Props = {
 // schema on every parent re-render.
 const SCHEMA_SEED_DOCUMENT = createEmptyDocument();
 
+// docx-editor stores comment bodies as `Paragraph[]` to match OOXML's
+// `w:p` structure inside `w:comment`. Each Paragraph holds Run[], and
+// each Run holds TextContent[]. Our backend stores comments as plain
+// text — most comments are short prose; richer formatting is a polish
+// decision. Walk the two-level tree (paragraph → run → text) and join.
+function extractCommentText(c: { content: unknown }): string {
+  const paragraphs = Array.isArray(c.content) ? c.content : [];
+  const parts: string[] = [];
+  for (const para of paragraphs) {
+    if (!isObj(para)) continue;
+    const runs = (para as { content?: unknown }).content;
+    if (!Array.isArray(runs)) continue;
+    for (const run of runs) {
+      if (!isObj(run)) continue;
+      // Hyperlink / Insertion / etc. nest their text further; for v1
+      // we look only at plain Run nodes, the dominant shape from the
+      // editor's add-comment UI.
+      const runType = (run as { type?: unknown }).type;
+      if (runType !== "run") continue;
+      const textNodes = (run as { content?: unknown }).content;
+      if (!Array.isArray(textNodes)) continue;
+      for (const node of textNodes) {
+        if (!isObj(node)) continue;
+        const nodeType = (node as { type?: unknown }).type;
+        const text = (node as { text?: unknown }).text;
+        if (nodeType === "text" && typeof text === "string") {
+          parts.push(text);
+        }
+      }
+    }
+    parts.push("\n");
+  }
+  return parts.join("").trim();
+}
+
+function isObj(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null;
+}
+
 export default function DocxDocumentEditor({
   documentId,
   documentTitle,
@@ -62,6 +108,75 @@ export default function DocxDocumentEditor({
     const full = `${me.firstName ?? ""} ${me.lastName ?? ""}`.trim();
     return full || me.username || "User";
   }, [me]);
+
+  // Comments live in REST, not Yjs (Phase 4 design choice — permissions,
+  // RAG, and audit all favor a server-of-truth model). The Y.Doc still
+  // carries the commentRangeStart/End markers because those are body
+  // content. The metadata array we feed to docx-editor's `comments`
+  // prop comes from our React Query cache.
+  const { data: commentRows = [] } = useDocumentComments(documentId);
+  const createComment = useCreateDocumentComment();
+  const replyComment = useReplyToDocumentComment();
+  const resolveComment = useResolveDocumentComment();
+  const deleteComment = useDeleteDocumentComment();
+
+  // docx-editor passes back Comment objects keyed on the numeric
+  // `number` we stamped at create time; resolve/delete callbacks give us
+  // that number too. Maintain a number→canonical Guid index so we can
+  // hit the right REST row without an extra fetch. Refs (not state) to
+  // avoid re-renders that don't affect editor output.
+  const numberToIdRef = useRef<Map<number, string>>(new Map());
+
+  // Translate our DTOs into docx-editor's Comment shape (number id +
+  // Paragraph[] body + parentId number). Build the index in the same
+  // pass — both have O(N) cost, keep them aligned. useMemo so the
+  // controlled `comments` prop has stable reference identity when
+  // nothing actually changed (avoids docx-editor reconciling on every
+  // unrelated re-render).
+  const comments = useMemo(() => {
+    const idx = new Map<number, string>();
+    const result = commentRows.map((row) => {
+      idx.set(row.number, row.id);
+      // OOXML structure: Paragraph.content holds Run[], Run.content holds
+      // TextContent[]. Plain-text comments become a single paragraph with
+      // a single run holding the text.
+      const paragraph = {
+        type: "paragraph" as const,
+        content: row.bodyText
+          ? [
+              {
+                type: "run" as const,
+                content: [{ type: "text" as const, text: row.bodyText }]
+              }
+            ]
+          : []
+      };
+      return {
+        id: row.number,
+        author: row.authorName ?? "User",
+        date: row.createdAtUtc,
+        content: [paragraph],
+        // parentCommentId is a Guid; we need the parent row's `number`
+        // to satisfy docx-editor's Comment.parentId shape. Look it up
+        // from the same list. (O(N²) worst case for very deep threads —
+        // fine in practice for chat-style comment volumes.)
+        parentId:
+          row.parentCommentId != null
+            ? commentRows.find((p) => p.id === row.parentCommentId)?.number
+            : undefined,
+        done: row.resolvedAtUtc != null
+      };
+    });
+    numberToIdRef.current = idx;
+    return result;
+  }, [commentRows]);
+
+  // Mode decision: editors get full edit, commenters get a locked body
+  // + open comments sidebar (mode='viewing'; readOnly=false so the
+  // commenting UI stays interactive), viewers get fully read-only.
+  const mode: "editing" | "suggesting" | "viewing" =
+    role === "editor" ? "editing" : "viewing";
+  const readOnly = role === "viewer";
 
   // Build the y-prosemirror plugin list once the Y.Doc + awareness are
   // available. The fragment name "default" matches the sidecar
@@ -137,10 +252,71 @@ export default function DocxDocumentEditor({
       externalContent
       externalPlugins={externalPlugins}
       author={authorName}
-      // Server-decided role drives read-only. The editor's own mode
-      // toggle (editing / suggesting / viewing) is still user-driven
-      // for editor-role users.
-      readOnly={role !== "editor"}
+      // Server-decided role drives chrome:
+      //   editor    → mode='editing', readOnly=false (full toolbar)
+      //   commenter → mode='viewing', readOnly=false (body locked,
+      //               comments sidebar interactive)
+      //   viewer    → readOnly=true (no edits, no comments)
+      // The editor's own mode toggle (editing / suggesting / viewing)
+      // is still user-driven for editor-role users via the toolbar.
+      mode={mode}
+      readOnly={readOnly}
+      // Controlled comments — feed our REST-backed array and forward
+      // every mutation back through the React Query hooks so the
+      // server stays the source of truth. Each callback receives a
+      // `Comment` whose `id` is the per-document numeric ID; we
+      // resolve it to the canonical Guid via numberToIdRef.
+      comments={comments}
+      onCommentAdd={(c) => {
+        const bodyText = extractCommentText(c);
+        if (!bodyText) return;
+        const parentId = c.parentId;
+        if (parentId != null) {
+          const parentGuid = numberToIdRef.current.get(parentId);
+          if (!parentGuid) {
+            console.warn(
+              `[comments] reply parentId=${parentId} not in numberToIdRef; skipping`
+            );
+            return;
+          }
+          replyComment.mutate({
+            documentId,
+            parentCommentId: parentGuid,
+            number: c.id,
+            bodyText
+          });
+        } else {
+          createComment.mutate({
+            documentId,
+            number: c.id,
+            bodyText
+          });
+        }
+      }}
+      onCommentReply={(reply, _parent) => {
+        const bodyText = extractCommentText(reply);
+        const parentGuid =
+          reply.parentId != null
+            ? numberToIdRef.current.get(reply.parentId)
+            : undefined;
+        if (!bodyText || !parentGuid) return;
+        replyComment.mutate({
+          documentId,
+          parentCommentId: parentGuid,
+          number: reply.id,
+          bodyText
+        });
+      }}
+      onCommentResolve={(c) => {
+        const guid = numberToIdRef.current.get(c.id);
+        if (!guid) return;
+        resolveComment.mutate({ documentId, commentId: guid });
+      }}
+      onCommentDelete={(c) => {
+        const guid = numberToIdRef.current.get(c.id);
+        if (!guid) return;
+        deleteComment.mutate({ documentId, commentId: guid });
+      }}
       // Surface the docx-editor's full Word-style toolbar.
       showToolbar
       showRuler

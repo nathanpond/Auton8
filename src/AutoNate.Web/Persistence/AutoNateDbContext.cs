@@ -122,6 +122,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<DocumentVersion> DocumentVersions { get; set; }
 
+    public virtual DbSet<DocumentComment> DocumentComments { get; set; }
+
     public virtual DbSet<ContentAncestor> ContentAncestors { get; set; }
 
     public virtual DbSet<PageFavorite> PageFavorites { get; set; }
@@ -1483,6 +1485,43 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Note).HasColumnName("note");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<DocumentComment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("document_comments_pkey");
+            entity.ToTable("document_comments");
+            entity.HasIndex(e => new { e.DocumentId, e.Number },
+                "document_comments_document_id_number_key").IsUnique();
+            entity.HasIndex(e => new { e.DocumentId, e.ThreadId },
+                "ix_document_comments_document_id_thread_id");
+
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Self-reference for reply chains. ON DELETE CASCADE keeps the
+            // table consistent if a thread root is deleted; the resolve UI
+            // marks-resolved rather than deletes, so this rarely fires in
+            // practice.
+            entity.HasOne<DocumentComment>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentCommentId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DocumentId).HasColumnName("document_id");
+            entity.Property(e => e.Number).HasColumnName("number");
+            entity.Property(e => e.ParentCommentId).HasColumnName("parent_comment_id");
+            entity.Property(e => e.ThreadId).HasColumnName("thread_id");
+            entity.Property(e => e.AuthorId).HasColumnName("author_id");
+            entity.Property(e => e.BodyText).HasColumnName("body_text");
+            entity.Property(e => e.ResolvedAtUtc).HasColumnName("resolved_at_utc");
+            entity.Property(e => e.ResolvedByUserId).HasColumnName("resolved_by_user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
         });
 
         modelBuilder.Entity<PageVersion>(entity =>

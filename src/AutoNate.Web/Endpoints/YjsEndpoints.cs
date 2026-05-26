@@ -110,13 +110,31 @@ public static class YjsEndpoints
             if (!viewDecision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
 
             // Edit determines role. Users with View but no Edit get a
-            // ticket with role=viewer; Hocuspocus's auth hook flips the
-            // connection to readOnly. Server-side enforcement is the
-            // security boundary — the role in the response is just a
-            // UX hint so the SPA can render read-only chrome up front.
+            // ticket with role=viewer (read-only); Hocuspocus's auth hook
+            // flips the connection to readOnly. For documents specifically,
+            // an intermediate "commenter" role exists for users who can
+            // Comment but not Edit — the SPA puts the editor in
+            // mode='viewing' (body locked) while the comments sidebar +
+            // commenting UI remain interactive. Notes/pages don't ship a
+            // commenter mode (yet), so they continue to bucket as
+            // editor-or-viewer.
             var editDecision = await authorizer.AuthorizeAsync(
                 http.User, authKind, authResourceId, Actions.Edit, ct);
-            var role = editDecision.IsAllowed ? RoleEditor : RoleViewer;
+            string role;
+            if (editDecision.IsAllowed)
+            {
+                role = RoleEditor;
+            }
+            else if (authKind == ContentKinds.Document)
+            {
+                var commentDecision = await authorizer.AuthorizeAsync(
+                    http.User, authKind, authResourceId, Actions.Comment, ct);
+                role = commentDecision.IsAllowed ? RoleCommenter : RoleViewer;
+            }
+            else
+            {
+                role = RoleViewer;
+            }
 
             var actorId = http.GetActorId();
             var displayName = http.User.Identity?.Name ?? actorId.ToString();
@@ -296,10 +314,27 @@ public static class YjsEndpoints
 
             // Re-evaluate Edit. The ticket payload's `Role` is a hint —
             // we trust the live authorizer in case the user was demoted
-            // (or promoted) between mint and connect.
+            // (or promoted) between mint and connect. For documents,
+            // also check Comment to surface the intermediate "commenter"
+            // role; for notes/pages, the role bucket stays editor-or-viewer
+            // (no commenter UI on that side yet).
             var editDecision = await authorizer.AuthorizeAsync(
                 principal, authKind, authResourceId, Actions.Edit, ct);
-            var role = editDecision.IsAllowed ? RoleEditor : RoleViewer;
+            string role;
+            if (editDecision.IsAllowed)
+            {
+                role = RoleEditor;
+            }
+            else if (authKind == ContentKinds.Document)
+            {
+                var commentDecision = await authorizer.AuthorizeAsync(
+                    principal, authKind, authResourceId, Actions.Comment, ct);
+                role = commentDecision.IsAllowed ? RoleCommenter : RoleViewer;
+            }
+            else
+            {
+                role = RoleViewer;
+            }
 
             return Results.Ok(new YjsAuthResponse(payload.UserId, payload.DisplayName, role));
         })
@@ -733,10 +768,15 @@ public static class YjsEndpoints
 
     // -- DTOs + helpers --------------------------------------------------
 
-    // Connection roles. "editor" = full read/write Y.Doc; "viewer" =
-    // read-only (Hocuspocus's `connection.readOnly = true`). Surface as
-    // public consts so other endpoint code can match values exactly.
+    // Connection roles. "editor" = full read/write Y.Doc; "commenter" =
+    // read-only Y.Doc (Hocuspocus's `connection.readOnly = true`) but
+    // permitted to add comments via the REST endpoints — the SPA puts
+    // the editor in mode='viewing' so the body is locked while the
+    // comments sidebar stays interactive; "viewer" = read-only every-
+    // where. Surface as public consts so other endpoint code matches
+    // values exactly.
     public const string RoleEditor = "editor";
+    public const string RoleCommenter = "commenter";
     public const string RoleViewer = "viewer";
 
     public sealed record TicketRequest(string DocumentName);

@@ -2799,6 +2799,34 @@ internal static class DatabaseSchemaInitializer
             ON document_versions (document_id, version_number);
         CREATE INDEX IF NOT EXISTS ix_document_versions_document_id
             ON document_versions (document_id);
+
+        -- Document comments (Phase 4). Range markers in the body Y.Doc carry
+        -- only the integer `number`; metadata (author, body, replies,
+        -- resolved status) lives here. `(document_id, number)` is unique
+        -- because docx-editor's body markers reference it; allocation is
+        -- client-side via Math.max(existing) + 1 — extremely rare conflicts
+        -- handled with an HTTP 409 from the create endpoint.
+        CREATE TABLE IF NOT EXISTS document_comments (
+            id UUID PRIMARY KEY,
+            document_id UUID NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+            number INT NOT NULL,
+            parent_comment_id UUID NULL REFERENCES document_comments (id) ON DELETE CASCADE,
+            thread_id UUID NOT NULL,
+            author_id UUID NOT NULL,
+            body_text TEXT NOT NULL,
+            resolved_at_utc TIMESTAMPTZ NULL,
+            resolved_by_user_id UUID NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            CONSTRAINT ck_document_comments_no_self_parent
+                CHECK (parent_comment_id IS NULL OR parent_comment_id <> id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS document_comments_document_id_number_key
+            ON document_comments (document_id, number);
+        CREATE INDEX IF NOT EXISTS ix_document_comments_document_id_thread_id
+            ON document_comments (document_id, thread_id);
+        CREATE INDEX IF NOT EXISTS ix_document_comments_open
+            ON document_comments (document_id) WHERE resolved_at_utc IS NULL;
         """;
 
     // Adds a 'Documents' top-level item to the seeded 'main' menu. Separate

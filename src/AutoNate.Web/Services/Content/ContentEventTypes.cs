@@ -119,6 +119,7 @@ public static class ContentEventTypes
     public const string CommentResolved = "content.comment.resolved";
     public const string CommentReopened = "content.comment.reopened";
     public const string CommentDeleted = "content.comment.deleted";
+    public const string DocumentCommentListViewed = "content.document.comment.list.viewed";
 
     // Folder (Documents subsystem — Phase 1). Mirrors the Cabinet lifecycle
     // shape: created/updated/moved/archived/restored/deleted + list/view.
