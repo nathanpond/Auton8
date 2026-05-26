@@ -1,6 +1,12 @@
 import * as Y from "yjs";
 import { ServerBlockNoteEditor } from "@blocknote/server-util";
 import { BlockNoteSchema, defaultBlockSpecs, type PartialBlock } from "@blocknote/core";
+// y-prosemirror's `yDocToProsemirrorJSON` walks a Y.XmlFragment and emits
+// a ProseMirror Node JSON tree without requiring a schema on this side —
+// exactly what we need for the documents prefix where the SPA owns the
+// TipTap schema and the sidecar just snapshots the materialized JSON for
+// .NET's body_jsonb mirror.
+import { yDocToProsemirrorJSON } from "y-prosemirror";
 import { noteEmbedServerSpec } from "./noteEmbedStub.js";
 import type pg from "pg";
 
@@ -67,6 +73,21 @@ const napkinMaterializer: Materializer = async (doc) => {
     elements,
     appState
   });
+};
+
+// Documents (Phase 3+) use TipTap on the SPA side, which writes to a Yjs
+// XmlFragment named "default" by default via the @tiptap/extension-
+// collaboration extension. We render to a ProseMirror Node JSON tree
+// (the same shape TipTap's `editor.getJSON()` produces) so the .NET
+// mirror is human-readable AND directly re-hydratable by the editor when
+// a cold-load needs to seed the Y.Doc from the body mirror.
+//
+// Fragment name MUST match what the SPA-side Collaboration extension
+// uses — TipTap's default field name is "default"; we keep that here so
+// the SPA's editor mount can stay at default config.
+const documentMaterializer: Materializer = async (doc) => {
+  const json = yDocToProsemirrorJSON(doc, "default");
+  return JSON.stringify(json);
 };
 
 // draw.io diagrams use Y.Text holding the full mxfile XML — the editor
@@ -166,6 +187,8 @@ export function selectMaterializer(documentName: string): Materializer | null {
       return napkinMaterializer;
     case "diagram":
       return diagramMaterializer;
+    case "documents":
+      return documentMaterializer;
     case "pagemeta":
       // Live notes-list metadata for a page. Source of truth lives in
       // the `notes` table; pagemeta is a Yjs sync channel only. No DB

@@ -60,15 +60,17 @@ public static class YjsEndpoints
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
 
-            // Translate the document target into a Page-scoped authorization
-            // check. Notes inherit page permissions (design D10), so for
-            // note:/napkin:/diagram: docs we look up the parent pageId and
-            // authorize on that. pagemeta: addresses the page directly, just
-            // a sibling channel to page: for the live notes-list metadata.
-            Guid pageId;
+            // Translate the document target into the right content kind for
+            // the authorizer. Pages: notes inherit page permissions (design
+            // D10) so note:/napkin:/diagram: docs look up the parent pageId
+            // and authorize on Page. pagemeta: addresses the page directly.
+            // documents: authorizes on the Document kind directly (Phase 3+).
+            Guid authResourceId;
+            string authKind;
             if (kind == DocKinds.Page || kind == DocKinds.PageMeta)
             {
-                pageId = entityId;
+                authResourceId = entityId;
+                authKind = ContentKinds.Page;
             }
             else if (IsNoteDocKind(kind))
             {
@@ -83,7 +85,20 @@ public static class YjsEndpoints
                     {
                         error = $"Document prefix '{kind}' requires note kind '{expected}', but note is '{note.NoteKind}'."
                     });
-                pageId = note.PageId;
+                authResourceId = note.PageId;
+                authKind = ContentKinds.Page;
+            }
+            else if (kind == DocKinds.Document)
+            {
+                // Sanity: the document must exist before we hand out a ticket
+                // that lets the editor mount against it. The authorizer would
+                // otherwise reach the "no project ancestor" deny on a missing
+                // id and return 403, which masks the real cause.
+                var docExists = await db.Documents.AsNoTracking()
+                    .AnyAsync(d => d.Id == entityId, ct);
+                if (!docExists) return Results.NotFound();
+                authResourceId = entityId;
+                authKind = ContentKinds.Document;
             }
             else
             {
@@ -91,7 +106,7 @@ public static class YjsEndpoints
             }
 
             var viewDecision = await authorizer.AuthorizeAsync(
-                http.User, ContentKinds.Page, pageId, Actions.View, ct);
+                http.User, authKind, authResourceId, Actions.View, ct);
             if (!viewDecision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
 
             // Edit determines role. Users with View but no Edit get a
@@ -100,7 +115,7 @@ public static class YjsEndpoints
             // security boundary — the role in the response is just a
             // UX hint so the SPA can render read-only chrome up front.
             var editDecision = await authorizer.AuthorizeAsync(
-                http.User, ContentKinds.Page, pageId, Actions.Edit, ct);
+                http.User, authKind, authResourceId, Actions.Edit, ct);
             var role = editDecision.IsAllowed ? RoleEditor : RoleViewer;
 
             var actorId = http.GetActorId();
@@ -232,8 +247,13 @@ public static class YjsEndpoints
                 return Results.Unauthorized();
 
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            Guid pageId;
-            if (kind == DocKinds.Page || kind == DocKinds.PageMeta) pageId = entityId;
+            Guid authResourceId;
+            string authKind;
+            if (kind == DocKinds.Page || kind == DocKinds.PageMeta)
+            {
+                authResourceId = entityId;
+                authKind = ContentKinds.Page;
+            }
             else if (IsNoteDocKind(kind))
             {
                 var noteRow = await db.Notes.AsNoTracking()
@@ -246,7 +266,16 @@ public static class YjsEndpoints
                 var expected = ExpectedNoteKindForDocKind(kind);
                 if (!string.Equals(noteRow.NoteKind, expected, StringComparison.Ordinal))
                     return Results.Unauthorized();
-                pageId = noteRow.PageId;
+                authResourceId = noteRow.PageId;
+                authKind = ContentKinds.Page;
+            }
+            else if (kind == DocKinds.Document)
+            {
+                var docExists = await db.Documents.AsNoTracking()
+                    .AnyAsync(d => d.Id == entityId, ct);
+                if (!docExists) return Results.Unauthorized();
+                authResourceId = entityId;
+                authKind = ContentKinds.Document;
             }
             else return Results.Unauthorized();
 
@@ -256,7 +285,7 @@ public static class YjsEndpoints
             // ContentAuthorizer's actor-id lookups.
             var principal = SyntheticPrincipal.FromUserId(payload.UserId);
             var viewDecision = await authorizer.AuthorizeAsync(
-                principal, ContentKinds.Page, pageId, Actions.View, ct);
+                principal, authKind, authResourceId, Actions.View, ct);
             if (!viewDecision.IsAllowed)
             {
                 log.LogWarning(
@@ -269,7 +298,7 @@ public static class YjsEndpoints
             // we trust the live authorizer in case the user was demoted
             // (or promoted) between mint and connect.
             var editDecision = await authorizer.AuthorizeAsync(
-                principal, ContentKinds.Page, pageId, Actions.Edit, ct);
+                principal, authKind, authResourceId, Actions.Edit, ct);
             var role = editDecision.IsAllowed ? RoleEditor : RoleViewer;
 
             return Results.Ok(new YjsAuthResponse(payload.UserId, payload.DisplayName, role));
@@ -411,6 +440,64 @@ public static class YjsEndpoints
                     ContentResourceKinds.Page,
                     resource: new { id = page.Id, title = page.Title },
                     details: new { fields = PageBodyFields, newVersionNumber, source = "yjs" },
+                    ct);
+            }
+            else if (kind == DocKinds.Document)
+            {
+                var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == entityId, ct);
+                if (doc is null) return Results.NotFound();
+
+                if (doc.BodyJsonb == payload.BodyJsonb)
+                {
+                    await tx.CommitAsync(ct);
+                    return Results.NoContent();
+                }
+
+                // Cold-load empty-clobber guard: if the incoming Y.Doc
+                // materialized to an empty ProseMirror doc but the mirror
+                // has content, refuse the write. Matches the page-side
+                // guard — same failure mode (editor mount → autosave of
+                // blank state → wipes the body).
+                if (IsEffectivelyEmptyProseMirror(payload.BodyJsonb)
+                    && !IsEffectivelyEmptyProseMirror(doc.BodyJsonb))
+                {
+                    log.LogWarning(
+                        "Rejected empty Yjs autosave for document {DocumentId}: would have clobbered existing body_jsonb.",
+                        doc.Id);
+                    await tx.CommitAsync(ct);
+                    return Results.NoContent();
+                }
+
+                newVersionNumber = await versions.SnapshotDocumentBeforeChangeAsync(
+                    db, doc.Id, doc.Title, doc.BodyJsonb,
+                    ContentVersionKinds.Autosave, null, actorId, now, ct);
+                doc.BodyJsonb = payload.BodyJsonb;
+                doc.UpdatedAtUtc = now;
+                doc.UpdatedBy = actorId;
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+
+                if (newVersionNumber is { } vn)
+                {
+                    await auditPublisher.PublishAsync(
+                        ContentEventTopic.TopicName,
+                        ContentEventTypes.DocumentVersionCreated,
+                        ContentResourceKinds.DocumentVersion,
+                        resource: new
+                        {
+                            documentId = doc.Id,
+                            versionNumber = vn - 1,
+                            kind = ContentVersionKinds.Autosave
+                        },
+                        details: null,
+                        ct);
+                }
+                await auditPublisher.PublishAsync(
+                    ContentEventTopic.TopicName,
+                    ContentEventTypes.DocumentUpdated,
+                    ContentResourceKinds.Document,
+                    resource: new { id = doc.Id, title = doc.Title },
+                    details: new { fields = DocumentBodyFields, newVersionNumber, source = "yjs" },
                     ct);
             }
             else if (IsNoteDocKind(kind))
@@ -606,6 +693,7 @@ public static class YjsEndpoints
         public const string Note = "note";         // → richtext note (BlockNote)
         public const string Napkin = "napkin";     // → drawing note (Excalidraw)
         public const string Diagram = "diagram";   // → diagram note (draw.io)
+        public const string Document = "documents"; // → document body (TipTap; Phase 3+)
     }
 
     // Maps a doc-name prefix to the NoteKind it's allowed to address.
@@ -629,7 +717,11 @@ public static class YjsEndpoints
         var sep = raw.IndexOf(':');
         if (sep <= 0 || sep == raw.Length - 1) return false;
         var k = raw[..sep];
-        if (k != DocKinds.Page && k != DocKinds.PageMeta && !IsNoteDocKindRaw(k)) return false;
+        if (k != DocKinds.Page && k != DocKinds.PageMeta
+            && k != DocKinds.Document && !IsNoteDocKindRaw(k))
+        {
+            return false;
+        }
         if (!Guid.TryParse(raw.AsSpan(sep + 1), out var g)) return false;
         kind = k;
         id = g;
@@ -681,6 +773,49 @@ public static class YjsEndpoints
     private static readonly JsonSerializerOptions WebhookJsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly string[] PageBodyFields = { "bodyJsonb" };
     private static readonly string[] NoteContentFields = { "contentJsonb" };
+    private static readonly string[] DocumentBodyFields = { "bodyJsonb" };
+
+    // True if `raw` is an empty / placeholder ProseMirror doc (the shape
+    // TipTap's empty editor materializes to: `{"type":"doc"}` with no
+    // content, or with a single empty paragraph). Mirrors the page-side
+    // empty-BlockNote guard — same failure mode, different content shape.
+    private static bool IsEffectivelyEmptyProseMirror(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+        var trimmed = raw.AsSpan().Trim();
+        if (trimmed.SequenceEqual("{}")) return true;
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+            if (!doc.RootElement.TryGetProperty("type", out var typeEl)) return false;
+            if (typeEl.GetString() != "doc") return false;
+            if (!doc.RootElement.TryGetProperty("content", out var contentEl))
+            {
+                // `{"type":"doc"}` with no content array → empty.
+                return true;
+            }
+            if (contentEl.ValueKind != JsonValueKind.Array) return false;
+            if (contentEl.GetArrayLength() == 0) return true;
+            if (contentEl.GetArrayLength() > 1) return false;
+            var only = contentEl[0];
+            if (only.ValueKind != JsonValueKind.Object) return false;
+            if (!only.TryGetProperty("type", out var inner)) return false;
+            // TipTap's StarterKit boots with a single empty paragraph.
+            if (inner.GetString() != "paragraph") return false;
+            if (only.TryGetProperty("content", out var innerContent)
+                && innerContent.ValueKind == JsonValueKind.Array
+                && innerContent.GetArrayLength() > 0)
+            {
+                return false;
+            }
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     // True if `raw` is null, empty, the default-row sentinel "{}", an empty
     // BlockNote block array, or a single placeholder paragraph with no

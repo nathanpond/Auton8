@@ -1,36 +1,59 @@
-import { useMemo } from "react";
+import { Suspense, lazy, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Anchor,
-  Badge,
   Box,
-  Code,
   Group,
   Loader,
   Stack,
   Text,
   Title
 } from "@mantine/core";
-import { useDocument } from "@/hooks/useDocuments";
+import { notifications } from "@mantine/notifications";
+import { useDocument, useUpdateDocument } from "@/hooks/useDocuments";
 
-// Phase 2 of the Documents feature: a minimal "editor" route. Renders the
-// document title + a read-only pretty-printed `bodyJsonb` block so the
-// data round-trip is visible end-to-end before the docx-editor + Hocuspocus
-// integration lands in Phase 3. Mounts OUTSIDE AppShell (see router.tsx) so
-// the future docx-editor will get full bleed; for now we wrap the content
-// in a thin chrome with a "Back to project" link.
+// Phase 3 (post-switch): we host @eigenpal/docx-editor-react in this
+// distraction-free route. The editor brings its own title bar, toolbar,
+// rulers, and zoom — we pass the doc title + a "Back to project" link
+// into its title bar right slot so we don't end up with two chrome rows
+// stacked. Renames flow through the REST documents endpoint via
+// useUpdateDocument; body content flows through Yjs + Hocuspocus, which
+// the wrapper component owns.
+
+const DocxDocumentEditor = lazy(
+  () => import("@/components/documents/DocxDocumentEditor")
+);
+
 export default function DocumentEditorPage() {
   const { documentId } = useParams<{ documentId: string }>();
   const { data: doc, isLoading, error } = useDocument(documentId ?? null);
+  const updateDocument = useUpdateDocument();
 
-  const prettyBody = useMemo(() => {
-    if (!doc) return "";
-    try {
-      return JSON.stringify(JSON.parse(doc.bodyJsonb), null, 2);
-    } catch {
-      return doc.bodyJsonb;
-    }
-  }, [doc]);
+  const onRename = useCallback(
+    async (newTitle: string) => {
+      if (!doc) return;
+      const trimmed = newTitle.trim();
+      if (!trimmed || trimmed === doc.title) return;
+      try {
+        await updateDocument.mutateAsync({
+          id: doc.id,
+          previousProjectId: doc.projectId,
+          previousFolderId: doc.folderId,
+          patch: { title: trimmed }
+        });
+        notifications.show({
+          message: `Renamed to "${trimmed}".`,
+          color: "green"
+        });
+      } catch {
+        notifications.show({
+          message: "Failed to rename document.",
+          color: "red"
+        });
+      }
+    },
+    [doc, updateDocument]
+  );
 
   if (isLoading) {
     return (
@@ -55,49 +78,31 @@ export default function DocumentEditorPage() {
 
   return (
     <Box style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      {/* Editor chrome — kept very thin in Phase 2; Phase 3 replaces this
-          with the docx-editor's own toolbar + the right-side AI panel. */}
-      <Group
-        justify="space-between"
-        align="center"
-        px="md"
-        py="xs"
-        style={{
-          borderBottom: "1px solid var(--mantine-color-gray-3)",
-          background: "var(--mantine-color-body)"
-        }}
+      <Suspense
+        fallback={
+          <Group justify="center" mt="xl">
+            <Loader />
+          </Group>
+        }
       >
-        <Group gap="md" style={{ minWidth: 0 }}>
-          <Anchor component={Link} to={`/documents/p/${doc.projectId}`} size="sm">
-            <i className="fa fa-arrow-left" aria-hidden style={{ marginRight: 6 }} />
-            Back to project
-          </Anchor>
-          <Title order={4} style={{ wordBreak: "break-word" }}>
-            {doc.title}
-          </Title>
-          <Badge color="gray" variant="light">
-            {doc.kind}
-          </Badge>
-          <Badge color="blue" variant="light">
-            v{doc.currentVersionNumber - 1}
-          </Badge>
-        </Group>
-        <Text size="xs" c="dimmed">
-          Editor preview — full editor lands in Phase 3.
-        </Text>
-      </Group>
-
-      <Box style={{ flex: 1, overflow: "auto", padding: 24 }}>
-        <Stack gap="md" style={{ maxWidth: 880, margin: "0 auto" }}>
-          {doc.description ? (
-            <Text c="dimmed">{doc.description}</Text>
-          ) : null}
-          <Title order={5}>Body (read-only JSON)</Title>
-          <Code block style={{ whiteSpace: "pre", overflowX: "auto" }}>
-            {prettyBody || "(empty)"}
-          </Code>
-        </Stack>
-      </Box>
+        <Box style={{ flex: 1, minHeight: 0 }}>
+          <DocxDocumentEditor
+            documentId={doc.id}
+            documentTitle={doc.title}
+            onRenameDocument={onRename}
+            titleBarRight={
+              <Anchor
+                component={Link}
+                to={`/documents/p/${doc.projectId}`}
+                size="sm"
+              >
+                <i className="fa fa-arrow-left" aria-hidden style={{ marginRight: 6 }} />
+                Back to project
+              </Anchor>
+            }
+          />
+        </Box>
+      </Suspense>
     </Box>
   );
 }
