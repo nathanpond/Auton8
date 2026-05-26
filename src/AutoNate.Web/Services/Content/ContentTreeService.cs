@@ -159,6 +159,19 @@ public sealed class ContentTreeService : IContentTreeService
                 }
                 return (ContentKinds.Notebook, page.NotebookId);
             }
+            case ContentKinds.Folder:
+            {
+                var folder = await db.Folders.AsNoTracking()
+                    .Where(f => f.Id == id)
+                    .Select(f => new { f.ProjectId, f.ParentFolderId })
+                    .FirstOrDefaultAsync(ct);
+                if (folder is null) return (null, null);
+                if (folder.ParentFolderId is { } parent)
+                {
+                    return (ContentKinds.Folder, parent);
+                }
+                return (ContentKinds.Project, folder.ProjectId);
+            }
             default:
                 return (null, null);
         }
@@ -189,6 +202,11 @@ public sealed class ContentTreeService : IContentTreeService
                            CASE WHEN parent_page_id IS NOT NULL THEN 'page'::text ELSE 'notebook'::text END,
                            COALESCE(parent_page_id, notebook_id)
                     FROM pages
+                    UNION ALL
+                    SELECT 'folder'::text, id,
+                           CASE WHEN parent_folder_id IS NOT NULL THEN 'folder'::text ELSE 'project'::text END,
+                           COALESCE(parent_folder_id, project_id)
+                    FROM folders
                 ) AS child ON child.parent_kind = s.kind AND child.parent_id = s.id
             )
             SELECT kind AS "Kind", id AS "Id" FROM subtree
@@ -257,6 +275,19 @@ public sealed class ContentTreeService : IContentTreeService
                 parentMap[(ContentKinds.Page, r.Id)] = r.ParentPageId is { } pp
                     ? (ContentKinds.Page, pp)
                     : (ContentKinds.Notebook, r.NotebookId);
+            }
+        }
+        if (idsByKind.TryGetValue(ContentKinds.Folder, out var folderIds) && folderIds.Count > 0)
+        {
+            var rows = await db.Folders.AsNoTracking()
+                .Where(f => folderIds.Contains(f.Id))
+                .Select(f => new { f.Id, f.ProjectId, f.ParentFolderId })
+                .ToListAsync(ct);
+            foreach (var r in rows)
+            {
+                parentMap[(ContentKinds.Folder, r.Id)] = r.ParentFolderId is { } pf
+                    ? (ContentKinds.Folder, pf)
+                    : (ContentKinds.Project, r.ProjectId);
             }
         }
         // Projects are roots — they never have a parent entry, which makes

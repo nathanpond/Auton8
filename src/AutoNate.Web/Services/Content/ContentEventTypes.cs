@@ -24,6 +24,8 @@ public static class ContentResourceKinds
     public const string Note = "note";
     public const string NoteVersion = "note.version";
     public const string Comment = "comment";
+    public const string Folder = "folder";
+    public const string Document = "document";
 }
 
 public static class ContentEventTypes
@@ -116,4 +118,15 @@ public static class ContentEventTypes
     public const string CommentResolved = "content.comment.resolved";
     public const string CommentReopened = "content.comment.reopened";
     public const string CommentDeleted = "content.comment.deleted";
+
+    // Folder (Documents subsystem — Phase 1). Mirrors the Cabinet lifecycle
+    // shape: created/updated/moved/archived/restored/deleted + list/view.
+    public const string FolderCreated = "content.folder.created";
+    public const string FolderUpdated = "content.folder.updated";
+    public const string FolderMoved = "content.folder.moved";
+    public const string FolderArchived = "content.folder.archived";
+    public const string FolderRestored = "content.folder.restored";
+    public const string FolderDeleted = "content.folder.deleted";
+    public const string FolderListViewed = "content.folder.list.viewed";
+    public const string FolderViewed = "content.folder.viewed";
 }

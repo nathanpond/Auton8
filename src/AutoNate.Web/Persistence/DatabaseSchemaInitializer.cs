@@ -2695,6 +2695,125 @@ internal static class DatabaseSchemaInitializer
             ADD COLUMN IF NOT EXISTS preview_svg TEXT NULL;
         """;
 
+    // Documents subsystem (Phase 1 of the Documents feature plan
+    // — see docs/plans/2026-05-26-documents-feature.md). Adds:
+    //   • `commenter` to the project_members.role CHECK constraint (so the
+    //     new 4th role can be persisted alongside owner/contributor/viewer).
+    //   • folders table — self-referential, project-scoped, unlimited nesting.
+    //     Mirrors content_locator_seq for cross-kind unique locators.
+    // Idempotent: drop-and-recreate of the CHECK is gated on the constraint
+    // name; CREATE TABLE IF NOT EXISTS is no-op on re-run.
+    //
+    // Folders are wired into IContentAuthorizer / ContentTreeService via the
+    // EntityKinds.Folder + ContentKinds.Folder constants; closure rows go into
+    // the existing content_ancestors table so inheritance "just works."
+    private const string ContentDocumentsSchemaSql =
+        """
+        DO $$
+        BEGIN
+            -- Refresh the project_members.role CHECK constraint to include
+            -- 'commenter'. The original constraint was created inline so it
+            -- carries the Postgres default name `project_members_role_check`.
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'project_members_role_check'
+            ) THEN
+                ALTER TABLE project_members
+                    DROP CONSTRAINT project_members_role_check;
+            END IF;
+            ALTER TABLE project_members
+                ADD CONSTRAINT project_members_role_check
+                CHECK (role IN ('owner','contributor','commenter','viewer'));
+        END $$;
+
+        CREATE TABLE IF NOT EXISTS folders (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            parent_folder_id UUID NULL REFERENCES folders (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            icon TEXT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL,
+            CONSTRAINT ck_folders_no_self_parent
+                CHECK (parent_folder_id IS NULL OR parent_folder_id <> id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_folders_project_id ON folders (project_id);
+        CREATE INDEX IF NOT EXISTS ix_folders_parent_folder_id
+            ON folders (parent_folder_id);
+
+        ALTER TABLE folders
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS folders_locator_key
+            ON folders (locator);
+        """;
+
+    // Adds a 'Documents' top-level item to the seeded 'main' menu. Separate
+    // from MenusSchemaSql so existing installs (where the menu was seeded
+    // before this feature existed) also pick it up. Idempotent: skips if the
+    // menu doesn't exist yet (fresh install path will populate it via the
+    // base seed once we add Documents there in a future migration) or if an
+    // item with this exact name + path already lives at the top of `main`.
+    private const string DocumentsMenuItemSeedSql =
+        """
+        DO $$
+        DECLARE
+            main_id UUID;
+            seed_actor UUID;
+            existing_top_count INT;
+            new_sort_order INT;
+        BEGIN
+            SELECT id INTO main_id FROM menus WHERE key = 'main';
+            IF main_id IS NULL THEN
+                RETURN;
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM menu_items mi
+                WHERE mi.menu_id = main_id
+                  AND mi.parent_id IS NULL
+                  AND mi.item_type = 'route'
+                  AND mi.config->>'path' = '/documents'
+            ) THEN
+                RETURN;
+            END IF;
+
+            SELECT user_id INTO seed_actor
+            FROM local_users
+            ORDER BY created_date ASC
+            LIMIT 1;
+            IF seed_actor IS NULL THEN
+                RETURN;
+            END IF;
+
+            SELECT COALESCE(MAX(sort_order), -1) + 1 INTO new_sort_order
+            FROM menu_items
+            WHERE menu_id = main_id AND parent_id IS NULL;
+
+            INSERT INTO menu_items (
+                id, menu_id, parent_id, sort_order, display_name, icon,
+                item_type, config, is_visible, is_system,
+                created_at_utc, updated_at_utc
+            )
+            VALUES (
+                gen_random_uuid(), main_id, NULL, new_sort_order,
+                'Documents', 'fa fa-file-lines',
+                'route', '{{"path":"/documents"}}'::jsonb,
+                TRUE, TRUE, NOW(), NOW()
+            );
+
+            -- Touch existing top count so the cache-version refresh is
+            -- predictable; harmless if the trigger isn't installed yet.
+            SELECT COUNT(*) INTO existing_top_count
+            FROM menu_items WHERE menu_id = main_id AND parent_id IS NULL;
+        END $$;
+        """;
+
     // Per-user page favorites. Composite PK (page_id, user_id) makes
     // PUT idempotent via ON CONFLICT DO NOTHING. Cascade on page delete so
     // favorites disappear with the page they pointed at.
@@ -3188,6 +3307,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotModelsMenuSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentHierarchySchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentLocatorSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ContentDocumentsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DocumentsMenuItemSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentNotePageIndexSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(NotePreviewSvgSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageFavoritesSchemaSql, cancellationToken);

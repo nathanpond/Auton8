@@ -1227,6 +1227,7 @@ app.MapProjectEndpoints();
 app.MapProjectMemberEndpoints();
 app.MapCabinetEndpoints();
 app.MapNotebookEndpoints();
+app.MapContentFolderEndpoints();
 app.MapContentPageEndpoints();
 app.MapPageVersionEndpoints();
 app.MapPageAttachmentEndpoints();

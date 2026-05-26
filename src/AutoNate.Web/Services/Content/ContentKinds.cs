@@ -11,6 +11,12 @@ public static class ContentKinds
     public const string Notebook = "notebook";
     public const string Page = "page";
 
+    // Documents subsystem — Project → Folder (self-nesting) → Document.
+    // Same authorizer / closure-row plumbing as the notes hierarchy.
+    public const string Folder = "folder";
+    public const string Document = "document";
+
     public static bool IsContentKind(string kind) =>
-        kind == Project || kind == Cabinet || kind == Notebook || kind == Page;
+        kind == Project || kind == Cabinet || kind == Notebook || kind == Page
+        || kind == Folder || kind == Document;
 }

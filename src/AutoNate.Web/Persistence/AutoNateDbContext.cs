@@ -116,6 +116,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<NoteVersion> NoteVersions { get; set; }
 
+    public virtual DbSet<Folder> Folders { get; set; }
+
     public virtual DbSet<ContentAncestor> ContentAncestors { get; set; }
 
     public virtual DbSet<PageFavorite> PageFavorites { get; set; }
@@ -1357,6 +1359,45 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Title).HasColumnName("title");
             entity.Property(e => e.BodyJsonb).HasColumnName("body_jsonb").HasColumnType("jsonb");
             entity.Property(e => e.CurrentVersionNumber).HasColumnName("current_version_number");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Folder>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("folders_pkey");
+            entity.ToTable("folders");
+            entity.HasIndex(e => e.ProjectId, "ix_folders_project_id");
+            entity.HasIndex(e => e.ParentFolderId, "ix_folders_parent_folder_id");
+            entity.HasIndex(e => e.Locator, "folders_locator_key").IsUnique();
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Self-referential parent FK. Matches the SQL schema's ON DELETE
+            // CASCADE — deleting a folder removes its descendants.
+            entity.HasOne<Folder>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentFolderId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.ProjectId).HasColumnName("project_id");
+            entity.Property(e => e.ParentFolderId).HasColumnName("parent_folder_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Icon).HasColumnName("icon");
             entity.Property(e => e.SortOrder).HasColumnName("sort_order");
             entity.Property(e => e.IsArchived).HasColumnName("is_archived");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");

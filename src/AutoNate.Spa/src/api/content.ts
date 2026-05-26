@@ -503,7 +503,7 @@ export async function copyNote(
 
 // ── Project members ────────────────────────────────────────────────────────
 
-export type ProjectRoleWire = "owner" | "contributor" | "viewer";
+export type ProjectRoleWire = "owner" | "contributor" | "commenter" | "viewer";
 
 export type ProjectMemberSource = "member" | "super-admin" | "wildcard" | "grant";
 
