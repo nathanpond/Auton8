@@ -66,6 +66,13 @@ export default function DocxDocumentEditor({
   // Build the y-prosemirror plugin list once the Y.Doc + awareness are
   // available. The fragment name "default" matches the sidecar
   // materializer; changing it would silently break body_jsonb snapshots.
+  //
+  // `role` is in the deps so when the server-side role flips from the
+  // pessimistic initial "viewer" to the actual "editor" (after the Yjs
+  // ticket fetch resolves), we recreate the plugin instances. docx-editor
+  // remounts on `key={role}` below and we need fresh ySyncPlugin/
+  // yCursorPlugin instances bound to the new EditorView — the old ones
+  // were attached to the now-destroyed view.
   const externalPlugins = useMemo(() => {
     if (!handle) return [];
     const fragment = handle.doc.getXmlFragment("default");
@@ -102,7 +109,7 @@ export default function DocxDocumentEditor({
       );
     }
     return plugins;
-  }, [handle]);
+  }, [handle, role]);
 
   // While the Yjs connection is establishing, render a placeholder so
   // the editor surface isn't blank — docx-editor's own placeholder
@@ -118,6 +125,13 @@ export default function DocxDocumentEditor({
 
   return (
     <DocxEditor
+      // Force a remount when role transitions. docx-editor latches the
+      // readOnly prop at mount and ignores subsequent changes — without
+      // this key the editor would stay locked at the pessimistic
+      // initial "viewer" role even after the ticket fetch promotes the
+      // user to "editor". Yjs state survives the remount because the
+      // Y.Doc + provider live in useYjsDocument one level up.
+      key={role}
       // Schema seed only (externalContent skips the content load).
       document={SCHEMA_SEED_DOCUMENT}
       externalContent

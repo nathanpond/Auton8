@@ -1,13 +1,13 @@
 # Documents Feature — Architecture Plan
 
-> **Note**: Per `reference_plan_location` memory, after exiting plan mode this should be moved to `./docs/plans/2026-05-26-documents-feature.md`.
+> **Status as of 2026-05-26**: Phases 1, 2, 3 shipped. Phase 3 pivoted mid-flight from a vanilla-TipTap editor to `@eigenpal/docx-editor-react` (ProseMirror-based) because the user wanted Word-grade DOCX round-trip, native tracked-changes / suggesting mode, and a built-in AI panel — features that would have been 10+ engineering weeks combined to build on TipTap. The pivot kept the entire backend stack (Hocuspocus, .NET auth/webhook, ContentVersionService, permissions) unchanged; only the SPA editor wrapper was swapped. Sections below have been refreshed to reflect the docx-editor reality where it materially changed the implementation; sections describing infrastructure already in place are left in their original (planning-tense) form for historical legibility.
 
 ## Context
 
 AutoNate needs a Google-Docs-style **Documents** subsystem alongside the existing notes/pages feature. It shares projects with notes but has its own hierarchy (folders), its own editor (rich, DOCX-export-capable), comment workflow, live data bindings, document templates, and deep AI integration. The collab + auth foundations are already in place (Hocuspocus running on :1234 with Postgres persistence; `IContentAuthorizer` doing closest-ancestor override resolution; `AgentSidebar` + `/api/agent/*` for AI). The work is mostly **new feature surface area** that plugs into existing infrastructure, not a foundational refactor.
 
 ### Decisions (from user)
-- **Editor**: docx-editor (TipTap-based) as a dedicated documents editor. Persist as structured Yjs/JSON internally; DOCX is an *export* format only.
+- **Editor**: `@eigenpal/docx-editor-react` (ProseMirror-based; their core handles OOXML parsing + paged layout). Mounted with `externalContent: true` + Yjs via `y-prosemirror`'s `ySyncPlugin` so our existing Hocuspocus sidecar drives content. Persist as ProseMirror JSON in `documents.body_jsonb` (docx-editor's richer schema, same JSON-in-Postgres storage model). DOCX is generated on demand via `ref.current.save()`; uploaded via the `documentBuffer` prop. ~~docx-editor (TipTap-based) as a dedicated documents editor.~~
 - **Folder model**: Single self-referential `Folder` table, unlimited nesting, separate from the existing Cabinet/Notebook layout used by notes.
 - **Roles**: Add `commenter` as a 4th project-level role (Owner / Contributor / Commenter / Viewer), applied to *all* content kinds.
 - **Permission overrides**: Full ACL per folder/document — can GRANT or DENY relative to inherited, including granting non-project-members read/comment access.
@@ -91,23 +91,37 @@ The existing sidecar (`services/hocuspocus/src/index.ts` + `auth.ts`) already au
 
 Add an envvar `HOCUSPOCUS_DOCUMENTS_ENABLED=true` (default true) so the new prefix can be flagged off in case of trouble.
 
-### 6. Editor — docx-editor wrapper
+### 6. Editor — `@eigenpal/docx-editor-react` wrapper (SHIPPED)
 
-**Vendor cautiously.** docx-editor (`github.com/eigenpal/docx-editor`) is a Yjs-aware TipTap-based editor monorepo. Approach:
-1. Add `@docx-editor/editor` (and `@docx-editor/agents` for AI primitives) as deps, pinned to a known version. If the upstream API surface is unstable, fork into `vendor/docx-editor/` and pin a hash.
-2. **Bundle isolation**: BlockNote uses TipTap internally; version mismatch with docx-editor's TipTap could cause duplicate-module crashes. Lazy-load docx-editor only on the editor route (`React.lazy` + `Suspense`) and configure Vite `optimizeDeps.include` to deduplicate `@tiptap/*` packages. If dedup fails, mount the documents editor inside a Vite-time separate chunk that does *not* import BlockNote.
-3. **Wrap** in `src/AutoNate.Spa/src/components/documents/editor/DocxEditor.tsx`:
-   - Construct a `Y.Doc` and connect via `HocuspocusProvider` to `ws://localhost:1234/yjs?token=...&docId=documents:{id}` (existing pattern from BlockNote — reuse `src/AutoNate.Spa/src/lib/yjs/` helpers).
-   - Read-only / comment-only mode driven by the `readOnly` flag returned from auth.
-   - Configure docx-editor's AI provider config to point at `/api/agent/documents/*` rather than its bundled defaults (replace the eigenpal LLM client with a thin adapter against our existing `/api/agent/conversations` endpoint).
+**Package**: `@eigenpal/docx-editor-react` (Apache-2.0, currently 1.0.3, actively maintained on `eigenpal/docx-editor`). It's built on ProseMirror primitives, not TipTap. Plays cleanly with Yjs because `externalContent: true` lets us swap its internal content layer for `y-prosemirror`'s `ySyncPlugin`.
 
-**Custom TipTap nodes for bindings** (`src/AutoNate.Spa/src/components/documents/editor/nodes/`):
-- `AqlTableNode` — attrs `{ bindingId }`; renders `<AqlTableBindingView />` which reads cached value + refresh button.
-- `ChartNode` — attrs `{ bindingId }`; same pattern, renders chart via existing chart components.
-- `RecordFieldNode` — inline binding to a single record field; renders text.
-- `WorkflowDataNode` — workflow execution data binding (optional v1.1).
+**Implementation**: `src/AutoNate.Spa/src/components/documents/DocxDocumentEditor.tsx`. Lazy-loaded by `pages/documents/DocumentEditorPage.tsx` so the editor chunk doesn't enter bundles for other routes.
 
-Each node's view fetches its `DocumentBinding` row via `useDocumentBinding(bindingId)`, renders the cached value, and shows a "Refresh" icon button that hits the refresh endpoint. Toolbar: "Refresh all bindings" button calls the bulk endpoint and shows a progress indicator.
+**Yjs wiring** — reuses the same `useYjsDocument(documents:{id})` hook BlockNote uses on the notes side, so the entire ticket / WS / awareness / IndexedDB-cache / reconnect-on-focus path is unchanged:
+- Pass `externalContent: true` + a stable `createEmptyDocument()` schema seed (hoisted to module scope so each render doesn't rebuild the schema).
+- `externalPlugins: [ySyncPlugin(doc.getXmlFragment("default")), yCursorPlugin(awareness, { cursorBuilder })]`.
+- Fragment name is `"default"` to match the sidecar's `documentMaterializer` — keeps `body_jsonb` snapshotting working without a sidecar change.
+
+**Role / readOnly gotcha (gotcha worth remembering)**: docx-editor latches the `readOnly` prop value at mount and ignores subsequent changes. Since `useYjsDocument` starts with the pessimistic `role="viewer"` (to avoid an editor flashing edit-capable before the ticket fetch confirms) and upgrades to `"editor"` after the ticket resolves, a naive consumer ends up with a permanently read-only editor. Fix: `<DocxEditor key={role} … />` remounts when the role flips; the `useMemo` for `externalPlugins` includes `role` in its deps so y-prosemirror plugins re-bind to the freshly created EditorView. Yjs state survives the remount because the Y.Doc + provider live in the parent's `useYjsDocument` scope.
+
+**Tailwind preflight gotcha**: docx-editor's `styles.css` has zero `button` rules — it relies on the host app having Tailwind preflight (or Normalize.css) handle the browser `<button>` user-agent reset. AutoNate is Mantine-only with no global button reset, so the browser default `border: 2px outset Buttonface` leaked through and gave every toolbar button a chunky dark border. Fix lives in `DocxDocumentEditor.css`: a scoped reset under `.ep-root button { border: 0; … }` that re-allows the border when the library opts in via Tailwind utility classes (font picker dropdowns etc.).
+
+**What we get out-of-box (no consumer code needed)**:
+- Word-style toolbar (file/format/insert/help menus, font picker + size + color, B/I/U/S, alignment, lists, link/image/table/horizontal rule, clear formatting)
+- Horizontal + vertical rulers
+- Zoom control
+- Document outline sidebar
+- Editing / Suggesting / Viewing mode dropdown (**Suggesting = Word's tracked changes — author attribution + accept/reject sidebar**)
+- Threaded comments anchored to text ranges
+- Find & replace, print preview, page setup dialogs
+- Editable document title in the title bar (we wire it through `documentName` + `onDocumentNameChange` to our REST `useUpdateDocument`)
+- Right slot in the title bar for our "Back to project" link via `renderTitleBarRight`
+
+**Custom ProseMirror plugins for bindings (Phase 5)** — same plan, different schema. Plugins live in `src/AutoNate.Spa/src/components/documents/editor/plugins/`:
+- `AqlTablePlugin` — ProseMirror node spec for `aql-table` blocks; attrs `{ bindingId }`. NodeView renders `<AqlTableBindingView />` which reads cached value + refresh button.
+- `ChartPlugin`, `RecordFieldPlugin`, `WorkflowDataPlugin` — same pattern.
+
+Bindings are registered via docx-editor's plugin host (`pluginSidebarItems` + `externalPlugins` extensions). Toolbar adds a "Refresh all bindings" entry via `toolbarExtra`.
 
 ### 7. Routes + shell
 
@@ -131,49 +145,49 @@ Each node's view fetches its `DocumentBinding` row via `useDocumentBinding(bindi
 
 ### 8. AI integration
 
-Reuse existing `/api/agent/*` infra. Add server services + endpoints:
+Reuse existing `/api/agent/*` infra on the server side. Use docx-editor's built-in `agentPanel` prop as the chrome on the client side — it ships the panel shell (header, resize handle, close button, localStorage width-persistence); we supply the chat UI body via `render`.
 
+Server services + endpoints (unchanged from the plan):
 - `src/AutoNate.Web/Services/Agent/DocumentAgentService.cs` — wraps the LLM client with document-scoped helpers.
 - Endpoints (new file `AgentDocumentEndpoints.cs`):
   - `POST /api/agent/documents/{id}/inline-assist` — `{ prompt, selectionText, surroundingContext }` → streamed completion. Authorized via `Document.Edit`.
   - `POST /api/agent/documents/{id}/chat` — Q&A over the document's content. Authorized via `Document.View`. Reuses `AgentConversation` so chat history persists; uses a `documentId` scope on conversations.
-  - `POST /api/agent/documents/{id}/bindings/suggest` — `{ naturalLanguage }` → suggested `{ kind, configJsonb }` (leans on the existing AQL grammar/schema tooling visible in the recent commits — `AQL NOW` token, schema responses). Authorized via `Document.Edit`.
-  - `POST /api/agent/documents/templates/{templateId}/generate-document` — `{ prompt, projectId, folderId }` creates a new document, runs AI to fill body content, returns the new doc id. Authorized via `Folder.CreateDocument` on the target folder + `Document.View` on the template.
+  - `POST /api/agent/documents/{id}/bindings/suggest` — `{ naturalLanguage }` → suggested `{ kind, configJsonb }`. Authorized via `Document.Edit`.
+  - `POST /api/agent/documents/templates/{templateId}/generate-document` — creates a doc from a template + prompt.
 
 Client integration:
-- Slash-menu and floating toolbar inline-assist (`InlineAssist.tsx`).
-- `DocumentChatPanel.tsx` — adapts the existing `AgentSidebar` pattern but scoped to a single document. Register a `PageContextProvider` for the editor route (per `add-page-context-provider` skill) so the chatbot sees the doc state.
+- `agentPanel={{ render: ({ close }) => <DocumentChatPanel documentId={id} onClose={close} /> }}` — `DocumentChatPanel` wraps our existing `AgentConversation` API so chat history persists alongside record-context chats. Register a `PageContextProvider` for the editor route (per `add-page-context-provider` skill) so the agent sees the open doc's state.
+- **Inline assist via suggesting mode**: this is the killer combination. docx-editor's agents package supports proposing edits AS tracked-change suggestions instead of direct edits — the user reviews them in the existing accept/reject sidebar. No custom diff UI needed.
 - Binding insert dialog (`InsertBindingDialog.tsx`) — NL textarea → calls `/bindings/suggest` → preview the suggested table/chart → confirm to insert.
 - Template gallery has "Generate document from prompt" button.
 
-### 9. Server-side export
+### 9. DOCX export (mostly client-side via docx-editor)
 
-`src/AutoNate.Web/Services/Documents/DocumentRenderService.cs`:
-- **DOCX**: use `DocumentFormat.OpenXml` (Microsoft's OpenXML SDK, NuGet) to walk the document JSON (TipTap node tree) and emit OpenXML. Bindings expand to their cached `LastResolvedValueJsonb` (or trigger a refresh-on-publish — opt-in flag).
-- **PDF**: render HTML from the same JSON, then headless Chromium / Puppeteer. Check `src/AutoNate.Web/` for an existing PDF service first — if absent, add Puppeteer-Sharp or proxy to a Node helper inside the existing Hocuspocus container.
+`@eigenpal/docx-editor-react` ships full OOXML round-trip in its `core` package — we do **not** need a server-side OpenXML SDK pipeline. The editor's imperative ref exposes `save(options)` which returns an `ArrayBuffer` of the serialized `.docx` file:
 
-Exports run via an `IHostedService` queue worker (mirror any existing background queue; otherwise a `Channel<T>`-backed worker). Outputs land in `./data/documents/exports/{documentId}/{exportId}.{ext}` and are downloadable by users with `Document.Export` permission.
+```ts
+const buffer = await editorRef.current?.save();
+```
+
+Phase 7 implementation:
+- "File → Download as DOCX" toolbar action calls `editorRef.current.save()`, wraps the ArrayBuffer in a Blob, and triggers a browser download. No server round-trip required for export.
+- For server-rendered exports (e.g. an admin batch export, a scheduled report, signed download links), we can optionally POST the buffer to `POST /api/content/documents/{id}/export?format=docx` which stores it at `./data/documents/exports/{documentId}/{exportId}.docx` and emits a `DocumentExport` row for downloadable, audited delivery. Decide later whether this server path is needed.
+- **PDF**: docx-editor includes a `print` flow + `PrintPreview` dialog → browser's native print-to-PDF works without any server-side renderer. For programmatic PDF, we'd still need headless Chromium / Puppeteer (deferred until there's a real use case).
+
+Bindings + export: the materialized binding values live in the JSON tree at export time, so they round-trip into DOCX automatically. The "refresh-before-export" toggle still matters; it just gates a binding refresh before the user clicks Download.
 
 ### 9b. DOCX / DOTX import (v1 — create-only)
 
-`src/AutoNate.Web/Services/Documents/DocumentImportService.cs` — parallel to (and sharing the OpenXML dependency with) `DocumentRenderService`. One service, two operations: render (out) and parse (in).
+`@eigenpal/docx-editor-react` exposes a `documentBuffer?: ArrayBuffer | Uint8Array | Blob | File` prop. Passing an uploaded `.docx` to that prop parses + renders it directly inside the editor — full OOXML fidelity for free, no custom server-side parser.
 
-**Flow**
-1. **Upload endpoint**: `POST /api/content/documents/import` (multipart) — takes `{ file, projectId, folderId?, title?, kind? }`. The `.docx` ↔ `kind='document'` and `.dotx` ↔ `kind='template'` mapping is inferred from the extension and MIME (`application/vnd.openxmlformats-officedocument.wordprocessingml.document` vs `…wordprocessingml.template`). `kind` in the body is optional and only used when extension/MIME is ambiguous. Authorized via `Folder.CreateDocument` on the target folder (or project-root equivalent).
-2. **Parser**: `DocumentImportService.ParseAsync(Stream)` opens the OpenXML package and walks the body:
-   - `w:p` (paragraph) → TipTap `paragraph` (with style → heading level mapping for `Heading1`..`Heading6`).
-   - `w:r` (run) → text node + marks (`bold`, `italic`, `underline`, `strike`, `code` from styles).
-   - `w:tbl` → TipTap `table` with `tableRow` / `tableCell` children.
-   - `w:hyperlink` → `link` mark.
-   - Lists (`w:numPr` referencing `numbering.xml`) → `bulletList` / `orderedList`.
-   - Images (`w:drawing` referencing `media/`) → save to `./data/documents/images/{newDocumentId}/{guid}.{ext}`, emit `image` node with the local URL.
-   - **Unsupported** (complex floats, content controls, embedded OLE objects, equations) → skip with a structured warning collected into the response; lossy round-trip is acceptable for v1.
-3. **Persist**: insert `Document` row (`Kind = 'document' | 'template'`, `BodyJsonb = parsedTree`), insert initial `DocumentVersion` row (version 1, source-of-truth = "import"), copy images to disk. Return the new document id + a list of import warnings.
-4. **UI**: "New" menu in folder view + template gallery surfaces "Import from .docx / .dotx" → file picker → progress modal → on completion, open the new document in the editor. Warnings show in a dismissible banner inside the editor on first open.
+Phase 7 implementation:
+1. **Upload endpoint**: `POST /api/content/documents/import` (multipart) — accepts `{ file, projectId, folderId?, title?, kind? }`. Server creates a `Document` row with empty `body_jsonb` + stashes the uploaded bytes to `./data/documents/imports/{documentId}.docx` (transient — discarded after first editor open commits the parsed JSON via the normal autosave path). Returns the new `documentId`. Authorized via `Folder.CreateDocument` / `Project.Edit`.
+2. **Client flow**: SPA opens `/documents/edit/{id}?import=1`; the editor route fetches the uploaded buffer once, passes it as `documentBuffer={buffer}` AND `externalContent={false}` for the first mount (lets docx-editor parse it into its internal state). On first autosave (Hocuspocus webhook → `body_jsonb`), the import file is deleted; subsequent opens use the Yjs path normally.
+3. **UI**: "New" menu in folder view + template gallery surfaces "Import from .docx / .dotx" → file picker → upload progress → open in editor.
 
-**Yjs note**: import populates `BodyJsonb` directly; the next Hocuspocus connect initializes the Y.Doc from this snapshot (existing behavior — no special handling needed).
+**Why this is so much smaller than the original §9b plan**: the entire OpenXML parser is inside docx-editor's core. The original plan had us writing a `DocumentImportService.ParseAsync` walking `w:p` / `w:r` / `w:tbl` etc. — that's now eigenpal's problem, not ours.
 
-**v2 (deferred)**: `POST /api/content/documents/{id}/import-merge` — same parser, but instead of creating a new row, the parsed tree is diffed against the current document body. Diff UI presents accept/reject per paragraph/block; accepted hunks are applied as a single Yjs transaction so collaborators see them as one atomic change. Out of scope for v1; the parser written here is the reusable foundation.
+**v2 (deferred)**: same idea as before — import a `.docx` *into* an existing document with diff/merge UI. docx-editor's suggesting mode plus a diff-against-current ProseMirror tree can produce the suggestions; v1 doesn't ship this.
 
 ### 10. Critical files reference
 
@@ -206,30 +220,33 @@ Exports run via an `IHostedService` queue worker (mirror any existing background
 
 ### 11. Suggested rollout (PR-sized phases)
 
-| # | Scope | Why this slice |
+| # | Scope | Status |
 |---|---|---|
-| 1 | `Commenter` role + EntityKinds + Folder entity + Folder CRUD + Folder tree UI on `/documents/p/:projectId` (no documents yet) | Smallest shippable: navigate folder structure, full auth. |
-| 2 | `Document` entity + REST CRUD + version snapshots + minimal editor route showing read-only JSON | Documents exist and persist; no fancy editor yet. |
-| 3 | docx-editor integration + Hocuspocus document prefix + collab editing | The editor lights up. |
-| 4 | Comments + comment-only Hocuspocus mode | Comment role becomes useful. |
-| 5 | Bindings (entity, endpoints, AQL resolver, in-editor nodes, refresh UX) | Live data in documents. |
-| 6 | Templates (kind discriminator, gallery, "create from template" flow) | Template authoring + reuse. |
-| 7 | DOCX + PDF export + export queue + download UI + **DOCX/DOTX import on create** (shares the OpenXML dep with export — implement both directions in the same PR) | Distribution outside the app, plus on-ramp from existing Word files. |
-| 8 | AI: inline assist + chat-with-doc + NL→AQL bindings + generate-from-template | Full AI scope. |
-| 9 | Polish: open-in-new-tab editor shell, "Refresh all bindings", history/restore UI, override-permission editor for folders/documents | Tightens the user-facing UX. |
+| 1 | `Commenter` role + EntityKinds + Folder entity + Folder CRUD + Folder tree UI on `/documents/p/:projectId` (no documents yet) | ✅ Shipped (5 new auth tests; 1275 → 1275 passing) |
+| 2 | `Document` entity + REST CRUD + version snapshots + minimal editor route showing read-only JSON | ✅ Shipped (5 new doc tests + 1 version-restore happy-path; 1275 → 1280 passing) |
+| 3 | docx-editor integration + Hocuspocus document prefix + collab editing | ✅ Shipped (pivoted from TipTap to `@eigenpal/docx-editor-react` mid-phase; backend tests unchanged; verified end-to-end in browser: empty cold-load doc, role-aware readOnly via `key={role}` remount, Yjs round-trip with v-counter bump, tracked-changes mode toggle visible in toolbar) |
+| 4 | Comments + comment-only mode | Next up. docx-editor ships threaded comments + a comments-sidebar toggle out of box; we wire its controlled `comments={[]}` + `onCommentsChange` to a Yjs sync channel (or REST — TBD) and gate Commenter-role users to suggesting/viewing mode. |
+| 5 | Bindings (entity, endpoints, AQL resolver, in-editor ProseMirror plugins, refresh UX) | Pending. Plugins now ride docx-editor's `externalPlugins` channel instead of being TipTap extensions. |
+| 6 | Templates (kind discriminator, gallery, "create from template" flow) | Pending. |
+| 7 | **DOCX/DOTX import + export** — both directions ride docx-editor's built-in OOXML round-trip (`documentBuffer` prop for import, `ref.current.save()` for export). No OpenXML SDK pipeline needed; the entire §9 / §9b plan slimmed dramatically. | Pending. |
+| 8 | AI via docx-editor's `agentPanel` slot wired to our `/api/agent/documents/*` endpoints. Inline assist piggybacks on suggesting mode (AI proposals = tracked-change suggestions). | Pending. |
+| 9 | Polish: full-bleed editor shell (already in place — `/documents/edit/:id` mounts outside AppShell), "Refresh all bindings", version-history sidebar (docx-editor has hooks for this), override-permission editor for folders/documents. | Pending. |
 
 (External link sharing and DOCX-into-existing-document merge/diff are intentionally not in the rollout — v2.)
 
 ### 12. Risks + open items
 
-- **docx-editor maturity**: package may be alpha; pin a version, plan for forking. Validate licensing — confirm the agents package license is compatible (the BlockNote-side memory note `project_editor_stack.md` flagged the BlockNote `xl-ai` package as GPL/blocked; do the same diligence here).
-- **TipTap version dedup**: BlockNote depends on TipTap; docx-editor depends on a (possibly different) TipTap. If dedup fails, the documents editor route must lazy-load and isolate.
-- **Hocuspocus comment-only mode**: Hocuspocus has `readOnly` but no native "comment" tier in the Yjs doc itself. Solution: in comment-only mode, the editor is loaded `readOnly: true` (no Yjs writes), and the comment UI hits REST instead of writing to Y. Worth a short prototype.
-- **Folder permission perf**: closest-ancestor resolution requires walking the parent chain. For deep nesting, materialize the ancestor path (`Folder.MaterializedPath` text column) or cache resolved permissions per `(userId, resourceId)` with invalidation on grant changes. Start simple (recursive CTE), add caching if hot.
+- ~~**docx-editor maturity**~~ → **Resolved**. `@eigenpal/docx-editor-react@1.0.3` is actively published (release this week), Apache-2.0, full-feature parity with the website claims. Track upstream releases; keep version pinned with `--save-exact` so a 1.x.y bump doesn't sneak in without review.
+- ~~**TipTap version dedup**~~ → **Resolved by replacement**. docx-editor is ProseMirror-based, not TipTap-based — the dedup risk applied only to the prior plan. (The npm `overrides` block pinning `@tiptap/core@3.23.4` is still useful for BlockNote's transitive TipTap and stays in place.)
+- **docx-editor `readOnly` prop is not reactive**: it latches at mount and ignores subsequent changes. Use `<DocxEditor key={role} … />` to force a remount on role transitions; include `role` in the `externalPlugins` useMemo deps so y-prosemirror plugins re-bind to the new EditorView. Documented in the new memory note `feedback_docx_editor_button_reset.md`'s sibling note.
+- **Tailwind preflight missing in host app**: docx-editor's stylesheet assumes the consumer has a global `<button>` reset; AutoNate (Mantine-only) doesn't. Scoped fix via `.ep-root button { border: 0; … }` in `DocxDocumentEditor.css`. Suspect this class of issue first if anything else in the editor surface looks visually off.
+- **Vite dep optimizer needs a force-rebuild after heavy ESM installs**: adding `@eigenpal/docx-editor-react` (1.3MB unpacked) wedged Vite's optimizer cache, returning 504s on the optimized chunks. Recovery: `rm -rf node_modules/.vite && npm run dev -- --force`.
+- **Comment-only mode (Phase 4)**: docx-editor's mode dropdown is Editing / Suggesting / Viewing — no native "comment-only" tier. Two viable shapes: (a) `mode='viewing'` + still allow commenting via the controlled `comments` prop (matches our original plan literally), or (b) put Commenters in Suggesting mode (every edit becomes a tracked change Commenters can't merge themselves). Decide during Phase 4.
+- **Folder permission perf**: closest-ancestor resolution requires walking the parent chain. For deep nesting, materialize the ancestor path or cache resolved permissions. Start simple (recursive CTE), add caching if hot.
 - **Binding refresh + Yjs**: pushing a binding update server-side into the Y.Doc requires the server (or a server-driven Hocuspocus client) to write into the doc — easier route is to update the `DocumentBinding` row, broadcast a Hocuspocus awareness ping with the binding id, and have each connected editor refetch + re-render. Confirm during phase 5.
 - **Export of bound content**: decide policy — does "export to PDF" trigger a binding refresh first, or snapshot the current cached values? Recommend a "refresh-before-export" toggle on the export dialog, defaulted on for `Publish`, off for `Quick download`.
-- **Import fidelity**: DOCX → TipTap is lossy by definition (OpenXML has features TipTap has no concept of: content controls, complex floats, equations, embedded objects, revision tracking). v1 strategy is "best-effort, surface warnings, never silently drop." Build a small fixture suite of real-world `.docx` files (a clean Word doc, a Google-Docs export, a doc with images + tables + lists + headings) and assert what survives. Any file type that produces too many warnings should fail loud with a "this file uses features we don't support yet" error rather than half-import.
-- **Memory note refresh**: `project_collab_foundation.md` currently says "decided, not built" — Hocuspocus is in fact built and running. Update post-plan-exit.
+- ~~**Import fidelity**~~ → Largely a non-issue now: docx-editor owns the OOXML parser, so import fidelity is whatever they ship. Their site promises "pixel-perfect OOXML rendering ... round-trips your .docx without quality loss." We may still want a fixture suite to catch regressions in their upstream releases, but we're no longer writing the parser.
+- ~~**Memory note refresh**: `project_collab_foundation.md` currently says "decided, not built"~~ → Already done.
 
 ---
 
