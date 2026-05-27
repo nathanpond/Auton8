@@ -157,6 +157,15 @@ export default function ProjectDocumentsPage() {
             <Group gap="xs">
               <Button
                 size="xs"
+                variant="subtle"
+                component={Link}
+                to="/documents/templates"
+                leftSection={<i className="fa fa-copy" aria-hidden />}
+              >
+                Templates
+              </Button>
+              <Button
+                size="xs"
                 variant="default"
                 leftSection={<i className="fa fa-folder-plus" aria-hidden />}
                 onClick={() => setDialog({ kind: "folder-create", parent: null })}

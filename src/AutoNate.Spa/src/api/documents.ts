@@ -161,9 +161,12 @@ export async function deleteFolder(id: string): Promise<void> {
 
 // ── Documents ──────────────────────────────────────────────────────────────
 
+// projectId is optional — omitting it returns documents across every
+// project the caller can see, gated by Document.View. Used by the
+// cross-project templates gallery.
 export async function listDocumentsPage(
   params: {
-    projectId: string;
+    projectId?: string;
     folderId?: string | null;
     atProjectRoot?: boolean;
     kind?: DocumentKind;
@@ -238,6 +241,29 @@ export async function updateDocument(
 
 export async function deleteDocument(id: string): Promise<void> {
   await api.delete(`/api/content/documents/${id}`);
+}
+
+// ── Templates (Phase 6) ────────────────────────────────────────────────────
+
+// Clone a template into a new document. Server copies the template's
+// body_jsonb (rewriting binding placeholders to fresh ids) + clones
+// every binding row with no resolved values — the new doc resolves
+// fresh on first open or via explicit refresh. Comments are NOT
+// cloned (templates are generic; comments live with specific docs).
+export async function cloneDocumentFromTemplate(
+  templateId: string,
+  req: {
+    projectId: string;
+    folderId?: string | null;
+    title: string;
+    description?: string;
+  }
+): Promise<DocumentDto> {
+  const { data } = await api.post<DocumentDto>(
+    `/api/content/documents/from-template/${templateId}`,
+    req
+  );
+  return data;
 }
 
 // ── Document versions ──────────────────────────────────────────────────────

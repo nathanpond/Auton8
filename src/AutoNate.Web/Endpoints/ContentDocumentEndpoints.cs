@@ -459,6 +459,196 @@ public static class ContentDocumentEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.Document, Actions.Delete);
 
+        // Clone-from-template (Phase 6). Reads the template (any
+        // kind='template' Document the caller can View), creates a fresh
+        // kind='document' Document with the template's body + a fresh
+        // copy of every binding. Comments are NOT cloned — they're
+        // tied to the template's review process, not generic content.
+        // Body placeholder text gets rewritten (`{{binding:OLD}}` →
+        // `{{binding:NEW}}`) so the cloned bindings line up with the
+        // copied body. The new doc's body_jsonb gets the rewritten
+        // text; the Y.Doc seeds from that mirror on first connect (the
+        // sidecar's `trySeedFromBodyMirror` handles this — works for
+        // documents the same way it works for pages).
+        //
+        // Permission: View on the template (route filter) + Edit on
+        // the destination folder (or Project.Edit at root) — same D9
+        // composition the create path uses.
+        group.MapPost("/from-template/{templateId:guid}", async (
+            Guid templateId,
+            CloneFromTemplateRequest request,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IContentAuthorizer authorizer,
+            IContentTreeService treeService,
+            IContentVersionService versions,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Title))
+            {
+                return Results.BadRequest(new { error = "Title is required." });
+            }
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var template = await db.Documents.AsNoTracking()
+                .FirstOrDefaultAsync(d => d.Id == templateId, ct);
+            if (template is null) return Results.NotFound();
+            if (template.Kind != DocumentKinds.Template)
+            {
+                return Results.BadRequest(new { error = "Source is not a template." });
+            }
+            if (template.ProjectId != request.ProjectId)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Template belongs to a different project than the destination. " +
+                            "Templates can't be cloned across projects in v1."
+                });
+            }
+
+            // D9 gate on the destination — same shape the create path
+            // uses for body documents.
+            AuthDecision decision;
+            if (request.FolderId is { } folderId)
+            {
+                var folder = await db.Folders.AsNoTracking()
+                    .Where(f => f.Id == folderId)
+                    .Select(f => new { f.Id, f.ProjectId })
+                    .FirstOrDefaultAsync(ct);
+                if (folder is null) return Results.BadRequest(new { error = "Folder not found." });
+                if (folder.ProjectId != request.ProjectId)
+                {
+                    return Results.BadRequest(new { error = "Folder belongs to a different project." });
+                }
+                decision = await authorizer.AuthorizeAsync(
+                    http.User, ContentKinds.Folder, folderId, Actions.Edit, ct);
+            }
+            else
+            {
+                decision = await authorizer.AuthorizeAsync(
+                    http.User, ContentKinds.Project, request.ProjectId, Actions.Edit, ct);
+            }
+            if (!decision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+            var actorId = http.GetActorId();
+            var now = DateTime.UtcNow;
+            var newDocId = Guid.NewGuid();
+
+            // Clone bindings first — we need the old-id → new-id map
+            // to rewrite the body text BEFORE persisting the new doc.
+            var sourceBindings = await db.DocumentBindings.AsNoTracking()
+                .Where(b => b.DocumentId == templateId)
+                .ToListAsync(ct);
+            var bindingIdMap = new Dictionary<Guid, Guid>(sourceBindings.Count);
+            foreach (var sb in sourceBindings)
+            {
+                bindingIdMap[sb.Id] = Guid.NewGuid();
+            }
+
+            // Rewrite `{{binding:OLD}}` → `{{binding:NEW}}` in the body.
+            // String replace is safe because UUIDs don't collide and
+            // placeholder syntax is well-defined.
+            var newBody = template.BodyJsonb;
+            foreach (var (oldId, newId) in bindingIdMap)
+            {
+                newBody = newBody.Replace(
+                    $"{{{{binding:{oldId}}}}}",
+                    $"{{{{binding:{newId}}}}}",
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            var newDoc = new Document
+            {
+                Id = newDocId,
+                ProjectId = request.ProjectId,
+                FolderId = request.FolderId,
+                Kind = DocumentKinds.Document,
+                TemplateId = templateId,
+                Title = request.Title.Trim(),
+                Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description!.Trim(),
+                BodyJsonb = newBody,
+                CurrentVersionNumber = 1,
+                SortOrder = 0,
+                IsArchived = false,
+                CreatedAtUtc = now, UpdatedAtUtc = now,
+                CreatedBy = actorId, UpdatedBy = actorId
+            };
+            db.Documents.Add(newDoc);
+
+            // Insert bindings with fresh ids, fresh document_id, no
+            // resolved values — the new doc will resolve on first open
+            // or on explicit refresh. This is intentional: the template
+            // may have a stale cached value, and per-row authorization
+            // can return different results for different callers.
+            foreach (var sb in sourceBindings)
+            {
+                db.DocumentBindings.Add(new DocumentBinding
+                {
+                    Id = bindingIdMap[sb.Id],
+                    DocumentId = newDocId,
+                    Kind = sb.Kind,
+                    ConfigJsonb = sb.ConfigJsonb,
+                    LastResolvedValueJsonb = null,
+                    LastResolvedAtUtc = null,
+                    LastResolvedByUserId = null,
+                    Label = sb.Label,
+                    CreatedAtUtc = now, UpdatedAtUtc = now,
+                    CreatedBy = actorId, UpdatedBy = actorId
+                });
+            }
+
+            await db.SaveChangesAsync(ct);
+            await treeService.InsertSelfWithAncestorsAsync(db, ContentKinds.Document, newDocId, ct);
+
+            var initialVersion = await versions.SnapshotDocumentBeforeChangeAsync(
+                db, newDocId, newDoc.Title, newDoc.BodyJsonb,
+                ContentVersionKinds.Manual, $"Cloned from template {templateId}",
+                actorId, now, ct);
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            await auditPublisher.PublishAsync(
+                ContentEventTopic.TopicName,
+                ContentEventTypes.DocumentCreated,
+                ContentResourceKinds.Document,
+                resource: new
+                {
+                    id = newDoc.Id,
+                    projectId = newDoc.ProjectId,
+                    folderId = newDoc.FolderId,
+                    title = newDoc.Title
+                },
+                details: new
+                {
+                    kind = newDoc.Kind,
+                    templateId,
+                    bindingsCloned = sourceBindings.Count,
+                    source = "template-clone"
+                },
+                ct);
+            if (initialVersion is { } v)
+            {
+                await auditPublisher.PublishAsync(
+                    ContentEventTopic.TopicName,
+                    ContentEventTypes.DocumentVersionCreated,
+                    ContentResourceKinds.DocumentVersion,
+                    resource: new { documentId = newDoc.Id, versionNumber = v, kind = ContentVersionKinds.Manual },
+                    details: null,
+                    ct);
+            }
+
+            return Results.Created(
+                $"/api/content/documents/{newDoc.Id}",
+                MapDto(newDoc));
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Document, Actions.View, "templateId")
+          .AuthorizedInHandler(
+              "View on the template gates discovery (route filter). The handler " +
+              "additionally requires Edit on the destination folder, or " +
+              "Project.Edit at the root, per the D9 composition.");
+
         return app;
     }
 
@@ -471,6 +661,10 @@ public static class ContentDocumentEndpoints
     public sealed record CreateDocumentRequest(
         Guid ProjectId, Guid? FolderId, string? Kind, Guid? TemplateId,
         string Title, string? Description, string? BodyJsonb, int? SortOrder);
+
+    public sealed record CloneFromTemplateRequest(
+        Guid ProjectId, Guid? FolderId,
+        string Title, string? Description);
 
     // FolderId uses an explicit "Set" flag so callers can disambiguate
     // "leave alone" (omit) from "move to project root" (FolderId=null +

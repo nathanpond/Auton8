@@ -150,10 +150,40 @@ export async function trySeedFromBodyMirror(
     if (r.rowCount === 1 && r.rows[0].note_kind === "richtext") {
       bodyJson = r.rows[0].content_jsonb;
     }
+  } else if (prefix === "documents") {
+    const r = await pool.query<{ body_jsonb: string | null }>(
+      "SELECT body_jsonb::text AS body_jsonb FROM documents WHERE id = $1",
+      [id]
+    );
+    if (r.rowCount === 1) bodyJson = r.rows[0].body_jsonb;
   } else {
     return false;
   }
   if (!bodyJson) return false;
+
+  if (prefix === "documents") {
+    // docx-editor body is ProseMirror Node JSON (matches the materializer
+    // shape on the other direction). Seed by walking the JSON tree into
+    // the Y.XmlFragment named "default" — that's the fragment the SPA's
+    // `ySyncPlugin(fragment)` binds to. Without this, templates cloned
+    // via the REST endpoint would open as empty editors because the
+    // body_jsonb mirror is present but the Y.Doc starts empty.
+    let pmJson: unknown;
+    try {
+      pmJson = JSON.parse(bodyJson);
+    } catch {
+      return false;
+    }
+    if (!isPmDoc(pmJson)) return false;
+    const fragment = targetDoc.getXmlFragment("default");
+    if (fragment.length > 0) {
+      // Already has content (maybe another tab seeded first). Don't
+      // double-seed; bail.
+      return false;
+    }
+    seedProseMirrorJsonIntoFragment(fragment, pmJson);
+    return true;
+  }
 
   let blocks: PartialBlock[];
   try {
@@ -170,6 +200,56 @@ export async function trySeedFromBodyMirror(
   const seedDoc = serverBlockNoteEditor.blocksToYDoc(blocks, "document-store");
   Y.applyUpdate(targetDoc, Y.encodeStateAsUpdate(seedDoc));
   return true;
+}
+
+// Best-effort ProseMirror JSON → Y.XmlFragment walker. Handles the
+// shapes docx-editor's body actually uses (doc → paragraph/heading →
+// text). Marks and attributes are skipped for v1 simplicity — the
+// editor normalizes the seeded structure on first render and fills
+// in defaults. Strict round-trip fidelity (bold/italic, alignment)
+// would require a real ProseMirror schema on the sidecar; that's a
+// polish task. For Phase 6 v1, plain-paragraph fidelity is enough
+// to make cloned templates show up with text + binding placeholders.
+function isPmDoc(json: unknown): json is { type: string; content?: unknown[] } {
+  return (
+    typeof json === "object" &&
+    json !== null &&
+    (json as { type?: unknown }).type === "doc"
+  );
+}
+
+function seedProseMirrorJsonIntoFragment(
+  fragment: Y.XmlFragment,
+  doc: { content?: unknown[] }
+): void {
+  if (!Array.isArray(doc.content)) return;
+  const children: Array<Y.XmlElement | Y.XmlText> = [];
+  for (const child of doc.content) {
+    const node = jsonNodeToYjs(child);
+    if (node) children.push(node);
+  }
+  if (children.length > 0) fragment.push(children);
+}
+
+function jsonNodeToYjs(json: unknown): Y.XmlElement | Y.XmlText | null {
+  if (typeof json !== "object" || json === null) return null;
+  const obj = json as { type?: unknown; text?: unknown; content?: unknown };
+  if (obj.type === "text" && typeof obj.text === "string") {
+    const t = new Y.XmlText();
+    t.insert(0, obj.text);
+    return t;
+  }
+  if (typeof obj.type !== "string") return null;
+  const el = new Y.XmlElement(obj.type);
+  if (Array.isArray(obj.content)) {
+    const kids: Array<Y.XmlElement | Y.XmlText> = [];
+    for (const child of obj.content) {
+      const cn = jsonNodeToYjs(child);
+      if (cn) kids.push(cn);
+    }
+    if (kids.length > 0) el.push(kids);
+  }
+  return el;
 }
 
 // Picks the right materializer for a given document name. Unknown

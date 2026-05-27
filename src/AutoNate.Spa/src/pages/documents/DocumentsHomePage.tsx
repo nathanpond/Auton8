@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Anchor, Badge } from "@mantine/core";
+import { Anchor, Badge, Button } from "@mantine/core";
 import PageHeader from "@/components/PageHeader";
 import {
   DataTable,
@@ -94,6 +94,16 @@ export default function DocumentsHomePage() {
       <PageHeader
         title="Documents"
         description="Pick a project to browse its folders and documents."
+        actions={
+          <Button
+            component={Link}
+            to="/documents/templates"
+            variant="light"
+            leftSection={<i className="fa fa-copy" aria-hidden />}
+          >
+            Template gallery
+          </Button>
+        }
       />
       <DataTable<ProjectDto>
         columns={columns}

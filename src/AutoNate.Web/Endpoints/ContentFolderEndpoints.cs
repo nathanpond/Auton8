@@ -126,7 +126,12 @@ public static class ContentFolderEndpoints
             var docAccess = await authorizer.GetAllowedIdsAsync(
                 http.User, ContentKinds.Document, Actions.View, ct);
             var docQuery = db.Documents.AsNoTracking()
-                .Where(d => d.FolderId == id);
+                .Where(d => d.FolderId == id)
+                // Templates have their own gallery surface
+                // (/documents/templates). The folder grid only shows
+                // body documents — including templates here would
+                // pollute the user's working view.
+                .Where(d => d.Kind == DocumentKinds.Document);
             if (includeArchived != true)
             {
                 docQuery = docQuery.Where(d => !d.IsArchived);

@@ -7,6 +7,7 @@ import {
   FolderDto,
   UpdateDocumentRequest,
   UpdateFolderRequest,
+  cloneDocumentFromTemplate,
   createDocument,
   createFolder,
   deleteDocument,
@@ -281,6 +282,57 @@ export function useDeleteDocumentVersion() {
       deleteDocumentVersion(vars.documentId, vars.versionNumber),
     onSuccess: (_void, vars) => {
       qc.invalidateQueries({ queryKey: documentVersionsKey(vars.documentId) });
+    }
+  });
+}
+
+// ── Templates (Phase 6) ────────────────────────────────────────────────────
+
+// Cross-project templates list — all templates the caller has
+// Document.View on, regardless of project membership. Used by the
+// /documents/templates gallery page.
+export const templatesKey = ["documents", "templates", "all"] as const;
+
+export function useTemplates() {
+  return useQuery<DocumentDto[]>({
+    queryKey: templatesKey,
+    queryFn: async ({ signal }) => {
+      const result = await listDocumentsPage(
+        { kind: "template", pageSize: 200 },
+        signal
+      );
+      return result.items;
+    }
+  });
+}
+
+export function useCloneFromTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      templateId: string;
+      projectId: string;
+      folderId?: string | null;
+      title: string;
+      description?: string;
+    }) =>
+      cloneDocumentFromTemplate(vars.templateId, {
+        projectId: vars.projectId,
+        folderId: vars.folderId,
+        title: vars.title,
+        description: vars.description
+      }),
+    onSuccess: (created) => {
+      // Invalidate the destination location so the new doc shows up
+      // in folder grids / root listings. The templates list itself
+      // doesn't change (we cloned, not modified the template).
+      if (created.folderId) {
+        qc.invalidateQueries({ queryKey: folderChildrenKey(created.folderId) });
+      } else {
+        qc.invalidateQueries({
+          queryKey: projectRootDocumentsKey(created.projectId, "document")
+        });
+      }
     }
   });
 }
