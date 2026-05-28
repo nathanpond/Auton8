@@ -53,9 +53,14 @@ type Props = {
   // viewers and commenters — they see the list + can refresh but can't
   // create or delete.
   canEdit: boolean;
+  // Optional handler for the close button. When omitted, the close
+  // button is hidden — useful for embedding contexts that don't want
+  // the panel dismissable (e.g. preview surfaces that always show it).
+  // In the editor we wire this to a toolbar toggle in DocxDocumentEditor.
+  onClose?: () => void;
 };
 
-export default function BindingsSidePanel({ documentId, onInsert, canEdit }: Props) {
+export default function BindingsSidePanel({ documentId, onInsert, canEdit, onClose }: Props) {
   const { data: bindings = [], isLoading } = useDocumentBindings(documentId);
   const refreshOne = useRefreshDocumentBinding();
   const refreshAll = useRefreshAllDocumentBindings();
@@ -117,6 +122,18 @@ export default function BindingsSidePanel({ documentId, onInsert, canEdit }: Pro
                 aria-label="Insert binding"
               >
                 <i className="fa fa-plus" aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+          ) : null}
+          {onClose ? (
+            <Tooltip label="Close bindings panel" withArrow openDelay={350}>
+              <ActionIcon
+                size="sm"
+                variant="subtle"
+                onClick={onClose}
+                aria-label="Close bindings panel"
+              >
+                <i className="fa fa-xmark" aria-hidden />
               </ActionIcon>
             </Tooltip>
           ) : null}

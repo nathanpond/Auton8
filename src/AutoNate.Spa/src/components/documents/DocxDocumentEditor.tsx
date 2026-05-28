@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DocxEditor, createEmptyDocument } from "@eigenpal/docx-editor-react";
+import type { DocxEditorRef } from "@eigenpal/docx-editor-react";
 import { ySyncPlugin, yCursorPlugin } from "y-prosemirror";
 import type { EditorView } from "prosemirror-view";
-import { Box, Group } from "@mantine/core";
+import { Box, Group, Button, ActionIcon, Tooltip } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
 import { useMe } from "@/hooks/useMe";
 import {
@@ -17,6 +19,9 @@ import type { DocumentBindingDto } from "@/api/documentBindings";
 import { updateBindingsRegistry } from "./bindingsRegistry";
 import { bindingPlaceholderText, createBindingsPlugin } from "./bindingsPlugin";
 import BindingsSidePanel from "./BindingsSidePanel";
+import DocumentChatPanel from "./DocumentChatPanel";
+import { useDocumentEditorPageContext } from "./useDocumentEditorPageContext";
+import { markdownToProseMirrorSlice } from "./markdownToPmNodes";
 import "@eigenpal/docx-editor-react/styles.css";
 // Local override file MUST be imported AFTER the library's stylesheet so
 // our scoped button reset wins the cascade.
@@ -52,6 +57,19 @@ type Props = {
   // full toolbar; anything else flips the editor to viewing mode.
   // Suggesting mode (tracked changes) is exposed via the editor's own
   // mode toggle — we don't force it from outside.
+
+  // Phase 7 import mode. When `importBuffer` is provided, the editor
+  // mounts in single-user IMPORT MODE: docx-editor parses the OOXML
+  // buffer into its internal ProseMirror state directly (externalContent
+  // off, no ySyncPlugin / cursor plugin). After parsing settles, the
+  // editor extracts the PM JSON via the captured EditorView and hands
+  // it back to the parent through `onImportFinalized` — the parent then
+  // PATCHes body_jsonb + DELETEs the stash + navigates to the same route
+  // without `?import=1`. The next mount uses the normal Yjs path, where
+  // the sidecar's `trySeedFromBodyMirror` populates the Y.Doc from the
+  // freshly-written body_jsonb mirror on first connect.
+  importBuffer?: ArrayBuffer | null;
+  onImportFinalized?: (bodyJsonb: string) => void;
 };
 
 // Empty schema seed. docx-editor needs a Document object on mount to
@@ -105,10 +123,25 @@ export default function DocxDocumentEditor({
   documentId,
   documentTitle,
   onRenameDocument,
-  titleBarRight
+  titleBarRight,
+  importBuffer = null,
+  onImportFinalized
 }: Props) {
+  const importMode = importBuffer != null;
+  // Bindings side panel visibility. Default ON so users coming from
+  // Phase 5 don't lose the surface they're used to; the new toolbar
+  // toggle (rendered via docx-editor's `toolbarExtra`) flips this, and
+  // the panel's own header X collapses it too. Suppressed in import
+  // mode for the same reason agentPanel is — no live bindings until
+  // the body is committed.
+  const [bindingsPanelOpen, setBindingsPanelOpen] = useState(true);
   const yjsName = useMemo(() => `documents:${documentId}`, [documentId]);
-  const { handle, role } = useYjsDocument(yjsName);
+  // Import mode skips Yjs entirely on this mount — the editor is single-user
+  // until the buffer is parsed and PATCHed into body_jsonb. The hook accepts
+  // `null` to no-op (no Hocuspocus connection, no awareness writes). Once the
+  // parent finalizes the import + navigates away from `?import=1`, the next
+  // mount has `importMode=false` and the hook reconnects normally.
+  const { handle, role } = useYjsDocument(importMode ? null : yjsName);
   const { data: me } = useMe();
   const authorName = useMemo(() => {
     if (!me || me.authenticated !== true) return "User";
@@ -196,10 +229,194 @@ export default function DocxDocumentEditor({
     updateBindingsRegistry(documentId, bindingRows);
   }, [documentId, bindingRows]);
 
+  // Phase 8: register the document with the chatbot's PageContextRegistry
+  // so the in-editor agent panel sees the doc's title + bindings + body
+  // preview. Body text is read on-demand from the live EditorView at
+  // snapshot time (called by the chat panel's send action) — no React
+  // state plumbing, no polling. Skipped in import mode because the body
+  // isn't committed yet and the chat panel isn't mounted either.
+  useDocumentEditorPageContext({
+    documentId,
+    documentTitle,
+    bindings: bindingRows,
+    getBodyText: () => {
+      const view = editorViewRef.current;
+      if (!view) return null;
+      try {
+        const doc = view.state.doc;
+        return doc.textBetween(0, doc.content.size, "\n", "\n");
+      } catch {
+        return null;
+      }
+    },
+    // Apply chatbot-driven mutations against the live EditorView. The
+    // transactions flow through ySyncPlugin into Yjs, so collaborators
+    // see the change in real time. Edits are gated to editor-role users
+    // because the agent calls `apply_page_action` first with
+    // confirmed=false (no-op, just describes the change) and the model
+    // only mutates after the user confirms in chat — that confirmation
+    // round-trip is what the skill enforces, not us.
+    onAction: async (req) => {
+      const view = editorViewRef.current;
+      if (!view) {
+        return {
+          ok: false,
+          error: "page_unreachable",
+          message: "Document editor view is not mounted yet."
+        };
+      }
+      if (role !== "editor") {
+        return {
+          ok: false,
+          error: "forbidden",
+          message: `Your role (${role}) doesn't permit edits to this document.`
+        };
+      }
+      const args = (req.args ?? {}) as { markdown?: unknown };
+      const markdown = typeof args.markdown === "string" ? args.markdown : "";
+      if (!markdown.trim()) {
+        return {
+          ok: false,
+          error: "bad_request",
+          message: "args.markdown is required and must be a non-empty string."
+        };
+      }
+      // Parse markdown into a PM Slice against the editor's actual
+      // schema — that way headings + bold + italic + lists map to the
+      // matching docx-editor styles instead of landing as literal
+      // `## Heading` text inside plain paragraphs. We also pass the
+      // live document's style table so `styleId="Heading1"` resolves
+      // to the actual rPr (bold, fontSize, fontFamily, etc.) defined
+      // in this document — matching what `commands.applyStyle` would
+      // do when the user picks Heading 1 from the toolbar. Without
+      // this lookup, the runs render at body defaults regardless of
+      // the document's heading styling.
+      const { schema } = view.state;
+      // docx-editor's getDocument() returns its Document object with a
+      // `package.styles` table. We accept any duck-typed shape with
+      // matching field names; the converter's resolver only reads
+      // styleId / basedOn / rPr fields and tolerates missing ones.
+      const liveDoc = editorRef.current?.getDocument() as
+        | { package?: { styles?: import("./markdownToPmNodes").StyleTable } }
+        | null
+        | undefined;
+      const styleTable = liveDoc?.package?.styles;
+      let slice;
+      try {
+        slice = markdownToProseMirrorSlice(markdown, schema, styleTable);
+      } catch (err) {
+        console.error("[apply_page_action] markdown parse failed", err);
+        return {
+          ok: false,
+          error: "parse_failed",
+          message: `Failed to parse markdown: ${err instanceof Error ? err.message : "unknown error"}.`
+        };
+      }
+      if (slice.size === 0) {
+        return {
+          ok: false,
+          error: "empty_result",
+          message: "Markdown parsed to an empty slice — nothing to insert."
+        };
+      }
+
+      if (req.action === "append_markdown") {
+        // Insert at the very end of the doc body. Using tr.replace lets
+        // the slice's open boundaries merge cleanly with the trailing
+        // paragraph; tr.insert would force a paragraph break first.
+        const endPos = view.state.doc.content.size;
+        const tr = view.state.tr.replace(endPos, endPos, slice);
+        view.dispatch(tr);
+        return {
+          ok: true,
+          summary: `Appended ${slice.content.childCount} block${slice.content.childCount === 1 ? "" : "s"} of formatted content to the end of the document.`
+        };
+      }
+      if (req.action === "insert_markdown_at_cursor") {
+        const { from, to } = view.state.selection;
+        const tr = view.state.tr.replace(from, to, slice);
+        view.dispatch(tr);
+        view.focus();
+        return {
+          ok: true,
+          summary: `Inserted ${slice.content.childCount} block${slice.content.childCount === 1 ? "" : "s"} of formatted content at the cursor.`
+        };
+      }
+      return {
+        ok: false,
+        error: "unsupported_action",
+        message: `Document editor doesn't support action '${req.action}'. Available: append_markdown, insert_markdown_at_cursor.`
+      };
+    }
+  });
+
   // Hold onto the EditorView so the side panel's "Insert at cursor"
   // action can dispatch a ProseMirror transaction that drops a
   // `{{binding:UUID}}` placeholder where the cursor is.
   const editorViewRef = useRef<EditorView | null>(null);
+
+  // Phase 7: export ref. `ref.current.save()` returns the canonical
+  // OOXML ArrayBuffer — the download helper wraps it in a Blob + an
+  // <a download> click so the user gets a real .docx file. Bound to
+  // both the title-bar Download button and docx-editor's own
+  // File → Save menu (via `onSave`) so either entry point works.
+  const editorRef = useRef<DocxEditorRef | null>(null);
+  const downloadAsDocx = useCallback(async () => {
+    try {
+      const buf =
+        editorRef.current && (await editorRef.current.save());
+      if (!buf) {
+        notifications.show({
+          message: "Document not ready to export. Try again in a moment.",
+          color: "yellow"
+        });
+        return;
+      }
+      const blob = new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      // Sanitize the title for a filesystem-safe filename. The editor's
+      // own File menu uses a similar shape; we keep them consistent so
+      // a user who hits both ends up with the same artifact.
+      const safeName = (documentTitle || "document").replace(/[\\/:*?"<>|]/g, "_");
+      anchor.download = `${safeName}.docx`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("[export] failed", err);
+      notifications.show({
+        message: "Failed to export document.",
+        color: "red"
+      });
+    }
+  }, [documentTitle]);
+
+  // Phase 7: import finalize plumbing. After docx-editor parses the
+  // OOXML buffer it dispatches the "load content" transaction(s); we
+  // wait a beat for the parse to settle (debounced via the latest
+  // `onChange`), then extract `view.state.doc.toJSON()` and hand the
+  // serialized ProseMirror JSON back to the parent. The parent owns
+  // the PATCH + DELETE + navigation so this component can stay
+  // controller-free.
+  //
+  // Guard the finalize to fire exactly once per import session — extra
+  // transactions after the first parse (e.g. layout-driven onChange
+  // events docx-editor sometimes emits) shouldn't trigger a second
+  // round-trip.
+  const finalizedRef = useRef(false);
+  const finalizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Cleanup pending timers when the component unmounts mid-import
+    // (e.g. user navigates away before finalize fires).
+    return () => {
+      if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+    };
+  }, []);
 
   const insertBindingPlaceholder = (binding: DocumentBindingDto) => {
     const view = editorViewRef.current;
@@ -236,6 +453,14 @@ export default function DocxDocumentEditor({
   // yCursorPlugin instances bound to the new EditorView — the old ones
   // were attached to the now-destroyed view.
   const externalPlugins = useMemo(() => {
+    // In import mode the editor runs single-user against the parsed
+    // OOXML state, so no Yjs sync/cursor plugins. The bindings decoration
+    // plugin still runs — placeholders inside the imported body should
+    // still render chips. There's no `handle` because the Yjs hook is
+    // disabled while we're in this mode.
+    if (importMode) {
+      return [createBindingsPlugin()];
+    }
     if (!handle) return [];
     const fragment = handle.doc.getXmlFragment("default");
     // Order matters slightly here: ySyncPlugin first (it owns content
@@ -274,13 +499,14 @@ export default function DocxDocumentEditor({
       );
     }
     return plugins;
-  }, [handle, role]);
+  }, [handle, role, importMode]);
 
   // While the Yjs connection is establishing, render a placeholder so
   // the editor surface isn't blank — docx-editor's own placeholder
   // prop covers this once it mounts, but the very first paint can
-  // race ahead of `handle` being set.
-  if (!handle) {
+  // race ahead of `handle` being set. Skipped in import mode (no Yjs
+  // connection to wait for).
+  if (!importMode && !handle) {
     return (
       <div style={{ padding: 32, color: "var(--mantine-color-dimmed)" }}>
         Connecting to document…
@@ -292,17 +518,51 @@ export default function DocxDocumentEditor({
     <Box style={{ display: "flex", height: "100%", minHeight: 0 }}>
       <Box style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
         <DocxEditor
-      // Force a remount when role transitions. docx-editor latches the
-      // readOnly prop at mount and ignores subsequent changes — without
-      // this key the editor would stay locked at the pessimistic
-      // initial "viewer" role even after the ticket fetch promotes the
-      // user to "editor". Yjs state survives the remount because the
-      // Y.Doc + provider live in useYjsDocument one level up.
-      key={role}
-      // Schema seed only (externalContent skips the content load).
-      document={SCHEMA_SEED_DOCUMENT}
-      externalContent
+      // Force a remount when role transitions OR when leaving import
+      // mode. docx-editor latches the readOnly prop at mount and ignores
+      // subsequent changes — without this key the editor would stay
+      // locked at the pessimistic initial "viewer" role even after the
+      // ticket fetch promotes the user to "editor". Yjs state survives
+      // the remount because the Y.Doc + provider live in useYjsDocument
+      // one level up. The `importMode` segment forces a clean remount
+      // when the parent transitions us from import → live (typically
+      // after a navigation that strips `?import=1`).
+      key={`${importMode ? "import" : "live"}:${role}`}
+      // Import mode: feed the OOXML buffer + a null `document` so the
+      // editor takes the buffer as the parse source. externalContent
+      // is OFF so docx-editor parses + manages the PM state directly.
+      // Live mode: schema seed only; ySyncPlugin feeds content from Yjs.
+      document={importMode ? null : SCHEMA_SEED_DOCUMENT}
+      documentBuffer={importMode ? importBuffer : undefined}
+      externalContent={!importMode}
       externalPlugins={externalPlugins}
+      // Debounced finalize for import mode. The first transactions
+      // come from docx-editor's parse pass; we want to fire `onImport
+      // Finalized` *after* the editor stops dispatching them. 500 ms
+      // of quiet is plenty for a typical document. Use onEditorViewReady
+      // to capture the view so we can call `state.doc.toJSON()`; the
+      // editor's own `onChange` returns a docx-editor Document, not PM
+      // JSON, so we go through the view instead.
+      onChange={
+        importMode && onImportFinalized
+          ? () => {
+              if (finalizedRef.current) return;
+              if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+              finalizeTimerRef.current = setTimeout(() => {
+                const view = editorViewRef.current;
+                if (!view || finalizedRef.current) return;
+                finalizedRef.current = true;
+                try {
+                  const json = view.state.doc.toJSON();
+                  onImportFinalized(JSON.stringify(json));
+                } catch (err) {
+                  console.error("[import] finalize serialization failed", err);
+                  finalizedRef.current = false;
+                }
+              }, 500);
+            }
+          : undefined
+      }
       author={authorName}
       // Server-decided role drives chrome:
       //   editor    → mode='editing', readOnly=false (full toolbar)
@@ -373,6 +633,46 @@ export default function DocxDocumentEditor({
       showToolbar
       showRuler
       showZoomControl
+      // Custom toolbar slot — renders to the right of the built-in
+      // controls. We use it for the Bindings panel toggle so it sits
+      // next to docx-editor's own "Open assistant" button. Hidden in
+      // import mode (no bindings panel mounted during import either).
+      toolbarExtra={
+        importMode ? undefined : (
+          <Tooltip
+            label={bindingsPanelOpen ? "Hide bindings panel" : "Show bindings panel"}
+            withArrow
+            openDelay={350}
+          >
+            <ActionIcon
+              variant={bindingsPanelOpen ? "filled" : "subtle"}
+              color={bindingsPanelOpen ? "blue" : "gray"}
+              size="md"
+              onClick={() => setBindingsPanelOpen((v) => !v)}
+              aria-label="Toggle bindings panel"
+              aria-pressed={bindingsPanelOpen}
+            >
+              <i className="fa fa-database" aria-hidden />
+            </ActionIcon>
+          </Tooltip>
+        )
+      }
+      // Phase 8: doc-scoped AI chat in docx-editor's built-in agentPanel
+      // slot. The library renders a toolbar toggle button + a resizable
+      // right-side panel; we provide the panel content. Width persists
+      // to localStorage automatically. Hidden in import mode because the
+      // page context provider doesn't register until the editor's live
+      // EditorView is up — chat would have no body to reference yet.
+      agentPanel={
+        importMode
+          ? undefined
+          : {
+              title: "AI Assistant",
+              render: ({ close }) => (
+                <DocumentChatPanel documentId={documentId} onClose={close} />
+              )
+            }
+      }
       // Title bar wiring: the docx-editor renders the doc name + an
       // optional right slot we use for the "Back to project" link.
       // Renames flow through our REST documents endpoint via the
@@ -380,11 +680,57 @@ export default function DocxDocumentEditor({
       documentName={documentTitle}
       documentNameEditable={role === "editor" && Boolean(onRenameDocument)}
       onDocumentNameChange={onRenameDocument}
-      renderTitleBarRight={titleBarRight ? () => titleBarRight : undefined}
+      // Compose: caller's slot (typically "Back to project") +
+      // a Download button that exports the current state as .docx.
+      // Hidden in import mode because the user hasn't committed the
+      // imported content yet — they should finalize first.
+      renderTitleBarRight={() => (
+        <Group gap="sm" wrap="nowrap">
+          {titleBarRight}
+          {!importMode ? (
+            <Button
+              size="xs"
+              variant="default"
+              leftSection={<i className="fa fa-download" aria-hidden />}
+              onClick={downloadAsDocx}
+            >
+              Download .docx
+            </Button>
+          ) : null}
+        </Group>
+      )}
       // Capture the EditorView so the side panel can dispatch
       // transactions to insert binding placeholders at the cursor.
       onEditorViewReady={(view) => {
         editorViewRef.current = view;
+      }}
+      // Capture the imperative ref so the title-bar Download button +
+      // docx-editor's own File → Save menu both flow through one
+      // download helper. Note: in import mode we still capture the
+      // ref (so the user can download a re-export of the imported doc
+      // before finalize), but the save() output represents the parsed
+      // PM state, not the original .docx bytes verbatim.
+      ref={editorRef}
+      // The editor's File → Save menu fires `onSave` with the OOXML
+      // buffer. Routing it through the same Blob+anchor helper as the
+      // title-bar Download button keeps both entry points consistent.
+      onSave={(buf) => {
+        try {
+          const blob = new Blob([buf], {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          const safeName = (documentTitle || "document").replace(/[\\/:*?"<>|]/g, "_");
+          a.download = `${safeName}.docx`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          console.error("[export] onSave failed", err);
+        }
       }}
       // Match Mantine surface tokens so the editor blends with the rest
       // of the app shell. The library inherits CSS vars for finer
@@ -392,14 +738,18 @@ export default function DocxDocumentEditor({
       style={{ height: "100%", background: "var(--mantine-color-gray-0)" }}
         />
       </Box>
-      {/* Bindings side panel — only visible while there's a Yjs handle
-          (i.e. the editor is mounted). For viewers we still surface it
-          so they can see live data their grants permit. */}
-      <BindingsSidePanel
-        documentId={documentId}
-        canEdit={role === "editor"}
-        onInsert={insertBindingPlaceholder}
-      />
+      {/* Bindings side panel — visible by default; user can hide via
+          the panel's own close button or the toolbar toggle. For
+          viewers we still surface it (when open) so they can see live
+          data their grants permit. Suppressed entirely in import mode. */}
+      {bindingsPanelOpen && !importMode ? (
+        <BindingsSidePanel
+          documentId={documentId}
+          canEdit={role === "editor"}
+          onInsert={insertBindingPlaceholder}
+          onClose={() => setBindingsPanelOpen(false)}
+        />
+      ) : null}
     </Box>
   );
 }

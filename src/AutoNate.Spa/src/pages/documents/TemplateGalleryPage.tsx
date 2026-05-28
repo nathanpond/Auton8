@@ -20,6 +20,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import PageHeader from "@/components/PageHeader";
+import ImportDocxButton from "@/components/documents/ImportDocxButton";
 import { DocumentDto } from "@/api/documents";
 import { useProjects } from "@/hooks/useContent";
 import {
@@ -69,12 +70,27 @@ export default function TemplateGalleryPage() {
         title="Template Gallery"
         description="Reusable document templates. Use a template to spin up a new document with the same body and live data bindings; bindings start unresolved and refresh against the destination project's data."
         actions={
-          <Button
-            leftSection={<i className="fa fa-file-circle-plus" aria-hidden />}
-            onClick={() => setDialog({ kind: "create" })}
-          >
-            New template
-          </Button>
+          <Group gap="xs">
+            {/* Import lands the new template in the user's first
+                available project — they can re-home it later via the
+                template's edit page if needed. Hidden until projects
+                load so we never POST with an empty project id. */}
+            {projects.length > 0 ? (
+              <ImportDocxButton
+                projectId={projects[0].id}
+                folderId={null}
+                accept=".dotx"
+                variant="default"
+                size="sm"
+              />
+            ) : null}
+            <Button
+              leftSection={<i className="fa fa-file-circle-plus" aria-hidden />}
+              onClick={() => setDialog({ kind: "create" })}
+            >
+              New template
+            </Button>
+          </Group>
         }
       />
 

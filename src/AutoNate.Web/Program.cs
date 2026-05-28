@@ -342,6 +342,10 @@ builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentAttachmentOptio
     .BindConfiguration("ContentAttachments");
 builder.Services.AddSingleton<AutoNate.Web.Services.Content.IContentAttachmentStore,
     AutoNate.Web.Services.Content.FilesystemContentAttachmentStore>();
+builder.Services.AddOptions<AutoNate.Web.Services.Content.DocumentImportOptions>()
+    .BindConfiguration("DocumentImports");
+builder.Services.AddSingleton<AutoNate.Web.Services.Content.IDocumentImportStorage,
+    AutoNate.Web.Services.Content.FilesystemDocumentImportStorage>();
 builder.Services.AddScoped<AuthCacheBumper>();
 builder.Services.AddScoped<EntityEdgeReconciler>();
 builder.Services.AddScoped<IRoleStore, EfCoreRoleStore>();

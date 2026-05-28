@@ -134,6 +134,7 @@ Bindings are registered via docx-editor's plugin host (`pluginSidebarItems` + `e
 | `/documents/p/:projectId/folder/:folderId` | `FolderViewPage` (Drive-style grid of children) | normal AppShell |
 | `/documents/templates` | `TemplateGalleryPage` | normal AppShell |
 | `/documents/edit/:documentId` | `DocumentEditorPage` | **minimal shell — no NavMenu, no Footer, full-width** |
+| `/documents/preview/:documentId` | `DocumentPreviewPage` (read-only, bindings fully resolved into inline content; see §9c) | **minimal shell — no NavMenu, no Footer, full-width** |
 
 **Minimal shell**: `src/AutoNate.Spa/src/shell/AppShell.tsx` already wraps everything. The cleanest way to give the editor its own chrome is to check the route in `AppShell.tsx` and render a different layout subtree for `/documents/edit/*` — or, preferred, register `/documents/edit/:documentId` *outside* the AppShell route group so it never enters the shell. The editor route renders its own `<DocumentEditorShell>` with just: title bar (rename, sharing, versions, refresh-all, export, AI panel toggle), main editor area, optional right-side chat panel.
 
@@ -174,7 +175,7 @@ Phase 7 implementation:
 - For server-rendered exports (e.g. an admin batch export, a scheduled report, signed download links), we can optionally POST the buffer to `POST /api/content/documents/{id}/export?format=docx` which stores it at `./data/documents/exports/{documentId}/{exportId}.docx` and emits a `DocumentExport` row for downloadable, audited delivery. Decide later whether this server path is needed.
 - **PDF**: docx-editor includes a `print` flow + `PrintPreview` dialog → browser's native print-to-PDF works without any server-side renderer. For programmatic PDF, we'd still need headless Chromium / Puppeteer (deferred until there's a real use case).
 
-Bindings + export: the materialized binding values live in the JSON tree at export time, so they round-trip into DOCX automatically. The "refresh-before-export" toggle still matters; it just gates a binding refresh before the user clicks Download.
+Bindings + export — **current state (post-Phase 5+7) vs target state**: in v1 the body stores `{{binding:UUID}}` as raw ProseMirror text and the bindings plugin paints chips over those nodes as decorations. Decorations are render-only — `docx-editor.save()` serializes the raw PM doc, so exported `.docx` files contain the placeholder *text*, not the resolved values. The "refresh-before-export" toggle still gates a binding refresh, but refresh only updates `DocumentBinding.LastResolvedValueJsonb` — it doesn't put the value into the body. The target shape (Phase 10) is to replace the text-plus-decoration model with first-class PM nodes (see §9e) so the resolved content lives *inside* the document tree and round-trips through OOXML automatically. As a near-term bridge before Phase 10 lands, see §9d for a resolve-before-save shim.
 
 ### 9b. DOCX / DOTX import (v1 — create-only)
 
@@ -188,6 +189,56 @@ Phase 7 implementation:
 **Why this is so much smaller than the original §9b plan**: the entire OpenXML parser is inside docx-editor's core. The original plan had us writing a `DocumentImportService.ParseAsync` walking `w:p` / `w:r` / `w:tbl` etc. — that's now eigenpal's problem, not ours.
 
 **v2 (deferred)**: same idea as before — import a `.docx` *into* an existing document with diff/merge UI. docx-editor's suggesting mode plus a diff-against-current ProseMirror tree can produce the suggestions; v1 doesn't ship this.
+
+### 9c. Read-only Preview (Phase 11)
+
+A web preview surface that renders the document with every binding fully resolved into inline content. Same chrome-free shell the editor uses, but with no toolbar, no commenting, no edit affordances — purely a "what does this document look like when populated against current data" surface. Mirrors the role exported `.docx` files used to play before users realized exports also need resolved content (§9 / §9d).
+
+**Route**: `/documents/preview/:documentId` — outside the AppShell, mounts a new `DocumentPreviewPage`. The editor's title-bar gains a sibling "Preview" link next to the "Download .docx" button so the user can flip between editing and seeing the populated output without leaving context. The preview page itself has a "Open in editor" link + "Refresh bindings" button (forces a server-side refresh-all before re-rendering) + the "Download .docx" button (same export pipeline, also resolved).
+
+**Rendering pipeline** (assumes Phase 10 has shipped — see "Pre-Phase-10 fallback" below if it hasn't):
+1. Fetch the document + the bindings list (each with its `LastResolvedValueJsonb`).
+2. Mount `<DocxEditor>` with `document={pmJsonFromBody}`, `externalContent={false}` (no Yjs), `readOnly`, `mode='viewing'`, no `toolbarExtra`, no `agentPanel`.
+3. With node-view bindings (Phase 10), the body already carries resolved-value nodes — the preview is just a read-only mount of the live doc. No transformation step needed.
+
+**Pre-Phase-10 fallback** (if we want the preview before the node-view refactor lands):
+- Add a client-side `resolveBindingsInPmDoc(pmJson, bindings) → pmJson` helper that walks the PM JSON and replaces `{{binding:UUID}}` text nodes with resolved content (an inline text run for `record-field`, a real `table` node for `aql-table`, an error chip for any binding that's unresolved or denied).
+- Preview mounts the editor with the transformed JSON. Same helper feeds the resolve-before-save export shim in §9d — write it once, share it across both surfaces.
+- Cost: ~200–300 LoC of PM-node construction matching docx-editor's schema, plus a small set of unit tests over the transformer.
+
+**Permissions**: gated by `Document.View` (same as the editor's read path). The bindings the preview pulls in are subject to the same `IDocumentBindingResolver` per-row authorization as the live editor's "Refresh all" action — a viewer with no access to the underlying records sees the binding's "denied" placeholder, not its cached value.
+
+### 9d. Resolve-before-save export (interim bridge, optional)
+
+If the preview ships before Phase 10 (via the §9c pre-Phase-10 fallback), the same `resolveBindingsInPmDoc` helper plugs into the editor's existing `Download .docx` button to give users a populated export *today*:
+
+1. Snapshot the current PM doc (so we can roll back after save).
+2. Dispatch a single PM transaction that replaces every `{{binding:UUID}}` text node with the resolved content (via the helper).
+3. Call `editorRef.current.save()` → `Blob` → trigger download (existing path).
+4. Dispatch a reverse transaction to restore the original placeholder text — collaborators on the same Yjs doc don't see a frozen snapshot replace their live bindings.
+
+This is a tactical shim, not a long-term shape. Phase 10 deletes both the snapshot/restore dance and the helper itself: with node-view bindings, the body already holds resolved content (or the node view renders from the registry on the fly), so `save()` produces correct OOXML on the first try.
+
+### 9e. Binding node-view refactor (Phase 10 — long-term fix)
+
+The Phase 5 bindings plugin paints chips as ProseMirror **decorations** over `{{binding:UUID}}` text. Decorations are visual-only — they don't affect the underlying doc, and serialization (OOXML export, ProseMirror JSON snapshots, RAG embedding pipelines) sees the raw placeholder text. Two user-visible consequences:
+
+1. Exported `.docx` files contain the literal `{{binding:UUID}}` string, not the resolved value (§9 / current "Bindings + export" note).
+2. docx-editor's paged renderer materializes text from the doc model and bypasses inline decorations entirely — the chip and the placeholder text both render side-by-side in the editor view.
+
+**Target shape**: replace the text + decoration model with **first-class ProseMirror nodes**, one per binding kind:
+
+- `record_field_binding` — inline node (`group: "inline"`, `inline: true`, `atom: true`), `attrs: { bindingId }`, renders the resolved scalar value inline. NodeSpec includes `toDOM` for HTML rendering + `parseDOM` for round-trip. In OOXML, serialize as a `<w:r>` run containing the resolved text — no special token, just normal Word content.
+- `aql_table_binding` — block node (`group: "block"`), `attrs: { bindingId }`, `content: "table_row+"` or absorbs the resolved rows directly via a custom NodeView that mounts the table content. NodeSpec serializes through docx-editor's standard `table` shape so Word can read it natively.
+- Both nodes carry their own NodeView that subscribes to the bindings registry, so a "Refresh all" or a server-driven binding update re-renders only the affected node instances (no full editor reflow).
+
+**Migration**:
+- Schema bump: add the two node types to docx-editor's schema via the `externalPlugins` channel (it accepts custom nodes through a schema extension — confirm exact API in their docs; if unsupported, the alternative is a docx-editor fork or upstream contribution).
+- Body migration job: walk every existing document's `body_jsonb`, replace each `{{binding:UUID}}` text node with the matching node-view JSON. Idempotent — re-running over an already-migrated doc is a no-op. Sidecar's `trySeedFromBodyMirror` keeps working because it's schema-agnostic.
+- Delete `bindingsPlugin.ts` + `bindingPlaceholderText` helper + the regex scanner. Side panel's "Insert at cursor" dispatches a node insertion (`tr.replaceSelectionWith(newNode)`) instead of text insertion.
+- Delete the `resolveBindingsInPmDoc` shim from §9c/§9d if it exists by then — `save()` produces correct output on the first try.
+
+**Why this isn't in Phase 5**: shipping decorations was a deliberate v1 shortcut — node views require schema cooperation from docx-editor (it owns the schema), and Phase 5's goal was "make bindings work in the editor view", not "make bindings round-trip through every output format." With Phases 5-9 shipped, the cost of the refactor is well-bounded and the requirements are pinned by real usage (preview + export both want resolved nodes in the tree).
 
 ### 10. Critical files reference
 
@@ -226,11 +277,13 @@ Phase 7 implementation:
 | 2 | `Document` entity + REST CRUD + version snapshots + minimal editor route showing read-only JSON | ✅ Shipped (5 new doc tests + 1 version-restore happy-path; 1275 → 1280 passing) |
 | 3 | docx-editor integration + Hocuspocus document prefix + collab editing | ✅ Shipped (pivoted from TipTap to `@eigenpal/docx-editor-react` mid-phase; backend tests unchanged; verified end-to-end in browser: empty cold-load doc, role-aware readOnly via `key={role}` remount, Yjs round-trip with v-counter bump, tracked-changes mode toggle visible in toolbar) |
 | 4 | Comments + comment-only mode | Next up. docx-editor ships threaded comments + a comments-sidebar toggle out of box; we wire its controlled `comments={[]}` + `onCommentsChange` to a Yjs sync channel (or REST — TBD) and gate Commenter-role users to suggesting/viewing mode. |
-| 5 | Bindings (entity, endpoints, AQL resolver, in-editor ProseMirror plugins, refresh UX) | ✅ Shipped (record-field + aql-table kinds, decoration plugin, side panel; known v1 limitation: docx-editor's page renderer bypasses inline decorations, so chips render next to the placeholder text rather than replacing it). |
+| 5 | Bindings (entity, endpoints, AQL resolver, in-editor ProseMirror plugins, refresh UX) | ✅ Shipped (record-field + aql-table kinds, decoration plugin, side panel; known v1 limitations tracked for **Phase 10**: docx-editor's page renderer bypasses inline decorations so chips render next to the placeholder text in-editor, AND export / RAG serialization sees the raw `{{binding:UUID}}` text instead of the resolved value). |
 | 6 | Templates (kind discriminator, gallery, "create from template" flow) | ✅ Shipped (clone endpoint copies body + bindings with fresh ids, rewrites `{{binding:UUID}}` placeholders, snapshots an initial version; cross-project clones rejected; SPA `TemplateGalleryPage` at `/documents/templates` for cross-project listing + use/edit/rename/delete; templates filtered out of regular folder grids; sidecar `trySeedFromBodyMirror` extended to seed Yjs from `documents.body_jsonb` on cold load; 4 backend tests passing). |
-| 7 | **DOCX/DOTX import + export** — both directions ride docx-editor's built-in OOXML round-trip (`documentBuffer` prop for import, `ref.current.save()` for export). No OpenXML SDK pipeline needed; the entire §9 / §9b plan slimmed dramatically. | Pending. |
-| 8 | AI via docx-editor's `agentPanel` slot wired to our `/api/agent/documents/*` endpoints. Inline assist piggybacks on suggesting mode (AI proposals = tracked-change suggestions). | Pending. |
+| 7 | **DOCX/DOTX import + export** — both directions ride docx-editor's built-in OOXML round-trip (`documentBuffer` prop for import, `ref.current.save()` for export). No OpenXML SDK pipeline needed; the entire §9 / §9b plan slimmed dramatically. | ✅ Shipped. Export: title-bar `Download .docx` button (and docx-editor's File→Save menu) call `editorRef.current.save()` and trigger a browser download. Import: `POST /api/content/documents/import` (multipart) auto-routes `.docx` → `Document` and `.dotx` → `Template` based on file extension, stashes bytes to `data/document-imports/{id}.docx` via `IDocumentImportStorage`, sniffs OOXML container before persisting. Editor route reads `?import=1`, fetches the stash via `GET /{id}/import-buffer`, mounts in single-user **import mode** (`externalContent=false`, `documentBuffer={buf}`, no `ySyncPlugin`) so docx-editor parses OOXML directly; after a 500 ms debounce the editor extracts `view.state.doc.toJSON()`, PATCHes it into `body_jsonb`, DELETEs the stash, and navigates without `?import=1` so the next mount uses the standard Yjs path (sidecar's `trySeedFromBodyMirror` seeds the Y.Doc from the freshly-written `body_jsonb` mirror). `ImportDocxButton` wired into folder views (`.docx`) and the template gallery (`.dotx`). 5 new backend tests, 47 doc-adjacent tests still green. |
+| 8 | AI via docx-editor's `agentPanel` slot wired to our `/api/agent/documents/*` endpoints. Inline assist piggybacks on suggesting mode (AI proposals = tracked-change suggestions). | 🚧 v1 shipped (doc-scoped chat). New `DocumentChatPanel` mounts inside docx-editor's `agentPanel` slot — reuses existing `/api/agent/conversations/*` + SSE streaming, per-document `pageKey=document:UUID` so threads scope to the open doc. `useDocumentEditorPageContext` registers a PageContextProvider so the agent's `inspect_page` skill sees the doc's title + bindings catalog + on-demand body text via the live EditorView. Local `PageContextRegistryProvider` mounted inside `DocumentEditorPage` because the editor route lives outside the AppShell. Verified end-to-end: chat answers "what's the title?" correctly using the page context, conversation persists across reloads. **Follow-up phases 8b–8d**: inline-assist (selection → suggesting-mode tracked changes), NL→AQL binding suggest dialog, and template+prompt → generate-document. |
 | 9 | Polish: full-bleed editor shell (already in place — `/documents/edit/:id` mounts outside AppShell), "Refresh all bindings", version-history sidebar (docx-editor has hooks for this), override-permission editor for folders/documents. | Pending. |
+| 10 | **Binding node-view refactor** (§9e). Replace the text-placeholder + decoration model with first-class PM nodes (`record_field_binding`, `aql_table_binding`) so the resolved content lives inside the document tree and round-trips through every output format (DOCX export, RAG embedding, search). Includes the body migration job that rewrites `{{binding:UUID}}` text in existing documents. Deletes `bindingsPlugin.ts` + the chip-decoration scanner. | Pending. |
+| 11 | **Read-only preview surface** (§9c). New `/documents/preview/:documentId` route mounting docx-editor in read-only viewing mode with bindings fully resolved into inline content. Editor's title bar gains a "Preview" sibling next to "Download .docx" for one-click flip from authoring to populated view. If we ship this before Phase 10, includes the `resolveBindingsInPmDoc` helper (§9c pre-Phase-10 fallback) — same helper backs the optional `resolve-before-save` export shim in §9d. Phase 10 obsoletes the helper. | Pending. |
 
 (External link sharing and DOCX-into-existing-document merge/diff are intentionally not in the rollout — v2.)
 
@@ -245,6 +298,8 @@ Phase 7 implementation:
 - **Folder permission perf**: closest-ancestor resolution requires walking the parent chain. For deep nesting, materialize the ancestor path or cache resolved permissions. Start simple (recursive CTE), add caching if hot.
 - **Binding refresh + Yjs**: pushing a binding update server-side into the Y.Doc requires the server (or a server-driven Hocuspocus client) to write into the doc — easier route is to update the `DocumentBinding` row, broadcast a Hocuspocus awareness ping with the binding id, and have each connected editor refetch + re-render. Confirm during phase 5.
 - **Export of bound content**: decide policy — does "export to PDF" trigger a binding refresh first, or snapshot the current cached values? Recommend a "refresh-before-export" toggle on the export dialog, defaulted on for `Publish`, off for `Quick download`.
+- **docx-editor schema extensibility (blocks Phase 10)**: the node-view refactor (§9e) needs to register two custom node types in docx-editor's ProseMirror schema. Confirm during Phase 10 scoping whether the library exposes a schema-extension API (additional `nodes` / `marks` via a prop or factory) or whether we need to fork / contribute upstream. Without an extension path, the alternative is a node-views-via-decorations approach (use `Decoration.widget` to render React node views over text placeholders) — that still bypasses OOXML serialization, so the export problem doesn't go away. The fallback there is the resolve-before-save shim (§9d) made permanent. Decide before committing to Phase 10.
+- **Body-migration safety for Phase 10**: rewriting every existing document's `body_jsonb` to swap text placeholders for node-view JSON needs to be transactionally safe AND idempotent (so re-runs are no-ops). Run it as a one-shot CLI / admin endpoint, not an EF migration — JSONB rewrites in-place can race with live Hocuspocus snapshots otherwise. Confirm Hocuspocus debounce window vs migration scan timing during Phase 10.
 - ~~**Import fidelity**~~ → Largely a non-issue now: docx-editor owns the OOXML parser, so import fidelity is whatever they ship. Their site promises "pixel-perfect OOXML rendering ... round-trips your .docx without quality loss." We may still want a fixture suite to catch regressions in their upstream releases, but we're no longer writing the parser.
 - ~~**Memory note refresh**: `project_collab_foundation.md` currently says "decided, not built"~~ → Already done.
 
@@ -264,6 +319,8 @@ End-to-end checks for each phase before merge:
    - Create a template with an AQL table binding; create a document from the template; refresh the binding; verify cached value persists in Yjs.
    - Click "AI inline assist", "Chat with this document", "/insert table of X" — all four AI features round-trip.
    - Export to PDF and DOCX; verify the files open in Acrobat / Word.
+   - **Preview (Phase 11)**: open `/documents/preview/:id` for a doc with both `record-field` and `aql-table` bindings — page renders read-only with each binding replaced by its resolved value (inline text for record-field, real table for aql-table). "Refresh bindings" in the preview header forces a server-side refresh-all and re-renders. "Open in editor" returns to the live editor; placeholders show their chip/text again.
+   - **Populated export (Phase 10 acceptance)**: with a doc containing both binding kinds, click "Download .docx" — open in Word and confirm the file contains resolved values (no `{{binding:UUID}}` strings anywhere in the body). Repeat after the binding configuration is changed to verify the next export reflects the new values, not a stale cache.
    - Import a `.docx` file → new document opens in editor with content + images + tables preserved; warnings banner reports any unsupported features. Import a `.dotx` → lands in the template gallery as a new template.
    - Round-trip a non-trivial doc: export current doc to .docx, re-import as a new doc, eyeball the diff (acceptable losses noted in `Import fidelity` risk).
    - Restore a prior version; verify content reverts.

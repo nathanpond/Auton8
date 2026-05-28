@@ -21,6 +21,7 @@ import { notifications } from "@mantine/notifications";
 import { DocumentDto, FolderDto, fetchFolder } from "@/api/documents";
 import { useQueries } from "@tanstack/react-query";
 import FolderTree from "@/components/documents/FolderTree";
+import ImportDocxButton from "@/components/documents/ImportDocxButton";
 import {
   useCreateDocument,
   useCreateFolder,
@@ -135,6 +136,11 @@ export default function ProjectDocumentsPage() {
               >
                 New subfolder
               </Button>
+              <ImportDocxButton
+                projectId={projectId}
+                folderId={currentFolder.id}
+                accept=".docx"
+              />
               <Button
                 size="xs"
                 leftSection={<i className="fa fa-file-circle-plus" aria-hidden />}
@@ -172,6 +178,11 @@ export default function ProjectDocumentsPage() {
               >
                 New folder
               </Button>
+              <ImportDocxButton
+                projectId={projectId}
+                folderId={null}
+                accept=".docx"
+              />
               <Button
                 size="xs"
                 leftSection={<i className="fa fa-file-circle-plus" aria-hidden />}

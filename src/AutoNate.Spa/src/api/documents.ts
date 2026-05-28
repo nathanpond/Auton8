@@ -243,6 +243,50 @@ export async function deleteDocument(id: string): Promise<void> {
   await api.delete(`/api/content/documents/${id}`);
 }
 
+// ── Imports (Phase 7) ──────────────────────────────────────────────────────
+
+// Multipart upload of a .docx / .dotx file. The backend dispatches kind
+// from the file extension (.docx → 'document', .dotx → 'template'), so
+// no `kind` field is sent; the returned DocumentDto's `kind` reflects
+// what landed. The editor route should be opened with `?import=1` after
+// this resolves so the first mount fetches the stashed buffer and lets
+// docx-editor parse it into Yjs.
+export async function importDocxAsDocument(req: {
+  file: File;
+  projectId: string;
+  folderId?: string | null;
+  title?: string;
+}): Promise<DocumentDto> {
+  const form = new FormData();
+  form.append("file", req.file, req.file.name);
+  form.append("projectId", req.projectId);
+  if (req.folderId) form.append("folderId", req.folderId);
+  if (req.title) form.append("title", req.title);
+  const { data } = await api.post<DocumentDto>(
+    "/api/content/documents/import",
+    form
+  );
+  return data;
+}
+
+// Fetch the stashed bytes for the editor's first mount. Returns the raw
+// ArrayBuffer docx-editor wants on its `documentBuffer` prop. The fetch
+// returns 404 once the editor's first autosave has been followed by the
+// matching DELETE — that's the signal that body_jsonb has taken over.
+export async function fetchDocumentImportBuffer(
+  documentId: string
+): Promise<ArrayBuffer> {
+  const { data } = await api.get<ArrayBuffer>(
+    `/api/content/documents/${documentId}/import-buffer`,
+    { responseType: "arraybuffer" }
+  );
+  return data;
+}
+
+export async function discardDocumentImportBuffer(documentId: string): Promise<void> {
+  await api.delete(`/api/content/documents/${documentId}/import-buffer`);
+}
+
 // ── Templates (Phase 6) ────────────────────────────────────────────────────
 
 // Clone a template into a new document. Server copies the template's

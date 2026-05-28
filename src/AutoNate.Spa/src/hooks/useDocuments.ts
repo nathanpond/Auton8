@@ -8,6 +8,7 @@ import {
   UpdateDocumentRequest,
   UpdateFolderRequest,
   cloneDocumentFromTemplate,
+  importDocxAsDocument,
   createDocument,
   createFolder,
   deleteDocument,
@@ -302,6 +303,31 @@ export function useTemplates() {
         signal
       );
       return result.items;
+    }
+  });
+}
+
+// ── Imports (Phase 7) ──────────────────────────────────────────────────────
+
+// Upload a .docx / .dotx file and create the matching Document row. The
+// returned DocumentDto's `kind` is determined by the file extension on
+// the backend — callers should branch on the result rather than send a
+// kind hint. The mutation invalidates the destination folder / templates
+// list so the new row shows up without a manual refetch.
+export function useImportDocx() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: importDocxAsDocument,
+    onSuccess: (created) => {
+      if (created.kind === "template") {
+        qc.invalidateQueries({ queryKey: templatesKey });
+      } else if (created.folderId) {
+        qc.invalidateQueries({ queryKey: folderChildrenKey(created.folderId) });
+      } else {
+        qc.invalidateQueries({
+          queryKey: projectRootDocumentsKey(created.projectId, "document")
+        });
+      }
     }
   });
 }

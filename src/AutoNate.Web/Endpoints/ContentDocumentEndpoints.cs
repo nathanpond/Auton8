@@ -649,6 +649,280 @@ public static class ContentDocumentEndpoints
               "additionally requires Edit on the destination folder, or " +
               "Project.Edit at the root, per the D9 composition.");
 
+        // ── Phase 7: DOCX / DOTX import ────────────────────────────────────
+        //
+        // Three endpoints make the import path work end-to-end:
+        //   POST   /import                      — upload .docx/.dotx, create
+        //                                          Document row, stash bytes
+        //   GET    /{id}/import-buffer          — fetch stashed bytes for the
+        //                                          editor's first mount
+        //   DELETE /{id}/import-buffer          — discard the stash once the
+        //                                          editor's first autosave has
+        //                                          materialized body_jsonb
+        //
+        // Why a transient stash instead of putting bytes in the DB or in
+        // body_jsonb: docx-editor parses OOXML into its own ProseMirror state
+        // on mount via the `documentBuffer` prop, then drives normal Yjs
+        // autosave. body_jsonb only becomes meaningful after that first
+        // snapshot. Storing the raw .docx in body_jsonb (or even keeping a
+        // permanent copy) would double the storage footprint without
+        // adding round-trip fidelity — re-export goes through docx-editor's
+        // `save()`, not the original bytes.
+
+        // Upload endpoint. Multipart with one `file` part + `projectId`,
+        // optional `folderId` + `title`. The Document.Kind discriminator
+        // is auto-derived from the file extension: `.docx` → 'document',
+        // `.dotx` → 'template'. Mirrors the create-document permission
+        // model (Folder.Edit nested, Project.Edit at root) since this is
+        // effectively a create-document POST with a binary side channel.
+        group.MapPost("/import", async (
+            HttpRequest req,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IContentAuthorizer authorizer,
+            IContentTreeService treeService,
+            IContentVersionService versions,
+            IDocumentImportStorage importStore,
+            Microsoft.Extensions.Options.IOptions<DocumentImportOptions> importOpts,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            if (!req.HasFormContentType)
+            {
+                return Results.BadRequest(new { error = "multipart/form-data required." });
+            }
+            var form = await req.ReadFormAsync(ct);
+            if (form.Files.Count == 0)
+            {
+                return Results.BadRequest(new { error = "No file provided." });
+            }
+            var file = form.Files[0];
+            var options = importOpts.Value;
+            if (file.Length <= 0)
+            {
+                return Results.BadRequest(new { error = "Uploaded file is empty." });
+            }
+            if (file.Length > options.MaxBytes)
+            {
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            }
+
+            // Extension dispatch: .docx → document, .dotx → template. We
+            // refuse anything else outright; legacy .doc / .dot (CFB,
+            // pre-OOXML) is not supported by docx-editor.
+            var fileName = file.FileName ?? string.Empty;
+            string documentKind;
+            if (fileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                documentKind = DocumentKinds.Document;
+            }
+            else if (fileName.EndsWith(".dotx", StringComparison.OrdinalIgnoreCase))
+            {
+                documentKind = DocumentKinds.Template;
+            }
+            else
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Only .docx and .dotx uploads are supported."
+                });
+            }
+
+            // Read once into memory for the sniff + the stash write. 25 MB
+            // ceiling is enforced above so the buffer is bounded.
+            await using var uploadStream = file.OpenReadStream();
+            await using var ms = new MemoryStream();
+            await uploadStream.CopyToAsync(ms, ct);
+            var bytes = ms.ToArray();
+
+            // OOXML containers are PKZIP — the sniffer returns
+            // "application/zip" for both .docx and .dotx since the
+            // container format is identical. We don't go further than
+            // confirming the family because we hand the bytes to
+            // docx-editor's parser; it owns OOXML-internal validation.
+            var sniffed = ContentTypeSniffer.Sniff(bytes);
+            if (sniffed != "application/zip")
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Uploaded file is not a valid OOXML document " +
+                            "(.docx / .dotx requires the OOXML / ZIP container format)."
+                });
+            }
+
+            // Parse the rest of the form. Title falls back to the file's
+            // base name without extension so a paste-as-new-document flow
+            // works without the SPA filling it in.
+            if (!Guid.TryParse(form["projectId"].ToString(), out var projectId))
+            {
+                return Results.BadRequest(new { error = "Missing or invalid projectId." });
+            }
+            Guid? folderId = null;
+            if (Guid.TryParse(form["folderId"].ToString(), out var parsedFolder))
+            {
+                folderId = parsedFolder;
+            }
+            var requestedTitle = form["title"].ToString();
+            if (string.IsNullOrWhiteSpace(requestedTitle))
+            {
+                requestedTitle = Path.GetFileNameWithoutExtension(fileName);
+            }
+            if (string.IsNullOrWhiteSpace(requestedTitle))
+            {
+                requestedTitle = documentKind == DocumentKinds.Template
+                    ? "Imported template"
+                    : "Imported document";
+            }
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var projectExists = await db.Projects.AsNoTracking()
+                .AnyAsync(p => p.Id == projectId, ct);
+            if (!projectExists) return Results.BadRequest(new { error = "Project not found." });
+
+            AuthDecision decision;
+            if (folderId is { } fid)
+            {
+                var folder = await db.Folders.AsNoTracking()
+                    .Where(f => f.Id == fid)
+                    .Select(f => new { f.Id, f.ProjectId })
+                    .FirstOrDefaultAsync(ct);
+                if (folder is null) return Results.BadRequest(new { error = "Folder not found." });
+                if (folder.ProjectId != projectId)
+                {
+                    return Results.BadRequest(new { error = "Folder belongs to a different project." });
+                }
+                decision = await authorizer.AuthorizeAsync(
+                    http.User, ContentKinds.Folder, fid, Actions.Edit, ct);
+            }
+            else
+            {
+                decision = await authorizer.AuthorizeAsync(
+                    http.User, ContentKinds.Project, projectId, Actions.Edit, ct);
+            }
+            if (!decision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+            var actorId = http.GetActorId();
+            var now = DateTime.UtcNow;
+            var documentId = Guid.NewGuid();
+
+            // Stash bytes first. If the DB insert fails afterwards we'll
+            // clean up via the catch block so we don't orphan a file
+            // referenced by no Document row.
+            using (var writeStream = new MemoryStream(bytes, writable: false))
+            {
+                await importStore.WriteAsync(documentId, writeStream, ct);
+            }
+
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            var doc = new Document
+            {
+                Id = documentId,
+                ProjectId = projectId,
+                FolderId = folderId,
+                Kind = documentKind,
+                Title = requestedTitle.Trim(),
+                // body_jsonb stays empty until docx-editor parses the
+                // stash and the first autosave commits the JSON. An
+                // empty `{}` object is a valid ProseMirror placeholder
+                // — the editor route checks for `?import=1` before
+                // hydrating from body_jsonb.
+                BodyJsonb = "{}",
+                CurrentVersionNumber = 1,
+                SortOrder = 0,
+                IsArchived = false,
+                CreatedAtUtc = now, UpdatedAtUtc = now,
+                CreatedBy = actorId, UpdatedBy = actorId
+            };
+            db.Documents.Add(doc);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                await treeService.InsertSelfWithAncestorsAsync(db, ContentKinds.Document, doc.Id, ct);
+                var initialVersion = await versions.SnapshotDocumentBeforeChangeAsync(
+                    db, doc.Id, doc.Title, doc.BodyJsonb,
+                    ContentVersionKinds.Manual,
+                    $"Imported from {Path.GetFileName(fileName)}",
+                    actorId, now, ct);
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+
+                await auditPublisher.PublishAsync(
+                    ContentEventTopic.TopicName,
+                    ContentEventTypes.DocumentCreated,
+                    ContentResourceKinds.Document,
+                    resource: new
+                    {
+                        id = doc.Id,
+                        projectId = doc.ProjectId,
+                        folderId = doc.FolderId,
+                        title = doc.Title
+                    },
+                    details: new
+                    {
+                        kind = doc.Kind,
+                        source = "import",
+                        sourceFileName = Path.GetFileName(fileName),
+                        sourceByteSize = bytes.LongLength
+                    },
+                    ct);
+                if (initialVersion is { } v)
+                {
+                    await auditPublisher.PublishAsync(
+                        ContentEventTopic.TopicName,
+                        ContentEventTypes.DocumentVersionCreated,
+                        ContentResourceKinds.DocumentVersion,
+                        resource: new { documentId = doc.Id, versionNumber = v, kind = ContentVersionKinds.Manual },
+                        details: null,
+                        ct);
+                }
+            }
+            catch
+            {
+                await importStore.DeleteAsync(documentId, ct);
+                throw;
+            }
+
+            return Results.Created($"/api/content/documents/{doc.Id}", MapDto(doc));
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Project / folder Edit gate same as create. Extension dispatch " +
+              "auto-routes .docx → document, .dotx → template; OOXML container " +
+              "is enforced via magic-byte sniff.");
+
+        // Fetch the stashed bytes for the editor's first mount. Streams
+        // directly with a fixed Content-Type — the file is always treated
+        // as the OOXML wordprocessingml container regardless of whether
+        // it was uploaded as .docx or .dotx (docx-editor parses both
+        // identically; the kind discriminator lives on the Document row).
+        group.MapGet("/{id:guid}/import-buffer", async (
+            Guid id,
+            IDocumentImportStorage importStore,
+            CancellationToken ct) =>
+        {
+            if (!importStore.Exists(id))
+            {
+                return Results.NotFound(new { error = "No pending import for this document." });
+            }
+            var stream = await importStore.ReadAsync(id, ct);
+            return Results.Stream(stream,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        }).RequirePermission(EntityKinds.Document, Actions.View);
+
+        // Discard the stash. Called by the editor route after the first
+        // successful Yjs snapshot lands so the JSON mirror takes over as
+        // source of truth. Best-effort: 204 always (we don't surface
+        // filesystem errors to the client because the DB row is the
+        // durable artifact; orphaned bytes are reaped by the optional
+        // sweep job).
+        group.MapDelete("/{id:guid}/import-buffer", async (
+            Guid id,
+            IDocumentImportStorage importStore,
+            CancellationToken ct) =>
+        {
+            await importStore.DeleteAsync(id, ct);
+            return Results.NoContent();
+        }).RequirePermission(EntityKinds.Document, Actions.Edit);
+
         return app;
     }
 

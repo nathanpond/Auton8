@@ -98,9 +98,13 @@ public sealed class WebFetchSkillTests
     }
 
     [Fact]
-    public async Task Truncates_oversized_responses_at_256_kb_and_marks_truncated()
+    public async Task Truncates_oversized_responses_at_48_kb_and_marks_truncated()
     {
-        var oversized = new string('A', 300 * 1024);
+        // Cap is 48 KB — a single oversized fetch shouldn't dominate the
+        // 200K-token provider context. See the comment above
+        // MaxResponseBytes in WebFetchSkill for the reasoning.
+        const int expectedCap = 48 * 1024;
+        var oversized = new string('A', 100 * 1024);
         var stub = new StubHttpMessageHandler();
         stub.When(HttpMethod.Get, "/big", _ => TextResponse(oversized, "text/plain"));
 
@@ -112,7 +116,7 @@ public sealed class WebFetchSkillTests
         var data = result.GetProperty("data");
         Assert.True(data.GetProperty("truncated").GetBoolean());
         var body = data.GetProperty("text").GetString() ?? string.Empty;
-        Assert.Equal(256 * 1024, body.Length);
+        Assert.Equal(expectedCap, body.Length);
     }
 
     [Fact]
