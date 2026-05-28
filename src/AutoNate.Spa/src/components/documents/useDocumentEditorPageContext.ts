@@ -31,6 +31,13 @@ type Args = {
   // every chat send — so the snapshot is always fresh, no polling
   // or React state plumbing required.
   getBodyText: () => string | null;
+  // Reads the user's current selection (text + the enclosing paragraph's
+  // paraId + a small window of surrounding context). Powers the Phase 8b
+  // inline-assist flow: the agent uses paraId+selectedText to target a
+  // tracked-change suggestion via apply_page_action(suggest_text_
+  // replacement). Returns null when nothing is selected (empty range) or
+  // the view isn't mounted yet.
+  getSelection: () => DocumentSelectionSnapshot | null;
   // Bindings catalog, sourced from the same React Query hook the bindings
   // side panel uses. We surface the kind + label + last resolved value so
   // the agent can reason about what data is referenced in the doc.
@@ -49,6 +56,24 @@ type Args = {
 // server-side limit. ~8KB of text is enough for a useful summary; longer
 // docs get truncated with a clear marker.
 const BODY_PREVIEW_LIMIT = 8000;
+
+// Wire shape for the user's current selection. paraId is docx-editor's
+// stable per-paragraph handle (Word's `w14:paraId`) — both the suggest_
+// text_replacement action and docx-editor's own proposeChange ref method
+// take it directly. `before`/`after` give the agent enough surrounding
+// prose to grok what was selected without us shipping the whole body.
+export type DocumentSelectionSnapshot = {
+  paraId: string;
+  selectedText: string;
+  before: string;
+  after: string;
+};
+
+// Per-side context window when capturing a selection. 200 chars each
+// gives the model enough prose to understand the selection's place in
+// the paragraph without bloating the snapshot. Exported so the editor
+// wrapper that produces the snapshot uses the same bound.
+export const SELECTION_CONTEXT_LIMIT = 200;
 
 export function pageKeyForDocument(documentId: string): string {
   return `document:${documentId}`;
@@ -81,6 +106,26 @@ export const DOCUMENT_PAGE_ACTIONS: PageActionDefinition[] = [
       "Args: { markdown: string } — same Markdown contract as " +
       "append_markdown. Use this when the user explicitly asks for an " +
       "insertion at the cursor; otherwise prefer append_markdown."
+  },
+  {
+    name: "suggest_text_replacement",
+    description:
+      "Propose a tracked-change replacement for an existing passage. " +
+      "Args: { paraId: string, search: string, replaceWith: string }. " +
+      "`paraId` identifies the target paragraph (use `data.selection.paraId` " +
+      "when the user has text selected). `search` is the exact substring of " +
+      "that paragraph to replace — must be a UNIQUE substring within the " +
+      "paragraph (use a longer span if the short one would be ambiguous). " +
+      "`replaceWith` is the new text. " +
+      "The change lands as a Word-style tracked suggestion (strikethrough " +
+      "old + underlined new) the user accepts or rejects in the editor's " +
+      "review UI — that IS the preview, so call directly with confirmed=true; " +
+      "do NOT do a describe-then-confirm round-trip. " +
+      "Use this for selection-targeted rewrites (\"reword this\", \"make " +
+      "this more formal\", \"fix the grammar in the selected sentence\"); " +
+      "use append_markdown / insert_markdown_at_cursor for additions, not " +
+      "this. Plain text only — markdown syntax in replaceWith would land " +
+      "as literal characters."
   }
 ];
 
@@ -88,6 +133,7 @@ export function useDocumentEditorPageContext({
   documentId,
   documentTitle,
   getBodyText,
+  getSelection,
   bindings,
   onAction
 }: Args): void {
@@ -99,6 +145,8 @@ export function useDocumentEditorPageContext({
   // still reading the freshest body at snapshot time.
   const bodyTextRef = useRef(getBodyText);
   bodyTextRef.current = getBodyText;
+  const selectionRef = useRef(getSelection);
+  selectionRef.current = getSelection;
   const onActionRef = useRef(onAction);
   onActionRef.current = onAction;
 
@@ -110,11 +158,12 @@ export function useDocumentEditorPageContext({
         : raw.length > BODY_PREVIEW_LIMIT
           ? `${raw.slice(0, BODY_PREVIEW_LIMIT)}…[truncated; full body lives in the live editor]`
           : raw;
+    const selection = selectionRef.current();
 
     return {
       pageKey,
       schemaVersion: 1,
-      version: hashFingerprint(documentTitle, raw, bindings),
+      version: hashFingerprint(documentTitle, raw, bindings, selection),
       // Forceful summary — included verbatim in the agent's system
       // prompt. The agent has access to notes-creation tools
       // (create_page_from_markdown, etc.) that DO NOT belong on this
@@ -126,12 +175,17 @@ export function useDocumentEditorPageContext({
       summary:
         `Open Word-style document "${documentTitle}" (docx-editor; NOT a notes page or a notebook). ` +
         `Carries ${bindings.length} live data binding${bindings.length === 1 ? "" : "s"}. ` +
-        `Any request to add, append, or insert content into this document MUST go through ` +
-        `apply_page_action — use action="append_markdown" to append rich content to the end ` +
-        `or action="insert_markdown_at_cursor" to insert at the user's cursor (both take ` +
-        `{ markdown: string }). NEVER use create_page_from_markdown or any other ` +
-        `notes/notebook-creation skill on this page — creating a new notebook page is the ` +
-        `wrong feature for a document; doing so leaves the user's open document unchanged ` +
+        (selection
+          ? `User currently has text selected — see data.selection for { paraId, selectedText, before, after }. ` +
+            `For selection-targeted rewrites ("reword this", "make this formal", "fix grammar"), use ` +
+            `apply_page_action(action="suggest_text_replacement", { paraId, search, replaceWith }) — the change ` +
+            `lands as a tracked-change suggestion the user accepts/rejects in the review UI (no confirm round-trip; ` +
+            `call with confirmed=true directly). `
+          : `No active text selection right now (data.selection is null). `) +
+        `For ADDITIONS, use apply_page_action — action="append_markdown" appends rich content to the end and ` +
+        `action="insert_markdown_at_cursor" inserts at the cursor (both take { markdown: string }). NEVER use ` +
+        `create_page_from_markdown or any other notes/notebook-creation skill on this page — creating a new ` +
+        `notebook page is the wrong feature for a document; doing so leaves the user's open document unchanged ` +
         `and creates a stray note in their notebook.`,
       data: {
         documentId,
@@ -141,6 +195,10 @@ export function useDocumentEditorPageContext({
         // safely include resolved binding values inline here too.
         bodyPreview: trimmedPreview,
         bodyPreviewTruncated: raw != null && raw.length > BODY_PREVIEW_LIMIT,
+        // null when nothing's selected. Agent reads .paraId for
+        // suggest_text_replacement targeting; selectedText/before/after
+        // give it the prose context to construct the replacement.
+        selection,
         bindings: bindings.map((b) => ({
           id: b.id,
           kind: b.kind,
@@ -197,7 +255,8 @@ export function useDocumentEditorPageContext({
 function hashFingerprint(
   title: string,
   preview: string | null,
-  bindings: DocumentBindingDto[]
+  bindings: DocumentBindingDto[],
+  selection: DocumentSelectionSnapshot | null
 ): number {
   let h = 5381;
   const mix = (s: string) => {
@@ -209,6 +268,10 @@ function hashFingerprint(
     mix(b.id);
     mix(b.kind);
     if (b.lastResolvedValueJsonb) mix(b.lastResolvedValueJsonb);
+  }
+  if (selection) {
+    mix(selection.paraId);
+    mix(selection.selectedText);
   }
   return h >>> 0;
 }

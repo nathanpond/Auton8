@@ -3,6 +3,7 @@ import { DocxEditor, createEmptyDocument } from "@eigenpal/docx-editor-react";
 import type { DocxEditorRef } from "@eigenpal/docx-editor-react";
 import { ySyncPlugin, yCursorPlugin } from "y-prosemirror";
 import type { EditorView } from "prosemirror-view";
+import type { Transaction } from "prosemirror-state";
 import { Box, Group, Button, ActionIcon, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
@@ -20,7 +21,10 @@ import { updateBindingsRegistry } from "./bindingsRegistry";
 import { bindingPlaceholderText, createBindingsPlugin } from "./bindingsPlugin";
 import BindingsSidePanel from "./BindingsSidePanel";
 import DocumentChatPanel from "./DocumentChatPanel";
-import { useDocumentEditorPageContext } from "./useDocumentEditorPageContext";
+import {
+  useDocumentEditorPageContext,
+  SELECTION_CONTEXT_LIMIT
+} from "./useDocumentEditorPageContext";
 import { markdownToProseMirrorSlice } from "./markdownToPmNodes";
 import "@eigenpal/docx-editor-react/styles.css";
 // Local override file MUST be imported AFTER the library's stylesheet so
@@ -117,6 +121,79 @@ function extractCommentText(c: { content: unknown }): string {
 
 function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null;
+}
+
+// docx-editor's suggestion-mode plugin wraps any doc-changing transaction
+// that LACKS this meta flag in tracked-change (insertion) marks while the
+// editor is in "suggesting" mode. Our markdown-insertion actions are
+// authoring-on-the-user's-behalf, not suggestions — they should land as
+// direct edits regardless of mode. Setting this meta makes the plugin's
+// appendTransaction skip the transaction (it matches the editor's own
+// internal `y="suggestionModeApplied"` bypass string). Coupled to a
+// docx-editor internal — if a version bump breaks insertion-while-in-
+// suggesting-mode, re-grep the bundle for the PluginKey("suggestionMode")
+// neighbourhood to confirm the meta string. (suggest_text_replacement is
+// unaffected — it goes through the editor's own proposeChange ref, which
+// is SUPPOSED to be tracked.)
+const SUGGESTION_MODE_BYPASS_META = "suggestionModeApplied";
+
+function markAsDirectEdit(tr: Transaction): void {
+  tr.setMeta(SUGGESTION_MODE_BYPASS_META, true);
+}
+
+// Make docx-editor's accept/reject tracked-change buttons mode-safe.
+//
+// Problem: docx-editor's acceptChange/rejectChange commands build a
+// transaction that strips the insertion/deletion mark + deletes the
+// other side's text, but they DON'T stamp the suggestion-tracker's
+// bypass meta. In Suggesting mode the tracker's appendTransaction then
+// re-intercepts that transaction's delete and re-marks the text instead
+// of removing it — so "reject" visibly does nothing (and "accept" is
+// flaky). In Editing mode the tracker is inactive so it works; the bug
+// only bites in Suggesting mode.
+//
+// Fix: wrap the view's dispatch and, for any transaction that REMOVES an
+// `insertion`/`deletion` mark (the structural signature of an accept or
+// reject), stamp the bypass meta so the tracker leaves it alone. No-op
+// in Editing mode (the tracker ignores the meta when inactive), correct
+// in Suggesting mode. Idempotent — guarded so a key={role} remount that
+// re-fires onEditorViewReady doesn't double-wrap.
+type PatchableView = EditorView & {
+  __acceptRejectModeSafe?: boolean;
+  dispatch: (tr: Transaction) => void;
+};
+
+function makeAcceptRejectModeSafe(view: EditorView): void {
+  const v = view as PatchableView;
+  if (v.__acceptRejectModeSafe) return;
+  v.__acceptRejectModeSafe = true;
+  const original = v.dispatch.bind(v);
+  v.dispatch = (tr: Transaction) => {
+    if (transactionRemovesTrackedMark(tr)) {
+      tr.setMeta(SUGGESTION_MODE_BYPASS_META, true);
+    }
+    original(tr);
+  };
+}
+
+// True when the transaction strips an insertion/deletion mark — the
+// distinguishing step of an accept/reject (vs. an ordinary edit, which
+// never removes those marks). We read each step's serialized form so the
+// check survives minification (no `instanceof RemoveMarkStep` against a
+// bundled class).
+function transactionRemovesTrackedMark(tr: Transaction): boolean {
+  for (const step of tr.steps) {
+    const json = (step as { toJSON?: () => unknown }).toJSON?.() as
+      | { stepType?: string; mark?: { type?: string } }
+      | undefined;
+    if (
+      json?.stepType === "removeMark" &&
+      (json.mark?.type === "insertion" || json.mark?.type === "deletion")
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export default function DocxDocumentEditor({
@@ -249,6 +326,52 @@ export default function DocxDocumentEditor({
         return null;
       }
     },
+    // Read the user's current selection on demand so the agent's
+    // page-context snapshot includes it. Walks the doc from the
+    // selection's $from anchor to find the enclosing textblock (always
+    // a paragraph in docx-editor's schema), reads its paraId, slices a
+    // window of surrounding context. Returns null when nothing is
+    // selected, the selection is collapsed (cursor only, no range),
+    // the enclosing block lacks a paraId, or the view isn't mounted.
+    getSelection: () => {
+      const view = editorViewRef.current;
+      if (!view) return null;
+      try {
+        const { from, to } = view.state.selection;
+        if (from === to) return null; // collapsed cursor — no selection
+        const $from = view.state.doc.resolve(from);
+        // Walk up to the enclosing textblock. depth=0 is the doc itself;
+        // the paragraph is typically at depth=1.
+        let blockDepth = $from.depth;
+        while (blockDepth > 0 && !$from.node(blockDepth).isTextblock) {
+          blockDepth--;
+        }
+        if (blockDepth === 0) return null;
+        const block = $from.node(blockDepth);
+        const paraId = (block.attrs as { paraId?: unknown })?.paraId;
+        if (typeof paraId !== "string" || paraId.length === 0) return null;
+        const blockStart = $from.start(blockDepth);
+        const blockEnd = $from.end(blockDepth);
+        const safeFrom = Math.max(from, blockStart);
+        const safeTo = Math.min(to, blockEnd);
+        const selectedText = view.state.doc.textBetween(safeFrom, safeTo, "\n");
+        const beforeFull = view.state.doc.textBetween(blockStart, safeFrom, "\n");
+        const afterFull = view.state.doc.textBetween(safeTo, blockEnd, "\n");
+        // Trim surrounding context — front-half of the trailing chunk,
+        // back-half of the leading chunk, so we stay near the selection.
+        const before =
+          beforeFull.length > SELECTION_CONTEXT_LIMIT
+            ? `…${beforeFull.slice(-SELECTION_CONTEXT_LIMIT)}`
+            : beforeFull;
+        const after =
+          afterFull.length > SELECTION_CONTEXT_LIMIT
+            ? `${afterFull.slice(0, SELECTION_CONTEXT_LIMIT)}…`
+            : afterFull;
+        return { paraId, selectedText, before, after };
+      } catch {
+        return null;
+      }
+    },
     // Apply chatbot-driven mutations against the live EditorView. The
     // transactions flow through ySyncPlugin into Yjs, so collaborators
     // see the change in real time. Edits are gated to editor-role users
@@ -272,6 +395,98 @@ export default function DocxDocumentEditor({
           message: `Your role (${role}) doesn't permit edits to this document.`
         };
       }
+
+      // Phase 8b: tracked-change suggestion. Routes through docx-editor's
+      // own proposeChange ref method, which inserts the proposal as a
+      // Word-style tracked change regardless of the editor's current
+      // mode (editing/suggesting/viewing). The user reviews + accepts/
+      // rejects in the existing tracked-changes UI — that's the preview,
+      // so we don't gate this behind the describe-then-confirm pattern.
+      if (req.action === "suggest_text_replacement") {
+        // Accept common arg-name aliases — models reliably vary between
+        // search/oldText/find and replaceWith/newText/replacement even
+        // when the schema names one set. Being liberal here avoids a
+        // wasted round-trip where the model guesses the "wrong" name.
+        const a = (req.args ?? {}) as Record<string, unknown>;
+        const pickString = (...keys: string[]): string | undefined => {
+          for (const k of keys) {
+            if (typeof a[k] === "string") return a[k] as string;
+          }
+          return undefined;
+        };
+        const paraId = pickString("paraId", "paragraphId", "para_id");
+        const search = pickString("search", "oldText", "find", "target", "old");
+        // replaceWith may legitimately be "" (delete) — pick even empty.
+        const replaceWith = pickString(
+          "replaceWith",
+          "newText",
+          "replacement",
+          "new",
+          "with"
+        );
+        if (!paraId || paraId.length === 0) {
+          return {
+            ok: false,
+            error: "bad_request",
+            message:
+              "paraId is required (use data.selection.paraId from the page snapshot)."
+          };
+        }
+        if (!search || search.length === 0) {
+          return {
+            ok: false,
+            error: "bad_request",
+            message:
+              "search is required — the unique substring of the target paragraph to replace (aliases: oldText, find)."
+          };
+        }
+        if (replaceWith === undefined) {
+          return {
+            ok: false,
+            error: "bad_request",
+            message:
+              "replaceWith is required, use \"\" to delete the matched text (aliases: newText, replacement)."
+          };
+        }
+        const ref = editorRef.current;
+        if (!ref) {
+          return {
+            ok: false,
+            error: "page_unreachable",
+            message: "Editor ref not ready yet; try again in a moment."
+          };
+        }
+        const ok = ref.proposeChange({
+          paraId,
+          search,
+          replaceWith,
+          author: authorName
+        });
+        if (!ok) {
+          // proposeChange returns false for: missing paraId, missing or
+          // ambiguous search (substring not found or matched twice), or
+          // attempt to layer on an existing tracked change. Telling the
+          // agent which case it was would require a richer return — for
+          // now, the union-of-causes message is enough for it to retry
+          // with a longer / more unique search string.
+          return {
+            ok: false,
+            error: "propose_failed",
+            message:
+              "Couldn't apply the suggestion. Most likely the search string wasn't a unique substring " +
+              "of that paragraph (matched zero or multiple times) — try a longer, more distinctive " +
+              "span. The paraId may also be stale, or the target range may already carry a tracked change."
+          };
+        }
+        return {
+          ok: true,
+          summary:
+            replaceWith.length === 0
+              ? `Proposed a tracked-change deletion of "${search.slice(0, 60)}${search.length > 60 ? "…" : ""}" — the user can accept or reject it in the review UI.`
+              : `Proposed a tracked-change replacement: "${search.slice(0, 40)}${search.length > 40 ? "…" : ""}" → "${replaceWith.slice(0, 40)}${replaceWith.length > 40 ? "…" : ""}" — the user can accept or reject it in the review UI.`
+        };
+      }
+
       const args = (req.args ?? {}) as { markdown?: unknown };
       const markdown = typeof args.markdown === "string" ? args.markdown : "";
       if (!markdown.trim()) {
@@ -326,6 +541,7 @@ export default function DocxDocumentEditor({
         // paragraph; tr.insert would force a paragraph break first.
         const endPos = view.state.doc.content.size;
         const tr = view.state.tr.replace(endPos, endPos, slice);
+        markAsDirectEdit(tr);
         view.dispatch(tr);
         return {
           ok: true,
@@ -335,6 +551,7 @@ export default function DocxDocumentEditor({
       if (req.action === "insert_markdown_at_cursor") {
         const { from, to } = view.state.selection;
         const tr = view.state.tr.replace(from, to, slice);
+        markAsDirectEdit(tr);
         view.dispatch(tr);
         view.focus();
         return {
@@ -345,7 +562,7 @@ export default function DocxDocumentEditor({
       return {
         ok: false,
         error: "unsupported_action",
-        message: `Document editor doesn't support action '${req.action}'. Available: append_markdown, insert_markdown_at_cursor.`
+        message: `Document editor doesn't support action '${req.action}'. Available: append_markdown, insert_markdown_at_cursor, suggest_text_replacement.`
       };
     }
   });
@@ -703,6 +920,7 @@ export default function DocxDocumentEditor({
       // transactions to insert binding placeholders at the cursor.
       onEditorViewReady={(view) => {
         editorViewRef.current = view;
+        makeAcceptRejectModeSafe(view);
       }}
       // Capture the imperative ref so the title-bar Download button +
       // docx-editor's own File → Save menu both flow through one
