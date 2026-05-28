@@ -233,7 +233,12 @@ function seedProseMirrorJsonIntoFragment(
 
 function jsonNodeToYjs(json: unknown): Y.XmlElement | Y.XmlText | null {
   if (typeof json !== "object" || json === null) return null;
-  const obj = json as { type?: unknown; text?: unknown; content?: unknown };
+  const obj = json as {
+    type?: unknown;
+    text?: unknown;
+    content?: unknown;
+    attrs?: unknown;
+  };
   if (obj.type === "text" && typeof obj.text === "string") {
     const t = new Y.XmlText();
     t.insert(0, obj.text);
@@ -241,6 +246,26 @@ function jsonNodeToYjs(json: unknown): Y.XmlElement | Y.XmlText | null {
   }
   if (typeof obj.type !== "string") return null;
   const el = new Y.XmlElement(obj.type);
+  // Copy node attrs. y-prosemirror stores PM node attrs as Y.XmlElement
+  // attributes (string-serialized for non-string values). Without this,
+  // attr-bearing nodes — Phase 10a binding `field` nodes (instruction /
+  // displayText), paragraph styleId, table widths, etc. — would lose
+  // their attrs on cold-load seeding, so an imported/cloned doc opened
+  // for the first time would render bindings/styles as blank. Match
+  // y-prosemirror's convention: JSON-encode object/array values, pass
+  // strings through, stringify primitives.
+  if (obj.attrs && typeof obj.attrs === "object") {
+    for (const [k, v] of Object.entries(obj.attrs as Record<string, unknown>)) {
+      if (v === null || v === undefined) continue;
+      const encoded =
+        typeof v === "string"
+          ? v
+          : typeof v === "object"
+            ? JSON.stringify(v)
+            : String(v);
+      el.setAttribute(k, encoded);
+    }
+  }
   if (Array.isArray(obj.content)) {
     const kids: Array<Y.XmlElement | Y.XmlText> = [];
     for (const child of obj.content) {

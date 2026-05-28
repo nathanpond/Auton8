@@ -19,6 +19,11 @@ import { useDocumentBindings } from "@/hooks/useDocumentBindings";
 import type { DocumentBindingDto } from "@/api/documentBindings";
 import { updateBindingsRegistry } from "./bindingsRegistry";
 import { bindingPlaceholderText, createBindingsPlugin } from "./bindingsPlugin";
+import {
+  buildRecordFieldNode,
+  recordFieldDisplayText,
+  syncRecordFieldNodes
+} from "./bindingFieldNode";
 import BindingsSidePanel from "./BindingsSidePanel";
 import DocumentChatPanel from "./DocumentChatPanel";
 import {
@@ -305,6 +310,40 @@ export default function DocxDocumentEditor({
   useEffect(() => {
     updateBindingsRegistry(documentId, bindingRows);
   }, [documentId, bindingRows]);
+
+  // Phase 10a: keep record-field `field` nodes in sync with the bindings
+  // list. One idempotent pass that (1) migrates any legacy
+  // `{{binding:UUID}}` text placeholder for a record-field binding into a
+  // field node, and (2) refreshes the displayText of existing field
+  // nodes whose resolved value changed. Editor-role only (viewers don't
+  // mutate the body); skipped in import mode (body not committed yet).
+  //
+  // Triggering is split across two places to handle either arrival
+  // order of (view-ready, bindings-loaded):
+  //   • This effect fires on every bindingRows change — covers refresh
+  //     and the case where bindings load AFTER the view is ready.
+  //   • onEditorViewReady runs a one-shot sync via bindingRowsRef —
+  //     covers the case where the view mounts AFTER bindings loaded.
+  // Both defer to the next tick so we don't dispatch into docx-editor's
+  // own mount-time transactions, and both no-op when there's nothing to
+  // change (the function is idempotent).
+  const bindingRowsRef = useRef(bindingRows);
+  bindingRowsRef.current = bindingRows;
+  useEffect(() => {
+    if (importMode || role !== "editor") return;
+    if (!editorViewRef.current) return;
+    const id = window.setTimeout(() => {
+      const live = editorViewRef.current;
+      if (live) {
+        try {
+          syncRecordFieldNodes(live, bindingRowsRef.current, markAsDirectEdit);
+        } catch (err) {
+          console.warn("[bindings] record-field sync failed", err);
+        }
+      }
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [bindingRows, role, importMode]);
 
   // Phase 8: register the document with the chatbot's PageContextRegistry
   // so the in-editor agent panel sees the doc's title + bindings + body
@@ -638,8 +677,28 @@ export default function DocxDocumentEditor({
   const insertBindingPlaceholder = (binding: DocumentBindingDto) => {
     const view = editorViewRef.current;
     if (!view) return;
-    const placeholder = bindingPlaceholderText(binding.id);
     const from = view.state.selection.from;
+
+    // Phase 10a: record-field bindings insert a `field` node (Word field
+    // primitive) carrying the binding id in `instruction` + the resolved
+    // value in `displayText`. Renders the value inline, round-trips to
+    // OOXML, no decoration chip needed. aql-table bindings keep the
+    // legacy `{{binding:UUID}}` text placeholder (the decoration plugin
+    // paints those) until Phase 10b.
+    if (binding.kind === "record-field") {
+      const fieldNode = buildRecordFieldNode(
+        view.state.schema,
+        binding.id,
+        recordFieldDisplayText(binding)
+      );
+      const tr = view.state.tr.replaceSelectionWith(fieldNode, false);
+      markAsDirectEdit(tr);
+      view.dispatch(tr);
+      view.focus();
+      return;
+    }
+
+    const placeholder = bindingPlaceholderText(binding.id);
     const tr = view.state.tr.insertText(placeholder, from);
     // Strip every mark from the inserted range. Without this, marks
     // that were active at the cursor (bold, italic, link, color, etc.)
@@ -919,8 +978,27 @@ export default function DocxDocumentEditor({
       // Capture the EditorView so the side panel can dispatch
       // transactions to insert binding placeholders at the cursor.
       onEditorViewReady={(view) => {
+        // docx-editor can call this repeatedly with the same view (the
+        // prop is an inline arrow). Guard so we wrap dispatch + run the
+        // one-shot sync exactly once per view instance — otherwise we'd
+        // loop and dispatch into a half-updated view.
+        if (editorViewRef.current === view) return;
         editorViewRef.current = view;
         makeAcceptRejectModeSafe(view);
+        // One-shot record-field sync for the case where bindings were
+        // already loaded before the view mounted. Deferred a tick so we
+        // don't dispatch into docx-editor's mount transactions.
+        if (!importMode && role === "editor") {
+          window.setTimeout(() => {
+            if (editorViewRef.current === view) {
+              try {
+                syncRecordFieldNodes(view, bindingRowsRef.current, markAsDirectEdit);
+              } catch (err) {
+                console.warn("[bindings] record-field sync (on ready) failed", err);
+              }
+            }
+          }, 0);
+        }
       }}
       // Capture the imperative ref so the title-bar Download button +
       // docx-editor's own File → Save menu both flow through one
