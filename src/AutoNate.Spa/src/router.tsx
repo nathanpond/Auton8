@@ -6,6 +6,7 @@ import ProtectedRoute from "./shell/ProtectedRoute";
 import Login from "./pages/login/Login";
 import DynamicPageRoute from "./pages/dynamic-page/DynamicPageRoute";
 import DocumentEditorPage from "./pages/documents/DocumentEditorPage";
+import DocumentPreviewPage from "./pages/documents/DocumentPreviewPage";
 import { renderAppRoutes } from "./routes/appRoutes";
 
 export default function Router() {
@@ -25,6 +26,17 @@ export default function Router() {
         element={
           <ProtectedRoute>
             <DocumentEditorPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Read-only "populated output" preview (Phase 11) — same full-bleed,
+          outside-the-shell treatment as the editor. */}
+      <Route
+        path="/documents/preview/:documentId"
+        element={
+          <ProtectedRoute>
+            <DocumentPreviewPage />
           </ProtectedRoute>
         }
       />

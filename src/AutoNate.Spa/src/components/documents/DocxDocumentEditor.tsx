@@ -86,6 +86,13 @@ type Props = {
   // freshly-written body_jsonb mirror on first connect.
   importBuffer?: ArrayBuffer | null;
   onImportFinalized?: (bodyJsonb: string) => void;
+  // Phase 11 read-only preview. When true, the editor mounts as a
+  // chrome-free, read-only "populated output" view of the live doc:
+  // forced readOnly + viewing mode, no toolbar / AI panel / bindings
+  // panel, and binding sync is skipped (preview must not mutate the doc).
+  // Because Phase 10 put resolved binding values directly in the document
+  // tree, no resolve step is needed — it's just a read-only mount.
+  previewMode?: boolean;
 };
 
 // Empty schema seed. docx-editor needs a Document object on mount to
@@ -204,6 +211,12 @@ function makeAcceptRejectModeSafe(view: EditorView): void {
   v.__acceptRejectModeSafe = true;
   const original = v.dispatch.bind(v);
   v.dispatch = (tr: Transaction) => {
+    // A late transaction can arrive after the view is torn down — e.g.
+    // y-prosemirror's awareness/meta observer firing during a route
+    // remount (preview ↔ editor). prosemirror-view nulls `docView` on
+    // destroy, and dispatching then throws deep in updateState
+    // (`matchesNode` of null). Skip — the view is going away.
+    if ((v as { docView?: unknown }).docView == null) return;
     if (transactionRemovesTrackedMark(tr)) {
       tr.setMeta(SUGGESTION_MODE_BYPASS_META, true);
     }
@@ -237,7 +250,8 @@ export default function DocxDocumentEditor({
   onRenameDocument,
   titleBarRight,
   importBuffer = null,
-  onImportFinalized
+  onImportFinalized,
+  previewMode = false
 }: Props) {
   const importMode = importBuffer != null;
   // Bindings side panel visibility. Default ON so users coming from
@@ -326,9 +340,10 @@ export default function DocxDocumentEditor({
   // Mode decision: editors get full edit, commenters get a locked body
   // + open comments sidebar (mode='viewing'; readOnly=false so the
   // commenting UI stays interactive), viewers get fully read-only.
+  // Preview mode forces fully read-only viewing regardless of role.
   const mode: "editing" | "suggesting" | "viewing" =
-    role === "editor" ? "editing" : "viewing";
-  const readOnly = role === "viewer";
+    !previewMode && role === "editor" ? "editing" : "viewing";
+  const readOnly = previewMode || role === "viewer";
 
   // Live data bindings. As of Phase 10 both kinds render as first-class
   // PM nodes (record-field → `field` node; aql-table → real table +
@@ -360,7 +375,7 @@ export default function DocxDocumentEditor({
   const bindingsLoadedRef = useRef(bindingsLoaded);
   bindingsLoadedRef.current = bindingsLoaded;
   useEffect(() => {
-    if (importMode || role !== "editor") return;
+    if (importMode || previewMode || role !== "editor") return;
     if (!editorViewRef.current) return;
     const id = window.setTimeout(() => {
       runBindingSync(
@@ -373,7 +388,7 @@ export default function DocxDocumentEditor({
     // bindingsLoaded in the deps so the false→true load transition fires
     // the sync even when the list is genuinely empty (orphan cleanup on
     // a doc whose bindings were all deleted).
-  }, [bindingRows, bindingsLoaded, role, importMode]);
+  }, [bindingRows, bindingsLoaded, role, importMode, previewMode]);
 
   // Phase 8: register the document with the chatbot's PageContextRegistry
   // so the in-editor agent panel sees the doc's title + bindings + body
@@ -917,16 +932,17 @@ export default function DocxDocumentEditor({
         if (!guid) return;
         deleteComment.mutate({ documentId, commentId: guid });
       }}
-      // Surface the docx-editor's full Word-style toolbar.
-      showToolbar
-      showRuler
-      showZoomControl
+      // Surface the docx-editor's full Word-style toolbar. Hidden in
+      // preview — preview is a chrome-free, read-only "output" view.
+      showToolbar={!previewMode}
+      showRuler={!previewMode}
+      showZoomControl={!previewMode}
       // Custom toolbar slot — renders to the right of the built-in
       // controls. We use it for the Bindings panel toggle so it sits
       // next to docx-editor's own "Open assistant" button. Hidden in
       // import mode (no bindings panel mounted during import either).
       toolbarExtra={
-        importMode ? undefined : (
+        importMode || previewMode ? undefined : (
           <Tooltip
             label={bindingsPanelOpen ? "Hide bindings panel" : "Show bindings panel"}
             withArrow
@@ -952,7 +968,7 @@ export default function DocxDocumentEditor({
       // page context provider doesn't register until the editor's live
       // EditorView is up — chat would have no body to reference yet.
       agentPanel={
-        importMode
+        importMode || previewMode
           ? undefined
           : {
               title: "AI Assistant",
@@ -966,7 +982,9 @@ export default function DocxDocumentEditor({
       // Renames flow through our REST documents endpoint via the
       // parent's callback; the doc name itself is NOT a Yjs property.
       documentName={documentTitle}
-      documentNameEditable={role === "editor" && Boolean(onRenameDocument)}
+      documentNameEditable={
+        !previewMode && role === "editor" && Boolean(onRenameDocument)
+      }
       onDocumentNameChange={onRenameDocument}
       // Compose: caller's slot (typically "Back to project") +
       // a Download button that exports the current state as .docx.
@@ -1000,7 +1018,7 @@ export default function DocxDocumentEditor({
         // One-shot binding sync for the case where bindings were already
         // loaded before the view mounted. Deferred a tick so we don't
         // dispatch into docx-editor's mount transactions.
-        if (!importMode && role === "editor") {
+        if (!importMode && !previewMode && role === "editor") {
           window.setTimeout(() => {
             if (editorViewRef.current === view) {
               runBindingSync(view, bindingRowsRef.current, bindingsLoadedRef.current);
@@ -1046,7 +1064,7 @@ export default function DocxDocumentEditor({
           the panel's own close button or the toolbar toggle. For
           viewers we still surface it (when open) so they can see live
           data their grants permit. Suppressed entirely in import mode. */}
-      {bindingsPanelOpen && !importMode ? (
+      {bindingsPanelOpen && !importMode && !previewMode ? (
         <BindingsSidePanel
           documentId={documentId}
           canEdit={role === "editor"}

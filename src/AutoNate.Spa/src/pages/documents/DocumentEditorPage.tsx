@@ -8,6 +8,7 @@ import {
 import {
   Anchor,
   Box,
+  Button,
   Group,
   Loader,
   Stack,
@@ -218,14 +219,25 @@ export default function DocumentEditorPage() {
             documentTitle={doc.title}
             onRenameDocument={onRename}
             titleBarRight={
-              <Anchor
-                component={Link}
-                to={`/documents/p/${doc.projectId}`}
-                size="sm"
-              >
-                <i className="fa fa-arrow-left" aria-hidden style={{ marginRight: 6 }} />
-                Back to project
-              </Anchor>
+              <Group gap="sm" wrap="nowrap">
+                <Anchor
+                  component={Link}
+                  to={`/documents/p/${doc.projectId}`}
+                  size="sm"
+                >
+                  <i className="fa fa-arrow-left" aria-hidden style={{ marginRight: 6 }} />
+                  Back to project
+                </Anchor>
+                <Button
+                  component={Link}
+                  to={`/documents/preview/${doc.id}`}
+                  size="xs"
+                  variant="default"
+                  leftSection={<i className="fa fa-eye" aria-hidden />}
+                >
+                  Preview
+                </Button>
+              </Group>
             }
             importBuffer={importBufferForEditor}
             onImportFinalized={onImportFinalized}
