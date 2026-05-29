@@ -51,7 +51,7 @@ public sealed class AqlSuggestionService(
                 "No AI provider is configured. Ask an admin to set up an LLM connection.");
         }
 
-        var system = BuildSystemPrompt();
+        var system = await BuildSystemPromptAsync(ct);
 
         // First draft.
         var raw = await CompleteAsync(provider, system, BuildUserPrompt(description, null, null), ct);
@@ -127,7 +127,7 @@ public sealed class AqlSuggestionService(
         };
     }
 
-    private string BuildSystemPrompt()
+    private async Task<string> BuildSystemPromptAsync(CancellationToken ct)
     {
         var sb = new StringBuilder();
         sb.AppendLine(
@@ -170,11 +170,33 @@ public sealed class AqlSuggestionService(
                     "    (Records also have custom fields that vary by RecordType — filter " +
                     "RecordType = \"<Type>\" and reference custom field names directly.)");
             }
+
+            // Allowed values for enum-like columns (e.g. Flows.Status). Without
+            // these the model invents natural phrasings ("In Progress") that are
+            // valid AQL but match zero rows. recordType filter is null — we want
+            // the entity-wide enums, not per-RecordType custom-field values.
+            IReadOnlyDictionary<string, IReadOnlyList<string>> enums;
+            try
+            {
+                enums = await entity.GetDynamicColumnEnumsAsync(null, ct);
+            }
+            catch
+            {
+                enums = new Dictionary<string, IReadOnlyList<string>>();
+            }
+            foreach (var (column, values) in enums)
+            {
+                if (values.Count == 0) continue;
+                sb.AppendLine(
+                    $"    {column} values (use these EXACT literals): {string.Join(" | ", values)}");
+            }
         }
         sb.AppendLine();
         sb.AppendLine(
-            "Only use the entities and columns listed above — never invent field or function names. " +
-            "If the request is ambiguous, pick the most likely entity and a reasonable query.");
+            "Only use the entities, columns, and listed value literals above — never invent field, " +
+            "function, or value names. When a column has listed values, use the exact literal (e.g. " +
+            "Status = \"In-progress\", not \"In Progress\"). If the request is ambiguous, pick the " +
+            "most likely entity and a reasonable query.");
         return sb.ToString();
     }
 
