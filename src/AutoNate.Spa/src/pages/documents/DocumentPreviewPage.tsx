@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   Anchor,
   Badge,
@@ -29,10 +29,24 @@ import { PageContextRegistryProvider } from "@/agent/pageContext/PageContextRegi
 const DocxDocumentEditor = lazy(
   () => import("@/components/documents/DocxDocumentEditor")
 );
+// Static historical-version renderer (only loaded when ?version=N is set).
+const DocumentVersionView = lazy(
+  () => import("@/components/documents/DocumentVersionView")
+);
 
 export default function DocumentPreviewPage() {
   const { documentId } = useParams<{ documentId: string }>();
+  const [searchParams] = useSearchParams();
   const { data: doc, isLoading, error } = useDocument(documentId ?? null);
+
+  // `?version=N` flips this page from "live read-only preview" to "static
+  // read-only render of historical version N". Parsed defensively — a
+  // non-numeric value falls back to the live preview.
+  const versionParamRaw = searchParams.get("version");
+  const versionNumber =
+    versionParamRaw != null && /^\d+$/.test(versionParamRaw)
+      ? Number.parseInt(versionParamRaw, 10)
+      : null;
 
   if (isLoading) {
     return (
@@ -74,8 +88,8 @@ export default function DocumentPreviewPage() {
           }}
         >
           <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-            <Badge variant="light" color="blue">
-              Preview
+            <Badge variant="light" color={versionNumber != null ? "grape" : "blue"}>
+              {versionNumber != null ? `Version ${versionNumber}` : "Preview"}
             </Badge>
             <Text fw={600} truncate>
               {doc.title}
@@ -106,11 +120,15 @@ export default function DocumentPreviewPage() {
           }
         >
           <Box style={{ flex: 1, minHeight: 0 }}>
-            <DocxDocumentEditor
-              documentId={doc.id}
-              documentTitle={doc.title}
-              previewMode
-            />
+            {versionNumber != null ? (
+              <DocumentVersionView documentId={doc.id} versionNumber={versionNumber} />
+            ) : (
+              <DocxDocumentEditor
+                documentId={doc.id}
+                documentTitle={doc.title}
+                previewMode
+              />
+            )}
           </Box>
         </Suspense>
       </Box>

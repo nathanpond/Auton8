@@ -27,6 +27,7 @@ import {
   syncAqlTableNodes
 } from "./bindingTableNode";
 import BindingsSidePanel from "./BindingsSidePanel";
+import VersionHistorySidePanel from "./VersionHistorySidePanel";
 import {
   bindingHighlightPlugin,
   setHoveredBinding,
@@ -254,13 +255,15 @@ export default function DocxDocumentEditor({
   previewMode = false
 }: Props) {
   const importMode = importBuffer != null;
-  // Bindings side panel visibility. Default ON so users coming from
-  // Phase 5 don't lose the surface they're used to; the new toolbar
-  // toggle (rendered via docx-editor's `toolbarExtra`) flips this, and
-  // the panel's own header X collapses it too. Suppressed in import
-  // mode for the same reason agentPanel is — no live bindings until
-  // the body is committed.
-  const [bindingsPanelOpen, setBindingsPanelOpen] = useState(true);
+  // Right-side panel selection. Bindings and version-history share the
+  // right rail and are mutually exclusive — `activePanel` tracks which (if
+  // any) is open. Defaults to "bindings" so users coming from Phase 5
+  // don't lose the surface they're used to. Toolbar toggles (rendered via
+  // docx-editor's `toolbarExtra`) flip it; each panel's header X clears it.
+  // Both are suppressed in import + preview modes.
+  const [activePanel, setActivePanel] = useState<"bindings" | "versions" | null>(
+    "bindings"
+  );
   const yjsName = useMemo(() => `documents:${documentId}`, [documentId]);
   // Import mode skips Yjs entirely on this mount — the editor is single-user
   // until the buffer is parsed and PATCHed into body_jsonb. The hook accepts
@@ -943,22 +946,44 @@ export default function DocxDocumentEditor({
       // import mode (no bindings panel mounted during import either).
       toolbarExtra={
         importMode || previewMode ? undefined : (
-          <Tooltip
-            label={bindingsPanelOpen ? "Hide bindings panel" : "Show bindings panel"}
-            withArrow
-            openDelay={350}
-          >
-            <ActionIcon
-              variant={bindingsPanelOpen ? "filled" : "subtle"}
-              color={bindingsPanelOpen ? "blue" : "gray"}
-              size="md"
-              onClick={() => setBindingsPanelOpen((v) => !v)}
-              aria-label="Toggle bindings panel"
-              aria-pressed={bindingsPanelOpen}
+          <Group gap={4} wrap="nowrap">
+            <Tooltip
+              label={activePanel === "bindings" ? "Hide bindings panel" : "Show bindings panel"}
+              withArrow
+              openDelay={350}
             >
-              <i className="fa fa-database" aria-hidden />
-            </ActionIcon>
-          </Tooltip>
+              <ActionIcon
+                variant={activePanel === "bindings" ? "filled" : "subtle"}
+                color={activePanel === "bindings" ? "blue" : "gray"}
+                size="md"
+                onClick={() =>
+                  setActivePanel((p) => (p === "bindings" ? null : "bindings"))
+                }
+                aria-label="Toggle bindings panel"
+                aria-pressed={activePanel === "bindings"}
+              >
+                <i className="fa fa-database" aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip
+              label={activePanel === "versions" ? "Hide version history" : "Show version history"}
+              withArrow
+              openDelay={350}
+            >
+              <ActionIcon
+                variant={activePanel === "versions" ? "filled" : "subtle"}
+                color={activePanel === "versions" ? "blue" : "gray"}
+                size="md"
+                onClick={() =>
+                  setActivePanel((p) => (p === "versions" ? null : "versions"))
+                }
+                aria-label="Toggle version history"
+                aria-pressed={activePanel === "versions"}
+              >
+                <i className="fa fa-clock-rotate-left" aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         )
       }
       // Phase 8: doc-scoped AI chat in docx-editor's built-in agentPanel
@@ -1064,14 +1089,20 @@ export default function DocxDocumentEditor({
           the panel's own close button or the toolbar toggle. For
           viewers we still surface it (when open) so they can see live
           data their grants permit. Suppressed entirely in import mode. */}
-      {bindingsPanelOpen && !importMode && !previewMode ? (
+      {activePanel === "bindings" && !importMode && !previewMode ? (
         <BindingsSidePanel
           documentId={documentId}
           canEdit={role === "editor"}
           onInsert={insertBindingPlaceholder}
           onHoverBinding={(id) => setHoveredBinding(editorViewRef.current, id)}
           onNavigateBinding={(id) => scrollToBinding(editorViewRef.current, id)}
-          onClose={() => setBindingsPanelOpen(false)}
+          onClose={() => setActivePanel(null)}
+        />
+      ) : null}
+      {activePanel === "versions" && !importMode && !previewMode ? (
+        <VersionHistorySidePanel
+          documentId={documentId}
+          onClose={() => setActivePanel(null)}
         />
       ) : null}
     </Box>
