@@ -33,32 +33,9 @@
   border-style: solid;
 }
 
-/* Phase 5: live data binding chips rendered by the decoration plugin.
-   Each `{{binding:UUID}}` placeholder in the document body is replaced
-   visually with one of these spans. Hover shows the binding's label +
-   last-refreshed time via the native `title` tooltip. */
-.doc-binding {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-weight: 500;
-  vertical-align: baseline;
-  cursor: default;
-  line-height: 1.4;
-}
-.doc-binding-record-field {
-  background: var(--mantine-color-blue-light);
-  color: var(--mantine-color-blue-9);
-}
-.doc-binding-aql-table {
-  background: var(--mantine-color-grape-light);
-  color: var(--mantine-color-grape-9);
-}
-.doc-binding-missing {
-  background: var(--mantine-color-gray-2);
-  color: var(--mantine-color-dimmed);
-  font-style: italic;
-}
+/* (Phase 5's `.doc-binding*` decoration-chip styles were removed here when
+   the decoration plugin went away in Phase 10 — bindings now render as
+   docx-editor `field` nodes / real tables, not painted-over text.) */
 
 /* Phase 10: hover-highlight for bound content. A single translucent box
    drawn by bindingHighlightPlugin over the bounding rect of the hovered
