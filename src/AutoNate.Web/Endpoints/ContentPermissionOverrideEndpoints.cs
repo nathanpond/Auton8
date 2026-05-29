@@ -36,9 +36,9 @@ public static class ContentPermissionOverrideEndpoints
     public static IEndpointRouteBuilder MapContentPermissionOverrideEndpoints(
         this IEndpointRouteBuilder app)
     {
-        MapForKind(app, "documents", "documentId", ContentKinds.Document,
+        MapForKind(app, "documents", ContentKinds.Document,
             EntityKinds.Document, DocumentGrantableActions);
-        MapForKind(app, "folders", "folderId", ContentKinds.Folder,
+        MapForKind(app, "folders", ContentKinds.Folder,
             EntityKinds.Folder, FolderGrantableActions);
         return app;
     }
@@ -46,12 +46,14 @@ public static class ContentPermissionOverrideEndpoints
     private static void MapForKind(
         IEndpointRouteBuilder app,
         string segment,
-        string idParam,
         string kind,
         string entityKind,
         string[] grantableActions)
     {
-        var group = app.MapGroup($"/api/content/{segment}/{{{idParam}:guid}}/permissions");
+        // Fixed route-param name `id` so it binds to the shared handlers'
+        // `Guid id` parameter (minimal APIs bind route params by name). The
+        // `segment` (documents/folders) is what differentiates the routes.
+        var group = app.MapGroup($"/api/content/{segment}/{{id:guid}}/permissions");
 
         string Selector(Guid id) => $"/{kind}/{id}";
 
@@ -76,7 +78,7 @@ public static class ContentPermissionOverrideEndpoints
                 details: new { resultCount = items.Count, scope = "by-resource" },
                 ct);
             return Results.Ok(new PermissionOverrideListResponse(items, grantableActions));
-        }).RequirePermission(entityKind, Actions.Edit, idParam);
+        }).RequirePermission(entityKind, Actions.Edit, "id");
 
         // Create an allow-override on this resource for a principal + action.
         group.MapPost("/", async (
@@ -140,7 +142,7 @@ public static class ContentPermissionOverrideEndpoints
                 return Results.BadRequest(new { error = ex.Message });
             }
         }).DisableAntiforgery()
-          .RequirePermission(entityKind, Actions.Edit, idParam);
+          .RequirePermission(entityKind, Actions.Edit, "id");
 
         // Remove an override. We verify the grant targets THIS resource before
         // deleting, so an editor can't delete arbitrary grants (e.g. admin
@@ -171,7 +173,7 @@ public static class ContentPermissionOverrideEndpoints
                 ct);
             return Results.NoContent();
         }).DisableAntiforgery()
-          .RequirePermission(entityKind, Actions.Edit, idParam);
+          .RequirePermission(entityKind, Actions.Edit, "id");
     }
 
     public sealed record CreateOverrideRequest(
