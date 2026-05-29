@@ -34,6 +34,7 @@ import {
   useRefreshDocumentBinding,
   useUpdateDocumentBinding
 } from "@/hooks/useDocumentBindings";
+import { useSuggestAql } from "@/hooks/useAqlSuggest";
 
 // Side panel listing every binding on the open document. From here a
 // user can create new bindings, refresh individual rows or all at once,
@@ -442,6 +443,23 @@ function BindingConfigFields({
   onChange: (patch: Partial<BindingFormState>) => void;
   autoFocus?: boolean;
 }) {
+  // NL→AQL suggestion (aql-table only). Local, ephemeral — the description
+  // isn't persisted; only the resulting query lands in `state.queryText`.
+  const [nlDescription, setNlDescription] = useState("");
+  const suggest = useSuggestAql();
+  const runSuggest = async () => {
+    const desc = nlDescription.trim();
+    if (!desc) return;
+    try {
+      const result = await suggest.mutateAsync(desc);
+      onChange({ queryText: result.query });
+    } catch (err) {
+      notifications.show({
+        message: extractErrorMessage(err) ?? "Couldn't suggest a query.",
+        color: "red"
+      });
+    }
+  };
   return (
     <>
       <TextInput
@@ -469,6 +487,49 @@ function BindingConfigFields({
         </>
       ) : (
         <>
+          <Box
+            style={{
+              border: "1px dashed var(--mantine-color-gray-4)",
+              borderRadius: 4,
+              padding: 8
+            }}
+          >
+            <Textarea
+              label="Describe it in plain English (optional)"
+              description="Let AI draft the AQL query — you can tweak it after."
+              placeholder="e.g. all open cars sorted by name"
+              minRows={2}
+              value={nlDescription}
+              onChange={(e) => setNlDescription(e.currentTarget.value)}
+            />
+            <Group justify="space-between" align="center" mt={6} wrap="nowrap">
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={<i className="fa fa-wand-magic-sparkles" aria-hidden />}
+                loading={suggest.isPending}
+                disabled={!nlDescription.trim()}
+                onClick={runSuggest}
+              >
+                Suggest query
+              </Button>
+              {suggest.data && !suggest.isPending ? (
+                <Text size="xs" c={suggest.data.valid ? "green" : "orange"}>
+                  {suggest.data.valid ? "Validated ✓" : "Drafted — may need tweaks"}
+                </Text>
+              ) : null}
+            </Group>
+            {suggest.data?.explanation && !suggest.isPending ? (
+              <Text size="xs" c="dimmed" mt={4}>
+                {suggest.data.explanation}
+              </Text>
+            ) : null}
+            {suggest.data && !suggest.data.valid && suggest.data.errors.length > 0 && !suggest.isPending ? (
+              <Text size="xs" c="orange" mt={4}>
+                {suggest.data.errors.join("; ")}
+              </Text>
+            ) : null}
+          </Box>
           <Textarea
             label="AQL query"
             description={
