@@ -1248,6 +1248,7 @@ app.MapContentDocumentEndpoints();
 app.MapDocumentVersionEndpoints();
 app.MapContentDocumentCommentEndpoints();
 app.MapContentDocumentBindingEndpoints();
+app.MapContentPermissionOverrideEndpoints();
 app.MapContentPageEndpoints();
 app.MapPageVersionEndpoints();
 app.MapPageAttachmentEndpoints();

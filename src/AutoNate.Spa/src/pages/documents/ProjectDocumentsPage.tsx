@@ -22,6 +22,7 @@ import { DocumentDto, FolderDto, fetchFolder } from "@/api/documents";
 import { useQueries } from "@tanstack/react-query";
 import FolderTree from "@/components/documents/FolderTree";
 import ImportDocxButton from "@/components/documents/ImportDocxButton";
+import PermissionsDialog from "@/components/documents/PermissionsDialog";
 import {
   useCreateDocument,
   useCreateFolder,
@@ -69,6 +70,7 @@ export default function ProjectDocumentsPage() {
     | { kind: "doc-create"; parent: FolderDto | null }
     | { kind: "doc-rename"; document: DocumentDto }
     | { kind: "doc-delete"; document: DocumentDto }
+    | { kind: "folder-permissions"; folder: FolderDto }
     | null
   >(null);
 
@@ -108,6 +110,7 @@ export default function ProjectDocumentsPage() {
           onCreateChild={(parent) => setDialog({ kind: "folder-create", parent })}
           onRenameFolder={(folder) => setDialog({ kind: "folder-rename", folder })}
           onDeleteFolder={(folder) => setDialog({ kind: "folder-delete", folder })}
+          onPermissionsFolder={(folder) => setDialog({ kind: "folder-permissions", folder })}
         />
       </Box>
 
@@ -242,6 +245,15 @@ export default function ProjectDocumentsPage() {
         document={dialog?.kind === "doc-delete" ? dialog.document : null}
         onClose={() => setDialog(null)}
       />
+      {dialog?.kind === "folder-permissions" ? (
+        <PermissionsDialog
+          kind="folders"
+          resourceId={dialog.folder.id}
+          resourceName={dialog.folder.name}
+          opened
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
     </Box>
   );
 }

@@ -15,6 +15,7 @@ type FolderTreeProps = {
   onCreateChild?: (parent: FolderDto | null) => void;
   onRenameFolder?: (folder: FolderDto) => void;
   onDeleteFolder?: (folder: FolderDto) => void;
+  onPermissionsFolder?: (folder: FolderDto) => void;
 };
 
 export default function FolderTree({
@@ -23,7 +24,8 @@ export default function FolderTree({
   onSelectFolder,
   onCreateChild,
   onRenameFolder,
-  onDeleteFolder
+  onDeleteFolder,
+  onPermissionsFolder
 }: FolderTreeProps) {
   const { data: roots = [], isLoading, error } = useProjectRootFolders(projectId);
 
@@ -86,6 +88,7 @@ export default function FolderTree({
             onCreateChild={onCreateChild}
             onRenameFolder={onRenameFolder}
             onDeleteFolder={onDeleteFolder}
+            onPermissionsFolder={onPermissionsFolder}
           />
         ))}
       </Box>
@@ -101,6 +104,7 @@ type FolderNodeProps = {
   onCreateChild?: (parent: FolderDto | null) => void;
   onRenameFolder?: (folder: FolderDto) => void;
   onDeleteFolder?: (folder: FolderDto) => void;
+  onPermissionsFolder?: (folder: FolderDto) => void;
 };
 
 // Each node owns its expanded state; the React Query hook is only enabled
@@ -112,7 +116,8 @@ function FolderNode({
   onSelectFolder,
   onCreateChild,
   onRenameFolder,
-  onDeleteFolder
+  onDeleteFolder,
+  onPermissionsFolder
 }: FolderNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const { data: childResponse, isFetching } = useFolderChildren(expanded ? folder.id : null);
@@ -196,6 +201,14 @@ function FolderNode({
                 Rename
               </Menu.Item>
             ) : null}
+            {onPermissionsFolder ? (
+              <Menu.Item
+                leftSection={<i className="fa fa-user-lock" aria-hidden />}
+                onClick={() => onPermissionsFolder(folder)}
+              >
+                Permissions
+              </Menu.Item>
+            ) : null}
             {onDeleteFolder ? (
               <>
                 <Menu.Divider />
@@ -234,6 +247,7 @@ function FolderNode({
               onCreateChild={onCreateChild}
               onRenameFolder={onRenameFolder}
               onDeleteFolder={onDeleteFolder}
+              onPermissionsFolder={onPermissionsFolder}
             />
           ))}
         </Box>

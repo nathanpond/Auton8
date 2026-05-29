@@ -28,6 +28,7 @@ import {
 } from "./bindingTableNode";
 import BindingsSidePanel from "./BindingsSidePanel";
 import VersionHistorySidePanel from "./VersionHistorySidePanel";
+import PermissionsDialog from "./PermissionsDialog";
 import {
   bindingHighlightPlugin,
   setHoveredBinding,
@@ -264,6 +265,7 @@ export default function DocxDocumentEditor({
   const [activePanel, setActivePanel] = useState<"bindings" | "versions" | null>(
     "bindings"
   );
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const yjsName = useMemo(() => `documents:${documentId}`, [documentId]);
   // Import mode skips Yjs entirely on this mount — the editor is single-user
   // until the buffer is parsed and PATCHed into body_jsonb. The hook accepts
@@ -1018,6 +1020,16 @@ export default function DocxDocumentEditor({
       renderTitleBarRight={() => (
         <Group gap="sm" wrap="nowrap">
           {titleBarRight}
+          {!importMode && !previewMode && role === "editor" ? (
+            <Button
+              size="xs"
+              variant="default"
+              leftSection={<i className="fa fa-user-lock" aria-hidden />}
+              onClick={() => setPermissionsOpen(true)}
+            >
+              Permissions
+            </Button>
+          ) : null}
           {!importMode ? (
             <Button
               size="xs"
@@ -1103,6 +1115,15 @@ export default function DocxDocumentEditor({
         <VersionHistorySidePanel
           documentId={documentId}
           onClose={() => setActivePanel(null)}
+        />
+      ) : null}
+      {!importMode && !previewMode ? (
+        <PermissionsDialog
+          kind="documents"
+          resourceId={documentId}
+          resourceName={documentTitle}
+          opened={permissionsOpen}
+          onClose={() => setPermissionsOpen(false)}
         />
       ) : null}
     </Box>
