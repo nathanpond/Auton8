@@ -261,6 +261,89 @@ public static class ContentDocumentBindingEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.Document, Actions.RefreshBindings, "documentId");
 
+        // Edit an existing binding's config and/or label. A config change
+        // re-resolves immediately (same as create) so the rendered value
+        // reflects the new record/field/query right away; the bumped
+        // LastResolvedAtUtc is what the SPA's in-doc sync keys off to
+        // refresh the field node / table in place. Kind is immutable —
+        // changing record-field ↔ aql-table would orphan the rendered
+        // node shape; delete + recreate for that.
+        group.MapPatch("/{bindingId:guid}", async (
+            Guid documentId,
+            Guid bindingId,
+            UpdateDocumentBindingRequest request,
+            HttpContext http,
+            IDbContextFactory<AutoNateDbContext> dbFactory,
+            IDocumentBindingResolverRegistry resolvers,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var binding = await db.DocumentBindings
+                .FirstOrDefaultAsync(b =>
+                    b.DocumentId == documentId && b.Id == bindingId, ct);
+            if (binding is null) return Results.NotFound();
+
+            var actorId = http.GetActorId();
+            var now = DateTime.UtcNow;
+            var configChanged =
+                request.ConfigJsonb is not null &&
+                request.ConfigJsonb != binding.ConfigJsonb;
+
+            if (configChanged)
+            {
+                if (string.IsNullOrWhiteSpace(request.ConfigJsonb))
+                {
+                    return Results.BadRequest(new { error = "Binding config cannot be empty." });
+                }
+                // Re-resolve with the new config before persisting so an
+                // invalid config (bad query, missing record) fails the
+                // edit instead of silently saving a broken binding.
+                var resolver = resolvers.Get(binding.Kind);
+                DocumentBindingResolveResult resolved;
+                try
+                {
+                    resolved = await resolver.ResolveAsync(request.ConfigJsonb!, http.User, ct);
+                }
+                catch (DocumentBindingResolveException ex)
+                {
+                    return Results.Json(new { error = ex.Message }, statusCode: ex.StatusCode);
+                }
+                binding.ConfigJsonb = request.ConfigJsonb!;
+                binding.LastResolvedValueJsonb = resolved.ResolvedValueJsonb;
+                binding.LastResolvedAtUtc = now;
+                binding.LastResolvedByUserId = actorId;
+            }
+
+            if (request.Label is not null)
+            {
+                binding.Label = string.IsNullOrWhiteSpace(request.Label)
+                    ? null
+                    : request.Label.Trim();
+            }
+
+            binding.UpdatedAtUtc = now;
+            binding.UpdatedBy = actorId;
+            await db.SaveChangesAsync(ct);
+
+            await auditPublisher.PublishAsync(
+                ContentEventTopic.TopicName,
+                ContentEventTypes.DocumentBindingUpdated,
+                ContentResourceKinds.DocumentBinding,
+                resource: new
+                {
+                    documentId,
+                    bindingId = binding.Id,
+                    kind = binding.Kind,
+                    label = binding.Label
+                },
+                details: new { configChanged },
+                ct);
+
+            return Results.Ok(MapDto(binding));
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Document, Actions.Edit, "documentId");
+
         group.MapDelete("/{bindingId:guid}", async (
             Guid documentId,
             Guid bindingId,
@@ -313,6 +396,13 @@ public static class ContentDocumentBindingEndpoints
     public sealed record CreateDocumentBindingRequest(
         string Kind,
         string ConfigJsonb,
+        string? Label);
+
+    // Both fields optional: null ConfigJsonb leaves the config (and its
+    // resolved value) untouched; null Label leaves the label untouched.
+    // An empty-string Label clears it back to null.
+    public sealed record UpdateDocumentBindingRequest(
+        string? ConfigJsonb,
         string? Label);
 
     public sealed record DocumentBindingDto(

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActionIcon,
   Badge,
@@ -19,9 +19,11 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import type {
+  AqlTableBindingConfig,
   AqlTableResolvedValue,
   DocumentBindingDto,
   DocumentBindingKind,
+  RecordFieldBindingConfig,
   RecordFieldResolvedValue
 } from "@/api/documentBindings";
 import {
@@ -29,7 +31,8 @@ import {
   useDeleteDocumentBinding,
   useDocumentBindings,
   useRefreshAllDocumentBindings,
-  useRefreshDocumentBinding
+  useRefreshDocumentBinding,
+  useUpdateDocumentBinding
 } from "@/hooks/useDocumentBindings";
 
 // Side panel listing every binding on the open document. From here a
@@ -58,14 +61,29 @@ type Props = {
   // the panel dismissable (e.g. preview surfaces that always show it).
   // In the editor we wire this to a toolbar toggle in DocxDocumentEditor.
   onClose?: () => void;
+  // Called with a binding id when the user hovers a row, and null when
+  // they leave it (or the panel unmounts). The editor uses this to
+  // highlight the bound content in the document.
+  onHoverBinding?: (bindingId: string | null) => void;
+  // Called when the user clicks a row's body (not its action icons). The
+  // editor scrolls the bound content into view.
+  onNavigateBinding?: (bindingId: string) => void;
 };
 
-export default function BindingsSidePanel({ documentId, onInsert, canEdit, onClose }: Props) {
+export default function BindingsSidePanel({
+  documentId,
+  onInsert,
+  canEdit,
+  onClose,
+  onHoverBinding,
+  onNavigateBinding
+}: Props) {
   const { data: bindings = [], isLoading } = useDocumentBindings(documentId);
   const refreshOne = useRefreshDocumentBinding();
   const refreshAll = useRefreshAllDocumentBindings();
   const deleteBinding = useDeleteDocumentBinding();
   const [insertModalOpen, setInsertModalOpen] = useState(false);
+  const [editingBinding, setEditingBinding] = useState<DocumentBindingDto | null>(null);
 
   return (
     <Box
@@ -177,7 +195,11 @@ export default function BindingsSidePanel({ documentId, onInsert, canEdit, onClo
                     }
                   )
                 }
+                onEdit={() => setEditingBinding(b)}
                 onInsert={() => onInsert?.(b)}
+                onHoverStart={() => onHoverBinding?.(b.id)}
+                onHoverEnd={() => onHoverBinding?.(null)}
+                onActivate={() => onNavigateBinding?.(b.id)}
               />
             ))}
           </Stack>
@@ -193,6 +215,12 @@ export default function BindingsSidePanel({ documentId, onInsert, canEdit, onClo
           onInsert?.(created);
         }}
       />
+
+      <EditBindingModal
+        documentId={documentId}
+        binding={editingBinding}
+        onClose={() => setEditingBinding(null)}
+      />
     </Box>
   );
 }
@@ -202,13 +230,21 @@ function BindingRow({
   canEdit,
   onRefresh,
   onDelete,
-  onInsert
+  onEdit,
+  onInsert,
+  onHoverStart,
+  onHoverEnd,
+  onActivate
 }: {
   binding: DocumentBindingDto;
   canEdit: boolean;
   onRefresh: () => void;
   onDelete: () => void;
+  onEdit: () => void;
   onInsert: () => void;
+  onHoverStart: () => void;
+  onHoverEnd: () => void;
+  onActivate: () => void;
 }) {
   const resolved = useMemo(
     () => decodeResolvedValue(binding),
@@ -217,9 +253,21 @@ function BindingRow({
   return (
     <Box
       p="xs"
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+      onClick={onActivate}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onActivate();
+        }
+      }}
       style={{
         border: "1px solid var(--mantine-color-gray-3)",
-        borderRadius: 4
+        borderRadius: 4,
+        cursor: "pointer"
       }}
     >
       <Group justify="space-between" gap={4} wrap="nowrap">
@@ -238,7 +286,8 @@ function BindingRow({
           </Group>
           <BindingPreview kind={binding.kind} resolved={resolved} />
         </Stack>
-        <Group gap={2}>
+        {/* Keep the action icons from triggering the row's navigate-click. */}
+        <Group gap={2} onClick={(e) => e.stopPropagation()}>
           <Tooltip label="Insert at cursor" withArrow openDelay={350}>
             <ActionIcon size="xs" variant="subtle" onClick={onInsert} aria-label="Insert at cursor">
               <i className="fa fa-arrow-left" aria-hidden />
@@ -249,6 +298,13 @@ function BindingRow({
               <i className="fa fa-rotate" aria-hidden />
             </ActionIcon>
           </Tooltip>
+          {canEdit ? (
+            <Tooltip label="Edit" withArrow openDelay={350}>
+              <ActionIcon size="xs" variant="subtle" onClick={onEdit} aria-label="Edit binding">
+                <i className="fa fa-pen" aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+          ) : null}
           {canEdit ? (
             <Tooltip label="Delete" withArrow openDelay={350}>
               <ActionIcon
@@ -313,6 +369,131 @@ function decodeResolvedValue(
   }
 }
 
+// ── Binding config form (shared by insert + edit) ───────────────────────
+
+type BindingFormState = {
+  label: string;
+  recordId: string;
+  fieldKey: string;
+  queryText: string;
+  limit: string;
+};
+
+const EMPTY_FORM: BindingFormState = {
+  label: "",
+  recordId: "",
+  fieldKey: "",
+  queryText: "",
+  limit: "200"
+};
+
+// Decode a stored binding into editable form state. Tolerant of malformed
+// JSON — falls back to empty fields so the edit dialog still opens.
+function formStateFromBinding(binding: DocumentBindingDto): BindingFormState {
+  const base: BindingFormState = { ...EMPTY_FORM, label: binding.label ?? "" };
+  try {
+    const cfg = JSON.parse(binding.configJsonb) as Partial<
+      RecordFieldBindingConfig & AqlTableBindingConfig
+    >;
+    if (binding.kind === "record-field") {
+      base.recordId = cfg.recordId ?? "";
+      base.fieldKey = cfg.fieldKey ?? "";
+    } else {
+      base.queryText = cfg.queryText ?? "";
+      base.limit = cfg.limit != null ? String(cfg.limit) : "200";
+    }
+  } catch {
+    /* leave defaults */
+  }
+  return base;
+}
+
+// Validate + serialize the per-kind config. Returns the JSON string or an
+// error message to surface — shared so insert and edit agree on shape.
+function buildConfigJsonb(
+  kind: DocumentBindingKind,
+  state: BindingFormState
+): { configJsonb: string } | { error: string } {
+  if (kind === "record-field") {
+    const id = state.recordId.trim();
+    const key = state.fieldKey.trim();
+    if (!id || !key) return { error: "Record id and field key are required." };
+    return { configJsonb: JSON.stringify({ recordId: id, fieldKey: key }) };
+  }
+  const q = state.queryText.trim();
+  if (!q) return { error: "AQL query is required." };
+  const parsedLimit = Number.parseInt(state.limit, 10);
+  return {
+    configJsonb: JSON.stringify({
+      queryText: q,
+      ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {})
+    })
+  };
+}
+
+function BindingConfigFields({
+  kind,
+  state,
+  onChange,
+  autoFocus
+}: {
+  kind: DocumentBindingKind;
+  state: BindingFormState;
+  onChange: (patch: Partial<BindingFormState>) => void;
+  autoFocus?: boolean;
+}) {
+  return (
+    <>
+      <TextInput
+        label="Label (optional)"
+        description="Shown in the side panel + on hover in the document"
+        value={state.label}
+        onChange={(e) => onChange({ label: e.currentTarget.value })}
+      />
+      {kind === "record-field" ? (
+        <>
+          <TextInput
+            label="Record ID"
+            description="UUID of the record (find via the Records page; copy from the URL)"
+            placeholder="00000000-0000-0000-0000-000000000000"
+            value={state.recordId}
+            onChange={(e) => onChange({ recordId: e.currentTarget.value })}
+            autoFocus={autoFocus}
+          />
+          <TextInput
+            label="Field key"
+            description="The field's key (not its label) — e.g. 'name', 'priority', 'due_date'"
+            value={state.fieldKey}
+            onChange={(e) => onChange({ fieldKey: e.currentTarget.value })}
+          />
+        </>
+      ) : (
+        <>
+          <Textarea
+            label="AQL query"
+            description={
+              <Text size="xs" c="dimmed">
+                Same AQL grammar as the Query page. Permissions apply per-row.{" "}
+                <Code>FROM Records WHERE …</Code> is the common shape.
+              </Text>
+            }
+            minRows={5}
+            value={state.queryText}
+            onChange={(e) => onChange({ queryText: e.currentTarget.value })}
+            autoFocus={autoFocus}
+          />
+          <TextInput
+            label="Row limit"
+            description="Caps the number of rows persisted into the snapshot (1–1000)"
+            value={state.limit}
+            onChange={(e) => onChange({ limit: e.currentTarget.value })}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 // ── Insert binding modal ────────────────────────────────────────────────
 
 function InsertBindingModal({
@@ -327,48 +508,24 @@ function InsertBindingModal({
   onCreated: (binding: DocumentBindingDto) => void;
 }) {
   const [kind, setKind] = useState<DocumentBindingKind>("record-field");
-  const [label, setLabel] = useState("");
-  const [recordId, setRecordId] = useState("");
-  const [fieldKey, setFieldKey] = useState("");
-  const [queryText, setQueryText] = useState("");
-  const [limit, setLimit] = useState("200");
+  const [form, setForm] = useState<BindingFormState>(EMPTY_FORM);
   const create = useCreateDocumentBinding();
 
   const submit = async () => {
-    let configJsonb: string;
-    if (kind === "record-field") {
-      const id = recordId.trim();
-      const key = fieldKey.trim();
-      if (!id || !key) {
-        notifications.show({ message: "Record id and field key are required.", color: "red" });
-        return;
-      }
-      configJsonb = JSON.stringify({ recordId: id, fieldKey: key });
-    } else {
-      const q = queryText.trim();
-      if (!q) {
-        notifications.show({ message: "AQL query is required.", color: "red" });
-        return;
-      }
-      const parsedLimit = Number.parseInt(limit, 10);
-      configJsonb = JSON.stringify({
-        queryText: q,
-        ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {})
-      });
+    const built = buildConfigJsonb(kind, form);
+    if ("error" in built) {
+      notifications.show({ message: built.error, color: "red" });
+      return;
     }
     try {
       const created = await create.mutateAsync({
         documentId,
         kind,
-        configJsonb,
-        label: label.trim() || undefined
+        configJsonb: built.configJsonb,
+        label: form.label.trim() || undefined
       });
       notifications.show({ message: "Binding created.", color: "green" });
-      // Reset form for next use
-      setLabel("");
-      setRecordId("");
-      setFieldKey("");
-      setQueryText("");
+      setForm(EMPTY_FORM);
       onCreated(created);
     } catch (err) {
       notifications.show({
@@ -391,58 +548,99 @@ function InsertBindingModal({
           onChange={(v) => v && setKind(v as DocumentBindingKind)}
           allowDeselect={false}
         />
-        <TextInput
-          label="Label (optional)"
-          description="Shown in the side panel + on hover in the document"
-          value={label}
-          onChange={(e) => setLabel(e.currentTarget.value)}
+        <BindingConfigFields
+          kind={kind}
+          state={form}
+          onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+          autoFocus
         />
-        {kind === "record-field" ? (
-          <>
-            <TextInput
-              label="Record ID"
-              description="UUID of the record (find via the Records page; copy from the URL)"
-              placeholder="00000000-0000-0000-0000-000000000000"
-              value={recordId}
-              onChange={(e) => setRecordId(e.currentTarget.value)}
-              autoFocus
-            />
-            <TextInput
-              label="Field key"
-              description="The field's key (not its label) — e.g. 'name', 'priority', 'due_date'"
-              value={fieldKey}
-              onChange={(e) => setFieldKey(e.currentTarget.value)}
-            />
-          </>
-        ) : (
-          <>
-            <Textarea
-              label="AQL query"
-              description={
-                <Text size="xs" c="dimmed">
-                  Same AQL grammar as the Query page. Permissions apply per-row.{" "}
-                  <Code>FROM Records WHERE …</Code> is the common shape.
-                </Text>
-              }
-              minRows={5}
-              value={queryText}
-              onChange={(e) => setQueryText(e.currentTarget.value)}
-              autoFocus
-            />
-            <TextInput
-              label="Row limit"
-              description="Caps the number of rows persisted into the snapshot (1–1000)"
-              value={limit}
-              onChange={(e) => setLimit(e.currentTarget.value)}
-            />
-          </>
-        )}
         <Group justify="flex-end">
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>
           <Button onClick={submit} loading={create.isPending}>
             Insert
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// ── Edit binding modal ──────────────────────────────────────────────────
+
+function EditBindingModal({
+  documentId,
+  binding,
+  onClose
+}: {
+  documentId: string;
+  // Null when no binding is being edited (modal closed). The form
+  // re-seeds whenever a different binding is selected.
+  binding: DocumentBindingDto | null;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<BindingFormState>(EMPTY_FORM);
+  const update = useUpdateDocumentBinding();
+
+  // Re-seed the form each time a binding is opened for editing.
+  useEffect(() => {
+    if (binding) setForm(formStateFromBinding(binding));
+  }, [binding]);
+
+  const submit = async () => {
+    if (!binding) return;
+    const built = buildConfigJsonb(binding.kind, form);
+    if ("error" in built) {
+      notifications.show({ message: built.error, color: "red" });
+      return;
+    }
+    try {
+      await update.mutateAsync({
+        documentId,
+        bindingId: binding.id,
+        configJsonb: built.configJsonb,
+        // Empty string clears the label back to null server-side.
+        label: form.label.trim()
+      });
+      notifications.show({ message: "Binding updated.", color: "green" });
+      onClose();
+    } catch (err) {
+      notifications.show({
+        message: extractErrorMessage(err) ?? "Failed to update binding.",
+        color: "red"
+      });
+    }
+  };
+
+  return (
+    <Modal opened={binding != null} onClose={onClose} title="Edit live data binding" size="lg">
+      <Stack>
+        <Select
+          label="Binding kind"
+          description="Kind can't change — delete and recreate to switch kinds"
+          data={[
+            { value: "record-field", label: "Record field — one field from one record" },
+            { value: "aql-table", label: "AQL table — run a query, render results as a table" }
+          ]}
+          value={binding?.kind ?? "record-field"}
+          disabled
+          allowDeselect={false}
+        />
+        {binding ? (
+          <BindingConfigFields
+            kind={binding.kind}
+            state={form}
+            onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+            autoFocus
+          />
+        ) : null}
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} loading={update.isPending}>
+            Save changes
           </Button>
         </Group>
       </Stack>

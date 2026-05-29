@@ -95,33 +95,37 @@ export function buildRecordFieldNode(
 //      current resolved value.
 //   2. REFRESH: update the displayText of any existing field node whose
 //      binding's resolved value has changed.
+//   3. REMOVE: delete any field node whose binding no longer exists
+//      (binding was deleted from the side panel). Only when
+//      `bindingsLoaded` is true — otherwise the transient empty list
+//      during the initial bindings fetch would wrongly delete every
+//      field node.
 //
-// aql-table placeholders are left untouched (handled by the decoration
-// plugin until Phase 10b). Returns true if it dispatched a transaction.
-//
-// All edits are collected then applied high-position-first so earlier
-// positions stay valid without position mapping. The transaction is
-// marked as a direct edit so it never becomes a tracked change, and is
-// kept out of the undo history (it's a sync, not a user action).
+// Returns true if it dispatched a transaction. All edits are collected
+// then applied high-position-first so earlier positions stay valid
+// without position mapping. The transaction is marked as a direct edit
+// so it never becomes a tracked change, and is kept out of the undo
+// history (it's a sync, not a user action).
 export function syncRecordFieldNodes(
   view: EditorView,
   bindings: DocumentBindingDto[],
-  markDirectEdit: (tr: Transaction) => void
+  markDirectEdit: (tr: Transaction) => void,
+  bindingsLoaded: boolean
 ): boolean {
   const recordFieldById = new Map<string, DocumentBindingDto>();
   for (const b of bindings) {
     if (b.kind === "record-field") recordFieldById.set(b.id, b);
   }
-  if (recordFieldById.size === 0) return false;
 
   const { schema, doc } = view.state;
   if (!schema.nodes.field) return false;
 
-  type Edit = { from: number; to: number; node: PmNode };
+  // node: null → delete the range (orphan removal); node: PmNode → replace.
+  type Edit = { from: number; to: number; node: PmNode | null };
   const edits: Edit[] = [];
 
   doc.descendants((node, pos) => {
-    // (2) existing field node — refresh stale displayText.
+    // existing field node — refresh stale displayText OR remove if orphaned.
     if (node.type.name === "field") {
       const id = bindingIdFromInstruction(node.attrs.instruction);
       if (id) {
@@ -135,6 +139,9 @@ export function syncRecordFieldNodes(
               node: buildRecordFieldNode(schema, id, want)
             });
           }
+        } else if (bindingsLoaded) {
+          // (3) binding gone — remove the orphaned field node.
+          edits.push({ from: pos, to: pos + node.nodeSize, node: null });
         }
       }
       return false; // leaf
@@ -165,12 +172,12 @@ export function syncRecordFieldNodes(
 
   if (edits.length === 0) return false;
 
-  // Apply high-position-first so each replace doesn't shift the
+  // Apply high-position-first so each replace/delete doesn't shift the
   // positions of edits we haven't applied yet.
   edits.sort((a, b) => b.from - a.from);
   let tr = view.state.tr;
   for (const e of edits) {
-    tr = tr.replaceWith(e.from, e.to, e.node);
+    tr = e.node ? tr.replaceWith(e.from, e.to, e.node) : tr.delete(e.from, e.to);
   }
   markDirectEdit(tr);
   // Keep the sync out of undo history — it's derived state, not an edit

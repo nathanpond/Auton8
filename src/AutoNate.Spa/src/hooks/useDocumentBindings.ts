@@ -6,7 +6,8 @@ import {
   deleteDocumentBinding,
   listDocumentBindings,
   refreshAllDocumentBindings,
-  refreshDocumentBinding
+  refreshDocumentBinding,
+  updateDocumentBinding
 } from "@/api/documentBindings";
 
 // React Query layer for document bindings.
@@ -51,6 +52,31 @@ export function useCreateDocumentBinding() {
       qc.setQueryData<DocumentBindingDto[] | undefined>(
         documentBindingsKey(vars.documentId),
         (prev) => (prev ? [...prev, created] : [created])
+      );
+    }
+  });
+}
+
+export function useUpdateDocumentBinding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      documentId: string;
+      bindingId: string;
+      configJsonb?: string;
+      label?: string;
+    }) =>
+      updateDocumentBinding(vars.documentId, vars.bindingId, {
+        configJsonb: vars.configJsonb,
+        label: vars.label
+      }),
+    onSuccess: (updated, vars) => {
+      // Replace the single row in place so the in-doc sync sees the new
+      // resolved value (bumped lastResolvedAtUtc) and refreshes the
+      // rendered field/table, while the panel order stays stable.
+      qc.setQueryData<DocumentBindingDto[] | undefined>(
+        documentBindingsKey(vars.documentId),
+        (prev) => prev?.map((b) => (b.id === updated.id ? updated : b))
       );
     }
   });

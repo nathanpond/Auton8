@@ -92,6 +92,21 @@ export async function createDocumentBinding(
   return data;
 }
 
+// Edit an existing binding. Omit a field to leave it unchanged; pass
+// configJsonb to re-point the binding (re-resolves server-side) or label
+// to rename it. Kind is immutable — delete + recreate to change kind.
+export async function updateDocumentBinding(
+  documentId: string,
+  bindingId: string,
+  req: { configJsonb?: string; label?: string }
+): Promise<DocumentBindingDto> {
+  const { data } = await api.patch<DocumentBindingDto>(
+    `/api/content/documents/${documentId}/bindings/${bindingId}`,
+    req
+  );
+  return data;
+}
+
 export async function refreshDocumentBinding(
   documentId: string,
   bindingId: string

@@ -126,6 +126,7 @@ public static class ContentEventTypes
     // single-binding endpoints; RefreshedAll fires once per /refresh-all
     // call with the total binding count in details.
     public const string DocumentBindingCreated = "content.document.binding.created";
+    public const string DocumentBindingUpdated = "content.document.binding.updated";
     public const string DocumentBindingRefreshed = "content.document.binding.refreshed";
     public const string DocumentBindingDeleted = "content.document.binding.deleted";
     public const string DocumentBindingsRefreshedAll = "content.document.bindings.refreshed_all";

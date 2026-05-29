@@ -17,14 +17,21 @@ import {
 } from "@/hooks/useDocumentComments";
 import { useDocumentBindings } from "@/hooks/useDocumentBindings";
 import type { DocumentBindingDto } from "@/api/documentBindings";
-import { updateBindingsRegistry } from "./bindingsRegistry";
-import { bindingPlaceholderText, createBindingsPlugin } from "./bindingsPlugin";
 import {
   buildRecordFieldNode,
   recordFieldDisplayText,
   syncRecordFieldNodes
 } from "./bindingFieldNode";
+import {
+  insertAqlTableBinding,
+  syncAqlTableNodes
+} from "./bindingTableNode";
 import BindingsSidePanel from "./BindingsSidePanel";
+import {
+  bindingHighlightPlugin,
+  setHoveredBinding,
+  scrollToBinding
+} from "./bindingHighlightPlugin";
 import DocumentChatPanel from "./DocumentChatPanel";
 import {
   useDocumentEditorPageContext,
@@ -144,6 +151,29 @@ const SUGGESTION_MODE_BYPASS_META = "suggestionModeApplied";
 
 function markAsDirectEdit(tr: Transaction): void {
   tr.setMeta(SUGGESTION_MODE_BYPASS_META, true);
+}
+
+// Run both binding-node sync passes against the live view. Table (block)
+// pass first in its own transaction, then record-field (inline) — keeps
+// block + inline position math from tangling. No-ops when the view is
+// gone or there's nothing to change. Wrapped so a failure in one pass
+// can't take down the editor.
+function runBindingSync(
+  view: EditorView | null,
+  bindings: DocumentBindingDto[],
+  bindingsLoaded: boolean
+): void {
+  if (!view) return;
+  try {
+    syncAqlTableNodes(view, bindings, markAsDirectEdit, bindingsLoaded);
+  } catch (err) {
+    console.warn("[bindings] aql-table sync failed", err);
+  }
+  try {
+    syncRecordFieldNodes(view, bindings, markAsDirectEdit, bindingsLoaded);
+  } catch (err) {
+    console.warn("[bindings] record-field sync failed", err);
+  }
 }
 
 // Make docx-editor's accept/reject tracked-change buttons mode-safe.
@@ -300,23 +330,19 @@ export default function DocxDocumentEditor({
     role === "editor" ? "editing" : "viewing";
   const readOnly = role === "viewer";
 
-  // Phase 5: live data bindings. The document body carries
-  // `{{binding:UUID}}` placeholders; the decoration plugin paints
-  // resolved values over them. Bindings live in REST; we push the
-  // current list into a module-level registry so the plugin can read
-  // them without a React context plumb. The plugin auto-rebuilds
-  // decorations when the registry changes.
-  const { data: bindingRows = [] } = useDocumentBindings(documentId);
-  useEffect(() => {
-    updateBindingsRegistry(documentId, bindingRows);
-  }, [documentId, bindingRows]);
+  // Live data bindings. As of Phase 10 both kinds render as first-class
+  // PM nodes (record-field → `field` node; aql-table → real table +
+  // caption marker), kept in sync with the REST bindings list by the
+  // effect below — no more text placeholders or decoration plugin.
+  const { data: bindingRows = [], isSuccess: bindingsLoaded } =
+    useDocumentBindings(documentId);
 
-  // Phase 10a: keep record-field `field` nodes in sync with the bindings
-  // list. One idempotent pass that (1) migrates any legacy
-  // `{{binding:UUID}}` text placeholder for a record-field binding into a
-  // field node, and (2) refreshes the displayText of existing field
-  // nodes whose resolved value changed. Editor-role only (viewers don't
-  // mutate the body); skipped in import mode (body not committed yet).
+  // Phase 10: keep binding nodes in sync with the REST bindings list.
+  // Two idempotent passes — aql-table (block: tables + caption markers)
+  // first, then record-field (inline: field nodes) — each migrating any
+  // legacy `{{binding:UUID}}` placeholder and refreshing stale rendered
+  // values. Editor-role only (viewers don't mutate the body); skipped in
+  // import mode (body not committed yet).
   //
   // Triggering is split across two places to handle either arrival
   // order of (view-ready, bindings-loaded):
@@ -326,24 +352,28 @@ export default function DocxDocumentEditor({
   //     covers the case where the view mounts AFTER bindings loaded.
   // Both defer to the next tick so we don't dispatch into docx-editor's
   // own mount-time transactions, and both no-op when there's nothing to
-  // change (the function is idempotent).
+  // change (the functions are idempotent). The table pass runs first +
+  // in its own transaction so its block edits don't tangle position
+  // math with the inline field pass.
   const bindingRowsRef = useRef(bindingRows);
   bindingRowsRef.current = bindingRows;
+  const bindingsLoadedRef = useRef(bindingsLoaded);
+  bindingsLoadedRef.current = bindingsLoaded;
   useEffect(() => {
     if (importMode || role !== "editor") return;
     if (!editorViewRef.current) return;
     const id = window.setTimeout(() => {
-      const live = editorViewRef.current;
-      if (live) {
-        try {
-          syncRecordFieldNodes(live, bindingRowsRef.current, markAsDirectEdit);
-        } catch (err) {
-          console.warn("[bindings] record-field sync failed", err);
-        }
-      }
+      runBindingSync(
+        editorViewRef.current,
+        bindingRowsRef.current,
+        bindingsLoadedRef.current
+      );
     }, 0);
     return () => window.clearTimeout(id);
-  }, [bindingRows, role, importMode]);
+    // bindingsLoaded in the deps so the false→true load transition fires
+    // the sync even when the list is genuinely empty (orphan cleanup on
+    // a doc whose bindings were all deleted).
+  }, [bindingRows, bindingsLoaded, role, importMode]);
 
   // Phase 8: register the document with the chatbot's PageContextRegistry
   // so the in-editor agent panel sees the doc's title + bindings + body
@@ -677,14 +707,12 @@ export default function DocxDocumentEditor({
   const insertBindingPlaceholder = (binding: DocumentBindingDto) => {
     const view = editorViewRef.current;
     if (!view) return;
-    const from = view.state.selection.from;
 
-    // Phase 10a: record-field bindings insert a `field` node (Word field
-    // primitive) carrying the binding id in `instruction` + the resolved
-    // value in `displayText`. Renders the value inline, round-trips to
-    // OOXML, no decoration chip needed. aql-table bindings keep the
-    // legacy `{{binding:UUID}}` text placeholder (the decoration plugin
-    // paints those) until Phase 10b.
+    // Phase 10: both binding kinds insert first-class nodes (no more
+    // `{{binding:UUID}}` text + decoration chip).
+    //   record-field → inline `field` node (value in displayText).
+    //   aql-table    → a [caption-marker paragraph, real table] block
+    //                  pair inserted after the cursor's top-level block.
     if (binding.kind === "record-field") {
       const fieldNode = buildRecordFieldNode(
         view.state.schema,
@@ -698,24 +726,10 @@ export default function DocxDocumentEditor({
       return;
     }
 
-    const placeholder = bindingPlaceholderText(binding.id);
-    const tr = view.state.tr.insertText(placeholder, from);
-    // Strip every mark from the inserted range. Without this, marks
-    // that were active at the cursor (bold, italic, link, color, etc.)
-    // get applied to the new text, which causes ProseMirror to split
-    // the placeholder across multiple text nodes — and our regex
-    // decoration scan, which walks one text node at a time, will only
-    // hide the prefix that lives in the first node. Visible symptom:
-    // tail of the UUID + `}}` showing after the chip.
-    const to = from + placeholder.length;
-    for (const markType of Object.values(view.state.schema.marks)) {
-      tr.removeMark(from, to, markType);
+    if (binding.kind === "aql-table") {
+      insertAqlTableBinding(view, binding, markAsDirectEdit);
+      return;
     }
-    // Also clear stored marks so the next character the user types
-    // doesn't pick up a stale mark from before the insertion.
-    tr.setStoredMarks([]);
-    view.dispatch(tr);
-    view.focus();
   };
 
   // Build the y-prosemirror plugin list once the Y.Doc + awareness are
@@ -730,19 +744,17 @@ export default function DocxDocumentEditor({
   // were attached to the now-destroyed view.
   const externalPlugins = useMemo(() => {
     // In import mode the editor runs single-user against the parsed
-    // OOXML state, so no Yjs sync/cursor plugins. The bindings decoration
-    // plugin still runs — placeholders inside the imported body should
-    // still render chips. There's no `handle` because the Yjs hook is
-    // disabled while we're in this mode.
+    // OOXML state — no Yjs sync/cursor plugins, and no binding plugins
+    // (Phase 10 renders bindings as real nodes, no decoration plugin).
     if (importMode) {
-      return [createBindingsPlugin()];
+      return [];
     }
     if (!handle) return [];
     const fragment = handle.doc.getXmlFragment("default");
-    // Order matters slightly here: ySyncPlugin first (it owns content
-    // sync), then the bindings decoration plugin (only adds visual
-    // decorations, no state writes), then yCursorPlugin (awareness).
-    const plugins = [ySyncPlugin(fragment), createBindingsPlugin()];
+    // ySyncPlugin owns content sync; yCursorPlugin adds awareness.
+    // bindingHighlightPlugin paints the hover-highlight for bound content
+    // (driven by the side panel) — view-only, no doc mutation.
+    const plugins = [ySyncPlugin(fragment), bindingHighlightPlugin()];
     // HocuspocusProvider types awareness as `Awareness | null`. The null
     // state is theoretical at runtime (the constructor populates it
     // eagerly), but yCursorPlugin's signature won't accept null, so
@@ -985,17 +997,13 @@ export default function DocxDocumentEditor({
         if (editorViewRef.current === view) return;
         editorViewRef.current = view;
         makeAcceptRejectModeSafe(view);
-        // One-shot record-field sync for the case where bindings were
-        // already loaded before the view mounted. Deferred a tick so we
-        // don't dispatch into docx-editor's mount transactions.
+        // One-shot binding sync for the case where bindings were already
+        // loaded before the view mounted. Deferred a tick so we don't
+        // dispatch into docx-editor's mount transactions.
         if (!importMode && role === "editor") {
           window.setTimeout(() => {
             if (editorViewRef.current === view) {
-              try {
-                syncRecordFieldNodes(view, bindingRowsRef.current, markAsDirectEdit);
-              } catch (err) {
-                console.warn("[bindings] record-field sync (on ready) failed", err);
-              }
+              runBindingSync(view, bindingRowsRef.current, bindingsLoadedRef.current);
             }
           }, 0);
         }
@@ -1043,6 +1051,8 @@ export default function DocxDocumentEditor({
           documentId={documentId}
           canEdit={role === "editor"}
           onInsert={insertBindingPlaceholder}
+          onHoverBinding={(id) => setHoveredBinding(editorViewRef.current, id)}
+          onNavigateBinding={(id) => scrollToBinding(editorViewRef.current, id)}
           onClose={() => setBindingsPanelOpen(false)}
         />
       ) : null}

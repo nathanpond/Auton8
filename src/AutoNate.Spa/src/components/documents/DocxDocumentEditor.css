@@ -59,3 +59,21 @@
   color: var(--mantine-color-dimmed);
   font-style: italic;
 }
+
+/* Phase 10: hover-highlight for bound content. A single translucent box
+   drawn by bindingHighlightPlugin over the bounding rect of the hovered
+   binding's rendered content (see that file for why it's an imperative
+   DOM overlay rather than a PM decoration). Pink fill at low opacity so
+   the content reads through, with a solid border marking the bounds.
+   `position: fixed` + coords set inline by the plugin; pointer-events
+   none so it never blocks editing. */
+.binding-hover-overlay {
+  position: fixed;
+  z-index: 200;
+  display: none;
+  pointer-events: none;
+  border-radius: 4px;
+  background-color: rgba(230, 73, 128, 0.16);
+  border: 2px solid rgba(230, 73, 128, 0.75);
+  box-shadow: 0 0 0 1px rgba(230, 73, 128, 0.15);
+}
