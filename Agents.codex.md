@@ -18,3 +18,18 @@ Required checks:
 - npm run lint --if-present
 - npm test --if-present
 - npx playwright test
+
+## Playwright exploration
+
+Prefer playwright-cli for browser exploration and test discovery.
+
+Use commands like:
+- npx playwright-cli open http://localhost:5173 --headed
+- npx playwright-cli snapshot
+- npx playwright-cli click <ref>
+- npx playwright-cli fill <ref> "value"
+- npx playwright-cli screenshot
+- npx playwright-cli requests
+- npx playwright-cli console
+
+Use Playwright MCP only when CLI exploration is not enough.
