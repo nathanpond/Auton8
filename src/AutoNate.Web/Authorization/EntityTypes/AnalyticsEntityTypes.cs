@@ -1,13 +1,15 @@
 using DataStoreModel = AutoNate.Web.Persistence.Scaffolded.DataStore;
 using DataConnectorModel = AutoNate.Web.Persistence.Scaffolded.DataConnector;
 using DatasetModel = AutoNate.Web.Persistence.Scaffolded.Dataset;
+using SavedQueryModel = AutoNate.Web.Persistence.Scaffolded.SavedQuery;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
 // EntityType registrations for the Data Stores & Analytics Pipeline feature
 // (docs/plans/2026-05-30-data-stores-implementation.md). Phase 1 lands
-// DataStore + DataConnector. Phase 2 adds Dataset. Transformer, Analyzer,
-// Pipeline, and PipelineRun kinds join this list as their phases ship.
+// DataStore + DataConnector. Phase 2 adds Dataset. Phase 3 promotes
+// SavedQuery to the Query kind. Transformer, Analyzer, Pipeline, and
+// PipelineRun kinds join this list as their phases ship.
 public static class AnalyticsEntityTypes
 {
     public static IReadOnlyList<IEntityType> All => _all.Value;
@@ -15,7 +17,7 @@ public static class AnalyticsEntityTypes
     private static readonly Lazy<IReadOnlyList<IEntityType>> _all = new(() =>
         new IEntityType[]
         {
-            DataStore!, DataConnector!, Dataset!,
+            DataStore!, DataConnector!, Dataset!, Query!,
         });
 
     // Refresh is intentionally not on DataStore — refresh is a Dataset
@@ -63,6 +65,22 @@ public static class AnalyticsEntityTypes
         {
             Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
             Actions.Refresh, Actions.Schedule
+        },
+        tags: Array.Empty<string>());
+
+    // Share gates POST /shares (token issuance for anonymous URL access).
+    // Edit gates the existing PATCH and DELETE on the saved query; List
+    // covers the /api/saved-queries collection. The store keeps an
+    // intrinsic-owner fallback so a creator never needs an explicit grant
+    // on their own row — this kind only matters for non-owner access.
+    public static EntityTypeDefinition Query { get; } = new(
+        kind: EntityKinds.Query,
+        clrType: typeof(SavedQueryModel),
+        idClrType: typeof(Guid),
+        actions: new[]
+        {
+            Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
+            Actions.Share
         },
         tags: Array.Empty<string>());
 }

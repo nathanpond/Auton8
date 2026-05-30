@@ -19,6 +19,8 @@ public partial class AutoNateDbContext
 
     public virtual DbSet<Dataset> Datasets { get; set; } = null!;
 
+    public virtual DbSet<SavedQueryShareToken> SavedQueryShareTokens { get; set; } = null!;
+
 #pragma warning disable CA1822
     partial void OnDataStoresModelCreating(ModelBuilder modelBuilder)
 #pragma warning restore CA1822
@@ -111,6 +113,31 @@ public partial class AutoNateDbContext
             entity.Property(e => e.RowCount).HasColumnName("row_count");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+        });
+
+        modelBuilder.Entity<SavedQueryShareToken>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("saved_query_share_tokens_pkey");
+            entity.ToTable("saved_query_share_tokens");
+            entity.HasIndex(e => e.SavedQueryId, "ix_saved_query_share_tokens_saved_query_id");
+            entity.HasIndex(e => e.TokenHash, "uq_saved_query_share_tokens_token_hash").IsUnique();
+
+            entity.HasOne<SavedQuery>()
+                .WithMany()
+                .HasForeignKey(e => e.SavedQueryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.SavedQueryId).HasColumnName("saved_query_id");
+            entity.Property(e => e.TokenHash).HasColumnName("token_hash");
+            entity.Property(e => e.IssuedBy).HasColumnName("issued_by");
+            entity.Property(e => e.IssuedAtUtc).HasColumnName("issued_at_utc");
+            entity.Property(e => e.ExpiresAtUtc).HasColumnName("expires_at_utc");
+            entity.Property(e => e.RevokedAtUtc).HasColumnName("revoked_at_utc");
+            entity.Property(e => e.MaxUses).HasColumnName("max_uses");
+            entity.Property(e => e.UseCount).HasColumnName("use_count");
+            entity.Property(e => e.LastUsedAtUtc).HasColumnName("last_used_at_utc");
+            entity.Property(e => e.Label).HasColumnName("label");
         });
 
         modelBuilder.Entity<Dataset>(entity =>
