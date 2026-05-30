@@ -949,7 +949,7 @@ internal static class DatabaseSchemaInitializer
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (g, main_id, NULL, 0, 'Dashboard', 'fa fa-house', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), main_id, g, 0, 'Home', NULL, 'template', '{{"templateKey":"home"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), main_id, g, 0, 'Home', NULL, 'template', '{{"templateKey":"home","path":"/home"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -1375,10 +1375,17 @@ internal static class DatabaseSchemaInitializer
 
             -- Convert any pre-existing route-typed menu items that point at a
             -- known templated path. Once converted, the WHERE clause stops
-            -- matching them, making this naturally idempotent.
+            -- matching them, making this naturally idempotent. Preserves the
+            -- `path` alongside the new `templateKey` so the SPA's router still
+            -- has a URL to match the menu item to — matches the shape Query and
+            -- other modern template items already use ({{path, templateKey}}).
+            -- Dropping path here was the cause of post-conversion 404s at /home
+            -- on fresh databases.
             UPDATE menu_items mi
             SET item_type = 'template',
-                config = jsonb_build_object('templateKey', mapping.template_key),
+                config = jsonb_build_object(
+                    'templateKey', mapping.template_key,
+                    'path',        mapping.path),
                 updated_at_utc = NOW()
             FROM (VALUES
               ('/home', 'home'),
@@ -2695,6 +2702,223 @@ internal static class DatabaseSchemaInitializer
             ADD COLUMN IF NOT EXISTS preview_svg TEXT NULL;
         """;
 
+    // Documents subsystem (Phase 1 of the Documents feature plan
+    // — see docs/plans/2026-05-26-documents-feature.md). Adds:
+    //   • `commenter` to the project_members.role CHECK constraint (so the
+    //     new 4th role can be persisted alongside owner/contributor/viewer).
+    //   • folders table — self-referential, project-scoped, unlimited nesting.
+    //     Mirrors content_locator_seq for cross-kind unique locators.
+    // Idempotent: drop-and-recreate of the CHECK is gated on the constraint
+    // name; CREATE TABLE IF NOT EXISTS is no-op on re-run.
+    //
+    // Folders are wired into IContentAuthorizer / ContentTreeService via the
+    // EntityKinds.Folder + ContentKinds.Folder constants; closure rows go into
+    // the existing content_ancestors table so inheritance "just works."
+    private const string ContentDocumentsSchemaSql =
+        """
+        DO $$
+        BEGIN
+            -- Refresh the project_members.role CHECK constraint to include
+            -- 'commenter'. The original constraint was created inline so it
+            -- carries the Postgres default name `project_members_role_check`.
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'project_members_role_check'
+            ) THEN
+                ALTER TABLE project_members
+                    DROP CONSTRAINT project_members_role_check;
+            END IF;
+            ALTER TABLE project_members
+                ADD CONSTRAINT project_members_role_check
+                CHECK (role IN ('owner','contributor','commenter','viewer'));
+        END $$;
+
+        CREATE TABLE IF NOT EXISTS folders (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            parent_folder_id UUID NULL REFERENCES folders (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            icon TEXT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL,
+            CONSTRAINT ck_folders_no_self_parent
+                CHECK (parent_folder_id IS NULL OR parent_folder_id <> id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_folders_project_id ON folders (project_id);
+        CREATE INDEX IF NOT EXISTS ix_folders_parent_folder_id
+            ON folders (parent_folder_id);
+
+        ALTER TABLE folders
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS folders_locator_key
+            ON folders (locator);
+
+        -- Documents (Phase 2 of the Documents feature). One entity covers
+        -- documents AND templates, distinguished by `kind`. folder_id is
+        -- nullable so a document can live at the project root.
+        -- template_id is a soft self-reference: documents created from a
+        -- template carry that link, but they own their own body copy.
+        CREATE TABLE IF NOT EXISTS documents (
+            id UUID PRIMARY KEY,
+            project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            folder_id UUID NULL REFERENCES folders (id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('document','template')),
+            template_id UUID NULL REFERENCES documents (id) ON DELETE SET NULL,
+            title TEXT NOT NULL,
+            description TEXT NULL,
+            body_jsonb JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            current_version_number INT NOT NULL DEFAULT 1,
+            sort_order INT NOT NULL DEFAULT 0,
+            is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_documents_project_id ON documents (project_id);
+        CREATE INDEX IF NOT EXISTS ix_documents_folder_id ON documents (folder_id);
+        CREATE INDEX IF NOT EXISTS ix_documents_template_id ON documents (template_id);
+
+        ALTER TABLE documents
+            ADD COLUMN IF NOT EXISTS locator BIGINT NOT NULL
+            DEFAULT nextval('content_locator_seq');
+        CREATE UNIQUE INDEX IF NOT EXISTS documents_locator_key
+            ON documents (locator);
+
+        CREATE TABLE IF NOT EXISTS document_versions (
+            id UUID PRIMARY KEY,
+            document_id UUID NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+            version_number INT NOT NULL,
+            title TEXT NOT NULL,
+            body_jsonb JSONB NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('autosave','manual','restore')),
+            note TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS document_versions_document_id_version_number_key
+            ON document_versions (document_id, version_number);
+        CREATE INDEX IF NOT EXISTS ix_document_versions_document_id
+            ON document_versions (document_id);
+
+        -- Document comments (Phase 4). Range markers in the body Y.Doc carry
+        -- only the integer `number`; metadata (author, body, replies,
+        -- resolved status) lives here. `(document_id, number)` is unique
+        -- because docx-editor's body markers reference it; allocation is
+        -- client-side via Math.max(existing) + 1 — extremely rare conflicts
+        -- handled with an HTTP 409 from the create endpoint.
+        CREATE TABLE IF NOT EXISTS document_comments (
+            id UUID PRIMARY KEY,
+            document_id UUID NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+            number INT NOT NULL,
+            parent_comment_id UUID NULL REFERENCES document_comments (id) ON DELETE CASCADE,
+            thread_id UUID NOT NULL,
+            author_id UUID NOT NULL,
+            body_text TEXT NOT NULL,
+            resolved_at_utc TIMESTAMPTZ NULL,
+            resolved_by_user_id UUID NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            CONSTRAINT ck_document_comments_no_self_parent
+                CHECK (parent_comment_id IS NULL OR parent_comment_id <> id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS document_comments_document_id_number_key
+            ON document_comments (document_id, number);
+        CREATE INDEX IF NOT EXISTS ix_document_comments_document_id_thread_id
+            ON document_comments (document_id, thread_id);
+        CREATE INDEX IF NOT EXISTS ix_document_comments_open
+            ON document_comments (document_id) WHERE resolved_at_utc IS NULL;
+
+        -- Document bindings (Phase 5). The document body carries only a
+        -- placeholder `{{binding:<id>}}`; the resolved value lives here
+        -- in last_resolved_value_jsonb. Snapshot-on-open semantics —
+        -- per-binding refresh + a global refresh-all explicitly trigger
+        -- re-resolution. CASCADE on document delete prunes orphans.
+        CREATE TABLE IF NOT EXISTS document_bindings (
+            id UUID PRIMARY KEY,
+            document_id UUID NOT NULL REFERENCES documents (id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('record-field','aql-table')),
+            config_jsonb JSONB NOT NULL,
+            last_resolved_value_jsonb JSONB NULL,
+            last_resolved_at_utc TIMESTAMPTZ NULL,
+            last_resolved_by_user_id UUID NULL,
+            label TEXT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_document_bindings_document_id
+            ON document_bindings (document_id);
+        """;
+
+    // Adds a 'Documents' top-level item to the seeded 'main' menu. Separate
+    // from MenusSchemaSql so existing installs (where the menu was seeded
+    // before this feature existed) also pick it up. Idempotent: skips if the
+    // menu doesn't exist yet (fresh install path will populate it via the
+    // base seed once we add Documents there in a future migration) or if an
+    // item with this exact name + path already lives at the top of `main`.
+    private const string DocumentsMenuItemSeedSql =
+        """
+        DO $$
+        DECLARE
+            main_id UUID;
+            seed_actor UUID;
+            existing_top_count INT;
+            new_sort_order INT;
+        BEGIN
+            SELECT id INTO main_id FROM menus WHERE key = 'main';
+            IF main_id IS NULL THEN
+                RETURN;
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM menu_items mi
+                WHERE mi.menu_id = main_id
+                  AND mi.parent_id IS NULL
+                  AND mi.item_type = 'route'
+                  AND mi.config->>'path' = '/documents'
+            ) THEN
+                RETURN;
+            END IF;
+
+            SELECT user_id INTO seed_actor
+            FROM local_users
+            ORDER BY created_date ASC
+            LIMIT 1;
+            IF seed_actor IS NULL THEN
+                RETURN;
+            END IF;
+
+            SELECT COALESCE(MAX(sort_order), -1) + 1 INTO new_sort_order
+            FROM menu_items
+            WHERE menu_id = main_id AND parent_id IS NULL;
+
+            INSERT INTO menu_items (
+                id, menu_id, parent_id, sort_order, display_name, icon,
+                item_type, config, is_visible, is_system,
+                created_at_utc, updated_at_utc
+            )
+            VALUES (
+                gen_random_uuid(), main_id, NULL, new_sort_order,
+                'Documents', 'fa fa-file-lines',
+                'route', '{{"path":"/documents"}}'::jsonb,
+                TRUE, TRUE, NOW(), NOW()
+            );
+
+            -- Touch existing top count so the cache-version refresh is
+            -- predictable; harmless if the trigger isn't installed yet.
+            SELECT COUNT(*) INTO existing_top_count
+            FROM menu_items WHERE menu_id = main_id AND parent_id IS NULL;
+        END $$;
+        """;
+
     // Per-user page favorites. Composite PK (page_id, user_id) makes
     // PUT idempotent via ON CONFLICT DO NOTHING. Cascade on page delete so
     // favorites disappear with the page they pointed at.
@@ -3188,6 +3412,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotModelsMenuSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentHierarchySchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentLocatorSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(ContentDocumentsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DocumentsMenuItemSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ContentNotePageIndexSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(NotePreviewSvgSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageFavoritesSchemaSql, cancellationToken);

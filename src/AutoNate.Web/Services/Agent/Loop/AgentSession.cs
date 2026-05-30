@@ -197,6 +197,34 @@ public sealed class AgentSession : IAgentSession
             history.Add(lm.Message);
             historyIds.Add(lm.Id);
         }
+
+        // Defensive sanitizer: heal any orphan `tool_use` blocks before the
+        // history hits the provider. The tool loop persists the assistant
+        // message containing tool_use BEFORE running the tool + writing the
+        // tool_result message, so a cancellation between those steps (user
+        // closes tab mid-tool-call, SSE stream drops, etc.) can leave a
+        // tool_use without its matching tool_result. Anthropic responds
+        // 400 if it sees that shape, which strands the whole conversation.
+        //
+        // Walk pairs: every assistant ToolUseBlock with id X must be
+        // followed in the NEXT message (Tool role) by a ToolResultBlock with
+        // id X. If any are missing, we synthesize an interrupted result so
+        // the provider sees well-formed history. The synthetic results are
+        // NOT persisted — only injected into this turn's working history,
+        // so we don't pollute the durable record with retroactive lies.
+        SanitizeOrphanToolUses(history, historyIds);
+
+        // Elide oversized tool_use args / tool_result content from prior
+        // user turns to keep replay cost bounded. A single web_fetch_result
+        // can dump ~70K tokens into the conversation; without elision, every
+        // subsequent turn re-sends that same payload until the context
+        // window blows. The most recent user-turn data is already
+        // synthesized into the assistant's text reply that immediately
+        // follows the tool_result, so the model loses no actionable info
+        // when the raw bytes are dropped — only the ability to re-quote
+        // verbatim from an earlier fetch. See ElideOversizedHistoryBlobs
+        // for the threshold + stub shape.
+        ElideOversizedHistoryBlobs(history);
         var maxTokens = _options.DefaultMaxTokens;
 
         // Apply per-turn capability gates from site settings. Read once per
@@ -517,6 +545,197 @@ public sealed class AgentSession : IAgentSession
         using var doc = JsonDocument.Parse("{}");
         return doc.RootElement.Clone();
     }
+
+    // See the call site (history-load) for the why. Walks the working
+    // history in order; whenever an assistant message carries one or more
+    // tool_use blocks, the next message must be a Tool message containing a
+    // tool_result for every tool_use_id. If any are missing (cancellation
+    // between persistence steps, SSE drop, etc.), synthesize an "interrupted"
+    // tool_result so the provider sees a paired conversation. Mutates
+    // `history` and `historyIds` in place — the injected entries get a
+    // sentinel id of Guid.Empty so downstream code that maps ids to
+    // persisted rows can skip them.
+    internal static void SanitizeOrphanToolUses(List<ChatMessage> history, List<Guid> historyIds)
+    {
+        for (var i = 0; i < history.Count; i++)
+        {
+            var msg = history[i];
+            if (msg.Role != ChatRole.Assistant) continue;
+            var unmatchedToolUseIds = new List<string>();
+            foreach (var block in msg.Blocks)
+            {
+                if (block is ChatContentBlock.ToolUseBlock tu)
+                {
+                    unmatchedToolUseIds.Add(tu.ToolUseId);
+                }
+            }
+            if (unmatchedToolUseIds.Count == 0) continue;
+
+            // Resolve which tool_use_ids are already paired by the next
+            // message (if any). Drop matched ids; anything still in the
+            // list is an orphan we need to synthesize for.
+            if (i + 1 < history.Count && history[i + 1].Role == ChatRole.Tool)
+            {
+                var paired = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var b in history[i + 1].Blocks)
+                {
+                    if (b is ChatContentBlock.ToolResultBlock tr) paired.Add(tr.ToolUseId);
+                }
+                unmatchedToolUseIds.RemoveAll(id => paired.Contains(id));
+            }
+            if (unmatchedToolUseIds.Count == 0) continue;
+
+            // Build a single synthetic Tool message that carries the
+            // missing tool_results. If a real Tool message already exists
+            // after this assistant turn (covering OTHER tool_uses), append
+            // the synthetic results to that one — otherwise insert a new
+            // message between i and i+1.
+            var syntheticBlocks = new List<ChatContentBlock>();
+            foreach (var id in unmatchedToolUseIds)
+            {
+                syntheticBlocks.Add(new ChatContentBlock.ToolResultBlock(
+                    id,
+                    SyntheticInterruptedResult(),
+                    IsError: true));
+            }
+
+            if (i + 1 < history.Count && history[i + 1].Role == ChatRole.Tool)
+            {
+                var existing = history[i + 1].Blocks.ToList();
+                existing.AddRange(syntheticBlocks);
+                history[i + 1] = new ChatMessage(ChatRole.Tool, existing);
+            }
+            else
+            {
+                history.Insert(i + 1, new ChatMessage(ChatRole.Tool, syntheticBlocks));
+                historyIds.Insert(i + 1, Guid.Empty);
+            }
+        }
+    }
+
+    private static JsonElement SyntheticInterruptedResult()
+    {
+        using var doc = JsonDocument.Parse(
+            "{\"kind\":\"interrupted\",\"error\":\"tool_call_interrupted\",\"message\":\"This tool call was interrupted before its result was recorded (likely because the previous turn's stream ended early). It was not applied.\"}");
+        return doc.RootElement.Clone();
+    }
+
+    // Tool-use args and tool-result content larger than this (serialized
+    // JSON length) get replaced with a small stub on replay. 4 KB is the
+    // working bound: real tool_results carry ~100 B (apply_page_action
+    // success message) to ~2 KB (inspect_page snapshot summary) of useful
+    // structure; web_fetch + huge markdown blobs land well past it. Keeping
+    // the bar low means almost every "useful for one turn, dead weight
+    // afterwards" blob gets pruned. The orphan sanitizer runs first so
+    // we never elide a tool_use that's missing its matching tool_result.
+    internal const int OversizedBlobThresholdBytes = 4 * 1024;
+
+    // Replace oversized tool_use args + tool_result content from prior
+    // turns with compact stubs. Mutates `history` in place; tool name and
+    // tool_use_id are preserved so provider-side pairing stays intact.
+    // The original blobs remain in the durable conversation record — only
+    // the in-memory replay history is altered.
+    //
+    // Why elide BOTH sides: a 7 KB markdown arg to apply_page_action is
+    // just as costly to replay as a 7 KB tool_result. The action's outcome
+    // ("Appended 3 blocks…") is preserved in the matching tool_result
+    // (small, kept verbatim), so the model can still reason about what
+    // happened even when it can't re-read the original markdown.
+    internal static void ElideOversizedHistoryBlobs(List<ChatMessage> history)
+    {
+        for (var i = 0; i < history.Count; i++)
+        {
+            var msg = history[i];
+            var rewrote = false;
+            var newBlocks = new List<ChatContentBlock>(msg.Blocks.Count);
+            foreach (var block in msg.Blocks)
+            {
+                if (block is ChatContentBlock.ToolUseBlock tu)
+                {
+                    var size = MeasureJsonLength(tu.Args);
+                    if (size > OversizedBlobThresholdBytes)
+                    {
+                        newBlocks.Add(new ChatContentBlock.ToolUseBlock(
+                            tu.ToolUseId,
+                            tu.Name,
+                            ElidedArgsStub(tu.Name, size)));
+                        rewrote = true;
+                        continue;
+                    }
+                }
+                else if (block is ChatContentBlock.ToolResultBlock tr)
+                {
+                    var size = MeasureJsonLength(tr.Result);
+                    if (size > OversizedBlobThresholdBytes)
+                    {
+                        newBlocks.Add(new ChatContentBlock.ToolResultBlock(
+                            tr.ToolUseId,
+                            ElidedResultStub(tr.Result, size),
+                            tr.IsError));
+                        rewrote = true;
+                        continue;
+                    }
+                }
+                newBlocks.Add(block);
+            }
+            if (rewrote) history[i] = new ChatMessage(msg.Role, newBlocks);
+        }
+    }
+
+    private static int MeasureJsonLength(JsonElement element)
+    {
+        // GetRawText avoids the cost of round-tripping through a writer;
+        // it returns the underlying span unchanged. For our threshold
+        // comparison the byte count of UTF-16 chars is good enough — we
+        // don't need exact token counts here, just a stable ordering.
+        try { return element.GetRawText().Length; }
+        catch { return 0; }
+    }
+
+    // Stub the model sees in place of an elided tool_use's args. Keeps
+    // the tool name (already on the block) and the original size so the
+    // model can decide whether the previous call was "expensive enough
+    // to redo" if it really needs the original content.
+    private static JsonElement ElidedArgsStub(string toolName, int originalSize)
+    {
+        var payload = $"{{\"_elided\":true,\"_originalSizeBytes\":{originalSize}," +
+                      $"\"_note\":\"args for {JsonEncodedString(toolName)} were elided from replay after the call ran; " +
+                      $"the matching tool_result holds the outcome.\"}}";
+        using var doc = JsonDocument.Parse(payload);
+        return doc.RootElement.Clone();
+    }
+
+    // Stub the model sees in place of an elided tool_result. We try to
+    // preserve `kind` from the original so the model knows what TYPE of
+    // result was returned (e.g. "web_fetch_result", "apply_page_action_
+    // applied") — sometimes that's enough to remember "I already fetched
+    // X" without seeing the bytes again.
+    private static JsonElement ElidedResultStub(JsonElement original, int originalSize)
+    {
+        string? kind = null;
+        if (original.ValueKind == JsonValueKind.Object &&
+            original.TryGetProperty("kind", out var k) &&
+            k.ValueKind == JsonValueKind.String)
+        {
+            kind = k.GetString();
+        }
+        var kindField = kind is null
+            ? string.Empty
+            : $"\"_originalKind\":\"{JsonEncodedString(kind)}\",";
+        var payload = $"{{\"_elided\":true,{kindField}\"_originalSizeBytes\":{originalSize}," +
+                      "\"_note\":\"Result content elided from replay history to keep the context window bounded. " +
+                      "The tool ran successfully; if you need the original bytes, re-issue the call.\"}";
+        using var doc = JsonDocument.Parse(payload);
+        return doc.RootElement.Clone();
+    }
+
+    // Cheap JSON-string escape for our stub payloads. We only need to
+    // handle the characters that appear in tool names + kind strings —
+    // both produced by us, so the surface is small (no embedded quotes
+    // in current names). Belt-and-suspenders against future tool names
+    // adding `"` or `\`.
+    private static string JsonEncodedString(string s) =>
+        s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
     // Heuristic for "the provider rejected our request because it was too
     // long". Matches Anthropic's "prompt is too long" wording and OpenAI's

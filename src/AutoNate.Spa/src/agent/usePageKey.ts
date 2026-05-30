@@ -13,6 +13,14 @@ const PATTERNS: Array<{ pattern: string; key: string }> = [
   { pattern: "/records/:id", key: "records" },
   { pattern: "/query", key: "aql-query" },
   { pattern: "/notes/*", key: "notes" },
+  // Documents subsystem (Phase 8). The editor route hosts the doc-scoped
+  // chat panel inside docx-editor's agentPanel slot — pageKey scopes the
+  // conversation list so doc chats don't pollute the global thread list.
+  // Per-document threading happens via the conversation's own metadata,
+  // not the pageKey, so all documents share one key here.
+  { pattern: "/documents/edit/:documentId", key: "documents" },
+  { pattern: "/documents/preview/:documentId", key: "documents" },
+  { pattern: "/documents/*", key: "documents" },
   { pattern: "/notifications", key: "notifications" },
   // Phase 5b — design-surface routes. Form-fill auto-discovery already
   // gives the chatbot a usable surface on these pages without explicit

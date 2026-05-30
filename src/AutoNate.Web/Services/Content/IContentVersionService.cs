@@ -75,4 +75,33 @@ public interface IContentVersionService
         Guid noteId,
         int versionNumber,
         CancellationToken ct);
+
+    // Document version lifecycle — same shape as the Page methods.
+    // Returns null when the autosave was rolled into the previous session
+    // row (no new version_number written; current_version_number unchanged).
+    Task<int?> SnapshotDocumentBeforeChangeAsync(
+        AutoNateDbContext db,
+        Guid documentId,
+        string priorTitle,
+        string priorBodyJsonb,
+        string kind,
+        string? note,
+        Guid actorId,
+        DateTime nowUtc,
+        CancellationToken ct);
+
+    Task<int> RestoreDocumentAsync(
+        AutoNateDbContext db,
+        Guid documentId,
+        int targetVersionNumber,
+        string? note,
+        Guid actorId,
+        DateTime nowUtc,
+        CancellationToken ct);
+
+    Task DeleteDocumentVersionAsync(
+        AutoNateDbContext db,
+        Guid documentId,
+        int versionNumber,
+        CancellationToken ct);
 }

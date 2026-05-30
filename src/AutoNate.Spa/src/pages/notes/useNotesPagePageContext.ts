@@ -118,12 +118,15 @@ export function useNotesPagePageContext(options: Options): void {
         // model-friendliness (markdown). Optional args.pageId targets a
         // specific page; defaults to the active page.
         const o = optsRef.current;
+        // PageQueryRequest.args is `unknown`; narrow with a typed view before
+        // reading the optional knobs documented in the queryTopics entry above.
+        const args = (req.args ?? {}) as { format?: string; pageId?: string };
         const format =
-          typeof req.args?.format === "string"
-            ? (req.args.format as "markdown" | "blocks" | "text")
+          typeof args.format === "string"
+            ? (args.format as "markdown" | "blocks" | "text")
             : "markdown";
         const targetPageId =
-          typeof req.args?.pageId === "string" ? req.args.pageId : o.activePageId;
+          typeof args.pageId === "string" ? args.pageId : o.activePageId;
         if (!targetPageId) {
           return { ok: false, error: "no_active_page", message: "No page is currently open in the editor." };
         }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
+using Npgsql;
 using Xunit;
 
 namespace AutoNate.E2E.Tests;
@@ -24,9 +25,27 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(3);
 
+    // Dedicated ephemeral test database. Dropped + recreated each fixture run
+    // so tests start from a clean, fully-seeded slate (see BootstrapTestDatabaseAsync)
+    // and destructive flows like "delete all executions" stay isolated from the
+    // developer's working `AutoNate` database.
+    internal const string TestDbName = "AutoNate_E2E";
+
+    // Dev Postgres credentials. Hardcoded to match `infra/docker-compose.yml`
+    // (POSTGRES_USER=autonate, POSTGRES_PASSWORD=Your_password123!) and the
+    // `Default` connection string in `appsettings.Development.json`. The port
+    // can be overridden via `AUTONATE_POSTGRES_PORT` to match the same env
+    // override the compose file honors.
+    private const string PgHost = "localhost";
+    private const string PgUser = "autonate";
+    private const string PgPassword = "Your_password123!";
+    private const string PgPoolTuning =
+        "Keepalive=30;Tcp Keepalive=true;Connection Idle Lifetime=60;Connection Pruning Interval=10";
+
     private Process? _appProcess;
     private IPlaywright? _playwright;
     private IBrowser? _browser;
+    private string _testConnString = string.Empty;
 
     public string BaseUrl { get; private set; } = string.Empty;
 
@@ -38,6 +57,13 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         var repoRoot = FindRepoRoot();
         WipeStaleStaticWebAssetsManifests(repoRoot);
         WipeWwwroot(repoRoot);
+
+        // Build a fresh `AutoNate_E2E` database before the app starts so the
+        // app's `DatabaseSchemaInitializer.EnsureAsync` (Program.cs) runs
+        // against a known-good baseline and finishes the schema (roles, menus,
+        // sample project, SuperAdmin backfill on the seeded admin row).
+        _testConnString = await BootstrapTestDatabaseAsync(repoRoot);
+
         BaseUrl = await StartAppAsync(repoRoot);
 
         _playwright = await Playwright.CreateAsync();
@@ -135,6 +161,11 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // only loads when ASPNETCORE_HOSTINGSTARTUPASSEMBLIES references it,
         // which --no-launch-profile keeps unset.
         info.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
+        // Override the dev `Default` connection string so the app boots against
+        // our ephemeral `AutoNate_E2E` database instead of the developer's
+        // working `AutoNate`. ASP.NET Core's configuration provider maps the
+        // double-underscore form to `ConnectionStrings:Default`.
+        info.Environment["ConnectionStrings__Default"] = _testConnString;
 
         _appProcess = new Process { StartInfo = info };
 
@@ -183,6 +214,68 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
                 $"--- stdout ---\n{string.Join('\n', stdoutBuffer)}\n" +
                 $"--- stderr ---\n{string.Join('\n', stderrBuffer)}");
         }
+    }
+
+    /// <summary>
+    /// Creates a fresh `AutoNate_E2E` database and replays
+    /// `infra/postgres/init/02-create-autonate-app-schema.sql` against it so
+    /// the seeded `admin`/`admin` row + foundational tables exist before the
+    /// app boots. The app's `DatabaseSchemaInitializer.EnsureAsync` then runs
+    /// the rest (lockout columns, roles, menus, sample project, SuperAdmin
+    /// backfill) idempotently against the new database.
+    ///
+    /// Why we do this work ourselves rather than relying on the docker
+    /// entrypoint init: the compose file sets `POSTGRES_DB=flowable`, so the
+    /// `.sql` files in `infra/postgres/init/` only run against the Flowable
+    /// database on first volume creation. The dev `AutoNate` database has been
+    /// hand-populated over time; a brand-new database (like ours) gets nothing
+    /// from docker init. Replaying `02-...sql` directly is the most faithful
+    /// way to track the source of truth as it evolves.
+    /// </summary>
+    /// <returns>The full Npgsql connection string to the bootstrapped database
+    /// — to be passed as the `ConnectionStrings__Default` env override.</returns>
+    private static async Task<string> BootstrapTestDatabaseAsync(string repoRoot)
+    {
+        var port = int.TryParse(
+            Environment.GetEnvironmentVariable("AUTONATE_POSTGRES_PORT"),
+            out var parsed) ? parsed : 5432;
+
+        var maintenanceConn =
+            $"Host={PgHost};Port={port};Database=postgres;Username={PgUser};Password={PgPassword}";
+        var testConn =
+            $"Host={PgHost};Port={port};Database={TestDbName};Username={PgUser};Password={PgPassword};{PgPoolTuning}";
+
+        // DROP + CREATE on the maintenance DB. `WITH (FORCE)` (PG13+) terminates
+        // any lingering sessions from a previous run so the DROP can succeed
+        // without waiting on disconnects. The compose stack runs PG16-alpine.
+        await using (var conn = new NpgsqlConnection(maintenanceConn))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $@"
+                DROP DATABASE IF EXISTS ""{TestDbName}"" WITH (FORCE);
+                CREATE DATABASE ""{TestDbName}"";
+            ";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Replay the foundational schema script against the new database.
+        // Npgsql executes multi-statement scripts (including PL/pgSQL DO blocks
+        // and dollar-quoted strings present in `02-...sql`) in a single
+        // ExecuteNonQuery call.
+        var initSqlPath = Path.Combine(
+            repoRoot, "infra", "postgres", "init", "02-create-autonate-app-schema.sql");
+        var initSql = await File.ReadAllTextAsync(initSqlPath);
+
+        await using (var conn = new NpgsqlConnection(testConn))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = initSql;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        return testConn;
     }
 
     /// <summary>

@@ -20,12 +20,17 @@ namespace AutoNate.Web.Services.Agent.Skills;
 // Response handling caps cost:
 //   - Content-Type whitelist (text/*, application/json, application/xml,
 //     application/xhtml+xml). Binaries are refused.
-//   - Body capped at 256 KB, with a truncated:true flag the model can read.
+//   - Body capped at 48 KB, with a truncated:true flag the model can read.
+//     Roughly 12K tokens — generous enough for an article extract while
+//     leaving the bulk of the model's 200K context window for the rest
+//     of the conversation. Anything bigger (e.g. a full Wikipedia page)
+//     would dominate one provider call's budget and routinely blow the
+//     limit when combined with the system prompt + tool definitions.
 public sealed class WebFetchSkill : IAgentSkill
 {
     public const string ToolName = "fetch_url";
 
-    private const int MaxResponseBytes = 256 * 1024;
+    private const int MaxResponseBytes = 48 * 1024;
 
     private static readonly string[] AllowedContentTypePrefixes =
     {
@@ -46,7 +51,7 @@ public sealed class WebFetchSkill : IAgentSkill
         {
             new AgentTool(
                 Name: ToolName,
-                Description: "Fetch the contents of an http or https URL via HTTP GET. Returns the response body (truncated to 256 KB) along with status and content type. Refuses private IPs, link-local addresses, and non-text content types.",
+                Description: "Fetch the contents of an http or https URL via HTTP GET. Returns the response body (truncated to 48 KB ≈ ~12K tokens) along with status and content type. Refuses private IPs, link-local addresses, and non-text content types. For long source pages, fetch once and synthesize — re-fetching the same URL costs another 12K tokens and doesn't reveal new content beyond the cap.",
                 JsonSchema: ParseSchema("""
                     {
                       "type": "object",

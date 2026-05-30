@@ -21,6 +21,9 @@ import TaskFormPage from "@/pages/workflow-tasks/TaskFormPage";
 import Notifications from "@/pages/notifications/Notifications";
 import NotesPage from "@/pages/notes/NotesPage";
 import AllProjects from "@/pages/notes/AllProjects";
+import DocumentsHomePage from "@/pages/documents/DocumentsHomePage";
+import ProjectDocumentsPage from "@/pages/documents/ProjectDocumentsPage";
+import TemplateGalleryPage from "@/pages/documents/TemplateGalleryPage";
 import DynamicPageRoute from "@/pages/dynamic-page/DynamicPageRoute";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
 
@@ -147,6 +150,26 @@ export const APP_ROUTES: AppRoute[] = [
   // from the project picker in /notes; clicking a row jumps back to /notes
   // with that project selected.
   { path: "projects", element: protect(<AllProjects />) },
+
+  // Documents subsystem (Phase 1 — folders only; documents + editor land in
+  // later phases). Three routes:
+  //   /documents                                 — project picker home page
+  //   /documents/p/:projectId                    — folder tree + project root
+  //   /documents/p/:projectId/folder/:folderId   — same shell, deep-linked
+  //                                                to a specific folder
+  // The folder view uses a custom side-tree layout; the editor route (later
+  // phases) will live OUTSIDE this AppShell so the editor can render full-
+  // bleed without the nav chrome.
+  { path: "documents", element: protect(<DocumentsHomePage />) },
+  // Cross-project template gallery. Templates are stored in the documents
+  // table (kind='template') but filtered out of regular folder listings —
+  // this is the only navigable surface that lists them.
+  { path: "documents/templates", element: protect(<TemplateGalleryPage />) },
+  { path: "documents/p/:projectId", element: protect(<ProjectDocumentsPage />) },
+  {
+    path: "documents/p/:projectId/folder/:folderId",
+    element: protect(<ProjectDocumentsPage />)
+  },
 
   // Forms feature: dev preview (draft) and runtime render (published).
   // Both require an authenticated user; the runtime render is additionally
