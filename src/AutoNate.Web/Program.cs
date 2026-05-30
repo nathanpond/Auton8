@@ -323,6 +323,12 @@ builder.Services.AddSingleton<ISelectorCompiler>(_ =>
 builder.Services.AddSingleton<ISelectorCompiler>(_ =>
     new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.SavedQuery>(
         EntityKinds.Query, q => q.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Pipeline>(
+        EntityKinds.Pipeline, p => p.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.PipelineRun>(
+        EntityKinds.PipelineRun, r => r.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -555,6 +561,27 @@ builder.Services.AddScoped<AutoNate.Web.Services.Datasets.Cached.ICachedDatasetM
 // refresh. Manual /api/datasets/{id}/refresh calls go through the
 // materializer directly without this loop.
 builder.Services.AddHostedService<AutoNate.Web.Services.Datasets.Cached.DatasetRefreshScheduler>();
+
+// Phase 5 of the Data Stores plan — Analytics Pipelines.
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.IPipelineStore,
+    AutoNate.Web.Services.Pipelines.EfCorePipelineStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.IPipelineRunStore,
+    AutoNate.Web.Services.Pipelines.EfCorePipelineRunStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.DatasetSourceRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.TransformerNodeRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.AnalyzerNodeRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.DatasetSinkRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunnerRegistry,
+    AutoNate.Web.Services.Pipelines.Execution.NodeRunnerRegistry>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Orchestration.PipelineOrchestrator>();
+// Polls every 5s for Queued pipeline_runs rows and dispatches the oldest
+// few to the orchestrator. Same one-loop-per-host model as the dataset
+// refresh scheduler.
+builder.Services.AddHostedService<AutoNate.Web.Services.Pipelines.Orchestration.PipelineRunWorker>();
 
 // Agent provider abstraction. Per-provider HttpClients have generous timeouts
 // because token streaming for a tool-using turn can run minutes.
@@ -1391,6 +1418,7 @@ app.MapDataConnectorEndpoints();
 app.MapDatasetEndpoints();
 app.MapTransformerEndpoints();
 app.MapAnalyzerEndpoints();
+app.MapPipelineEndpoints();
 app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
 

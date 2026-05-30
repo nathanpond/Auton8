@@ -21,6 +21,12 @@ public partial class AutoNateDbContext
 
     public virtual DbSet<SavedQueryShareToken> SavedQueryShareTokens { get; set; } = null!;
 
+    public virtual DbSet<Pipeline> Pipelines { get; set; } = null!;
+
+    public virtual DbSet<PipelineRun> PipelineRuns { get; set; } = null!;
+
+    public virtual DbSet<PipelineRunStep> PipelineRunSteps { get; set; } = null!;
+
 #pragma warning disable CA1822
     partial void OnDataStoresModelCreating(ModelBuilder modelBuilder)
 #pragma warning restore CA1822
@@ -113,6 +119,76 @@ public partial class AutoNateDbContext
             entity.Property(e => e.RowCount).HasColumnName("row_count");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+        });
+
+        modelBuilder.Entity<Pipeline>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("pipelines_pkey");
+            entity.ToTable("pipelines");
+            entity.HasIndex(e => e.OwnerUserId, "ix_pipelines_owner_user_id");
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.GraphJson)
+                .HasColumnName("graph")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.ScheduleCron).HasColumnName("schedule_cron");
+            entity.Property(e => e.LastRunAtUtc).HasColumnName("last_run_at_utc");
+            entity.Property(e => e.OwnerUserId).HasColumnName("owner_user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<PipelineRun>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("pipeline_runs_pkey");
+            entity.ToTable("pipeline_runs");
+            entity.HasIndex(e => e.PipelineId, "ix_pipeline_runs_pipeline_id");
+            entity.HasIndex(e => e.Status, "ix_pipeline_runs_status");
+            entity.HasIndex(e => e.QueuedAtUtc, "ix_pipeline_runs_queued_at_utc").IsDescending();
+
+            entity.HasOne<Pipeline>()
+                .WithMany()
+                .HasForeignKey(e => e.PipelineId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.PipelineId).HasColumnName("pipeline_id");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.GraphSnapshotJson)
+                .HasColumnName("graph_snapshot")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.QueuedAtUtc).HasColumnName("queued_at_utc");
+            entity.Property(e => e.StartedAtUtc).HasColumnName("started_at_utc");
+            entity.Property(e => e.CompletedAtUtc).HasColumnName("completed_at_utc");
+            entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
+            entity.Property(e => e.TriggeredBy).HasColumnName("triggered_by");
+            entity.Property(e => e.TriggerKind).HasColumnName("trigger_kind");
+        });
+
+        modelBuilder.Entity<PipelineRunStep>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("pipeline_run_steps_pkey");
+            entity.ToTable("pipeline_run_steps");
+            entity.HasIndex(e => e.PipelineRunId, "ix_pipeline_run_steps_pipeline_run_id");
+
+            entity.HasOne<PipelineRun>()
+                .WithMany()
+                .HasForeignKey(e => e.PipelineRunId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.PipelineRunId).HasColumnName("pipeline_run_id");
+            entity.Property(e => e.NodeKey).HasColumnName("node_key");
+            entity.Property(e => e.NodeKind).HasColumnName("node_kind");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.StartedAtUtc).HasColumnName("started_at_utc");
+            entity.Property(e => e.CompletedAtUtc).HasColumnName("completed_at_utc");
+            entity.Property(e => e.RowCount).HasColumnName("row_count");
+            entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
         });
 
         modelBuilder.Entity<SavedQueryShareToken>(entity =>
