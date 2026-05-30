@@ -74,8 +74,13 @@ public sealed class AdminConfigTests : E2ETestBase
 
         await page.GotoAsync(path);
 
+        // Exact=true so the Events page's per-transport h4s
+        // (e.g. "Transport — site.events", "Transport — agent.events") don't
+        // also bind to the h1 "Events" assertion via Playwright's default
+        // case-normalized substring match. Every other heading in the theory
+        // table is also a unique-exact h1.
         await Assertions.Expect(
-            page.GetByRole(AriaRole.Heading, new() { Name = heading }))
+            page.GetByRole(AriaRole.Heading, new() { Name = heading, Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 
