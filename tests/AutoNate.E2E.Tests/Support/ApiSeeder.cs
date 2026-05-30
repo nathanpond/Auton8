@@ -90,6 +90,98 @@ public sealed class ApiSeeder
             Name: json.GetProperty("name").GetString()!);
     }
 
+    /// <summary>
+    /// Saves a minimal user-task workflow via <c>POST /api/workflows/</c>, then
+    /// publishes it via <c>POST /api/workflows/{id}/publish</c> so it's deployed
+    /// to Flowable and ready to receive instances. The BPMN is hand-rolled to be
+    /// the smallest shape Flowable will accept: <c>start → userTask → end</c>.
+    /// The user task keeps the instance in the RUNNING state long enough for UI
+    /// tests to observe / cancel / delete it.
+    ///
+    /// Flowable lives outside the ephemeral test DB (its own Postgres schema),
+    /// so each call must use a unique <paramref name="processKey"/> to avoid
+    /// deployment collisions with prior runs or with the dev developer's
+    /// workflows. <see cref="TestNames"/>'s slugs already supply that.
+    /// </summary>
+    public async Task<WorkflowDto> CreateAndPublishWorkflowAsync(string processKey, string name)
+    {
+        var modelId = Guid.NewGuid();
+        var bpmnXml = MinimalUserTaskBpmn(processKey, name);
+        var now = DateTimeOffset.UtcNow;
+
+        var saveResponse = await _request.PostAsync("/api/workflows/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                id = modelId,
+                name,
+                processKey,
+                bpmnXml,
+                isDraft = true,
+                draftVersionNumber = 1,
+                createdAtUtc = now,
+                updatedAtUtc = now
+            }
+        });
+        await EnsureSuccessAsync(saveResponse, "save workflow");
+        var saved = await saveResponse.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from POST /api/workflows/.");
+
+        // Publish requires the full WorkflowModel body — relay what the server
+        // just gave us (which is the canonical, normalized shape).
+        var publishResponse = await _request.PostAsync(
+            $"/api/workflows/{modelId}/publish",
+            new APIRequestContextOptions { DataObject = saved });
+        await EnsureSuccessAsync(publishResponse, "publish workflow");
+
+        return new WorkflowDto(modelId, name, processKey);
+    }
+
+    /// <summary>
+    /// Starts a workflow instance via <c>POST /api/workflows/{processKey}/start</c>
+    /// with the given display name. The Flowable response is relayed through
+    /// the endpoint; we read the new instance id off it so cancel/delete tests
+    /// can target the row by name + id pair.
+    /// </summary>
+    public async Task<ExecutionDto> StartExecutionAsync(string processKey, string instanceName)
+    {
+        var response = await _request.PostAsync(
+            $"/api/workflows/{processKey}/start",
+            new APIRequestContextOptions { DataObject = new { name = instanceName } });
+        await EnsureSuccessAsync(response, "start execution");
+        var json = await response.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /start.");
+
+        return new ExecutionDto(
+            Id: json.GetProperty("id").GetString()!,
+            Name: instanceName);
+    }
+
+    private static string MinimalUserTaskBpmn(string processKey, string name) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                          xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                          xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                          id="Definitions_1"
+                          targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="{{processKey}}" name="{{name}}" isExecutable="true">
+            <bpmn:startEvent id="StartEvent_1">
+              <bpmn:outgoing>Flow_1</bpmn:outgoing>
+            </bpmn:startEvent>
+            <bpmn:userTask id="UserTask_1" name="Review">
+              <bpmn:incoming>Flow_1</bpmn:incoming>
+              <bpmn:outgoing>Flow_2</bpmn:outgoing>
+            </bpmn:userTask>
+            <bpmn:endEvent id="EndEvent_1">
+              <bpmn:incoming>Flow_2</bpmn:incoming>
+            </bpmn:endEvent>
+            <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="UserTask_1" />
+            <bpmn:sequenceFlow id="Flow_2" sourceRef="UserTask_1" targetRef="EndEvent_1" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
     private static async Task EnsureSuccessAsync(IAPIResponse response, string action)
     {
         if (response.Ok) return;
@@ -119,3 +211,14 @@ public sealed record RecordTypeDto(Guid Id, string ShortCode, string Name);
 /// composite ("E3F8C1-1") that drives /record/{key} routing in the SPA.
 /// </summary>
 public sealed record RecordDto(Guid Id, string Key, string Name);
+
+/// <summary>
+/// Minimal handle for a saved+published workflow model.
+/// </summary>
+public sealed record WorkflowDto(Guid Id, string Name, string ProcessKey);
+
+/// <summary>
+/// Minimal handle for a started workflow execution (process instance). The
+/// <c>Id</c> is the Flowable process-instance id (a string).
+/// </summary>
+public sealed record ExecutionDto(string Id, string Name);
