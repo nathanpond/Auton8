@@ -3508,6 +3508,33 @@ internal static class DatabaseSchemaInitializer
             ON datasets (source_kind, source_id);
         """;
 
+    // Phase 3 of the Data Stores plan — anonymous share tokens for saved
+    // AQL queries. Stored as SHA-256 hex of the token so a DB read can't
+    // reconstruct a working URL. ON DELETE CASCADE from saved_queries
+    // sweeps every token when the underlying query is removed.
+    private const string SavedQueryShareTokensSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS saved_query_share_tokens (
+            id UUID PRIMARY KEY,
+            saved_query_id UUID NOT NULL REFERENCES saved_queries (id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL,
+            issued_by UUID NOT NULL,
+            issued_at_utc TIMESTAMPTZ NOT NULL,
+            expires_at_utc TIMESTAMPTZ NULL,
+            revoked_at_utc TIMESTAMPTZ NULL,
+            max_uses INTEGER NULL,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at_utc TIMESTAMPTZ NULL,
+            label TEXT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_query_share_tokens_token_hash
+            ON saved_query_share_tokens (token_hash);
+
+        CREATE INDEX IF NOT EXISTS ix_saved_query_share_tokens_saved_query_id
+            ON saved_query_share_tokens (saved_query_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -3576,6 +3603,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(RecordActivityRollupSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(DataStoresSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(DatasetsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SavedQueryShareTokensSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

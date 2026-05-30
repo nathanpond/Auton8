@@ -225,6 +225,14 @@ public sealed class AqlAssistSkillTests
             if (ThrowOnExecute is not null) throw ThrowOnExecute;
             return Task.FromResult(Response);
         }
+
+        public Task<QueryResult> ExecuteBoundAsync(
+            string queryText,
+            IReadOnlyDictionary<string, string>? parameters,
+            ClaimsPrincipal actor,
+            int? hardCap,
+            CancellationToken cancellationToken)
+            => ExecuteAsync(queryText, actor, hardCap, cancellationToken);
     }
 
     private sealed class FakeRegistry : IQueryEntityRegistry

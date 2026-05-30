@@ -320,6 +320,9 @@ builder.Services.AddSingleton<ISelectorCompiler>(_ =>
 builder.Services.AddSingleton<ISelectorCompiler>(_ =>
     new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Dataset>(
         EntityKinds.Dataset, d => d.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.SavedQuery>(
+        EntityKinds.Query, q => q.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -425,6 +428,11 @@ builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlExecutor,
     AutoNate.Web.Services.Query.AqlExecutor>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.ISavedQueryStore,
     AutoNate.Web.Services.Query.EfCoreSavedQueryStore>();
+// Phase 3 of the Data Stores plan — share-token issuance + anonymous redemption.
+builder.Services.AddScoped<AutoNate.Web.Services.Query.ISavedQueryShareTokenStore,
+    AutoNate.Web.Services.Query.EfCoreSavedQueryShareTokenStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.IShareIssuerPrincipalFactory,
+    AutoNate.Web.Services.Query.ShareIssuerPrincipalFactory>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlSuggestionService,
     AutoNate.Web.Services.Query.AqlSuggestionService>();
 
@@ -1306,6 +1314,7 @@ app.MapQueryEndpoints();
 app.MapAqlSchemaEndpoints();
 app.MapAqlSuggestEndpoints();
 app.MapSavedQueryEndpoints();
+app.MapPublicQueryShareEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();
