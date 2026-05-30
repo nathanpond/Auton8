@@ -17,7 +17,7 @@ public static class AnalyticsEntityTypes
     private static readonly Lazy<IReadOnlyList<IEntityType>> _all = new(() =>
         new IEntityType[]
         {
-            DataStore!, DataConnector!, Dataset!, Query!,
+            DataStore!, DataConnector!, Dataset!, Query!, Transformer!, Analyzer!,
         });
 
     // Refresh is intentionally not on DataStore — refresh is a Dataset
@@ -82,5 +82,26 @@ public static class AnalyticsEntityTypes
             Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
             Actions.Share
         },
+        tags: Array.Empty<string>());
+
+    // Transformers and Analyzers are catalog kinds in Phase 4 — the actual
+    // implementations are DI-registered (built-ins) or plugin-contributed,
+    // not user-created rows. The List action gates the /api/transformers
+    // and /api/analyzers palette endpoints; Run will gate Phase 5's per-node
+    // pipeline execution. No instance authorizer is needed today (the
+    // catalog is global); a per-key gate joins later if/when transformer-
+    // specific permissions become a real need.
+    public static EntityTypeDefinition Transformer { get; } = new(
+        kind: EntityKinds.Transformer,
+        clrType: typeof(object),
+        idClrType: typeof(string),
+        actions: new[] { Actions.List, Actions.View, Actions.Run, Actions.ExecuteUnsafe },
+        tags: Array.Empty<string>());
+
+    public static EntityTypeDefinition Analyzer { get; } = new(
+        kind: EntityKinds.Analyzer,
+        clrType: typeof(object),
+        idClrType: typeof(string),
+        actions: new[] { Actions.List, Actions.View, Actions.Run, Actions.ExecuteUnsafe },
         tags: Array.Empty<string>());
 }

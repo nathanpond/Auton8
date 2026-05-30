@@ -57,6 +57,18 @@ public interface IPluginContext
     // ALC, with the same disable-sweeps-everything lifecycle as Menus/Behaviors.
     IPluginConnectors Connectors { get; }
 
+    // Helpers for contributing IPluginTransformer implementations to the
+    // host's transformer registry (Phase 4 of the Data Stores plan). Plugin
+    // transformers appear in the React Flow node palette alongside the
+    // built-in shelf and are invoked by the pipeline orchestrator. Same
+    // disable-sweeps-everything lifecycle as Connectors.
+    IPluginTransformers Transformers { get; }
+
+    // Helpers for contributing IPluginAnalyzer implementations to the host's
+    // analyzer registry (Phase 4 of the Data Stores plan). Same lifecycle as
+    // Transformers.
+    IPluginAnalyzers Analyzers { get; }
+
     // Host services for cross-cutting needs (logging, etc.). The host wraps
     // its root provider in an allowlist before handing it over, so only a
     // curated set of safe types resolve — currently ILoggerFactory,
