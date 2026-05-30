@@ -13,7 +13,12 @@ public sealed record AqlQuery(
     IReadOnlyList<AqlOrderItem> OrderBy,
     IReadOnlyList<AqlSelectItem>? Columns,
     IReadOnlyList<string>? Group,
-    int? Limit);
+    int? Limit,
+    // The string-literal argument after a parameterized entity reference:
+    // `FROM Dataset("sales")` parses to Entity="Dataset", EntityArgument="sales".
+    // Null when the FROM is bare (every entity except Dataset in v1). Validated
+    // against IQueryEntity.AcceptsEntityArgument / RequiresEntityArgument.
+    string? EntityArgument = null);
 
 public sealed record AqlSelectItem(
     string? Field,

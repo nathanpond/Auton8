@@ -17,6 +17,8 @@ public partial class AutoNateDbContext
 
     public virtual DbSet<ConnectorRun> ConnectorRuns { get; set; } = null!;
 
+    public virtual DbSet<Dataset> Datasets { get; set; } = null!;
+
 #pragma warning disable CA1822
     partial void OnDataStoresModelCreating(ModelBuilder modelBuilder)
 #pragma warning restore CA1822
@@ -109,6 +111,32 @@ public partial class AutoNateDbContext
             entity.Property(e => e.RowCount).HasColumnName("row_count");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+        });
+
+        modelBuilder.Entity<Dataset>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("datasets_pkey");
+            entity.ToTable("datasets");
+            entity.HasIndex(e => e.OwnerUserId, "ix_datasets_owner_user_id");
+            entity.HasIndex(e => new { e.SourceKind, e.SourceId }, "ix_datasets_source");
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Mode).HasColumnName("mode");
+            entity.Property(e => e.ColumnSchemaJson)
+                .HasColumnName("column_schema")
+                .HasColumnType("jsonb");
+            entity.Property(e => e.RefreshCron).HasColumnName("refresh_cron");
+            entity.Property(e => e.LastRefreshedAtUtc).HasColumnName("last_refreshed_at_utc");
+            entity.Property(e => e.SourceKind).HasColumnName("source_kind");
+            entity.Property(e => e.SourceId).HasColumnName("source_id");
+            entity.Property(e => e.SourceTableName).HasColumnName("source_table_name");
+            entity.Property(e => e.OwnerUserId).HasColumnName("owner_user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         modelBuilder.Entity<ConnectorRun>(entity =>

@@ -317,6 +317,9 @@ builder.Services.AddSingleton<ISelectorCompiler>(_ =>
 builder.Services.AddSingleton<ISelectorCompiler>(_ =>
     new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.DataConnector>(
         EntityKinds.DataConnector, d => d.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Dataset>(
+        EntityKinds.Dataset, d => d.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -412,6 +415,10 @@ builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.RecordActivityRollupQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.NotesQueryEntity>());
+// Phase 2 of the Data Stores plan — parameterized FROM Dataset("name").
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.DatasetQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.DatasetQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntityRegistry,
     AutoNate.Web.Services.Query.Entities.QueryEntityRegistry>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlExecutor,
@@ -465,6 +472,17 @@ builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginConnectorRegistry,
     AutoNate.Web.Plugins.PluginConnectorRegistry>();
 builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandlerRegistry,
     AutoNate.Web.Services.DataConnectors.DataConnectorHandlerRegistry>();
+// Datasets (Phase 2 of the Data Stores plan).
+builder.Services.AddScoped<AutoNate.Web.Services.Datasets.IDatasetStore,
+    AutoNate.Web.Services.Datasets.EfCoreDatasetStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Datasets.IDatasetExecutor,
+    AutoNate.Web.Services.Datasets.DatasetExecutor>();
+builder.Services.AddScoped<AutoNate.Web.Services.Datasets.Cached.ICachedDatasetMaterializer,
+    AutoNate.Web.Services.Datasets.Cached.CachedDatasetMaterializer>();
+// One-minute polling scheduler that drives cron-based cached-dataset
+// refresh. Manual /api/datasets/{id}/refresh calls go through the
+// materializer directly without this loop.
+builder.Services.AddHostedService<AutoNate.Web.Services.Datasets.Cached.DatasetRefreshScheduler>();
 
 // Agent provider abstraction. Per-provider HttpClients have generous timeouts
 // because token streaming for a tool-using turn can run minutes.
@@ -1297,6 +1315,7 @@ app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
 app.MapDataStoreEndpoints();
 app.MapDataConnectorEndpoints();
+app.MapDatasetEndpoints();
 app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
 
