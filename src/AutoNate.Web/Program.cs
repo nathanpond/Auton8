@@ -227,6 +227,11 @@ builder.Services.AddOptions<DaprOptions>()
 builder.Services.AddOptions<NatsOptions>()
     .BindConfiguration(NatsOptions.SectionName);
 builder.Services.AddSingleton<NatsStreamProvisioner>();
+// Phase 6 of the Data Stores plan — shared NATS connection for callers
+// (the code-node runner today) that need request/reply rather than the
+// short-lived publish-only flow the provisioner uses.
+builder.Services.AddSingleton<AutoNate.Web.Services.Nats.INatsConnectionProvider,
+    AutoNate.Web.Services.Nats.NatsConnectionProvider>();
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddScopedSubscriptions();
 builder.Services.AddSingleton<DaprSidecarProbe>();
@@ -582,6 +587,16 @@ builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Orchestration.Pipelin
 // few to the orchestrator. Same one-loop-per-host model as the dataset
 // refresh scheduler.
 builder.Services.AddHostedService<AutoNate.Web.Services.Pipelines.Orchestration.PipelineRunWorker>();
+
+// Phase 6 of the Data Stores plan — user-authored code transformers /
+// analyzers. The JetStreamCodeNodeRunner is registered Scoped because
+// TransformerNodeRunner / AnalyzerNodeRunner consume it via constructor
+// injection alongside the registries (also Scoped). When Nats:Url isn't
+// configured, the runner will fail on first publish — but the Phase 4
+// fallthrough path means non-code transformers keep working regardless.
+builder.Services.AddScoped<AutoNate.Web.Services.Transformers.Code.ICodeTransformerStore,
+    AutoNate.Web.Services.Transformers.Code.EfCoreCodeTransformerStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.JetStreamCodeNodeRunner>();
 
 // Agent provider abstraction. Per-provider HttpClients have generous timeouts
 // because token streaming for a tool-using turn can run minutes.
@@ -1419,6 +1434,7 @@ app.MapDatasetEndpoints();
 app.MapTransformerEndpoints();
 app.MapAnalyzerEndpoints();
 app.MapPipelineEndpoints();
+app.MapCodeTransformerEndpoints();
 app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
 

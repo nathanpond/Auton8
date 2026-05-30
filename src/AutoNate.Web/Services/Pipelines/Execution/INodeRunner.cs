@@ -18,7 +18,12 @@ public interface INodeRunner
 public sealed record class NodeRunnerContext(
     PipelineNode Node,
     IReadOnlyList<DataFrame> Inputs,
-    ClaimsPrincipal Actor);
+    ClaimsPrincipal Actor,
+    // The pipeline run that owns the current invocation. Phase 6's
+    // JetStream code-node runner uses it as part of the subject name so
+    // the sidecar's per-message log lines and any future cancel signals
+    // can attribute the work back to the run.
+    Guid PipelineRunId);
 
 public sealed class NodeRunnerNotFoundException(string kind)
     : Exception($"No node runner registered for kind '{kind}'.");
