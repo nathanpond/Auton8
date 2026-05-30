@@ -82,7 +82,7 @@ public sealed class PipelineOrchestrator(
                 try
                 {
                     var output = await runner.RunAsync(
-                        new NodeRunnerContext(node, inputFrames, actor), cancellationToken);
+                        new NodeRunnerContext(node, inputFrames, actor, runId), cancellationToken);
                     outputs[node.Id] = output;
                     var rowCount = output?.Rows.Count is { } rc ? (long?)rc : null;
                     await runStore.MarkStepCompletedAsync(

@@ -26,6 +26,7 @@ import DataStoresPage from "@/pages/admin/datastores/DataStoresPage";
 import DataConnectorsPage from "@/pages/admin/dataconnectors/DataConnectorsPage";
 import DatasetsPage from "@/pages/admin/datasets/DatasetsPage";
 import PipelinesPage from "@/pages/admin/pipelines/PipelinesPage";
+import CodeTransformersPage from "@/pages/admin/code-transformers/CodeTransformersPage";
 import SiteAppearancePage from "@/pages/admin/config/SiteAppearance";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
 import Events from "@/pages/admin/config/Events";
@@ -88,6 +89,7 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   dataConnectors: <DataConnectorsPage />,
   datasets: <DatasetsPage />,
   pipelines: <PipelinesPage />,
+  codeTransformers: <CodeTransformersPage />,
   dashboard: <Dashboard />,
   query: <QueryPage />
 };

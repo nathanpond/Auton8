@@ -27,6 +27,8 @@ public partial class AutoNateDbContext
 
     public virtual DbSet<PipelineRunStep> PipelineRunSteps { get; set; } = null!;
 
+    public virtual DbSet<CodeTransformer> CodeTransformers { get; set; } = null!;
+
 #pragma warning disable CA1822
     partial void OnDataStoresModelCreating(ModelBuilder modelBuilder)
 #pragma warning restore CA1822
@@ -119,6 +121,27 @@ public partial class AutoNateDbContext
             entity.Property(e => e.RowCount).HasColumnName("row_count");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+        });
+
+        modelBuilder.Entity<CodeTransformer>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("code_transformers_pkey");
+            entity.ToTable("code_transformers");
+            entity.HasIndex(e => e.OwnerUserId, "ix_code_transformers_owner_user_id");
+            entity.HasIndex(e => e.Kind, "ix_code_transformers_kind");
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Language).HasColumnName("language");
+            entity.Property(e => e.Code).HasColumnName("code");
+            entity.Property(e => e.IsUnsafe).HasColumnName("is_unsafe");
+            entity.Property(e => e.OwnerUserId).HasColumnName("owner_user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         modelBuilder.Entity<Pipeline>(entity =>

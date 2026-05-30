@@ -88,7 +88,8 @@ const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] 
   { path: "datastores", templateKey: "dataStores" },
   { path: "dataconnectors", templateKey: "dataConnectors" },
   { path: "datasets", templateKey: "datasets" },
-  { path: "pipelines", templateKey: "pipelines" }
+  { path: "pipelines", templateKey: "pipelines" },
+  { path: "code-transformers", templateKey: "codeTransformers" }
 ];
 
 // Absolute-path → templateKey index, materialized once for the validator.

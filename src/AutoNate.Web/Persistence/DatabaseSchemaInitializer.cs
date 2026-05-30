@@ -3600,6 +3600,37 @@ internal static class DatabaseSchemaInitializer
             ON pipeline_run_steps (pipeline_run_id);
         """;
 
+    // User-authored transformers / analyzers (Phase 6 of the Data Stores
+    // plan). The code itself executes in `services/executor/` under V8 or
+    // Pyodide isolates unless `is_unsafe` flips the runtime to host-side
+    // CPython (which the `transformer:executeunsafe` permission gates).
+    private const string CodeTransformersSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS code_transformers (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            kind TEXT NOT NULL,
+            language TEXT NOT NULL,
+            code TEXT NOT NULL DEFAULT '',
+            is_unsafe BOOLEAN NOT NULL DEFAULT FALSE,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_code_transformers_name
+            ON code_transformers (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_code_transformers_owner_user_id
+            ON code_transformers (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_code_transformers_kind
+            ON code_transformers (kind);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -3670,6 +3701,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(DatasetsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SavedQueryShareTokensSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PipelinesSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(CodeTransformersSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value
