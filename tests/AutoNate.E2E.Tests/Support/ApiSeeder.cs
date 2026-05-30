@@ -158,6 +158,67 @@ public sealed class ApiSeeder
     }
 
     /// <summary>
+    /// Creates a local user via <c>POST /api/users/</c>. Critical for Phase 10
+    /// permission gating: because <c>superadmin_backfill_v1</c> runs once at
+    /// app startup, users created <em>after</em> boot do <em>not</em> get
+    /// SuperAdmin — they have no grants until something is explicitly created
+    /// for them. The endpoint requires the caller to have <c>user:create</c>,
+    /// so this should be invoked from the seeded admin's request context.
+    /// </summary>
+    public async Task<UserDto> CreateUserAsync(
+        string username, string password,
+        string firstName = "E2E", string lastName = "User",
+        string? email = null)
+    {
+        var response = await _request.PostAsync("/api/users/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                username,
+                firstName,
+                lastName,
+                password,
+                email = email ?? $"{username}@e2e.local"
+            }
+        });
+        await EnsureSuccessAsync(response, "create user");
+        var json = await response.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /api/users/.");
+        return new UserDto(
+            UserId: json.GetProperty("userId").GetGuid(),
+            Username: json.GetProperty("username").GetString()!);
+    }
+
+    /// <summary>
+    /// Creates a permission grant via <c>POST /api/admin/grants</c>. The
+    /// endpoint requires <c>siteconfig:edit</c>, so this also needs the
+    /// admin's request context. <paramref name="selectorString"/> follows the
+    /// shape <c>/recordtype/*</c> (kind-level) or <c>/record/{id}</c>
+    /// (instance), with optional sub-paths for tagged predicates; see
+    /// <c>AutoNate.Web.Tests/Authorization/SelectorParserTests.cs</c> for the
+    /// canonical grammar.
+    /// </summary>
+    public async Task GrantAsync(
+        string principalKind, Guid principalId,
+        string action, string selectorString,
+        string effect = "allow", int priority = 0)
+    {
+        var response = await _request.PostAsync("/api/admin/grants/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                principalKind,
+                principalId = principalId.ToString(),
+                action,
+                selectorString,
+                effect,
+                priority
+            }
+        });
+        await EnsureSuccessAsync(response, "create permission grant");
+    }
+
+    /// <summary>
     /// Creates a content project via <c>POST /api/content/projects</c>. Any
     /// signed-in user can create one; the caller becomes the Owner in the
     /// same transaction so the project is immediately scoped + writeable.
@@ -307,6 +368,12 @@ public sealed record ExecutionDto(string Id, string Name);
 /// <c>/form/{shortCode}</c> and <c>/formdev/{shortCode}</c> routes.
 /// </summary>
 public sealed record FormDto(Guid Id, string ShortCode, string Name);
+
+/// <summary>
+/// Minimal handle for a created local user — <c>UserId</c> is the principal
+/// id used in permission grants.
+/// </summary>
+public sealed record UserDto(Guid UserId, string Username);
 
 /// <summary>
 /// Minimal handle for a created content project. Drives
