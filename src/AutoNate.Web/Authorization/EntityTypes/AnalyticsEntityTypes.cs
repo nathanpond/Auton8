@@ -2,14 +2,16 @@ using DataStoreModel = AutoNate.Web.Persistence.Scaffolded.DataStore;
 using DataConnectorModel = AutoNate.Web.Persistence.Scaffolded.DataConnector;
 using DatasetModel = AutoNate.Web.Persistence.Scaffolded.Dataset;
 using SavedQueryModel = AutoNate.Web.Persistence.Scaffolded.SavedQuery;
+using PipelineModel = AutoNate.Web.Persistence.Scaffolded.Pipeline;
+using PipelineRunModel = AutoNate.Web.Persistence.Scaffolded.PipelineRun;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
 // EntityType registrations for the Data Stores & Analytics Pipeline feature
 // (docs/plans/2026-05-30-data-stores-implementation.md). Phase 1 lands
 // DataStore + DataConnector. Phase 2 adds Dataset. Phase 3 promotes
-// SavedQuery to the Query kind. Transformer, Analyzer, Pipeline, and
-// PipelineRun kinds join this list as their phases ship.
+// SavedQuery to the Query kind. Phase 4 adds Transformer + Analyzer.
+// Phase 5 adds Pipeline + PipelineRun.
 public static class AnalyticsEntityTypes
 {
     public static IReadOnlyList<IEntityType> All => _all.Value;
@@ -18,6 +20,7 @@ public static class AnalyticsEntityTypes
         new IEntityType[]
         {
             DataStore!, DataConnector!, Dataset!, Query!, Transformer!, Analyzer!,
+            Pipeline!, PipelineRun!,
         });
 
     // Refresh is intentionally not on DataStore — refresh is a Dataset
@@ -103,5 +106,27 @@ public static class AnalyticsEntityTypes
         clrType: typeof(object),
         idClrType: typeof(string),
         actions: new[] { Actions.List, Actions.View, Actions.Run, Actions.ExecuteUnsafe },
+        tags: Array.Empty<string>());
+
+    // Pipeline = the DAG definition; PipelineRun = one execution. Run is
+    // gated separately from Edit so an operator can hand out execution
+    // rights without authoring rights. Schedule covers the schedule_cron
+    // edit path; Cancel terminates an in-flight run.
+    public static EntityTypeDefinition Pipeline { get; } = new(
+        kind: EntityKinds.Pipeline,
+        clrType: typeof(PipelineModel),
+        idClrType: typeof(Guid),
+        actions: new[]
+        {
+            Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
+            Actions.Run, Actions.Schedule, Actions.Cancel
+        },
+        tags: Array.Empty<string>());
+
+    public static EntityTypeDefinition PipelineRun { get; } = new(
+        kind: EntityKinds.PipelineRun,
+        clrType: typeof(PipelineRunModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.List, Actions.Cancel },
         tags: Array.Empty<string>());
 }

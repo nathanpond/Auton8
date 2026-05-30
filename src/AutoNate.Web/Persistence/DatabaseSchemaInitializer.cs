@@ -3535,6 +3535,71 @@ internal static class DatabaseSchemaInitializer
             ON saved_query_share_tokens (saved_query_id);
         """;
 
+    // Analytics pipelines (Phase 5 of the Data Stores plan). The DAG lives
+    // in `pipelines.graph` (jsonb). pipeline_runs captures a snapshot of
+    // the graph at enqueue time so a concurrent edit can't mutate a
+    // queued run. pipeline_run_steps records per-node status/timings/row
+    // counts as the orchestrator walks the topologically-sorted graph.
+    private const string PipelinesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS pipelines (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            graph JSONB NOT NULL DEFAULT '{"nodes":[],"edges":[]}'::jsonb,
+            schedule_cron TEXT NULL,
+            last_run_at_utc TIMESTAMPTZ NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_pipelines_name
+            ON pipelines (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_pipelines_owner_user_id
+            ON pipelines (owner_user_id);
+
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+            id UUID PRIMARY KEY,
+            pipeline_id UUID NOT NULL REFERENCES pipelines (id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'Queued',
+            graph_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            queued_at_utc TIMESTAMPTZ NOT NULL,
+            started_at_utc TIMESTAMPTZ NULL,
+            completed_at_utc TIMESTAMPTZ NULL,
+            error_message TEXT NULL,
+            triggered_by UUID NOT NULL,
+            trigger_kind TEXT NOT NULL DEFAULT 'manual'
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_runs_pipeline_id
+            ON pipeline_runs (pipeline_id);
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_runs_status
+            ON pipeline_runs (status);
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_runs_queued_at_utc
+            ON pipeline_runs (queued_at_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS pipeline_run_steps (
+            id UUID PRIMARY KEY,
+            pipeline_run_id UUID NOT NULL REFERENCES pipeline_runs (id) ON DELETE CASCADE,
+            node_key TEXT NOT NULL,
+            node_kind TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Queued',
+            started_at_utc TIMESTAMPTZ NULL,
+            completed_at_utc TIMESTAMPTZ NULL,
+            row_count BIGINT NULL,
+            error_message TEXT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_run_steps_pipeline_run_id
+            ON pipeline_run_steps (pipeline_run_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -3604,6 +3669,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(DataStoresSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(DatasetsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SavedQueryShareTokensSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PipelinesSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value
