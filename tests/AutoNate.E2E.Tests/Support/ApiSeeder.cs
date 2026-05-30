@@ -53,6 +53,43 @@ public sealed class ApiSeeder
             Name: json.GetProperty("name").GetString()!);
     }
 
+    /// <summary>
+    /// POST /api/records/ — creates a record of the given type. <c>Values</c>
+    /// is sent as an empty object since the record type has no custom fields
+    /// in most foundation tests; pass <paramref name="valuesJson"/> to send a
+    /// raw JSON object string when custom fields are needed.
+    /// </summary>
+    public async Task<RecordDto> CreateRecordAsync(
+        Guid recordTypeId,
+        string name,
+        string? status = null,
+        string? valuesJson = null)
+    {
+        // CreateRecordRequest.Values is a JsonElement, so an empty object
+        // ({}) is the safest default — record types with no custom fields
+        // accept it directly.
+        using var doc = System.Text.Json.JsonDocument.Parse(valuesJson ?? "{}");
+        var response = await _request.PostAsync("/api/records/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                recordTypeId,
+                name,
+                status,
+                values = doc.RootElement
+            }
+        });
+
+        await EnsureSuccessAsync(response, "create record");
+        var json = await response.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /api/records/.");
+
+        return new RecordDto(
+            Id: json.GetProperty("id").GetGuid(),
+            Key: json.GetProperty("key").GetString()!,
+            Name: json.GetProperty("name").GetString()!);
+    }
+
     private static async Task EnsureSuccessAsync(IAPIResponse response, string action)
     {
         if (response.Ok) return;
@@ -76,3 +113,9 @@ public sealed class ApiSeeder
 /// color, isSystem, …); add fields here when a test needs them.
 /// </summary>
 public sealed record RecordTypeDto(Guid Id, string ShortCode, string Name);
+
+/// <summary>
+/// Minimal projection of <c>RecordDto</c>. <c>Key</c> is the human-readable
+/// composite ("E3F8C1-1") that drives /record/{key} routing in the SPA.
+/// </summary>
+public sealed record RecordDto(Guid Id, string Key, string Name);

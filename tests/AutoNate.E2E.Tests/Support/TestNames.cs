@@ -21,4 +21,13 @@ internal static class TestNames
     /// human-readable entity names.
     /// </summary>
     public static string Prefixed(string prefix) => $"e2e-{prefix}-{ShortSlug()}";
+
+    /// <summary>
+    /// Returns a record-type short code that satisfies
+    /// <c>RecordTypeShortCode.Valid</c>: <c>^[A-Z][A-Z0-9]{1,7}$</c>. We use a
+    /// fixed <c>E</c> prefix (for E2E) so codes are easy to recognize in the
+    /// DB, then 5 uppercased hex characters of randomness — total 6 chars,
+    /// always starts with a letter, comfortably inside the 2–8 char window.
+    /// </summary>
+    public static string ShortCode() => "E" + Guid.NewGuid().ToString("N")[..5].ToUpperInvariant();
 }
