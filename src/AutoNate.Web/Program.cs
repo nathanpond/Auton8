@@ -273,9 +273,18 @@ builder.Services.AddDbContextFactory<AutoNateDbContext>((sp, options) =>
     options.ConfigureWarnings(w =>
         w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.ConnectionError));
 });
+// Database initializers run at startup before the rest of the host stands up,
+// in Order ascending. Primary AutoNate DB is Order 0; Phase 1 of the Data
+// Stores plan adds a secondary at Order 10 against `autonate_datastores`.
+builder.Services.AddSingleton<AutoNate.Web.Persistence.IDatabaseInitializer,
+    AutoNate.Web.Persistence.PrimaryDatabaseInitializer>();
 builder.Services.AddOptions<AutoNate.Web.Authorization.AuthorizationOptions>()
     .BindConfiguration(AutoNate.Web.Authorization.AuthorizationOptions.SectionName);
 foreach (var entityType in CoreEntityTypes.All)
+{
+    builder.Services.AddSingleton<IEntityType>(entityType);
+}
+foreach (var entityType in AutoNate.Web.Authorization.EntityTypes.AnalyticsEntityTypes.All)
 {
     builder.Services.AddSingleton<IEntityType>(entityType);
 }
@@ -299,6 +308,15 @@ builder.Services.AddSingleton<ISelectorCompiler>(_ =>
 builder.Services.AddSingleton<ISelectorCompiler>(_ =>
     new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.ExternalConnection>(
         EntityKinds.ExternalConnection, c => c.Id));
+// Data Stores & Analytics Pipeline (docs/plans/2026-05-30-data-stores-implementation.md).
+// Path-only is sufficient for v1; tag predicates can join the compilers
+// later if grants need to scope by kind/owner without enumerating ids.
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.DataStore>(
+        EntityKinds.DataStore, d => d.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.DataConnector>(
+        EntityKinds.DataConnector, d => d.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -415,6 +433,38 @@ builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionSto
 // the stub just confirms the secret decrypts cleanly.
 builder.Services.AddScoped<ITestConnectionService, StubTestConnectionService>();
 builder.Services.AddScoped<IConnectionModelLister, ConnectionModelLister>();
+
+// Data Stores & Analytics Pipeline — Phase 1 wiring
+// (docs/plans/2026-05-30-data-stores-implementation.md). The primary-DB
+// metadata stores are scoped (one DbContext per request); the SQL
+// provisioner + connection factory are singletons because they hold no
+// per-request state. The DatastoresDatabaseInitializer auto-disables when
+// ConnectionStrings:Datastores is absent (logs an Info and no-ops).
+builder.Services.AddOptions<AutoNate.Web.Services.DataStores.Sql.DatastoresDatabaseOptions>()
+    .BindConfiguration(AutoNate.Web.Services.DataStores.Sql.DatastoresDatabaseOptions.SectionName);
+builder.Services.AddSingleton<AutoNate.Web.Persistence.IDatabaseInitializer,
+    AutoNate.Web.Services.DataStores.Sql.DatastoresDatabaseInitializer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataStores.Sql.IDatastoresConnectionFactory,
+    AutoNate.Web.Services.DataStores.Sql.DatastoresConnectionFactory>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataStores.Sql.SqlDataStoreProvisioner>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataStores.IDataStoreStore,
+    AutoNate.Web.Services.DataStores.EfCoreDataStoreStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataConnectors.IDataConnectorStore,
+    AutoNate.Web.Services.DataConnectors.EfCoreDataConnectorStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataStores.File.IFileDataStoreService,
+    AutoNate.Web.Services.DataStores.File.FileDataStoreService>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataStores.Sql.CsvIngestor>();
+// Built-in connector handlers. Plugin-contributed handlers join through
+// IPluginConnectorRegistry → PluginDataConnectorAdapter, registered below.
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandler,
+    AutoNate.Web.Services.DataConnectors.Builtin.RestDataConnectorHandler>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandler,
+    AutoNate.Web.Services.DataConnectors.Builtin.SmbDataConnectorHandler>();
+builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginConnectorRegistry,
+    AutoNate.Web.Plugins.PluginConnectorRegistry>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandlerRegistry,
+    AutoNate.Web.Services.DataConnectors.DataConnectorHandlerRegistry>();
 
 // Agent provider abstraction. Per-provider HttpClients have generous timeouts
 // because token streaming for a tool-using turn can run minutes.
@@ -828,7 +878,16 @@ if (app.Environment.IsDevelopment()
     }
 }
 
-await DatabaseSchemaInitializer.EnsureAsync(app.Services);
+await using (var dbInitScope = app.Services.CreateAsyncScope())
+{
+    var initializers = dbInitScope.ServiceProvider
+        .GetServices<AutoNate.Web.Persistence.IDatabaseInitializer>()
+        .OrderBy(i => i.Order);
+    foreach (var initializer in initializers)
+    {
+        await initializer.InitializeAsync();
+    }
+}
 
 // Provision JetStream streams before any subscriber tries to subscribe and
 // before the first publish. JetStream requires every published subject to be
@@ -1236,6 +1295,8 @@ app.MapAdminPluginsEndpoints();
 app.MapAdminProjectionsEndpoints();
 app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
+app.MapDataStoreEndpoints();
+app.MapDataConnectorEndpoints();
 app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
 

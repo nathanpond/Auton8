@@ -3361,6 +3361,118 @@ internal static class DatabaseSchemaInitializer
             ON record_activity_rollup_cache (bucket_day DESC);
         """;
 
+    // Data Stores + DataConnectors metadata tables in the primary AutoNate DB
+    // (docs/plans/2026-05-30-data-stores-implementation.md). The actual per-
+    // datastore SQL schemas + read-only roles live in the second cluster DB
+    // `autonate_datastores`, provisioned by DatastoresDatabaseInitializer in
+    // a follow-up commit. File bytes live on disk under DataPaths.DatastoresRoot.
+    // Names are globally unique (LOWER) so the Phase 2 AQL `Dataset("name")`
+    // lookups have a stable single handle.
+    private const string DataStoresSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS datastores (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            kind SMALLINT NOT NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datastores_name
+            ON datastores (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_datastores_owner_user_id
+            ON datastores (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_datastores_kind
+            ON datastores (kind);
+
+        CREATE TABLE IF NOT EXISTS dataconnectors (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            kind TEXT NOT NULL,
+            config JSONB NOT NULL DEFAULT '{}'::jsonb,
+            last_fetched_at_utc TIMESTAMPTZ NULL,
+            cursor TEXT NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_dataconnectors_name
+            ON dataconnectors (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_dataconnectors_owner_user_id
+            ON dataconnectors (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_dataconnectors_kind
+            ON dataconnectors (kind);
+
+        CREATE TABLE IF NOT EXISTS datastore_files (
+            id UUID PRIMARY KEY,
+            datastore_id UUID NOT NULL REFERENCES datastores (id) ON DELETE CASCADE,
+            folder_path TEXT NOT NULL DEFAULT '/',
+            filename TEXT NOT NULL,
+            storage_key TEXT NOT NULL,
+            size_bytes BIGINT NOT NULL,
+            content_type TEXT NULL,
+            uploaded_by UUID NOT NULL,
+            uploaded_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_datastore_files_datastore_id
+            ON datastore_files (datastore_id);
+
+        CREATE INDEX IF NOT EXISTS ix_datastore_files_datastore_folder
+            ON datastore_files (datastore_id, folder_path);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datastore_files_path
+            ON datastore_files (datastore_id, folder_path, LOWER(filename));
+
+        CREATE TABLE IF NOT EXISTS datastore_tables (
+            id UUID PRIMARY KEY,
+            datastore_id UUID NOT NULL REFERENCES datastores (id) ON DELETE CASCADE,
+            schema_name TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            column_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
+            row_count BIGINT NOT NULL DEFAULT 0,
+            created_by UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_datastore_tables_datastore_id
+            ON datastore_tables (datastore_id);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datastore_tables_datastore_schema_table
+            ON datastore_tables (datastore_id, schema_name, LOWER(table_name));
+
+        CREATE TABLE IF NOT EXISTS connector_runs (
+            id UUID PRIMARY KEY,
+            dataconnector_id UUID NOT NULL REFERENCES dataconnectors (id) ON DELETE CASCADE,
+            started_at_utc TIMESTAMPTZ NOT NULL,
+            completed_at_utc TIMESTAMPTZ NULL,
+            status TEXT NOT NULL,
+            rows_fetched BIGINT NOT NULL DEFAULT 0,
+            error_message TEXT NULL,
+            cursor_before TEXT NULL,
+            cursor_after TEXT NULL,
+            triggered_by UUID NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_connector_runs_dataconnector_id
+            ON connector_runs (dataconnector_id);
+
+        CREATE INDEX IF NOT EXISTS ix_connector_runs_started_at_utc
+            ON connector_runs (started_at_utc DESC);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -3427,6 +3539,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowEventLogSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ProcessRetentionConfigSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordActivityRollupSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DataStoresSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

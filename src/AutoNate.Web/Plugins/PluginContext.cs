@@ -18,6 +18,7 @@ internal sealed class PluginContext : IPluginContext
         IPluginBehaviors behaviors,
         IPluginProjections projections,
         IPluginAgentSkills agentSkills,
+        IPluginConnectors connectors,
         IServiceProvider hostServices)
     {
         PluginId = pluginId;
@@ -36,6 +37,7 @@ internal sealed class PluginContext : IPluginContext
         Behaviors = behaviors;
         Projections = projections;
         AgentSkills = agentSkills;
+        Connectors = connectors;
         HostServices = hostServices;
     }
 
@@ -48,5 +50,6 @@ internal sealed class PluginContext : IPluginContext
     public IPluginBehaviors Behaviors { get; }
     public IPluginProjections Projections { get; }
     public IPluginAgentSkills AgentSkills { get; }
+    public IPluginConnectors Connectors { get; }
     public IServiceProvider HostServices { get; }
 }

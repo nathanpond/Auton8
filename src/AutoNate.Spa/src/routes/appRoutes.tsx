@@ -71,7 +71,9 @@ const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] 
   { path: "forms", templateKey: "configForms" },
   { path: "form-mappings", templateKey: "configFormMappings" },
   { path: "chatbot-settings", templateKey: "configChatbotSettings" },
-  { path: "chatbot-models", templateKey: "configChatbotModels" }
+  { path: "chatbot-models", templateKey: "configChatbotModels" },
+  { path: "datastores", templateKey: "dataStores" },
+  { path: "dataconnectors", templateKey: "dataConnectors" }
 ];
 
 // Absolute-path → templateKey index, materialized once for the validator.

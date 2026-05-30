@@ -22,6 +22,8 @@ import AdminPlugins from "@/pages/admin/Plugins";
 import AdminProjections from "@/pages/admin/Projections";
 import StatusAppearance from "@/pages/admin/config/StatusAppearance";
 import ModelCatalogPage from "@/pages/admin/config/chatbot/ModelCatalogPage";
+import DataStoresPage from "@/pages/admin/datastores/DataStoresPage";
+import DataConnectorsPage from "@/pages/admin/dataconnectors/DataConnectorsPage";
 import SiteAppearancePage from "@/pages/admin/config/SiteAppearance";
 import PagesMenus from "@/pages/admin/config/PagesMenus";
 import Events from "@/pages/admin/config/Events";
@@ -80,6 +82,8 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configFormMappings: <FormsFormMappings />,
   configChatbotSettings: <SitewideChatbotSettings />,
   configChatbotModels: <ModelCatalogPage />,
+  dataStores: <DataStoresPage />,
+  dataConnectors: <DataConnectorsPage />,
   dashboard: <Dashboard />,
   query: <QueryPage />
 };
