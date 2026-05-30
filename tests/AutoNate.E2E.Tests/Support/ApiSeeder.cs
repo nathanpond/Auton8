@@ -158,6 +158,45 @@ public sealed class ApiSeeder
     }
 
     /// <summary>
+    /// Creates a content project via <c>POST /api/content/projects</c>. Any
+    /// signed-in user can create one; the caller becomes the Owner in the
+    /// same transaction so the project is immediately scoped + writeable.
+    /// </summary>
+    public async Task<ProjectDto> CreateProjectAsync(string name, string? description = null)
+    {
+        var response = await _request.PostAsync("/api/content/projects", new APIRequestContextOptions
+        {
+            DataObject = new { name, description }
+        });
+        await EnsureSuccessAsync(response, "create project");
+        var json = await response.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /api/content/projects.");
+        return new ProjectDto(
+            Id: json.GetProperty("id").GetGuid(),
+            Name: json.GetProperty("name").GetString()!);
+    }
+
+    /// <summary>
+    /// Creates a document at the project root via
+    /// <c>POST /api/content/documents</c>. <c>Kind</c> defaults server-side to
+    /// <c>DocumentKinds.Document</c> when omitted, which is what we want for
+    /// the smoke tests.
+    /// </summary>
+    public async Task<DocumentDto> CreateDocumentAsync(Guid projectId, string title)
+    {
+        var response = await _request.PostAsync("/api/content/documents", new APIRequestContextOptions
+        {
+            DataObject = new { projectId, title }
+        });
+        await EnsureSuccessAsync(response, "create document");
+        var json = await response.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /api/content/documents.");
+        return new DocumentDto(
+            Id: json.GetProperty("id").GetGuid(),
+            Title: json.GetProperty("title").GetString()!);
+    }
+
+    /// <summary>
     /// Creates a form via <c>POST /api/forms/</c> and returns its id + short
     /// code. The server populates <c>FormCode</c> from <c>DefaultFormCode</c>
     /// when the request omits it, so the freshly-created form already renders
@@ -268,3 +307,14 @@ public sealed record ExecutionDto(string Id, string Name);
 /// <c>/form/{shortCode}</c> and <c>/formdev/{shortCode}</c> routes.
 /// </summary>
 public sealed record FormDto(Guid Id, string ShortCode, string Name);
+
+/// <summary>
+/// Minimal handle for a created content project. Drives
+/// <c>/documents/p/{id}</c> and the notes-side cabinets / notebooks tree.
+/// </summary>
+public sealed record ProjectDto(Guid Id, string Name);
+
+/// <summary>
+/// Minimal handle for a created document. Drives <c>/documents/edit/{id}</c>.
+/// </summary>
+public sealed record DocumentDto(Guid Id, string Title);
