@@ -8,7 +8,7 @@ public partial class ProjectMember
 
     public Guid UserId { get; set; }
 
-    // 'owner' | 'contributor' | 'viewer'
+    // 'owner' | 'contributor' | 'commenter' | 'viewer'
     public string Role { get; set; } = null!;
 
     public DateTime AddedAtUtc { get; set; }

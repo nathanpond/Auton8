@@ -37,4 +37,12 @@ public static class EntityKinds
     public const string Cabinet = "cabinet";
     public const string Notebook = "notebook";
     public const string Page = "page";
+
+    // Documents subsystem: Project → Folder (self-nesting, unlimited depth) →
+    // Document. Same IContentAuthorizer plumbing as the notes hierarchy
+    // (closure rows in content_ancestors). Documents land in a later phase;
+    // the Folder kind ships in Phase 1 so the folder tree + override grants
+    // are functional without a document editor.
+    public const string Folder = "folder";
+    public const string Document = "document";
 }

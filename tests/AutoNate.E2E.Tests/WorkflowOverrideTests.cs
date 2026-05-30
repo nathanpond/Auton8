@@ -38,10 +38,16 @@ public sealed class WorkflowOverrideTests
         // them proves the executions API actually responded, not just that
         // the route registered. A fresh DB has zero executions, so we don't
         // care about the numeric value — only that the cards mount.
-        await Assertions.Expect(page.GetByText("RUNNING")).ToBeVisibleAsync();
-        await Assertions.Expect(page.GetByText("COMPLETED")).ToBeVisibleAsync();
-        await Assertions.Expect(page.GetByText("CANCELLED")).ToBeVisibleAsync();
-        await Assertions.Expect(page.GetByText("ERRORED")).ToBeVisibleAsync();
+        // Exact=true so the uppercase stat-card labels don't also catch the
+        // row-level mantine-Badge spans that read "Cancelled" / "Running" /
+        // etc. — Playwright's text matcher case-normalizes, so without
+        // Exact=true `CANCELLED` would also bind to every cancelled-row
+        // badge left behind by Phase 4's cancel-execution test (Flowable
+        // state is shared across the run).
+        await Assertions.Expect(page.GetByText("RUNNING", new() { Exact = true }).First).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("COMPLETED", new() { Exact = true }).First).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("CANCELLED", new() { Exact = true }).First).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("ERRORED", new() { Exact = true }).First).ToBeVisibleAsync();
 
         // And no error banner — if useExecutions() threw we'd see a red Alert
         // with role="alert". The flash slot uses role="status" for success,

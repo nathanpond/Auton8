@@ -1,0 +1,56 @@
+/*
+ * Reset for docx-editor's toolbar buttons.
+ *
+ * @eigenpal/docx-editor-react ships its styles via Tailwind under the
+ * `.ep-root` namespace, but DOES NOT include a CSS reset for native
+ * <button> elements — it expects the host app to have one (Tailwind
+ * preflight, Normalize.css, etc. usually do). Our SPA is Mantine-only
+ * and Mantine only resets buttons it owns, so the browser's user-agent
+ * default (`2px outset Buttonface`) leaks through and we end up with
+ * heavy black borders on every toolbar button.
+ *
+ * Scope this reset under .ep-root so it only affects controls inside
+ * the editor — never global, never Mantine, never our own UI.
+ */
+
+.ep-root button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Some controls (font-family, font-size, zoom) render as combobox-like
+   <button> wrappers where docx-editor expects a visible chrome ring.
+   They tag those with utility classes like `.border` from Tailwind —
+   re-allow borders when those classes are present so the dropdown
+   chrome remains intact.  */
+.ep-root button.border,
+.ep-root button[class*="border-"] {
+  border-width: 1px;
+  border-style: solid;
+}
+
+/* (Phase 5's `.doc-binding*` decoration-chip styles were removed here when
+   the decoration plugin went away in Phase 10 — bindings now render as
+   docx-editor `field` nodes / real tables, not painted-over text.) */
+
+/* Phase 10: hover-highlight for bound content. A single translucent box
+   drawn by bindingHighlightPlugin over the bounding rect of the hovered
+   binding's rendered content (see that file for why it's an imperative
+   DOM overlay rather than a PM decoration). Pink fill at low opacity so
+   the content reads through, with a solid border marking the bounds.
+   `position: fixed` + coords set inline by the plugin; pointer-events
+   none so it never blocks editing. */
+.binding-hover-overlay {
+  position: fixed;
+  z-index: 200;
+  display: none;
+  pointer-events: none;
+  border-radius: 4px;
+  background-color: rgba(230, 73, 128, 0.16);
+  border: 2px solid rgba(230, 73, 128, 0.75);
+  box-shadow: 0 0 0 1px rgba(230, 73, 128, 0.15);
+}

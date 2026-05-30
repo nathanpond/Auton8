@@ -38,6 +38,15 @@ public static class Actions
 
     public const string Manage = "manage";
 
+    // Documents — re-resolve live data bindings (record fields, AQL
+    // tables, etc.) embedded in the document body. Surfaced as a
+    // separate action from Edit so we can let a Commenter trigger a
+    // "Refresh all" without giving them body edits — they're not
+    // changing the document itself, just asking the server to recompute
+    // the cached values. v1 wires it into the Editor and Owner
+    // role-bundle only; loosen later if the commenter UX needs it.
+    public const string RefreshBindings = "refreshbindings";
+
     // System issues lifecycle (Phase 3 wires Acknowledge/Resolve into the API;
     // Remediate gates the on-demand POST /system-issues/{id}/remediate endpoint
     // landing in Phase 4. Read is the Phase 1 list/detail gate).

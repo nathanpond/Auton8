@@ -56,8 +56,12 @@ export function createAuthHook(config: AuthConfig) {
     // Hocuspocus protocol: setting `connectionConfig.readOnly = true`
     // here (before returning) causes the server to reject every WRITE
     // message from this socket while still letting it sync state. .NET
-    // decides the role from live Page.Edit; we just enforce.
-    if (data.role === "viewer") {
+    // decides the role from live Page.Edit / Comment grants; we just
+    // enforce. Only "editor" may write the Y.Doc body — both "viewer" and
+    // "commenter" are read-only here (fail closed on any unexpected role).
+    // Commenters still comment fully: comments go through the REST API,
+    // not the Y.Doc, so a read-only body connection doesn't block them.
+    if (data.role !== "editor") {
       payload.connectionConfig.readOnly = true;
     }
 

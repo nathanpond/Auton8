@@ -48,12 +48,14 @@ const CATEGORIES: CategoryDef[] = [
 const ROLE_OPTIONS: { value: ProjectRoleWire; label: string }[] = [
   { value: "owner", label: "Owner" },
   { value: "contributor", label: "Contributor" },
+  { value: "commenter", label: "Commenter" },
   { value: "viewer", label: "Viewer" }
 ];
 
 const ROLE_LABEL: Record<ProjectRoleWire, string> = {
   owner: "Owner",
   contributor: "Contributor",
+  commenter: "Commenter",
   viewer: "Viewer"
 };
 

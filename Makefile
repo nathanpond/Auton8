@@ -15,7 +15,7 @@ SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
 FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
-.PHONY: infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart
+.PHONY: infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
 
 infra-prepare:
 	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
@@ -80,3 +80,21 @@ app-dapr: infra-ensure
 		--scheduler-host-address $(DAPR_SCHEDULER_HOST_ADDRESS) \
 		--resources-path $(DAPR_DASHBOARD_COMPONENTS) \
 		-- dotnet run --project $(APP_PROJECT) --launch-profile $(APP_PROFILE)
+
+# Playwright E2E suite. The fixture (AutoNateE2EFixture) creates a dedicated
+# `AutoNate_E2E` Postgres database each run and replays
+# infra/postgres/init/02-create-autonate-app-schema.sql against it, so this
+# target needs only the same infra `app` does. We build the test project up
+# front so the Playwright install script (which is shipped inside the test
+# assembly) can be invoked via `dotnet exec`, then `dotnet test --no-build`
+# skips a redundant rebuild.
+e2e-install:
+	dotnet build tests/AutoNate.E2E.Tests
+	# Idempotent: a no-op when the right Chromium build is already on disk.
+	dotnet exec \
+		--runtimeconfig tests/AutoNate.E2E.Tests/bin/Debug/net10.0/AutoNate.E2E.Tests.runtimeconfig.json \
+		--depsfile tests/AutoNate.E2E.Tests/bin/Debug/net10.0/AutoNate.E2E.Tests.deps.json \
+		tests/AutoNate.E2E.Tests/bin/Debug/net10.0/Microsoft.Playwright.dll install chromium
+
+e2e: infra-ensure e2e-install
+	dotnet test tests/AutoNate.E2E.Tests --no-build

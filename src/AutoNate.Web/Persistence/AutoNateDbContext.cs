@@ -116,6 +116,16 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<NoteVersion> NoteVersions { get; set; }
 
+    public virtual DbSet<Folder> Folders { get; set; }
+
+    public virtual DbSet<Document> Documents { get; set; }
+
+    public virtual DbSet<DocumentVersion> DocumentVersions { get; set; }
+
+    public virtual DbSet<DocumentComment> DocumentComments { get; set; }
+
+    public virtual DbSet<DocumentBinding> DocumentBindings { get; set; }
+
     public virtual DbSet<ContentAncestor> ContentAncestors { get; set; }
 
     public virtual DbSet<PageFavorite> PageFavorites { get; set; }
@@ -1359,6 +1369,182 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.CurrentVersionNumber).HasColumnName("current_version_number");
             entity.Property(e => e.SortOrder).HasColumnName("sort_order");
             entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Folder>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("folders_pkey");
+            entity.ToTable("folders");
+            entity.HasIndex(e => e.ProjectId, "ix_folders_project_id");
+            entity.HasIndex(e => e.ParentFolderId, "ix_folders_parent_folder_id");
+            entity.HasIndex(e => e.Locator, "folders_locator_key").IsUnique();
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Self-referential parent FK. Matches the SQL schema's ON DELETE
+            // CASCADE — deleting a folder removes its descendants.
+            entity.HasOne<Folder>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentFolderId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.ProjectId).HasColumnName("project_id");
+            entity.Property(e => e.ParentFolderId).HasColumnName("parent_folder_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Icon).HasColumnName("icon");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<Document>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("documents_pkey");
+            entity.ToTable("documents");
+            entity.HasIndex(e => e.ProjectId, "ix_documents_project_id");
+            entity.HasIndex(e => e.FolderId, "ix_documents_folder_id");
+            entity.HasIndex(e => e.TemplateId, "ix_documents_template_id");
+            entity.HasIndex(e => e.Locator, "documents_locator_key").IsUnique();
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne<Folder>()
+                .WithMany()
+                .HasForeignKey(e => e.FolderId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
+
+            // Self-reference: a document created from a template carries the
+            // template's id; we keep the link soft (SET NULL) so deleting the
+            // template doesn't cascade through real documents that were
+            // already cloned off it.
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.TemplateId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Locator)
+                .HasColumnName("locator")
+                .HasDefaultValueSql("nextval('content_locator_seq')")
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.ProjectId).HasColumnName("project_id");
+            entity.Property(e => e.FolderId).HasColumnName("folder_id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.TemplateId).HasColumnName("template_id");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.BodyJsonb).HasColumnName("body_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.CurrentVersionNumber).HasColumnName("current_version_number");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.IsArchived).HasColumnName("is_archived");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+        });
+
+        modelBuilder.Entity<DocumentVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("document_versions_pkey");
+            entity.ToTable("document_versions");
+            entity.HasIndex(e => new { e.DocumentId, e.VersionNumber },
+                "document_versions_document_id_version_number_key").IsUnique();
+            entity.HasIndex(e => e.DocumentId, "ix_document_versions_document_id");
+
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DocumentId).HasColumnName("document_id");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.BodyJsonb).HasColumnName("body_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<DocumentComment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("document_comments_pkey");
+            entity.ToTable("document_comments");
+            entity.HasIndex(e => new { e.DocumentId, e.Number },
+                "document_comments_document_id_number_key").IsUnique();
+            entity.HasIndex(e => new { e.DocumentId, e.ThreadId },
+                "ix_document_comments_document_id_thread_id");
+
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Self-reference for reply chains. ON DELETE CASCADE keeps the
+            // table consistent if a thread root is deleted; the resolve UI
+            // marks-resolved rather than deletes, so this rarely fires in
+            // practice.
+            entity.HasOne<DocumentComment>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentCommentId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired(false);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DocumentId).HasColumnName("document_id");
+            entity.Property(e => e.Number).HasColumnName("number");
+            entity.Property(e => e.ParentCommentId).HasColumnName("parent_comment_id");
+            entity.Property(e => e.ThreadId).HasColumnName("thread_id");
+            entity.Property(e => e.AuthorId).HasColumnName("author_id");
+            entity.Property(e => e.BodyText).HasColumnName("body_text");
+            entity.Property(e => e.ResolvedAtUtc).HasColumnName("resolved_at_utc");
+            entity.Property(e => e.ResolvedByUserId).HasColumnName("resolved_by_user_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        modelBuilder.Entity<DocumentBinding>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("document_bindings_pkey");
+            entity.ToTable("document_bindings");
+            entity.HasIndex(e => e.DocumentId, "ix_document_bindings_document_id");
+
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(e => e.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.DocumentId).HasColumnName("document_id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.ConfigJsonb).HasColumnName("config_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.LastResolvedValueJsonb).HasColumnName("last_resolved_value_jsonb").HasColumnType("jsonb");
+            entity.Property(e => e.LastResolvedAtUtc).HasColumnName("last_resolved_at_utc");
+            entity.Property(e => e.LastResolvedByUserId).HasColumnName("last_resolved_by_user_id");
+            entity.Property(e => e.Label).HasColumnName("label");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");

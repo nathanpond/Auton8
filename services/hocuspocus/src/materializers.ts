@@ -1,6 +1,12 @@
 import * as Y from "yjs";
 import { ServerBlockNoteEditor } from "@blocknote/server-util";
 import { BlockNoteSchema, defaultBlockSpecs, type PartialBlock } from "@blocknote/core";
+// y-prosemirror's `yDocToProsemirrorJSON` walks a Y.XmlFragment and emits
+// a ProseMirror Node JSON tree without requiring a schema on this side —
+// exactly what we need for the documents prefix where the SPA owns the
+// TipTap schema and the sidecar just snapshots the materialized JSON for
+// .NET's body_jsonb mirror.
+import { yDocToProsemirrorJSON } from "y-prosemirror";
 import { noteEmbedServerSpec } from "./noteEmbedStub.js";
 import type pg from "pg";
 
@@ -69,6 +75,21 @@ const napkinMaterializer: Materializer = async (doc) => {
   });
 };
 
+// Documents (Phase 3+) use TipTap on the SPA side, which writes to a Yjs
+// XmlFragment named "default" by default via the @tiptap/extension-
+// collaboration extension. We render to a ProseMirror Node JSON tree
+// (the same shape TipTap's `editor.getJSON()` produces) so the .NET
+// mirror is human-readable AND directly re-hydratable by the editor when
+// a cold-load needs to seed the Y.Doc from the body mirror.
+//
+// Fragment name MUST match what the SPA-side Collaboration extension
+// uses — TipTap's default field name is "default"; we keep that here so
+// the SPA's editor mount can stay at default config.
+const documentMaterializer: Materializer = async (doc) => {
+  const json = yDocToProsemirrorJSON(doc, "default");
+  return JSON.stringify(json);
+};
+
 // draw.io diagrams use Y.Text holding the full mxfile XML — the editor
 // emits whole-XML autosaves rather than character-level ops, so Y.Text is
 // effectively a string container with eventual-consistency replace
@@ -129,10 +150,40 @@ export async function trySeedFromBodyMirror(
     if (r.rowCount === 1 && r.rows[0].note_kind === "richtext") {
       bodyJson = r.rows[0].content_jsonb;
     }
+  } else if (prefix === "documents") {
+    const r = await pool.query<{ body_jsonb: string | null }>(
+      "SELECT body_jsonb::text AS body_jsonb FROM documents WHERE id = $1",
+      [id]
+    );
+    if (r.rowCount === 1) bodyJson = r.rows[0].body_jsonb;
   } else {
     return false;
   }
   if (!bodyJson) return false;
+
+  if (prefix === "documents") {
+    // docx-editor body is ProseMirror Node JSON (matches the materializer
+    // shape on the other direction). Seed by walking the JSON tree into
+    // the Y.XmlFragment named "default" — that's the fragment the SPA's
+    // `ySyncPlugin(fragment)` binds to. Without this, templates cloned
+    // via the REST endpoint would open as empty editors because the
+    // body_jsonb mirror is present but the Y.Doc starts empty.
+    let pmJson: unknown;
+    try {
+      pmJson = JSON.parse(bodyJson);
+    } catch {
+      return false;
+    }
+    if (!isPmDoc(pmJson)) return false;
+    const fragment = targetDoc.getXmlFragment("default");
+    if (fragment.length > 0) {
+      // Already has content (maybe another tab seeded first). Don't
+      // double-seed; bail.
+      return false;
+    }
+    seedProseMirrorJsonIntoFragment(fragment, pmJson);
+    return true;
+  }
 
   let blocks: PartialBlock[];
   try {
@@ -151,6 +202,81 @@ export async function trySeedFromBodyMirror(
   return true;
 }
 
+// Best-effort ProseMirror JSON → Y.XmlFragment walker. Handles the
+// shapes docx-editor's body actually uses (doc → paragraph/heading →
+// text). Marks and attributes are skipped for v1 simplicity — the
+// editor normalizes the seeded structure on first render and fills
+// in defaults. Strict round-trip fidelity (bold/italic, alignment)
+// would require a real ProseMirror schema on the sidecar; that's a
+// polish task. For Phase 6 v1, plain-paragraph fidelity is enough
+// to make cloned templates show up with text + binding placeholders.
+function isPmDoc(json: unknown): json is { type: string; content?: unknown[] } {
+  return (
+    typeof json === "object" &&
+    json !== null &&
+    (json as { type?: unknown }).type === "doc"
+  );
+}
+
+function seedProseMirrorJsonIntoFragment(
+  fragment: Y.XmlFragment,
+  doc: { content?: unknown[] }
+): void {
+  if (!Array.isArray(doc.content)) return;
+  const children: Array<Y.XmlElement | Y.XmlText> = [];
+  for (const child of doc.content) {
+    const node = jsonNodeToYjs(child);
+    if (node) children.push(node);
+  }
+  if (children.length > 0) fragment.push(children);
+}
+
+function jsonNodeToYjs(json: unknown): Y.XmlElement | Y.XmlText | null {
+  if (typeof json !== "object" || json === null) return null;
+  const obj = json as {
+    type?: unknown;
+    text?: unknown;
+    content?: unknown;
+    attrs?: unknown;
+  };
+  if (obj.type === "text" && typeof obj.text === "string") {
+    const t = new Y.XmlText();
+    t.insert(0, obj.text);
+    return t;
+  }
+  if (typeof obj.type !== "string") return null;
+  const el = new Y.XmlElement(obj.type);
+  // Copy node attrs. y-prosemirror stores PM node attrs as Y.XmlElement
+  // attributes (string-serialized for non-string values). Without this,
+  // attr-bearing nodes — Phase 10a binding `field` nodes (instruction /
+  // displayText), paragraph styleId, table widths, etc. — would lose
+  // their attrs on cold-load seeding, so an imported/cloned doc opened
+  // for the first time would render bindings/styles as blank. Match
+  // y-prosemirror's convention: JSON-encode object/array values, pass
+  // strings through, stringify primitives.
+  if (obj.attrs && typeof obj.attrs === "object") {
+    for (const [k, v] of Object.entries(obj.attrs as Record<string, unknown>)) {
+      if (v === null || v === undefined) continue;
+      const encoded =
+        typeof v === "string"
+          ? v
+          : typeof v === "object"
+            ? JSON.stringify(v)
+            : String(v);
+      el.setAttribute(k, encoded);
+    }
+  }
+  if (Array.isArray(obj.content)) {
+    const kids: Array<Y.XmlElement | Y.XmlText> = [];
+    for (const child of obj.content) {
+      const cn = jsonNodeToYjs(child);
+      if (cn) kids.push(cn);
+    }
+    if (kids.length > 0) el.push(kids);
+  }
+  return el;
+}
+
 // Picks the right materializer for a given document name. Unknown
 // prefixes return null so the webhook handler can warn-and-skip rather
 // than blindly POSTing an empty/wrong payload to .NET.
@@ -166,6 +292,8 @@ export function selectMaterializer(documentName: string): Materializer | null {
       return napkinMaterializer;
     case "diagram":
       return diagramMaterializer;
+    case "documents":
+      return documentMaterializer;
     case "pagemeta":
       // Live notes-list metadata for a page. Source of truth lives in
       // the `notes` table; pagemeta is a Yjs sync channel only. No DB

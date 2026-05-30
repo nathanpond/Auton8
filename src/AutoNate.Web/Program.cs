@@ -324,12 +324,28 @@ builder.Services.AddScoped<AutoNate.Web.Services.Content.IProjectMembershipServi
     AutoNate.Web.Services.Content.ProjectMembershipService>();
 builder.Services.AddScoped<AutoNate.Web.Services.Content.IContentVersionService,
     AutoNate.Web.Services.Content.ContentVersionService>();
+
+// Document binding resolvers (Phase 5). Per-kind implementations are
+// scoped because they depend on scoped services (IAuthorizer for the
+// record-field resolver, IAqlExecutor for the aql-table resolver). The
+// registry is also scoped so DI can inject the matching lifetime of
+// resolvers; resolution lookup is a single dictionary read.
+builder.Services.AddScoped<AutoNate.Web.Services.Content.Bindings.IDocumentBindingResolver,
+    AutoNate.Web.Services.Content.Bindings.RecordFieldBindingResolver>();
+builder.Services.AddScoped<AutoNate.Web.Services.Content.Bindings.IDocumentBindingResolver,
+    AutoNate.Web.Services.Content.Bindings.AqlTableBindingResolver>();
+builder.Services.AddScoped<AutoNate.Web.Services.Content.Bindings.IDocumentBindingResolverRegistry,
+    AutoNate.Web.Services.Content.Bindings.DocumentBindingResolverRegistry>();
 builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentVersioningOptions>()
     .BindConfiguration(AutoNate.Web.Services.Content.ContentVersioningOptions.SectionName);
 builder.Services.AddOptions<AutoNate.Web.Services.Content.ContentAttachmentOptions>()
     .BindConfiguration("ContentAttachments");
 builder.Services.AddSingleton<AutoNate.Web.Services.Content.IContentAttachmentStore,
     AutoNate.Web.Services.Content.FilesystemContentAttachmentStore>();
+builder.Services.AddOptions<AutoNate.Web.Services.Content.DocumentImportOptions>()
+    .BindConfiguration("DocumentImports");
+builder.Services.AddSingleton<AutoNate.Web.Services.Content.IDocumentImportStorage,
+    AutoNate.Web.Services.Content.FilesystemDocumentImportStorage>();
 builder.Services.AddScoped<AuthCacheBumper>();
 builder.Services.AddScoped<EntityEdgeReconciler>();
 builder.Services.AddScoped<IRoleStore, EfCoreRoleStore>();
@@ -384,6 +400,8 @@ builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlExecutor,
     AutoNate.Web.Services.Query.AqlExecutor>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.ISavedQueryStore,
     AutoNate.Web.Services.Query.EfCoreSavedQueryStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlSuggestionService,
+    AutoNate.Web.Services.Query.AqlSuggestionService>();
 
 // External Connections — admin-managed config for outbound integrations
 // (LLM providers today, future SMTP/S3/IdP). DataProtection encrypts the
@@ -1209,6 +1227,7 @@ app.MapPageTemplateEndpoints();
 app.MapDashboardEndpoints();
 app.MapQueryEndpoints();
 app.MapAqlSchemaEndpoints();
+app.MapAqlSuggestEndpoints();
 app.MapSavedQueryEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
@@ -1227,6 +1246,12 @@ app.MapProjectEndpoints();
 app.MapProjectMemberEndpoints();
 app.MapCabinetEndpoints();
 app.MapNotebookEndpoints();
+app.MapContentFolderEndpoints();
+app.MapContentDocumentEndpoints();
+app.MapDocumentVersionEndpoints();
+app.MapContentDocumentCommentEndpoints();
+app.MapContentDocumentBindingEndpoints();
+app.MapContentPermissionOverrideEndpoints();
 app.MapContentPageEndpoints();
 app.MapPageVersionEndpoints();
 app.MapPageAttachmentEndpoints();
