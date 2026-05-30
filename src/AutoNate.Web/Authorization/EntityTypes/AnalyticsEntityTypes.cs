@@ -1,12 +1,13 @@
 using DataStoreModel = AutoNate.Web.Persistence.Scaffolded.DataStore;
 using DataConnectorModel = AutoNate.Web.Persistence.Scaffolded.DataConnector;
+using DatasetModel = AutoNate.Web.Persistence.Scaffolded.Dataset;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
 // EntityType registrations for the Data Stores & Analytics Pipeline feature
 // (docs/plans/2026-05-30-data-stores-implementation.md). Phase 1 lands
-// DataStore + DataConnector. The Dataset, Transformer, Analyzer, Pipeline,
-// and PipelineRun kinds join this list as their phases ship.
+// DataStore + DataConnector. Phase 2 adds Dataset. Transformer, Analyzer,
+// Pipeline, and PipelineRun kinds join this list as their phases ship.
 public static class AnalyticsEntityTypes
 {
     public static IReadOnlyList<IEntityType> All => _all.Value;
@@ -14,7 +15,7 @@ public static class AnalyticsEntityTypes
     private static readonly Lazy<IReadOnlyList<IEntityType>> _all = new(() =>
         new IEntityType[]
         {
-            DataStore!, DataConnector!,
+            DataStore!, DataConnector!, Dataset!,
         });
 
     // Refresh is intentionally not on DataStore — refresh is a Dataset
@@ -44,6 +45,24 @@ public static class AnalyticsEntityTypes
         {
             Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
             Actions.Connect, Actions.Refresh
+        },
+        tags: Array.Empty<string>());
+
+    // Refresh gates the on-demand POST /refresh on cached datasets, plus the
+    // scheduled DatasetRefreshProjection's per-dataset cron tick (the
+    // projection treats absence of refresh as "don't run", same as a paused
+    // projection). Schedule gates editing refresh_cron. Curated-product
+    // permission model: `dataset:view:<id>` is sufficient to query rows via
+    // AQL `Dataset("name")` even when the underlying source isn't visible
+    // to the actor (see DatasetQueryEntity).
+    public static EntityTypeDefinition Dataset { get; } = new(
+        kind: EntityKinds.Dataset,
+        clrType: typeof(DatasetModel),
+        idClrType: typeof(Guid),
+        actions: new[]
+        {
+            Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
+            Actions.Refresh, Actions.Schedule
         },
         tags: Array.Empty<string>());
 }

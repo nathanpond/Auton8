@@ -3473,6 +3473,41 @@ internal static class DatabaseSchemaInitializer
             ON connector_runs (started_at_utc DESC);
         """;
 
+    // Datasets metadata table (Phase 2 of the Data Stores plan). The actual
+    // cached rows live in `autonate_datastores.cache_<datasetid>` schemas,
+    // provisioned by CachedDatasetStore on first refresh. Names are
+    // case-insensitively unique so AQL `Dataset("name")` lookups have a
+    // single stable handle.
+    private const string DatasetsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS datasets (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            mode SMALLINT NOT NULL,
+            column_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
+            refresh_cron TEXT NULL,
+            last_refreshed_at_utc TIMESTAMPTZ NULL,
+            source_kind TEXT NOT NULL,
+            source_id UUID NOT NULL,
+            source_table_name TEXT NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datasets_name
+            ON datasets (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_datasets_owner_user_id
+            ON datasets (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_datasets_source
+            ON datasets (source_kind, source_id);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -3540,6 +3575,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(ProcessRetentionConfigSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordActivityRollupSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(DataStoresSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DatasetsSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

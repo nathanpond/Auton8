@@ -27,6 +27,25 @@ internal sealed class AqlValidator
                 $"Unknown entity '{query.Entity}'. Available: {string.Join(", ", _registry.EntityNames)}.");
         }
 
+        // Parameterized-FROM contract check (Phase 2 of the Data Stores plan).
+        // The parser already accepted `Entity("arg")` regardless of which
+        // entity is being targeted; per-entity rules live on the entity, not
+        // in the grammar. Surface mismatches as validation errors with the
+        // same vocabulary the rest of the validator uses.
+        if (query.EntityArgument is not null && !entity.AcceptsEntityArgument)
+        {
+            throw new AqlValidationException(
+                $"Entity '{entity.Name}' does not accept a parameterized argument; use bare 'FROM {entity.Name}' instead.");
+        }
+        if (entity.RequiresEntityArgument && query.EntityArgument is null)
+        {
+            var hint = entity.EntityArgumentHint is not null
+                ? $" ({entity.EntityArgumentHint})"
+                : string.Empty;
+            throw new AqlValidationException(
+                $"Entity '{entity.Name}' requires a parameterized argument{hint}; use 'FROM {entity.Name}(\"...\")'.");
+        }
+
         var prepared = await entity.PrepareAsync(query, cancellationToken);
         errors.AddRange(prepared.ValidationErrors);
         var schema = prepared.Schema;

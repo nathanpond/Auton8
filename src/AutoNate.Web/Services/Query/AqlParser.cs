@@ -28,6 +28,7 @@ internal sealed class AqlParser
     private AqlQuery ParseQuery()
     {
         string entity = "Records";
+        string? entityArgument = null;
         var fromWasExplicit = false;
 
         if (Peek().Kind == TokenKind.Keyword && Peek().Text == "FROM")
@@ -36,6 +37,20 @@ internal sealed class AqlParser
             var ent = Expect(TokenKind.Identifier, "Expected entity name after FROM.");
             entity = ent.Text;
             fromWasExplicit = true;
+
+            // Parameterized FROM: `FROM Entity("argument")`. The argument is a
+            // single string literal that the entity uses to resolve a concrete
+            // surface (e.g. `Dataset("sales")` resolves to the Dataset named
+            // "sales"). Per-entity validation in AqlValidator rejects args on
+            // entities that haven't opted in, and missing args on entities
+            // that require them.
+            if (Peek().Kind == TokenKind.LParen)
+            {
+                Advance();
+                var arg = Expect(TokenKind.String, "Expected a string literal argument after '(' in parameterized FROM.");
+                entityArgument = arg.Text;
+                Expect(TokenKind.RParen, "Expected ')' to close parameterized FROM.");
+            }
         }
 
         AqlWhere? where = null;
@@ -63,7 +78,7 @@ internal sealed class AqlParser
                 "Clauses must appear in order: FROM, WHERE, ORDER BY, COLUMNS, GROUP, LIMIT.");
         }
 
-        return new AqlQuery(entity, where, orderBy, columns, group, limit);
+        return new AqlQuery(entity, where, orderBy, columns, group, limit, entityArgument);
     }
 
     private static bool IsClauseKeyword(AqlToken t) =>

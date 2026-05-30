@@ -136,7 +136,10 @@ public static class AqlSchemaEndpoints
             AllowedWhereFunctions: entity.AllowedFunctions.ToList(),
             RowFunctions: rowFunctions,
             HasDynamicFields: hasDynamic,
-            RecordTypeFilterField: recordTypeFilterField);
+            RecordTypeFilterField: recordTypeFilterField,
+            AcceptsEntityArgument: entity.AcceptsEntityArgument,
+            RequiresEntityArgument: entity.RequiresEntityArgument,
+            EntityArgumentHint: entity.EntityArgumentHint);
     }
 
     // ---- Per-entity column resolution ------------------------------------
@@ -193,7 +196,14 @@ public static class AqlSchemaEndpoints
         IReadOnlyList<string> AllowedWhereFunctions,
         IReadOnlyList<RowFunctionDto> RowFunctions,
         bool HasDynamicFields,
-        string? RecordTypeFilterField);
+        string? RecordTypeFilterField,
+        // Parameterized-FROM metadata (Phase 2 of the Data Stores plan).
+        // The chatbot's describe_aql_entity tool and the SPA's monaco
+        // completion logic both branch on AcceptsEntityArgument to know
+        // whether to suggest `Entity("...")` or bare `Entity`.
+        bool AcceptsEntityArgument,
+        bool RequiresEntityArgument,
+        string? EntityArgumentHint);
 
     public sealed record RowFunctionDto(
         string Name,

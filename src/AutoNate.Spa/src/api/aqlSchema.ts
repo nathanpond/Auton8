@@ -31,6 +31,13 @@ export type AqlEntityMeta = {
   rowFunctions: AqlRowFunction[];
   hasDynamicFields: boolean;
   recordTypeFilterField: string | null;
+  // Parameterized FROM (Phase 2 of the Data Stores plan): when true the
+  // entity is referenced as `FROM Entity("argument")`. Completion logic
+  // applies a different snippet for these entities. RequiresEntityArgument
+  // means a bare `FROM Entity` is rejected by the validator.
+  acceptsEntityArgument: boolean;
+  requiresEntityArgument: boolean;
+  entityArgumentHint: string | null;
 };
 
 export type AqlSchema = {

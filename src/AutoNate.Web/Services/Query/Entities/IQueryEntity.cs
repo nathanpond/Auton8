@@ -87,6 +87,21 @@ public interface IQueryEntity
     // they have well-trodden patterns worth advertising.
     IReadOnlyList<QueryExample> Examples => Array.Empty<QueryExample>();
 
+    // Parameterized FROM (Phase 2 of the Data Stores plan). An entity opts in
+    // by overriding AcceptsEntityArgument to true; when overridden the
+    // parser-supplied `query.EntityArgument` is forwarded to PrepareAsync.
+    // RequiresEntityArgument forces the argument to be present (the Dataset
+    // entity sets both to true — `FROM Dataset()` is rejected with the same
+    // error vocabulary as bad column references). Default false preserves
+    // every existing entity's bare-FROM contract.
+    bool AcceptsEntityArgument => false;
+
+    bool RequiresEntityArgument => false;
+
+    // Optional human-readable hint for what the entity argument means, surfaced
+    // through the schema endpoint and the chatbot's describe_aql_entity tool.
+    string? EntityArgumentHint => null;
+
     // Resolve the full schema (static + dynamic), resolve literal references
     // (e.g. RecordType names), and return a prepared query the validator can
     // run generic checks against and the executor can fire.
