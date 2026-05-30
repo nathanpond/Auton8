@@ -480,6 +480,70 @@ builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginConnectorRegistry,
     AutoNate.Web.Plugins.PluginConnectorRegistry>();
 builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandlerRegistry,
     AutoNate.Web.Services.DataConnectors.DataConnectorHandlerRegistry>();
+// Phase 4 of the Data Stores plan — Transformer + Analyzer registries
+// (built-ins + plugin-contributed). Built-ins are singletons because they
+// hold no per-request state; the registry composes the live union of
+// DI-registered + plugin-contributed implementations on each call.
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.FilterRowsTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.DedupeTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.ColumnRenameCastTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.JoinTwoInputsTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.NullFillTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.DateNormalizeTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.RegexExtractTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.SchemaInferTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.PivotTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.UnpivotTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.CsvToJsonTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.JsonToCsvTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.JsonFlattenTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.XlsxToCsvTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginTransformerRegistry,
+    AutoNate.Web.Plugins.PluginTransformerRegistry>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformerRegistry,
+    AutoNate.Web.Services.Transformers.TransformerRegistry>();
+
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.SummaryStatisticsAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.NullRateAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.DistinctCountAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.TopKAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.GroupByAggregateAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.HistogramBinAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.CorrelationMatrixAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.AnomalyZScoreAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.AnomalyIqrAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.TrendLinearRegressionAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.KMeansClusterAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginAnalyzerRegistry,
+    AutoNate.Web.Plugins.PluginAnalyzerRegistry>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzerRegistry,
+    AutoNate.Web.Services.Analyzers.AnalyzerRegistry>();
+
 // Datasets (Phase 2 of the Data Stores plan).
 builder.Services.AddScoped<AutoNate.Web.Services.Datasets.IDatasetStore,
     AutoNate.Web.Services.Datasets.EfCoreDatasetStore>();
@@ -1325,6 +1389,8 @@ app.MapExternalConnectionEndpoints();
 app.MapDataStoreEndpoints();
 app.MapDataConnectorEndpoints();
 app.MapDatasetEndpoints();
+app.MapTransformerEndpoints();
+app.MapAnalyzerEndpoints();
 app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
 

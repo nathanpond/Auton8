@@ -52,6 +52,8 @@
            Streams CSV rows into Npgsql NpgsqlBinaryImporter (COPY) for the
            CsvIngestor. -->
       <PackageReference Include="CsvHelper" Version="33.0.1" />
+      <!-- XLSX ingest for the xlsx-to-csv built-in transformer (Phase 4). -->
+      <PackageReference Include="ClosedXML" Version="0.105.0" />
     </ItemGroup>
 
     <ItemGroup>
