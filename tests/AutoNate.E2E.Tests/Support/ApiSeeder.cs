@@ -157,6 +157,46 @@ public sealed class ApiSeeder
             Name: instanceName);
     }
 
+    /// <summary>
+    /// Creates a form via <c>POST /api/forms/</c> and returns its id + short
+    /// code. The server populates <c>FormCode</c> from <c>DefaultFormCode</c>
+    /// when the request omits it, so the freshly-created form already renders
+    /// a "New form" heading via <c>JsxFormHost</c> at <c>/form/{shortCode}</c>
+    /// once published.
+    /// </summary>
+    public async Task<FormDto> CreateFormAsync(string name, string shortCode, bool siteAvailable)
+    {
+        var response = await _request.PostAsync("/api/forms/", new APIRequestContextOptions
+        {
+            DataObject = new
+            {
+                name,
+                shortCode,
+                siteAvailable
+            }
+        });
+        await EnsureSuccessAsync(response, "create form");
+        var json = await response.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /api/forms/.");
+
+        return new FormDto(
+            Id: json.GetProperty("id").GetGuid(),
+            ShortCode: json.GetProperty("shortCode").GetString()!,
+            Name: json.GetProperty("name").GetString()!);
+    }
+
+    /// <summary>
+    /// Publishes a form via <c>POST /api/forms/{id}/publish</c>. The publish
+    /// endpoint takes no body — it deploys the current draft as the published
+    /// snapshot the public view loads.
+    /// </summary>
+    public async Task PublishFormAsync(Guid formId)
+    {
+        var response = await _request.PostAsync($"/api/forms/{formId}/publish",
+            new APIRequestContextOptions { DataObject = new { } });
+        await EnsureSuccessAsync(response, "publish form");
+    }
+
     private static string MinimalUserTaskBpmn(string processKey, string name) => $$"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -222,3 +262,9 @@ public sealed record WorkflowDto(Guid Id, string Name, string ProcessKey);
 /// <c>Id</c> is the Flowable process-instance id (a string).
 /// </summary>
 public sealed record ExecutionDto(string Id, string Name);
+
+/// <summary>
+/// Minimal handle for a created form. <c>ShortCode</c> drives the
+/// <c>/form/{shortCode}</c> and <c>/formdev/{shortCode}</c> routes.
+/// </summary>
+public sealed record FormDto(Guid Id, string ShortCode, string Name);
