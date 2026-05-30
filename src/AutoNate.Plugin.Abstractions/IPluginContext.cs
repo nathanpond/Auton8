@@ -50,6 +50,13 @@ public interface IPluginContext
     // tool the plugin added.
     IPluginAgentSkills AgentSkills { get; }
 
+    // Helpers for contributing IPluginDataConnector implementations to the
+    // host's connector handler registry (docs/plans/2026-05-30-data-stores-implementation.md).
+    // Plugin-contributed kinds appear in the admin connector-create dropdown
+    // and route their TestAsync/FetchAsync invocations through the plugin's
+    // ALC, with the same disable-sweeps-everything lifecycle as Menus/Behaviors.
+    IPluginConnectors Connectors { get; }
+
     // Host services for cross-cutting needs (logging, etc.). The host wraps
     // its root provider in an allowlist before handing it over, so only a
     // curated set of safe types resolve — currently ILoggerFactory,

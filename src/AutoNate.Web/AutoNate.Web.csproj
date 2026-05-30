@@ -48,6 +48,10 @@
            bundles the native libduckdb binaries for Linux x86_64, macOS,
            and Windows so deploys don't need a separate install step. -->
       <PackageReference Include="DuckDB.NET.Data.Full" Version="1.4.1" />
+      <!-- CSV ingest for SqlType DataStores (docs/plans/2026-05-30-data-stores-implementation.md).
+           Streams CSV rows into Npgsql NpgsqlBinaryImporter (COPY) for the
+           CsvIngestor. -->
+      <PackageReference Include="CsvHelper" Version="33.0.1" />
     </ItemGroup>
 
     <ItemGroup>

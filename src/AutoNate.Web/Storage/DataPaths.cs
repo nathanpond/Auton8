@@ -21,6 +21,7 @@ public sealed class DataPaths : IDataPaths
         UploadsRoot = Path.Combine(Root, "uploads");
         RepositoriesRoot = Path.Combine(Root, "repositories");
         TempRoot = Path.Combine(Root, "tmp");
+        DatastoresRoot = Path.Combine(Root, "datastores");
 
         // Create eagerly: PhysicalFileProvider throws if PublicRoot is missing
         // when the static-files middleware is wired, and callers shouldn't have
@@ -31,6 +32,7 @@ public sealed class DataPaths : IDataPaths
         Directory.CreateDirectory(UploadsRoot);
         Directory.CreateDirectory(RepositoriesRoot);
         Directory.CreateDirectory(TempRoot);
+        Directory.CreateDirectory(DatastoresRoot);
     }
 
     public string Root { get; }
@@ -39,4 +41,5 @@ public sealed class DataPaths : IDataPaths
     public string UploadsRoot { get; }
     public string RepositoriesRoot { get; }
     public string TempRoot { get; }
+    public string DatastoresRoot { get; }
 }

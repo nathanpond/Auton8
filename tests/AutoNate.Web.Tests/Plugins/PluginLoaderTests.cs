@@ -106,6 +106,7 @@ public sealed class PluginLoaderTests : IDisposable
             UploadsRoot = Path.Combine(root, "uploads");
             RepositoriesRoot = Path.Combine(root, "repositories");
             TempRoot = Path.Combine(root, "tmp");
+            DatastoresRoot = Path.Combine(root, "datastores");
         }
         public string Root { get; }
         public string PublicRoot { get; }
@@ -113,6 +114,7 @@ public sealed class PluginLoaderTests : IDisposable
         public string UploadsRoot { get; }
         public string RepositoriesRoot { get; }
         public string TempRoot { get; }
+        public string DatastoresRoot { get; }
     }
 
     private Plugin StageSamplePlugin()
