@@ -949,7 +949,7 @@ internal static class DatabaseSchemaInitializer
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (g, main_id, NULL, 0, 'Dashboard', 'fa fa-house', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), main_id, g, 0, 'Home', NULL, 'template', '{{"templateKey":"home"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
+                VALUES (gen_random_uuid(), main_id, g, 0, 'Home', NULL, 'template', '{{"templateKey":"home","path":"/home"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
 
                 g := gen_random_uuid();
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -1375,10 +1375,17 @@ internal static class DatabaseSchemaInitializer
 
             -- Convert any pre-existing route-typed menu items that point at a
             -- known templated path. Once converted, the WHERE clause stops
-            -- matching them, making this naturally idempotent.
+            -- matching them, making this naturally idempotent. Preserves the
+            -- `path` alongside the new `templateKey` so the SPA's router still
+            -- has a URL to match the menu item to — matches the shape Query and
+            -- other modern template items already use ({{path, templateKey}}).
+            -- Dropping path here was the cause of post-conversion 404s at /home
+            -- on fresh databases.
             UPDATE menu_items mi
             SET item_type = 'template',
-                config = jsonb_build_object('templateKey', mapping.template_key),
+                config = jsonb_build_object(
+                    'templateKey', mapping.template_key,
+                    'path',        mapping.path),
                 updated_at_utc = NOW()
             FROM (VALUES
               ('/home', 'home'),

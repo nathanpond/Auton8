@@ -35,17 +35,19 @@ public sealed class AgentSidebarTests
         var toggle = page.GetByLabel("Open AutoNate assistant");
         await toggle.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
 
-        // Before the click the panel header text shouldn't be visible (the
-        // <aside> is rendered but its inner is gated on isOpen).
-        await Assertions.Expect(page.GetByText("AutoNate Assistant")).Not.ToBeVisibleAsync();
+        // Before the click the close button shouldn't be visible (the
+        // <aside> is rendered but its inner is gated on isOpen). The old
+        // "AutoNate Assistant" header text was removed in favor of the
+        // current-page breadcrumb (see AgentSidebar.css comment near .136),
+        // so the Close-button affordance is now the canonical open-state
+        // signal.
+        await Assertions.Expect(page.GetByLabel("Close assistant")).Not.ToBeVisibleAsync();
 
         await toggle.ClickAsync();
 
-        // The opened panel renders a header reading "AutoNate Assistant" and
-        // a Close button with aria-label="Close assistant". Asserting both
-        // catches drift in either the trigger or the open-state CSS class.
-        await Assertions.Expect(page.GetByText("AutoNate Assistant"))
-            .ToBeVisibleAsync(new() { Timeout = 5_000 });
+        // The opened panel renders a Close button with aria-label="Close
+        // assistant". Asserting on it catches drift in either the trigger or
+        // the open-state CSS class.
         await Assertions.Expect(page.GetByLabel("Close assistant"))
             .ToBeVisibleAsync(new() { Timeout = 5_000 });
     }

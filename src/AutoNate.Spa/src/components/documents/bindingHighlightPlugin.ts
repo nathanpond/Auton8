@@ -308,15 +308,19 @@ export function scrollToBinding(view: EditorView | null, bindingId: string): voi
   const run = () => {
     let best: HTMLElement | null = null;
     let bestTop = Infinity;
-    document.querySelectorAll<HTMLElement>(`.${ANCHOR_CLASS}`).forEach((el) => {
+    // for-of (not forEach): TS's control-flow analysis can't see assignments
+    // to `best` made inside a callback closure, so the post-loop `if (best)`
+    // narrows to `never`. With a same-scope for-of the assignment is visible
+    // and `best` narrows to `HTMLElement` as expected.
+    for (const el of document.querySelectorAll<HTMLElement>(`.${ANCHOR_CLASS}`)) {
       const r = el.getBoundingClientRect();
-      if (r.left < -1000) return; // skip the parked off-screen editable copy
-      if (r.width <= 0 && r.height <= 0) return;
+      if (r.left < -1000) continue; // skip the parked off-screen editable copy
+      if (r.width <= 0 && r.height <= 0) continue;
       if (r.top < bestTop) {
         bestTop = r.top;
         best = el;
       }
-    });
+    }
     if (best) {
       best.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
