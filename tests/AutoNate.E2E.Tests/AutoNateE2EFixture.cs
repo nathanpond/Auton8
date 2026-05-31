@@ -262,10 +262,13 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // Replay the foundational schema script against the new database.
         // Npgsql executes multi-statement scripts (including PL/pgSQL DO blocks
         // and dollar-quoted strings present in `02-...sql`) in a single
-        // ExecuteNonQuery call.
+        // ExecuteNonQuery call. Strip leading psql meta-commands (e.g. the
+        // `\c "AutoNate"` that switches DBs under the docker entrypoint) —
+        // Npgsql is already connected to the target DB and the server would
+        // reject `\c` as a syntax error.
         var initSqlPath = Path.Combine(
             repoRoot, "infra", "postgres", "init", "02-create-autonate-app-schema.sql");
-        var initSql = await File.ReadAllTextAsync(initSqlPath);
+        var initSql = StripPsqlMetaCommands(await File.ReadAllTextAsync(initSqlPath));
 
         await using (var conn = new NpgsqlConnection(testConn))
         {
@@ -276,6 +279,19 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         }
 
         return testConn;
+    }
+
+    private static string StripPsqlMetaCommands(string sql)
+    {
+        var lines = sql.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].TrimStart().StartsWith('\\'))
+            {
+                lines[i] = string.Empty;
+            }
+        }
+        return string.Join('\n', lines);
     }
 
     /// <summary>
