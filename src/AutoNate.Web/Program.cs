@@ -483,6 +483,11 @@ builder.Services.AddScoped<AutoNate.Web.Services.DataStores.Sql.CsvIngestor>();
 // Built-in connector handlers. Plugin-contributed handlers join through
 // IPluginConnectorRegistry → PluginDataConnectorAdapter, registered below.
 builder.Services.AddHttpClient();
+// Dedicated HttpClient for the REST connector — third-party APIs need a
+// shorter ceiling than the IHttpClientFactory default (100s) so a hung
+// upstream doesn't stall the admin Test endpoint or the scheduled fetch
+// worker for a minute and a half.
+builder.Services.AddHttpClient("data-connector", c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandler,
     AutoNate.Web.Services.DataConnectors.Builtin.RestDataConnectorHandler>();
 builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandler,

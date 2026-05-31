@@ -69,7 +69,11 @@
 .form-editor-rail-btn:focus-visible {
     color: #102a43;
     background: #eef5fb;
-    outline: none;
+}
+
+.form-editor-rail-btn:focus-visible {
+    outline: 2px solid var(--mantine-primary-color-filled);
+    outline-offset: 2px;
 }
 
 .form-editor-rail-btn.is-active {
@@ -131,7 +135,11 @@
 .form-editor-collapse-btn:focus-visible {
     color: #102a43;
     background: #eef5fb;
-    outline: none;
+}
+
+.form-editor-collapse-btn:focus-visible {
+    outline: 2px solid var(--mantine-primary-color-filled);
+    outline-offset: 2px;
 }
 
 .form-editor-sidebar-body {

@@ -870,7 +870,13 @@ function ChatThread({
           Delete
         </Button>
       </Group>
-      <div className="agent-thread__messages" ref={messagesRef}>
+      <div
+        className="agent-thread__messages"
+        ref={messagesRef}
+        aria-live="polite"
+        aria-atomic="false"
+        aria-relevant="additions text"
+      >
         {detail.messages.map((m) => (
           <MessageBubble
             key={m.id}

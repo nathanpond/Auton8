@@ -28,11 +28,13 @@ import {
   kindLabel,
   listDataStores
 } from "@/api/datastores";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 
 const QUERY_KEY = ["datastores", "list"] as const;
 const COLUMN_WIDTHS = ["1fr", "120px", "2fr", "180px", "60px"];
 
 export default function DataStoresPage() {
+  useDocumentTitle("Data Stores");
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
