@@ -1,5 +1,5 @@
-import { FormEvent, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FormEvent, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
   Alert,
@@ -30,6 +30,7 @@ import {
 } from "@/api/datastores";
 
 const QUERY_KEY = ["datastores", "list"] as const;
+const COLUMN_WIDTHS = ["1fr", "120px", "2fr", "180px", "60px"];
 
 export default function DataStoresPage() {
   const queryClient = useQueryClient();
@@ -38,11 +39,6 @@ export default function DataStoresPage() {
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<DataStoreKind>("FileType");
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: ({ signal }) => listDataStores(signal)
-  });
 
   const createMutation = useMutation({
     mutationFn: createDataStore,
@@ -88,49 +84,60 @@ export default function DataStoresPage() {
     });
   }
 
-  const columns: DataTableColumn<DataStore>[] = [
-    { accessor: "name", title: "Name" },
-    {
-      accessor: "kind",
-      title: "Kind",
-      render: (row) => (
-        <Badge color={kindLabel(row.kind) === "SqlType" ? "blue" : "gray"}>
-          {kindLabel(row.kind)}
-        </Badge>
-      )
-    },
-    {
-      accessor: "description",
-      title: "Description",
-      render: (row) => row.description ?? <Text c="dimmed">—</Text>
-    },
-    {
-      accessor: "createdAtUtc",
-      title: "Created",
-      render: (row) => new Date(row.createdAtUtc).toLocaleString()
-    },
-    {
-      accessor: "actions",
-      title: "",
-      width: 60,
-      render: (row) => (
-        <Tooltip label="Delete data store">
-          <ActionIcon
-            color="red"
-            variant="subtle"
-            aria-label={`Delete ${row.name}`}
-            onClick={() => {
-              if (window.confirm(`Delete data store "${row.name}"?`)) {
-                deleteMutation.mutate(row.id);
-              }
-            }}
-          >
-            <i className="fa fa-trash" />
-          </ActionIcon>
-        </Tooltip>
-      )
-    }
-  ];
+  const columns = useMemo<DataTableColumn<DataStore>[]>(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => <Text fw={500}>{row.original.name}</Text>
+      },
+      {
+        id: "kind",
+        accessorFn: (row) => kindLabel(row.kind),
+        header: "Kind",
+        cell: ({ row }) => (
+          <Badge color={kindLabel(row.original.kind) === "SqlType" ? "blue" : "gray"}>
+            {kindLabel(row.original.kind)}
+          </Badge>
+        )
+      },
+      {
+        id: "description",
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) => row.original.description ?? <Text c="dimmed">—</Text>
+      },
+      {
+        id: "createdAtUtc",
+        accessorKey: "createdAtUtc",
+        header: "Created",
+        cell: ({ row }) => new Date(row.original.createdAtUtc).toLocaleString()
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Tooltip label="Delete data store">
+            <ActionIcon
+              color="red"
+              variant="subtle"
+              aria-label={`Delete ${row.original.name}`}
+              onClick={() => {
+                if (window.confirm(`Delete data store "${row.original.name}"?`)) {
+                  deleteMutation.mutate(row.original.id);
+                }
+              }}
+            >
+              <i className="fa fa-trash" />
+            </ActionIcon>
+          </Tooltip>
+        )
+      }
+    ],
+    [deleteMutation]
+  );
 
   return (
     <Stack gap="md">
@@ -147,19 +154,16 @@ export default function DataStoresPage() {
         DB and accept CSV ingest.
       </Text>
 
-      {error ? (
-        <Alert color="red" title="Failed to load data stores">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </Alert>
-      ) : null}
-
       <Box>
-        <DataTable
-          records={data ?? []}
+        <DataTable<DataStore>
+          mode="client"
+          loadAll={() => listDataStores()}
+          queryKey={QUERY_KEY}
           columns={columns}
-          fetching={isLoading}
-          idAccessor="id"
-          noRecordsText="No data stores yet."
+          rowKey={(row) => row.id}
+          columnWidths={COLUMN_WIDTHS}
+          emptyMessage="No data stores yet."
+          loadingMessage="Loading data stores…"
         />
       </Box>
 

@@ -3396,7 +3396,7 @@ internal static class DatabaseSchemaInitializer
             name TEXT NOT NULL,
             description TEXT NULL,
             kind TEXT NOT NULL,
-            config JSONB NOT NULL DEFAULT '{}'::jsonb,
+            config JSONB NOT NULL DEFAULT '{{}}'::jsonb,
             last_fetched_at_utc TIMESTAMPTZ NULL,
             cursor TEXT NULL,
             owner_user_id UUID NOT NULL,
@@ -3540,13 +3540,19 @@ internal static class DatabaseSchemaInitializer
     // the graph at enqueue time so a concurrent edit can't mutate a
     // queued run. pipeline_run_steps records per-node status/timings/row
     // counts as the orchestrator walks the topologically-sorted graph.
+    // ExecuteSqlRawAsync runs the SQL through `String.Format`, which treats
+    // `{`/`}` as format-token delimiters. JSON literals embedded as column
+    // defaults have to double the braces or the EF format pass throws
+    // FormatException before the statement ever reaches Postgres. Other
+    // jsonb defaults in this file (search for `'{{}}'::jsonb`) follow the
+    // same convention.
     private const string PipelinesSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS pipelines (
             id UUID PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT NULL,
-            graph JSONB NOT NULL DEFAULT '{"nodes":[],"edges":[]}'::jsonb,
+            graph JSONB NOT NULL DEFAULT '{{"nodes":[],"edges":[]}}'::jsonb,
             schedule_cron TEXT NULL,
             last_run_at_utc TIMESTAMPTZ NULL,
             owner_user_id UUID NOT NULL,
@@ -3566,7 +3572,7 @@ internal static class DatabaseSchemaInitializer
             id UUID PRIMARY KEY,
             pipeline_id UUID NOT NULL REFERENCES pipelines (id) ON DELETE CASCADE,
             status TEXT NOT NULL DEFAULT 'Queued',
-            graph_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            graph_snapshot JSONB NOT NULL DEFAULT '{{}}'::jsonb,
             queued_at_utc TIMESTAMPTZ NOT NULL,
             started_at_utc TIMESTAMPTZ NULL,
             completed_at_utc TIMESTAMPTZ NULL,

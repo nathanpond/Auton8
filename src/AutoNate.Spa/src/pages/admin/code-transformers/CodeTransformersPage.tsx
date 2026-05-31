@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
   Alert,
@@ -33,6 +33,7 @@ import {
 } from "@/api/codeTransformers";
 
 const QUERY_KEY = ["code-transformers", "list"] as const;
+const COLUMN_WIDTHS = ["1fr", "140px", "140px", "180px", "180px", "130px"];
 
 const JS_TRANSFORMER_STARTER = `function transform(inputs, config) {
   // inputs is an array of frames; inputs[0] is rows[] from the upstream node.
@@ -75,11 +76,6 @@ export default function CodeTransformersPage() {
   const [isUnsafe, setIsUnsafe] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: ({ signal }) => listCodeTransformers(signal)
-  });
-
   function resetForm() {
     setEditingId(null);
     setName("");
@@ -91,9 +87,6 @@ export default function CodeTransformersPage() {
     setSubmitError(null);
   }
 
-  // Update the starter when kind/language change AND the user hasn't typed
-  // anything substantive yet (heuristic: code matches one of the four
-  // built-in starters).
   useEffect(() => {
     if (editingId !== null) return;
     const starters = [
@@ -190,62 +183,69 @@ export default function CodeTransformersPage() {
     }
   }
 
-  const columns: DataTableColumn<CodeTransformer>[] = [
-    { accessor: "name", title: "Name" },
-    {
-      accessor: "kind",
-      title: "Kind",
-      render: (row) => <Badge variant="light">{row.kind}</Badge>
-    },
-    {
-      accessor: "language",
-      title: "Language",
-      render: (row) => <Badge variant="light">{row.language}</Badge>
-    },
-    {
-      accessor: "isUnsafe",
-      title: "Sandbox",
-      render: (row) =>
-        row.isUnsafe ? (
-          <Badge color="red">Trusted (unsafe)</Badge>
-        ) : (
-          <Badge color="green">Sandboxed</Badge>
+  const columns = useMemo<DataTableColumn<CodeTransformer>[]>(
+    () => [
+      { id: "name", accessorKey: "name", header: "Name", cell: ({ row }) => row.original.name },
+      {
+        id: "kind",
+        accessorKey: "kind",
+        header: "Kind",
+        cell: ({ row }) => <Badge variant="light">{row.original.kind}</Badge>
+      },
+      {
+        id: "language",
+        accessorKey: "language",
+        header: "Language",
+        cell: ({ row }) => <Badge variant="light">{row.original.language}</Badge>
+      },
+      {
+        id: "isUnsafe",
+        accessorKey: "isUnsafe",
+        header: "Sandbox",
+        cell: ({ row }) =>
+          row.original.isUnsafe ? (
+            <Badge color="red">Trusted (unsafe)</Badge>
+          ) : (
+            <Badge color="green">Sandboxed</Badge>
+          )
+      },
+      {
+        id: "updatedAtUtc",
+        accessorKey: "updatedAtUtc",
+        header: "Updated",
+        cell: ({ row }) => new Date(row.original.updatedAtUtc).toLocaleString()
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Group gap={4} wrap="nowrap">
+            <Tooltip label="Edit code">
+              <ActionIcon variant="subtle" aria-label={`Edit ${row.original.name}`} onClick={() => openEdit(row.original)}>
+                <i className="fa fa-pen-to-square" />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Delete">
+              <ActionIcon
+                color="red"
+                variant="subtle"
+                aria-label={`Delete ${row.original.name}`}
+                onClick={() => {
+                  if (window.confirm(`Delete code transformer "${row.original.name}"?`)) {
+                    deleteMutation.mutate(row.original.id);
+                  }
+                }}
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         )
-    },
-    {
-      accessor: "updatedAtUtc",
-      title: "Updated",
-      render: (row) => new Date(row.updatedAtUtc).toLocaleString()
-    },
-    {
-      accessor: "actions",
-      title: "",
-      width: 130,
-      render: (row) => (
-        <Group gap={4} wrap="nowrap">
-          <Tooltip label="Edit code">
-            <ActionIcon variant="subtle" aria-label={`Edit ${row.name}`} onClick={() => openEdit(row)}>
-              <i className="fa fa-pen-to-square" />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Delete">
-            <ActionIcon
-              color="red"
-              variant="subtle"
-              aria-label={`Delete ${row.name}`}
-              onClick={() => {
-                if (window.confirm(`Delete code transformer "${row.name}"?`)) {
-                  deleteMutation.mutate(row.id);
-                }
-              }}
-            >
-              <i className="fa fa-trash" />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      )
-    }
-  ];
+      }
+    ],
+    [deleteMutation]
+  );
 
   return (
     <Stack gap="md">
@@ -263,19 +263,16 @@ export default function CodeTransformersPage() {
         switch requires the <code>executeunsafe</code> permission.
       </Text>
 
-      {error ? (
-        <Alert color="red" title="Failed to load code transformers">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </Alert>
-      ) : null}
-
       <Box>
-        <DataTable
-          records={data ?? []}
+        <DataTable<CodeTransformer>
+          mode="client"
+          loadAll={() => listCodeTransformers()}
+          queryKey={QUERY_KEY}
           columns={columns}
-          fetching={isLoading}
-          idAccessor="id"
-          noRecordsText="No code transformers yet."
+          rowKey={(row) => row.id}
+          columnWidths={COLUMN_WIDTHS}
+          emptyMessage="No code transformers yet."
+          loadingMessage="Loading code transformers…"
         />
       </Box>
 
