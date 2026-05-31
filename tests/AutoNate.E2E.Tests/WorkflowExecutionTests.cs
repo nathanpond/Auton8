@@ -196,4 +196,34 @@ public sealed class WorkflowExecutionTests : E2ETestBase
         // workflowName cell is gone.
         await Assertions.Expect(nameCell).Not.ToBeVisibleAsync(new() { Timeout = 20_000 });
     }
+
+    [Fact]
+    public async Task AssignedWorkflowTask_CompleteFromMyTasks_RemovesItFromTheTable()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var meResponse = await page.APIRequest.GetAsync("/api/auth/me");
+        var me = await meResponse.JsonAsync()
+            ?? throw new InvalidOperationException("Empty response from /api/auth/me.");
+        var adminUserId = me.GetProperty("userId").GetString()
+            ?? throw new InvalidOperationException("/api/auth/me did not return userId.");
+
+        var processKey = $"e2e_{TestNames.ShortSlug()}";
+        var workflowName = TestNames.Prefixed("wf-task");
+        await seeder.CreateAndPublishWorkflowAsync(processKey, workflowName, assignee: adminUserId);
+        await seeder.StartExecutionAsync(processKey, instanceName: TestNames.Prefixed("complete"));
+
+        await page.GotoAsync("/home");
+        var taskName = page.GetByText(workflowName).First;
+        await Assertions.Expect(taskName).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Open", Exact = true }).ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Review" });
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Complete Task" }).ClickAsync();
+
+        await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(taskName).Not.ToBeVisibleAsync(new() { Timeout = 20_000 });
+    }
 }

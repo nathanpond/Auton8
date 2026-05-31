@@ -41,7 +41,10 @@ export function useCreateDashboard() {
   return useMutation<Dashboard, Error, CreateDashboardRequest>({
     mutationFn: createDashboard,
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: DASHBOARDS_QUERY_KEY });
+      qc.setQueryData<Dashboard[]>(DASHBOARDS_QUERY_KEY, (old) =>
+        old ? [...old.filter((dashboard) => dashboard.id !== created.id), created] : [created]
+      );
+      void qc.invalidateQueries({ queryKey: DASHBOARDS_QUERY_KEY });
       qc.setQueryData(DASHBOARD_QUERY_KEY(created.id), {
         dashboard: created,
         widgets: []

@@ -262,7 +262,8 @@ export async function importDocxAsDocument(req: {
   if (req.title) form.append("title", req.title);
   const { data } = await api.post<DocumentDto>(
     "/api/content/documents/import",
-    form
+    form,
+    { headers: { "Content-Type": "multipart/form-data" } }
   );
   return data;
 }

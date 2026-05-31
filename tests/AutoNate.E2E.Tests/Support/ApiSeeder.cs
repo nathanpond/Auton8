@@ -103,10 +103,13 @@ public sealed class ApiSeeder
     /// deployment collisions with prior runs or with the dev developer's
     /// workflows. <see cref="TestNames"/>'s slugs already supply that.
     /// </summary>
-    public async Task<WorkflowDto> CreateAndPublishWorkflowAsync(string processKey, string name)
+    public async Task<WorkflowDto> CreateAndPublishWorkflowAsync(
+        string processKey,
+        string name,
+        string? assignee = null)
     {
         var modelId = Guid.NewGuid();
-        var bpmnXml = MinimalUserTaskBpmn(processKey, name);
+        var bpmnXml = MinimalUserTaskBpmn(processKey, name, assignee);
         var now = DateTimeOffset.UtcNow;
 
         var saveResponse = await _request.PostAsync("/api/workflows/", new APIRequestContextOptions
@@ -297,19 +300,55 @@ public sealed class ApiSeeder
         await EnsureSuccessAsync(response, "publish form");
     }
 
-    private static string MinimalUserTaskBpmn(string processKey, string name) => $$"""
+    /// <summary>
+    /// Mounts the built-in dashboard template at a unique path. Fresh installs
+    /// register the template but deliberately do not place it on a menu, so UI
+    /// tests create their own mount before exercising dashboard behavior.
+    /// </summary>
+    public async Task CreateDashboardMountAsync(string path)
+    {
+        var response = await _request.PostAsync("/api/admin/menus/standalone/items",
+            new APIRequestContextOptions
+            {
+                DataObject = new
+                {
+                    parentId = (Guid?)null,
+                    sortOrder = 0,
+                    displayName = TestNames.Prefixed("dashboard-mount"),
+                    icon = (string?)null,
+                    itemType = "template",
+                    config = JsonSerializer.SerializeToElement(new
+                    {
+                        templateKey = "dashboard",
+                        path,
+                        isUserConfigurable = true
+                    }),
+                    permissionRequired = (string?)null,
+                    isVisible = true
+                }
+            });
+        await EnsureSuccessAsync(response, "create dashboard mount");
+    }
+
+    private static string MinimalUserTaskBpmn(string processKey, string name, string? assignee)
+    {
+        var assigneeAttribute = string.IsNullOrWhiteSpace(assignee)
+            ? string.Empty
+            : $" flowable:assignee=\"{System.Security.SecurityElement.Escape(assignee)}\"";
+        return $$"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                           xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
                           xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                           xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                          xmlns:flowable="http://flowable.org/bpmn"
                           id="Definitions_1"
                           targetNamespace="http://autonate.dev/workflows">
           <bpmn:process id="{{processKey}}" name="{{name}}" isExecutable="true">
             <bpmn:startEvent id="StartEvent_1">
               <bpmn:outgoing>Flow_1</bpmn:outgoing>
             </bpmn:startEvent>
-            <bpmn:userTask id="UserTask_1" name="Review">
+            <bpmn:userTask id="UserTask_1" name="Review"{{assigneeAttribute}}>
               <bpmn:incoming>Flow_1</bpmn:incoming>
               <bpmn:outgoing>Flow_2</bpmn:outgoing>
             </bpmn:userTask>
@@ -321,6 +360,7 @@ public sealed class ApiSeeder
           </bpmn:process>
         </bpmn:definitions>
         """;
+    }
 
     private static async Task EnsureSuccessAsync(IAPIResponse response, string action)
     {
