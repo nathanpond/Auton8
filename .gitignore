@@ -34,6 +34,11 @@ src/AutoNate.Web/wwwroot/
 # nothing in dist/ should ever be hand-maintained.
 services/*/dist/
 
+# Plugin build output. `Directory.Build.targets` regenerates plugins/*/dist/
+# zips on every build; tracking them produces phantom binary diffs and ships
+# stale bytes in PRs.
+plugins/*/dist/
+
 .idea/
 Test Results/
 

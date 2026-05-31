@@ -90,6 +90,18 @@ public sealed class CsvIngestor(
         if (!connectionFactory.IsEnabled)
             throw new InvalidOperationException("SqlType DataStores feature is disabled.");
 
+        // Re-sanitize: the caller-supplied columns aren't required to be the
+        // unmodified PreviewAsync output, so we can't assume names already
+        // passed SanitizeColumnName. They land in `CREATE TABLE "..."` and
+        // `COPY ("...")` quoted identifiers below; an unescaped `"` would
+        // break out of the quote.
+        var sanitized = new List<CsvColumn>(columns.Count);
+        for (var i = 0; i < columns.Count; i++)
+        {
+            sanitized.Add(new CsvColumn(SanitizeColumnName(columns[i].Name, i), columns[i].PostgresType));
+        }
+        columns = sanitized;
+
         var sanitizedTable = SanitizeTableName(tableName);
         var schema = SqlDataStoreProvisioner.SchemaNameFor(dataStoreId);
         var qualified = $"\"{schema}\".\"{sanitizedTable}\"";

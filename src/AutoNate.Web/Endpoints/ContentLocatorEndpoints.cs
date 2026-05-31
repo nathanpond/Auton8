@@ -67,8 +67,17 @@ public static class ContentLocatorEndpoints
             bool Allows(ContentAccessSet set, Guid id) =>
                 set.Unrestricted || set.AllowedIds.Contains(id);
 
-            var cabinets = await db.Cabinets.AsNoTracking()
-                .Where(c => c.ProjectId == projectId && !c.IsArchived)
+            // Push the view-access filter into SQL so unauthorized rows never
+            // leave Postgres (canonical pattern, see NotebookEndpoints). Edit
+            // sets stay in-memory: they only drive the per-row CanEdit flag.
+            var cabinetQuery = db.Cabinets.AsNoTracking()
+                .Where(c => c.ProjectId == projectId && !c.IsArchived);
+            if (!cabinetView.Unrestricted)
+            {
+                var cabinetViewIds = cabinetView.AllowedIds;
+                cabinetQuery = cabinetQuery.Where(c => cabinetViewIds.Contains(c.Id));
+            }
+            var cabinets = await cabinetQuery
                 .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
                 .Select(c => new
                 {
@@ -77,8 +86,14 @@ public static class ContentLocatorEndpoints
                 .ToListAsync(ct);
             var cabinetIds = cabinets.Select(c => c.Id).ToList();
 
-            var notebooks = await db.Notebooks.AsNoTracking()
-                .Where(n => cabinetIds.Contains(n.CabinetId) && !n.IsArchived)
+            var notebookQuery = db.Notebooks.AsNoTracking()
+                .Where(n => cabinetIds.Contains(n.CabinetId) && !n.IsArchived);
+            if (!notebookView.Unrestricted)
+            {
+                var notebookViewIds = notebookView.AllowedIds;
+                notebookQuery = notebookQuery.Where(n => notebookViewIds.Contains(n.Id));
+            }
+            var notebooks = await notebookQuery
                 .OrderBy(n => n.SortOrder).ThenBy(n => n.Name)
                 .Select(n => new
                 {
@@ -87,8 +102,14 @@ public static class ContentLocatorEndpoints
                 .ToListAsync(ct);
             var notebookIds = notebooks.Select(n => n.Id).ToList();
 
-            var pages = await db.Pages.AsNoTracking()
-                .Where(p => notebookIds.Contains(p.NotebookId) && !p.IsArchived)
+            var pageQuery = db.Pages.AsNoTracking()
+                .Where(p => notebookIds.Contains(p.NotebookId) && !p.IsArchived);
+            if (!pageView.Unrestricted)
+            {
+                var pageViewIds = pageView.AllowedIds;
+                pageQuery = pageQuery.Where(p => pageViewIds.Contains(p.Id));
+            }
+            var pages = await pageQuery
                 .OrderBy(p => p.SortOrder).ThenBy(p => p.Title)
                 .Select(p => new
                 {
@@ -97,15 +118,14 @@ public static class ContentLocatorEndpoints
                 .ToListAsync(ct);
 
             var cabinetDtos = cabinets
-                .Where(c => Allows(cabinetView, c.Id))
                 .Select(c => new ProjectTreeCabinet(
                     c.Id, c.Locator, c.Name, c.Icon, Allows(cabinetEdit, c.Id),
                     notebooks
-                        .Where(n => n.CabinetId == c.Id && Allows(notebookView, n.Id))
+                        .Where(n => n.CabinetId == c.Id)
                         .Select(n => new ProjectTreeNotebook(
                             n.Id, n.Locator, n.Name, n.Icon, Allows(notebookEdit, n.Id),
                             pages
-                                .Where(p => p.NotebookId == n.Id && Allows(pageView, p.Id))
+                                .Where(p => p.NotebookId == n.Id)
                                 .Select(p => new ProjectTreePage(
                                     p.Id, p.Locator, p.Title, p.ParentPageId,
                                     Allows(pageEdit, p.Id)))

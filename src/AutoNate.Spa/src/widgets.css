@@ -119,3 +119,21 @@
 .bn-comment-add-reaction {
     display: none !important;
 }
+
+/* ─── Reduced-motion (WCAG 2.3.3) ───
+   When the user has set `prefers-reduced-motion: reduce` at the OS level,
+   collapse animations/transitions to a near-zero duration site-wide. This
+   replaces the per-component opt-in we'd otherwise need across the agent
+   typing indicator, system-health pulse, notes modal fade, sidebar slide,
+   etc. Pages that need a meaningful reduced variant (e.g., a snap-instead-
+   of-slide) can override this rule with a higher-specificity selector. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

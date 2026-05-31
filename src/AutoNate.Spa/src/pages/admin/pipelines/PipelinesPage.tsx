@@ -28,10 +28,13 @@ import {
   runPipeline
 } from "@/api/pipelines";
 
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+
 const QUERY_KEY = ["pipelines", "list"] as const;
 const COLUMN_WIDTHS = ["1fr", "2fr", "140px", "180px", "130px"];
 
 export default function PipelinesPage() {
+  useDocumentTitle("Pipelines");
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");

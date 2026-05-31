@@ -24,7 +24,7 @@ public sealed class RestDataConnectorHandler(
         try
         {
             var config = ParseConfig(connector);
-            using var client = httpClientFactory.CreateClient();
+            using var client = httpClientFactory.CreateClient("data-connector");
             using var request = BuildRequest(config, lastFetchedAtUtc: null);
             using var response = await client.SendAsync(
                 request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -62,7 +62,7 @@ public sealed class RestDataConnectorHandler(
         ArgumentNullException.ThrowIfNull(sink);
 
         var config = ParseConfig(connector);
-        using var client = httpClientFactory.CreateClient();
+        using var client = httpClientFactory.CreateClient("data-connector");
         using var request = BuildRequest(config, state.LastFetchedAtUtc);
         using var response = await client.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);

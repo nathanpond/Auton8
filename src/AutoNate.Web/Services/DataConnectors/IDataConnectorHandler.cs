@@ -17,8 +17,8 @@ public interface IDataConnectorHandler
 
     // Pull data since the supplied refresh state. Returns updated state
     // the caller persists. The fetched rows are streamed into a sink the
-    // caller owns — Phase 1 wires this to a TODO sink; Phase 5 (pipelines)
-    // wires it to the orchestrator's staging area.
+    // caller owns — Datasets pass the cache materializer, Pipelines pass
+    // the orchestrator's staging area.
     Task<ConnectorRefreshState> FetchAsync(
         DataConnector connector,
         ConnectorRefreshState state,

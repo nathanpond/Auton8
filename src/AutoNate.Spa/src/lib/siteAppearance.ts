@@ -12,7 +12,11 @@ export const DEFAULT_SITE_APPEARANCE: SiteAppearance = {
   logoText: "Auto Nate",
   loginTagline: "Sign in to continue to the automation dashboard",
   loginCoverImageUrl: "/assets/img/login-bg/space.jpg",
-  primaryAccentColor: "#00acac",
+  // Darkened from the original #00acac (which computed 2.78:1 against #fff
+  // and failed WCAG 1.4.11's 3:1 UI-component threshold). #008080 (CSS teal)
+  // computes ~4.77:1 against #fff — comfortably past the 3:1 floor for UI
+  // components and the 4.5:1 floor for text.
+  primaryAccentColor: "#008080",
   headerBg: "#ffffff",
   headerColor: "#212529",
   topMenuBg: "#20252a",
@@ -263,6 +267,75 @@ export function validateSiteAppearance(appearance: SiteAppearance): Partial<Reco
   }
 
   return errors;
+}
+
+// Surface-bg-vs-text and other load-bearing color pairs that need to clear
+// WCAG 1.4.3 (text 4.5:1) or 1.4.11 (UI components / large text 3:1).
+//
+// Returned warnings drive a non-blocking advisory in the SiteAppearance
+// editor — admins can still save a low-contrast theme if they have a reason
+// (debug, dev, brand override), but they see the computed ratio and the
+// pair that's failing.
+export type ContrastWarning = {
+  fieldKey: keyof SiteAppearance;
+  pairLabel: string;
+  fgKey: keyof SiteAppearance;
+  bgKey: keyof SiteAppearance;
+  ratio: number;
+  required: number;
+  reason: "text" | "ui";
+};
+
+type ContrastCheck = {
+  fgKey: keyof SiteAppearance;
+  bgKey: keyof SiteAppearance;
+  pairLabel: string;
+  required: number;
+  reason: "text" | "ui";
+};
+
+const CONTRAST_CHECKS: ContrastCheck[] = [
+  { fgKey: "surfaceTextColor", bgKey: "surfaceBg", pairLabel: "Body text on surface", required: 4.5, reason: "text" },
+  { fgKey: "surfaceTextColor", bgKey: "surfaceSecondaryBg", pairLabel: "Body text on secondary surface", required: 4.5, reason: "text" },
+  { fgKey: "surfaceDimmedColor", bgKey: "surfaceBg", pairLabel: "Secondary text on surface", required: 4.5, reason: "text" },
+  { fgKey: "headerColor", bgKey: "headerBg", pairLabel: "Header text on header background", required: 4.5, reason: "text" },
+  { fgKey: "topMenuLinkColor", bgKey: "topMenuBg", pairLabel: "Top-menu link on top-menu background", required: 4.5, reason: "text" },
+  { fgKey: "topMenuLinkActiveColor", bgKey: "topMenuLinkActiveBg", pairLabel: "Active top-menu link", required: 4.5, reason: "text" },
+  { fgKey: "sidebarLinkColor", bgKey: "sidebarBg", pairLabel: "Sidebar link on sidebar background", required: 4.5, reason: "text" },
+  { fgKey: "sidebarActiveColor", bgKey: "sidebarActiveBg", pairLabel: "Active sidebar link", required: 4.5, reason: "text" },
+  // UI components (3:1): the primary accent has to register against the
+  // surface bg as a button / focus ring boundary.
+  { fgKey: "primaryAccentColor", bgKey: "surfaceBg", pairLabel: "Primary accent against surface", required: 3.0, reason: "ui" }
+];
+
+export function checkContrastWarnings(appearance: SiteAppearance): ContrastWarning[] {
+  const warnings: ContrastWarning[] = [];
+  for (const check of CONTRAST_CHECKS) {
+    const fg = parseHex(appearance[check.fgKey] as string);
+    const bg = parseHex(appearance[check.bgKey] as string);
+    if (!fg || !bg) continue;
+    const ratio = contrastRatio(fg, bg);
+    if (ratio < check.required) {
+      warnings.push({
+        fieldKey: check.fgKey,
+        pairLabel: check.pairLabel,
+        fgKey: check.fgKey,
+        bgKey: check.bgKey,
+        ratio,
+        required: check.required,
+        reason: check.reason
+      });
+    }
+  }
+  return warnings;
+}
+
+function contrastRatio(a: Rgb, b: Rgb): number {
+  const lA = relativeLuminance(a);
+  const lB = relativeLuminance(b);
+  const lighter = Math.max(lA, lB);
+  const darker = Math.min(lA, lB);
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 export function areSiteAppearancesEqual(a: SiteAppearance, b: SiteAppearance): boolean {
