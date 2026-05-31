@@ -1,5 +1,5 @@
-import { FormEvent, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FormEvent, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
   Alert,
@@ -34,6 +34,7 @@ import {
 } from "@/api/datasets";
 
 const QUERY_KEY = ["datasets", "list"] as const;
+const COLUMN_WIDTHS = ["1fr", "100px", "1fr", "1fr", "180px", "130px"];
 
 const POSTGRES_TYPES = ["text", "bigint", "double precision", "boolean", "timestamptz"];
 
@@ -59,11 +60,6 @@ export default function DatasetsPage() {
   );
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: ({ signal }) => listDatasets(signal)
-  });
-
   const createMutation = useMutation({
     mutationFn: createDataset,
     onSuccess: () => {
@@ -85,10 +81,6 @@ export default function DatasetsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       notifications.show({ message: "Dataset deleted.", color: "green" });
-    },
-    onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Delete failed.";
-      notifications.show({ message, color: "red" });
     }
   });
 
@@ -97,12 +89,6 @@ export default function DatasetsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       notifications.show({ message: "Dataset refreshed.", color: "green" });
-    },
-    onError: (err: unknown) => {
-      const message =
-        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
-        (err instanceof Error ? err.message : "Refresh failed.");
-      notifications.show({ message, color: "red" });
     }
   });
 
@@ -123,20 +109,20 @@ export default function DatasetsPage() {
       setSubmitError("Name is required.");
       return;
     }
-    let columns: DatasetColumn[];
+    let parsedColumns: DatasetColumn[];
     try {
-      columns = JSON.parse(columnsJson);
+      parsedColumns = JSON.parse(columnsJson);
     } catch (err) {
       setSubmitError(
         "Columns JSON is invalid: " + (err instanceof Error ? err.message : String(err))
       );
       return;
     }
-    if (!Array.isArray(columns) || columns.length === 0) {
+    if (!Array.isArray(parsedColumns) || parsedColumns.length === 0) {
       setSubmitError("Columns must be a non-empty array.");
       return;
     }
-    for (const col of columns) {
+    for (const col of parsedColumns) {
       if (!col?.name || !POSTGRES_TYPES.includes(col.postgresType)) {
         setSubmitError(
           "Each column must have a name and one of: " + POSTGRES_TYPES.join(", ")
@@ -148,7 +134,7 @@ export default function DatasetsPage() {
       name: name.trim(),
       description: description.trim() || null,
       mode,
-      columns,
+      columns: parsedColumns,
       sourceKind,
       sourceId: sourceId.trim(),
       sourceTableName: sourceTableName.trim() || null,
@@ -156,74 +142,83 @@ export default function DatasetsPage() {
     });
   }
 
-  const columns: DataTableColumn<Dataset>[] = [
-    { accessor: "name", title: "Name" },
-    {
-      accessor: "mode",
-      title: "Mode",
-      render: (row) => (
-        <Badge color={modeLabel(row.mode) === "Cached" ? "teal" : "gray"}>
-          {modeLabel(row.mode)}
-        </Badge>
-      )
-    },
-    {
-      accessor: "sourceKind",
-      title: "Source",
-      render: (row) => (
-        <Text size="sm">
-          <Code>{row.sourceKind}</Code>
-          {row.sourceTableName ? ` · ${row.sourceTableName}` : ""}
-        </Text>
-      )
-    },
-    {
-      accessor: "refreshCron",
-      title: "Refresh",
-      render: (row) => row.refreshCron ?? <Text c="dimmed">manual / virtual</Text>
-    },
-    {
-      accessor: "lastRefreshedAtUtc",
-      title: "Last refresh",
-      render: (row) =>
-        row.lastRefreshedAtUtc ? new Date(row.lastRefreshedAtUtc).toLocaleString() : <Text c="dimmed">Never</Text>
-    },
-    {
-      accessor: "actions",
-      title: "",
-      width: 130,
-      render: (row) => (
-        <Group gap={4} wrap="nowrap">
-          {modeLabel(row.mode) === "Cached" ? (
-            <Tooltip label="Refresh now">
+  const columns = useMemo<DataTableColumn<Dataset>[]>(
+    () => [
+      { id: "name", accessorKey: "name", header: "Name", cell: ({ row }) => row.original.name },
+      {
+        id: "mode",
+        accessorFn: (row) => modeLabel(row.mode),
+        header: "Mode",
+        cell: ({ row }) => (
+          <Badge color={modeLabel(row.original.mode) === "Cached" ? "teal" : "gray"}>
+            {modeLabel(row.original.mode)}
+          </Badge>
+        )
+      },
+      {
+        id: "sourceKind",
+        accessorKey: "sourceKind",
+        header: "Source",
+        cell: ({ row }) => (
+          <Text size="sm">
+            <Code>{row.original.sourceKind}</Code>
+            {row.original.sourceTableName ? ` · ${row.original.sourceTableName}` : ""}
+          </Text>
+        )
+      },
+      {
+        id: "refreshCron",
+        accessorKey: "refreshCron",
+        header: "Refresh",
+        cell: ({ row }) => row.original.refreshCron ?? <Text c="dimmed">manual / virtual</Text>
+      },
+      {
+        id: "lastRefreshedAtUtc",
+        accessorKey: "lastRefreshedAtUtc",
+        header: "Last refresh",
+        cell: ({ row }) =>
+          row.original.lastRefreshedAtUtc
+            ? new Date(row.original.lastRefreshedAtUtc).toLocaleString()
+            : <Text c="dimmed">Never</Text>
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Group gap={4} wrap="nowrap">
+            {modeLabel(row.original.mode) === "Cached" ? (
+              <Tooltip label="Refresh now">
+                <ActionIcon
+                  variant="subtle"
+                  aria-label={`Refresh ${row.original.name}`}
+                  onClick={() => refreshMutation.mutate(row.original.id)}
+                  loading={refreshMutation.isPending && refreshMutation.variables === row.original.id}
+                >
+                  <i className="fa fa-rotate" />
+                </ActionIcon>
+              </Tooltip>
+            ) : null}
+            <Tooltip label="Delete dataset">
               <ActionIcon
+                color="red"
                 variant="subtle"
-                aria-label={`Refresh ${row.name}`}
-                onClick={() => refreshMutation.mutate(row.id)}
-                loading={refreshMutation.isPending && refreshMutation.variables === row.id}
+                aria-label={`Delete ${row.original.name}`}
+                onClick={() => {
+                  if (window.confirm(`Delete dataset "${row.original.name}"?`)) {
+                    deleteMutation.mutate(row.original.id);
+                  }
+                }}
               >
-                <i className="fa fa-rotate" />
+                <i className="fa fa-trash" />
               </ActionIcon>
             </Tooltip>
-          ) : null}
-          <Tooltip label="Delete dataset">
-            <ActionIcon
-              color="red"
-              variant="subtle"
-              aria-label={`Delete ${row.name}`}
-              onClick={() => {
-                if (window.confirm(`Delete dataset "${row.name}"?`)) {
-                  deleteMutation.mutate(row.id);
-                }
-              }}
-            >
-              <i className="fa fa-trash" />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      )
-    }
-  ];
+          </Group>
+        )
+      }
+    ],
+    [deleteMutation, refreshMutation]
+  );
 
   return (
     <Stack gap="md">
@@ -241,19 +236,16 @@ export default function DatasetsPage() {
         on a refresh cron.
       </Text>
 
-      {error ? (
-        <Alert color="red" title="Failed to load datasets">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </Alert>
-      ) : null}
-
       <Box>
-        <DataTable
-          records={data ?? []}
+        <DataTable<Dataset>
+          mode="client"
+          loadAll={() => listDatasets()}
+          queryKey={QUERY_KEY}
           columns={columns}
-          fetching={isLoading}
-          idAccessor="id"
-          noRecordsText="No datasets yet."
+          rowKey={(row) => row.id}
+          columnWidths={COLUMN_WIDTHS}
+          emptyMessage="No datasets yet."
+          loadingMessage="Loading datasets…"
         />
       </Box>
 
@@ -268,7 +260,7 @@ export default function DatasetsPage() {
           <Stack gap="sm">
             <TextInput
               label="Name"
-              description="Used as the AQL handle: FROM Dataset(&quot;name&quot;)."
+              description='Used as the AQL handle: FROM Dataset("name").'
               required
               value={name}
               onChange={(e) => setName(e.currentTarget.value)}

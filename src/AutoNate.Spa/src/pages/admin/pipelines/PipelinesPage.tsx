@@ -1,5 +1,5 @@
-import { FormEvent, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FormEvent, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
   Alert,
@@ -29,6 +29,7 @@ import {
 } from "@/api/pipelines";
 
 const QUERY_KEY = ["pipelines", "list"] as const;
+const COLUMN_WIDTHS = ["1fr", "2fr", "140px", "180px", "130px"];
 
 export default function PipelinesPage() {
   const queryClient = useQueryClient();
@@ -36,11 +37,6 @@ export default function PipelinesPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: ({ signal }) => listPipelines(signal)
-  });
 
   const createMutation = useMutation({
     mutationFn: createPipeline,
@@ -97,67 +93,74 @@ export default function PipelinesPage() {
     });
   }
 
-  const columns: DataTableColumn<Pipeline>[] = [
-    {
-      accessor: "name",
-      title: "Name",
-      render: (row) => (
-        <Link to={`/admin/config/pipelines/${row.id}`}>
-          <Text fw={500}>{row.name}</Text>
-        </Link>
-      )
-    },
-    {
-      accessor: "description",
-      title: "Description",
-      render: (row) => row.description ?? <Text c="dimmed">—</Text>
-    },
-    {
-      accessor: "scheduleCron",
-      title: "Schedule",
-      render: (row) =>
-        row.scheduleCron ? <Badge variant="light">{row.scheduleCron}</Badge> : <Text c="dimmed">manual</Text>
-    },
-    {
-      accessor: "lastRunAtUtc",
-      title: "Last run",
-      render: (row) =>
-        row.lastRunAtUtc ? new Date(row.lastRunAtUtc).toLocaleString() : <Text c="dimmed">Never</Text>
-    },
-    {
-      accessor: "actions",
-      title: "",
-      width: 130,
-      render: (row) => (
-        <Group gap={4} wrap="nowrap">
-          <Tooltip label="Run now">
-            <ActionIcon
-              variant="subtle"
-              aria-label={`Run ${row.name}`}
-              onClick={() => runMutation.mutate(row.id)}
-              loading={runMutation.isPending && runMutation.variables === row.id}
-            >
-              <i className="fa fa-play" />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Delete pipeline">
-            <ActionIcon
-              color="red"
-              variant="subtle"
-              aria-label={`Delete ${row.name}`}
-              onClick={() => {
-                if (window.confirm(`Delete pipeline "${row.name}"?`)) {
-                  deleteMutation.mutate(row.id);
-                }
-              }}
-            >
-              <i className="fa fa-trash" />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      )
-    }
-  ];
+  const columns = useMemo<DataTableColumn<Pipeline>[]>(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <Link to={`/admin/config/pipelines/${row.original.id}`}>
+            <Text fw={500}>{row.original.name}</Text>
+          </Link>
+        )
+      },
+      {
+        id: "description",
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) => row.original.description ?? <Text c="dimmed">—</Text>
+      },
+      {
+        id: "scheduleCron",
+        accessorKey: "scheduleCron",
+        header: "Schedule",
+        cell: ({ row }) =>
+          row.original.scheduleCron ? <Badge variant="light">{row.original.scheduleCron}</Badge> : <Text c="dimmed">manual</Text>
+      },
+      {
+        id: "lastRunAtUtc",
+        accessorKey: "lastRunAtUtc",
+        header: "Last run",
+        cell: ({ row }) =>
+          row.original.lastRunAtUtc ? new Date(row.original.lastRunAtUtc).toLocaleString() : <Text c="dimmed">Never</Text>
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Group gap={4} wrap="nowrap">
+            <Tooltip label="Run now">
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Run ${row.original.name}`}
+                onClick={() => runMutation.mutate(row.original.id)}
+                loading={runMutation.isPending && runMutation.variables === row.original.id}
+              >
+                <i className="fa fa-play" />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Delete pipeline">
+              <ActionIcon
+                color="red"
+                variant="subtle"
+                aria-label={`Delete ${row.original.name}`}
+                onClick={() => {
+                  if (window.confirm(`Delete pipeline "${row.original.name}"?`)) {
+                    deleteMutation.mutate(row.original.id);
+                  }
+                }}
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        )
+      }
+    ],
+    [deleteMutation, runMutation]
+  );
 
   return (
     <Stack gap="md">
@@ -174,19 +177,16 @@ export default function PipelinesPage() {
         React Flow editor.
       </Text>
 
-      {error ? (
-        <Alert color="red" title="Failed to load pipelines">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </Alert>
-      ) : null}
-
       <Box>
-        <DataTable
-          records={data ?? []}
+        <DataTable<Pipeline>
+          mode="client"
+          loadAll={() => listPipelines()}
+          queryKey={QUERY_KEY}
           columns={columns}
-          fetching={isLoading}
-          idAccessor="id"
-          noRecordsText="No pipelines yet."
+          rowKey={(row) => row.id}
+          columnWidths={COLUMN_WIDTHS}
+          emptyMessage="No pipelines yet."
+          loadingMessage="Loading pipelines…"
         />
       </Box>
 

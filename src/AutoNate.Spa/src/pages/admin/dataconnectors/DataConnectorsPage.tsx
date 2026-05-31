@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
@@ -34,6 +34,7 @@ import {
 
 const QUERY_KEY = ["dataconnectors", "list"] as const;
 const KINDS_KEY = ["dataconnectors", "kinds"] as const;
+const COLUMN_WIDTHS = ["1fr", "120px", "2fr", "200px", "130px"];
 
 export default function DataConnectorsPage() {
   const queryClient = useQueryClient();
@@ -45,18 +46,11 @@ export default function DataConnectorsPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; result: ConnectorTestResult } | null>(null);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: ({ signal }) => listDataConnectors(signal)
-  });
-
   const { data: kinds } = useQuery({
     queryKey: KINDS_KEY,
     queryFn: ({ signal }) => listDataConnectorKinds(signal)
   });
 
-  // Reset config skeleton when kind changes — REST gets a URL+auth shape,
-  // SMB gets a share-path shape, anything else gets an empty object.
   useEffect(() => {
     if (kind === "rest") setConfigJson('{"url": "", "authMode": "none"}');
     else if (kind === "smb") setConfigJson('{"share": "", "path": "/", "username": "", "password": ""}');
@@ -120,58 +114,66 @@ export default function DataConnectorsPage() {
     });
   }
 
-  const columns: DataTableColumn<DataConnector>[] = [
-    { accessor: "name", title: "Name" },
-    {
-      accessor: "kind",
-      title: "Kind",
-      render: (row) => <Badge variant="light">{row.kind}</Badge>
-    },
-    {
-      accessor: "description",
-      title: "Description",
-      render: (row) => row.description ?? <Text c="dimmed">—</Text>
-    },
-    {
-      accessor: "lastFetchedAtUtc",
-      title: "Last fetched",
-      render: (row) =>
-        row.lastFetchedAtUtc ? new Date(row.lastFetchedAtUtc).toLocaleString() : <Text c="dimmed">Never</Text>
-    },
-    {
-      accessor: "actions",
-      title: "",
-      width: 130,
-      render: (row) => (
-        <Group gap={4} wrap="nowrap">
-          <Tooltip label="Test connection">
-            <ActionIcon
-              variant="subtle"
-              aria-label={`Test ${row.name}`}
-              onClick={() => testMutation.mutate(row.id)}
-              loading={testMutation.isPending && testMutation.variables === row.id}
-            >
-              <i className="fa fa-plug" />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Delete connector">
-            <ActionIcon
-              color="red"
-              variant="subtle"
-              aria-label={`Delete ${row.name}`}
-              onClick={() => {
-                if (window.confirm(`Delete data connector "${row.name}"?`)) {
-                  deleteMutation.mutate(row.id);
-                }
-              }}
-            >
-              <i className="fa fa-trash" />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      )
-    }
-  ];
+  const columns = useMemo<DataTableColumn<DataConnector>[]>(
+    () => [
+      { id: "name", accessorKey: "name", header: "Name", cell: ({ row }) => row.original.name },
+      {
+        id: "kind",
+        accessorKey: "kind",
+        header: "Kind",
+        cell: ({ row }) => <Badge variant="light">{row.original.kind}</Badge>
+      },
+      {
+        id: "description",
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) => row.original.description ?? <Text c="dimmed">—</Text>
+      },
+      {
+        id: "lastFetchedAtUtc",
+        accessorKey: "lastFetchedAtUtc",
+        header: "Last fetched",
+        cell: ({ row }) =>
+          row.original.lastFetchedAtUtc
+            ? new Date(row.original.lastFetchedAtUtc).toLocaleString()
+            : <Text c="dimmed">Never</Text>
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <Group gap={4} wrap="nowrap">
+            <Tooltip label="Test connection">
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Test ${row.original.name}`}
+                onClick={() => testMutation.mutate(row.original.id)}
+                loading={testMutation.isPending && testMutation.variables === row.original.id}
+              >
+                <i className="fa fa-plug" />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Delete connector">
+              <ActionIcon
+                color="red"
+                variant="subtle"
+                aria-label={`Delete ${row.original.name}`}
+                onClick={() => {
+                  if (window.confirm(`Delete data connector "${row.original.name}"?`)) {
+                    deleteMutation.mutate(row.original.id);
+                  }
+                }}
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        )
+      }
+    ],
+    [deleteMutation, testMutation]
+  );
 
   return (
     <Stack gap="md">
@@ -188,12 +190,6 @@ export default function DataConnectorsPage() {
         <Code>smb</Code> (Samba network share — wire integration ships separately).
       </Text>
 
-      {error ? (
-        <Alert color="red" title="Failed to load data connectors">
-          {error instanceof Error ? error.message : "Unknown error"}
-        </Alert>
-      ) : null}
-
       {testResult ? (
         <Alert
           color={testResult.result.success ? "green" : "red"}
@@ -206,12 +202,15 @@ export default function DataConnectorsPage() {
       ) : null}
 
       <Box>
-        <DataTable
-          records={data ?? []}
+        <DataTable<DataConnector>
+          mode="client"
+          loadAll={() => listDataConnectors()}
+          queryKey={QUERY_KEY}
           columns={columns}
-          fetching={isLoading}
-          idAccessor="id"
-          noRecordsText="No data connectors yet."
+          rowKey={(row) => row.id}
+          columnWidths={COLUMN_WIDTHS}
+          emptyMessage="No data connectors yet."
+          loadingMessage="Loading data connectors…"
         />
       </Box>
 

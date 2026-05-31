@@ -11,7 +11,8 @@ import {
   type Connection,
   type Edge,
   type Node,
-  type NodeProps
+  type NodeProps,
+  type NodeTypes
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useNavigate, useParams } from "react-router-dom";
@@ -43,13 +44,19 @@ import { listAnalyzers } from "@/api/analyzers";
 
 // Per-node form data shape stored in `node.data`. The graph round-trip
 // keeps these fields in sync with the backend PipelineNode shape; React
-// Flow keeps positions in `node.position`.
+// Flow keeps positions in `node.position`. React Flow's `NodeProps<T>`
+// constrains `T` to extend `Record<string, unknown>`, so the index
+// signature on this type is load-bearing — without it the
+// `NodeProps<Node<PipelineNodeData>>` constraint check fails.
 type PipelineNodeData = {
   label: string;
   kind: PipelineNodeShape["kind"];
   key: string;
   config: Record<string, string>;
+  [key: string]: unknown;
 };
+
+type PipelineFlowNode = Node<PipelineNodeData>;
 
 const NODE_KIND_LABELS: Record<PipelineNodeShape["kind"], string> = {
   "dataset-source": "Dataset source",
@@ -63,7 +70,7 @@ const NODE_KIND_LABELS: Record<PipelineNodeShape["kind"], string> = {
 // key/value config blob. The Phase 5.1 follow-up surfaces kind-specific
 // schemas from /api/transformers/{key}/schema; today the editor is
 // generic so the React Flow plumbing lands without per-kind forms.
-function NodeCard({ data }: NodeProps<PipelineNodeData>) {
+function NodeCard({ data }: NodeProps<PipelineFlowNode>) {
   return (
     <Paper p="xs" withBorder shadow="xs" style={{ minWidth: 180, background: "var(--mantine-color-body)" }}>
       <Stack gap={4}>
@@ -76,12 +83,15 @@ function NodeCard({ data }: NodeProps<PipelineNodeData>) {
   );
 }
 
-const NODE_TYPES = {
+// React Flow's `NodeTypes` is a string→component map; `as const` would
+// over-narrow the keys away from string. Plain `{...}` keeps it
+// assignable to `NodeTypes`.
+const NODE_TYPES: NodeTypes = {
   "dataset-source": NodeCard,
   transformer: NodeCard,
   analyzer: NodeCard,
   "dataset-sink": NodeCard
-} as const;
+};
 
 function makeNodeId() {
   return `node_${Math.random().toString(36).slice(2, 10)}`;
@@ -159,7 +169,7 @@ function PipelineEditorInner() {
     queryFn: ({ signal }) => listAnalyzers(signal)
   });
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<PipelineNodeData>>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<PipelineFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 

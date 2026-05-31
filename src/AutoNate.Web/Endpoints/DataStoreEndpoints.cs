@@ -226,13 +226,16 @@ public static class DataStoreEndpoints
         }).RequirePermission(EntityKinds.DataStore, Actions.Edit)
           .DisableAntiforgery();
 
+        // Minimal API refuses to bind a body on a DELETE without an
+        // explicit annotation. Take the folder path as a `path` query
+        // parameter instead — `?path=/foo/bar` is the canonical shape.
         group.MapDelete("/{id:guid}/folders", async (
-            Guid id, FolderRequest request, IFileDataStoreService files, CancellationToken ct) =>
+            Guid id, string path, IFileDataStoreService files, CancellationToken ct) =>
         {
-            if (request is null) return Results.BadRequest();
+            if (string.IsNullOrWhiteSpace(path)) return Results.BadRequest(new { reason = "path is required." });
             try
             {
-                await files.DeleteFolderAsync(id, request.FolderPath, ct);
+                await files.DeleteFolderAsync(id, path, ct);
                 return Results.NoContent();
             }
             catch (FileDataStoreNotFoundException)

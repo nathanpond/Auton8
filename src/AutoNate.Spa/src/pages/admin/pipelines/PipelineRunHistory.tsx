@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -31,6 +31,9 @@ const STATUS_COLOR: Record<PipelineRun["status"], string> = {
   Failed: "red",
   Cancelled: "yellow"
 };
+
+const RUN_COLUMN_WIDTHS = ["140px", "180px", "180px", "180px", "120px", "2fr"];
+const STEP_COLUMN_WIDTHS = ["1fr", "140px", "140px", "100px", "2fr"];
 
 export default function PipelineRunHistory() {
   const { id } = useParams<{ id: string }>();
@@ -65,76 +68,95 @@ export default function PipelineRunHistory() {
     }
   });
 
+  const runColumns = useMemo<DataTableColumn<PipelineRun>[]>(
+    () => [
+      {
+        id: "status",
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => (
+          <Badge color={STATUS_COLOR[row.original.status]}>{row.original.status}</Badge>
+        )
+      },
+      {
+        id: "queuedAtUtc",
+        accessorKey: "queuedAtUtc",
+        header: "Queued",
+        cell: ({ row }) => new Date(row.original.queuedAtUtc).toLocaleString()
+      },
+      {
+        id: "startedAtUtc",
+        accessorKey: "startedAtUtc",
+        header: "Started",
+        cell: ({ row }) =>
+          row.original.startedAtUtc ? new Date(row.original.startedAtUtc).toLocaleString() : <Text c="dimmed">—</Text>
+      },
+      {
+        id: "completedAtUtc",
+        accessorKey: "completedAtUtc",
+        header: "Completed",
+        cell: ({ row }) =>
+          row.original.completedAtUtc ? new Date(row.original.completedAtUtc).toLocaleString() : <Text c="dimmed">—</Text>
+      },
+      {
+        id: "triggerKind",
+        accessorKey: "triggerKind",
+        header: "Trigger",
+        cell: ({ row }) => <Badge variant="light">{row.original.triggerKind}</Badge>
+      },
+      {
+        id: "errorMessage",
+        accessorKey: "errorMessage",
+        header: "Error",
+        cell: ({ row }) =>
+          row.original.errorMessage ? (
+            <Text size="xs" c="red" lineClamp={2}>
+              {row.original.errorMessage}
+            </Text>
+          ) : (
+            <Text c="dimmed">—</Text>
+          )
+      }
+    ],
+    []
+  );
+
+  const stepColumns = useMemo<DataTableColumn<PipelineRunStep>[]>(
+    () => [
+      { id: "nodeKey", accessorKey: "nodeKey", header: "Node", cell: ({ row }) => row.original.nodeKey },
+      { id: "nodeKind", accessorKey: "nodeKind", header: "Kind", cell: ({ row }) => row.original.nodeKind },
+      {
+        id: "status",
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => (
+          <Badge color={STATUS_COLOR[row.original.status]}>{row.original.status}</Badge>
+        )
+      },
+      {
+        id: "rowCount",
+        accessorKey: "rowCount",
+        header: "Rows",
+        cell: ({ row }) => row.original.rowCount ?? <Text c="dimmed">—</Text>
+      },
+      {
+        id: "errorMessage",
+        accessorKey: "errorMessage",
+        header: "Error",
+        cell: ({ row }) =>
+          row.original.errorMessage ? (
+            <Text size="xs" c="red" lineClamp={2}>
+              {row.original.errorMessage}
+            </Text>
+          ) : (
+            <Text c="dimmed">—</Text>
+          )
+      }
+    ],
+    []
+  );
+
   if (!id) return null;
-
-  const columns: DataTableColumn<PipelineRun>[] = [
-    {
-      accessor: "status",
-      title: "Status",
-      render: (row) => <Badge color={STATUS_COLOR[row.status]}>{row.status}</Badge>
-    },
-    {
-      accessor: "queuedAtUtc",
-      title: "Queued",
-      render: (row) => new Date(row.queuedAtUtc).toLocaleString()
-    },
-    {
-      accessor: "startedAtUtc",
-      title: "Started",
-      render: (row) =>
-        row.startedAtUtc ? new Date(row.startedAtUtc).toLocaleString() : <Text c="dimmed">—</Text>
-    },
-    {
-      accessor: "completedAtUtc",
-      title: "Completed",
-      render: (row) =>
-        row.completedAtUtc ? new Date(row.completedAtUtc).toLocaleString() : <Text c="dimmed">—</Text>
-    },
-    {
-      accessor: "triggerKind",
-      title: "Trigger",
-      render: (row) => <Badge variant="light">{row.triggerKind}</Badge>
-    },
-    {
-      accessor: "errorMessage",
-      title: "Error",
-      render: (row) =>
-        row.errorMessage ? (
-          <Text size="xs" c="red" lineClamp={2}>
-            {row.errorMessage}
-          </Text>
-        ) : (
-          <Text c="dimmed">—</Text>
-        )
-    }
-  ];
-
-  const stepColumns: DataTableColumn<PipelineRunStep>[] = [
-    { accessor: "nodeKey", title: "Node" },
-    { accessor: "nodeKind", title: "Kind" },
-    {
-      accessor: "status",
-      title: "Status",
-      render: (row) => <Badge color={STATUS_COLOR[row.status]}>{row.status}</Badge>
-    },
-    {
-      accessor: "rowCount",
-      title: "Rows",
-      render: (row) => row.rowCount ?? <Text c="dimmed">—</Text>
-    },
-    {
-      accessor: "errorMessage",
-      title: "Error",
-      render: (row) =>
-        row.errorMessage ? (
-          <Text size="xs" c="red" lineClamp={2}>
-            {row.errorMessage}
-          </Text>
-        ) : (
-          <Text c="dimmed">—</Text>
-        )
-    }
-  ];
 
   return (
     <Stack gap="md">
@@ -152,23 +174,19 @@ export default function PipelineRunHistory() {
         </Group>
       </Group>
 
-      {runsQuery.error ? (
-        <Alert color="red">Failed to load runs.</Alert>
-      ) : null}
+      {runsQuery.error ? <Alert color="red">Failed to load runs.</Alert> : null}
 
       <Box>
-        <DataTable
-          records={runsQuery.data ?? []}
-          columns={columns}
-          fetching={runsQuery.isLoading}
-          idAccessor="id"
-          noRecordsText="No runs yet."
-          onRowClick={({ record }) => setSelectedRunId(record.id)}
-          rowStyle={(row) =>
-            row.id === selectedRunId
-              ? { background: "var(--mantine-color-blue-light)" }
-              : undefined
-          }
+        <DataTable<PipelineRun>
+          mode="client"
+          loadAll={async () => runsQuery.data ?? listPipelineRuns(id)}
+          queryKey={["pipeline-runs", id]}
+          columns={runColumns}
+          rowKey={(row) => row.id}
+          columnWidths={RUN_COLUMN_WIDTHS}
+          emptyMessage="No runs yet."
+          loadingMessage="Loading runs…"
+          onRowClick={(row) => setSelectedRunId(row.id)}
         />
       </Box>
 
@@ -177,12 +195,15 @@ export default function PipelineRunHistory() {
           <Stack gap="sm">
             <Title order={3}>Steps</Title>
             {runDetailQuery.data ? (
-              <DataTable
-                records={runDetailQuery.data.steps}
+              <DataTable<PipelineRunStep>
+                mode="client"
+                loadAll={async () => runDetailQuery.data?.steps ?? []}
+                queryKey={["pipeline-run-detail", id, selectedRunId, "steps"]}
                 columns={stepColumns}
-                fetching={runDetailQuery.isLoading}
-                idAccessor="id"
-                noRecordsText="No steps recorded."
+                rowKey={(row) => row.id}
+                columnWidths={STEP_COLUMN_WIDTHS}
+                emptyMessage="No steps recorded."
+                loadingMessage="Loading step detail…"
               />
             ) : (
               <Text c="dimmed">Loading step detail…</Text>
