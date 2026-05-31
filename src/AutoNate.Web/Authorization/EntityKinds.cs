@@ -45,4 +45,25 @@ public static class EntityKinds
     // are functional without a document editor.
     public const string Folder = "folder";
     public const string Document = "document";
+
+    // Data Stores & Analytics Pipeline (docs/plans/2026-05-30-data-stores-implementation.md).
+    // Selector compilers, IAuthorizer<T> instances, and [RequirePermission] filters
+    // for each of these land alongside the endpoint that gates the kind, not all at
+    // once — see the plan's per-phase file list.
+    public const string DataStore = "datastore";
+    public const string DataConnector = "dataconnector";
+    public const string Dataset = "dataset";
+    public const string Transformer = "transformer";
+    public const string Analyzer = "analyzer";
+    public const string Pipeline = "pipeline";
+    public const string PipelineRun = "pipelinerun";
+
+    // Saved AQL queries — promoted to a first-class permissionable kind in
+    // Phase 3 of the Data Stores plan. Before Phase 3, saved queries were
+    // owner-gated only inside the store (anyone authenticated could create
+    // their own; the IsShared boolean broadcast visibility globally). The
+    // kind adds per-row View grants for non-owner access plus the Share
+    // action that gates anonymous-URL token issuance, while preserving the
+    // store's intrinsic-owner fallback (the owner always has full access).
+    public const string Query = "query";
 }

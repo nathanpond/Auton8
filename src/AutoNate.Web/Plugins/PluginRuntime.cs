@@ -32,6 +32,9 @@ public sealed class PluginRuntime
     private readonly IWorkflowBehaviorRegistry? _behaviorRegistry;
     private readonly PluginScheduledJobRegistry? _scheduledJobRegistry;
     private readonly PluginAgentSkillRegistry? _agentSkillRegistry;
+    private readonly IPluginConnectorRegistry? _connectorRegistry;
+    private readonly IPluginTransformerRegistry? _transformerRegistry;
+    private readonly IPluginAnalyzerRegistry? _analyzerRegistry;
     private readonly IDataPaths _dataPaths;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginRuntime> _log;
@@ -58,7 +61,10 @@ public sealed class PluginRuntime
         IDbContextFactory<AutoNateDbContext>? dbFactory = null,
         IWorkflowBehaviorRegistry? behaviorRegistry = null,
         PluginScheduledJobRegistry? scheduledJobRegistry = null,
-        PluginAgentSkillRegistry? agentSkillRegistry = null)
+        PluginAgentSkillRegistry? agentSkillRegistry = null,
+        IPluginConnectorRegistry? connectorRegistry = null,
+        IPluginTransformerRegistry? transformerRegistry = null,
+        IPluginAnalyzerRegistry? analyzerRegistry = null)
     {
         _registrar = registrar;
         _hostServices = hostServices;
@@ -68,6 +74,9 @@ public sealed class PluginRuntime
         _behaviorRegistry = behaviorRegistry;
         _scheduledJobRegistry = scheduledJobRegistry;
         _agentSkillRegistry = agentSkillRegistry;
+        _connectorRegistry = connectorRegistry;
+        _transformerRegistry = transformerRegistry;
+        _analyzerRegistry = analyzerRegistry;
         _dataPaths = dataPaths;
         _loggerFactory = loggerFactory;
         _log = loggerFactory.CreateLogger<PluginRuntime>();
@@ -220,8 +229,23 @@ public sealed class PluginRuntime
                 // Configure() runs.
                 _agentSkillRegistry?.RemoveForPlugin(row.Id);
 
+                IPluginConnectors connectors = _connectorRegistry is not null
+                    ? new PluginConnectors(_connectorRegistry, row.Id)
+                    : new NoopPluginConnectors();
+                _connectorRegistry?.RemoveAllForPlugin(row.Id);
+
+                IPluginTransformers transformers = _transformerRegistry is not null
+                    ? new PluginTransformers(_transformerRegistry, row.Id)
+                    : new NoopPluginTransformers();
+                _transformerRegistry?.RemoveAllForPlugin(row.Id);
+
+                IPluginAnalyzers analyzers = _analyzerRegistry is not null
+                    ? new PluginAnalyzers(_analyzerRegistry, row.Id)
+                    : new NoopPluginAnalyzers();
+                _analyzerRegistry?.RemoveAllForPlugin(row.Id);
+
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, agentSkills, new SafePluginServiceProvider(_hostServices));
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, agentSkills, connectors, transformers, analyzers, new SafePluginServiceProvider(_hostServices));
                 instance.Configure(context);
 
                 var loaded = new LoadedPlugin(row.Id, instance.Name, instance.Version, alc, scoped, instance);
@@ -253,6 +277,9 @@ public sealed class PluginRuntime
             _behaviorRegistry?.RemoveAllForPlugin(id);
             _scheduledJobRegistry?.RemoveForPlugin(id);
             _agentSkillRegistry?.RemoveForPlugin(id);
+            _connectorRegistry?.RemoveAllForPlugin(id);
+            _transformerRegistry?.RemoveAllForPlugin(id);
+            _analyzerRegistry?.RemoveAllForPlugin(id);
             _log.LogInformation(
                 "Disabled plugin {Id} ({Name}); ALC remains loaded inert until process restart.",
                 id, loaded.Name);
@@ -350,12 +377,18 @@ public sealed class PluginRuntime
                 // already swept them.
                 IPluginAgentSkills agentSkills = new NoopPluginAgentSkills();
 
+                // Same noop discipline for Connectors during Cleanup() — late
+                // registrations during teardown are silently dropped.
+                IPluginConnectors connectors = new NoopPluginConnectors();
+                IPluginTransformers transformers = new NoopPluginTransformers();
+                IPluginAnalyzers analyzers = new NoopPluginAnalyzers();
+
                 // Wrap the registrar so anything Cleanup() accidentally
                 // subscribes to gets dropped immediately afterwards. We don't
                 // want a cleanup callback to leak hooks into a plugin that's
                 // about to be deleted.
                 scoped = new ScopedHookRegistrar(_registrar);
-                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, agentSkills, new SafePluginServiceProvider(_hostServices));
+                var context = new PluginContext(row.Id, contextCode, scoped, data, menus, behaviors, projections, agentSkills, connectors, transformers, analyzers, new SafePluginServiceProvider(_hostServices));
 
                 try
                 {

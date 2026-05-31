@@ -15,13 +15,19 @@ export default function AppShell() {
     <UserPreferencesProvider>
       <PageContextRegistryProvider>
         <AgentSidebarProvider>
+          {/* Keyboard users skip the full NavMenu on every page; the link is
+              visually hidden until focus lands on it. Targets the #content
+              wrapper below — it has tabIndex={-1} so focus can land on it. */}
+          <a href="#content" className="skip-to-content">
+            Skip to main content
+          </a>
           <MantineAppShell header={{ height: 56 }} padding={0}>
             <MantineAppShell.Header withBorder={false}>
               <NavMenu />
             </MantineAppShell.Header>
 
             <MantineAppShell.Main>
-              <div id="content" className="app-shell-content">
+              <div id="content" className="app-shell-content" tabIndex={-1}>
                 <Outlet />
               </div>
             </MantineAppShell.Main>

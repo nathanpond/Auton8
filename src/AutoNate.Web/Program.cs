@@ -227,6 +227,11 @@ builder.Services.AddOptions<DaprOptions>()
 builder.Services.AddOptions<NatsOptions>()
     .BindConfiguration(NatsOptions.SectionName);
 builder.Services.AddSingleton<NatsStreamProvisioner>();
+// Phase 6 of the Data Stores plan — shared NATS connection for callers
+// (the code-node runner today) that need request/reply rather than the
+// short-lived publish-only flow the provisioner uses.
+builder.Services.AddSingleton<AutoNate.Web.Services.Nats.INatsConnectionProvider,
+    AutoNate.Web.Services.Nats.NatsConnectionProvider>();
 builder.Services.AddSingleton<BusWatcherStreamService>();
 builder.Services.AddScopedSubscriptions();
 builder.Services.AddSingleton<DaprSidecarProbe>();
@@ -273,9 +278,18 @@ builder.Services.AddDbContextFactory<AutoNateDbContext>((sp, options) =>
     options.ConfigureWarnings(w =>
         w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.ConnectionError));
 });
+// Database initializers run at startup before the rest of the host stands up,
+// in Order ascending. Primary AutoNate DB is Order 0; Phase 1 of the Data
+// Stores plan adds a secondary at Order 10 against `autonate_datastores`.
+builder.Services.AddSingleton<AutoNate.Web.Persistence.IDatabaseInitializer,
+    AutoNate.Web.Persistence.PrimaryDatabaseInitializer>();
 builder.Services.AddOptions<AutoNate.Web.Authorization.AuthorizationOptions>()
     .BindConfiguration(AutoNate.Web.Authorization.AuthorizationOptions.SectionName);
 foreach (var entityType in CoreEntityTypes.All)
+{
+    builder.Services.AddSingleton<IEntityType>(entityType);
+}
+foreach (var entityType in AutoNate.Web.Authorization.EntityTypes.AnalyticsEntityTypes.All)
 {
     builder.Services.AddSingleton<IEntityType>(entityType);
 }
@@ -299,6 +313,27 @@ builder.Services.AddSingleton<ISelectorCompiler>(_ =>
 builder.Services.AddSingleton<ISelectorCompiler>(_ =>
     new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.ExternalConnection>(
         EntityKinds.ExternalConnection, c => c.Id));
+// Data Stores & Analytics Pipeline (docs/plans/2026-05-30-data-stores-implementation.md).
+// Path-only is sufficient for v1; tag predicates can join the compilers
+// later if grants need to scope by kind/owner without enumerating ids.
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.DataStore>(
+        EntityKinds.DataStore, d => d.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.DataConnector>(
+        EntityKinds.DataConnector, d => d.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Dataset>(
+        EntityKinds.Dataset, d => d.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.SavedQuery>(
+        EntityKinds.Query, q => q.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Pipeline>(
+        EntityKinds.Pipeline, p => p.Id));
+builder.Services.AddSingleton<ISelectorCompiler>(_ =>
+    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.PipelineRun>(
+        EntityKinds.PipelineRun, r => r.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();
@@ -394,12 +429,21 @@ builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.RecordActivityRollupQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.NotesQueryEntity>());
+// Phase 2 of the Data Stores plan — parameterized FROM Dataset("name").
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.DatasetQueryEntity>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntity>(sp =>
+    sp.GetRequiredService<AutoNate.Web.Services.Query.Entities.DatasetQueryEntity>());
 builder.Services.AddScoped<AutoNate.Web.Services.Query.Entities.IQueryEntityRegistry,
     AutoNate.Web.Services.Query.Entities.QueryEntityRegistry>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlExecutor,
     AutoNate.Web.Services.Query.AqlExecutor>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.ISavedQueryStore,
     AutoNate.Web.Services.Query.EfCoreSavedQueryStore>();
+// Phase 3 of the Data Stores plan — share-token issuance + anonymous redemption.
+builder.Services.AddScoped<AutoNate.Web.Services.Query.ISavedQueryShareTokenStore,
+    AutoNate.Web.Services.Query.EfCoreSavedQueryShareTokenStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Query.IShareIssuerPrincipalFactory,
+    AutoNate.Web.Services.Query.ShareIssuerPrincipalFactory>();
 builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlSuggestionService,
     AutoNate.Web.Services.Query.AqlSuggestionService>();
 
@@ -415,6 +459,149 @@ builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionSto
 // the stub just confirms the secret decrypts cleanly.
 builder.Services.AddScoped<ITestConnectionService, StubTestConnectionService>();
 builder.Services.AddScoped<IConnectionModelLister, ConnectionModelLister>();
+
+// Data Stores & Analytics Pipeline — Phase 1 wiring
+// (docs/plans/2026-05-30-data-stores-implementation.md). The primary-DB
+// metadata stores are scoped (one DbContext per request); the SQL
+// provisioner + connection factory are singletons because they hold no
+// per-request state. The DatastoresDatabaseInitializer auto-disables when
+// ConnectionStrings:Datastores is absent (logs an Info and no-ops).
+builder.Services.AddOptions<AutoNate.Web.Services.DataStores.Sql.DatastoresDatabaseOptions>()
+    .BindConfiguration(AutoNate.Web.Services.DataStores.Sql.DatastoresDatabaseOptions.SectionName);
+builder.Services.AddSingleton<AutoNate.Web.Persistence.IDatabaseInitializer,
+    AutoNate.Web.Services.DataStores.Sql.DatastoresDatabaseInitializer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataStores.Sql.IDatastoresConnectionFactory,
+    AutoNate.Web.Services.DataStores.Sql.DatastoresConnectionFactory>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataStores.Sql.SqlDataStoreProvisioner>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataStores.IDataStoreStore,
+    AutoNate.Web.Services.DataStores.EfCoreDataStoreStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataConnectors.IDataConnectorStore,
+    AutoNate.Web.Services.DataConnectors.EfCoreDataConnectorStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataStores.File.IFileDataStoreService,
+    AutoNate.Web.Services.DataStores.File.FileDataStoreService>();
+builder.Services.AddScoped<AutoNate.Web.Services.DataStores.Sql.CsvIngestor>();
+// Built-in connector handlers. Plugin-contributed handlers join through
+// IPluginConnectorRegistry → PluginDataConnectorAdapter, registered below.
+builder.Services.AddHttpClient();
+// Dedicated HttpClient for the REST connector — third-party APIs need a
+// shorter ceiling than the IHttpClientFactory default (100s) so a hung
+// upstream doesn't stall the admin Test endpoint or the scheduled fetch
+// worker for a minute and a half.
+builder.Services.AddHttpClient("data-connector", c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandler,
+    AutoNate.Web.Services.DataConnectors.Builtin.RestDataConnectorHandler>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandler,
+    AutoNate.Web.Services.DataConnectors.Builtin.SmbDataConnectorHandler>();
+builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginConnectorRegistry,
+    AutoNate.Web.Plugins.PluginConnectorRegistry>();
+builder.Services.AddSingleton<AutoNate.Web.Services.DataConnectors.IDataConnectorHandlerRegistry,
+    AutoNate.Web.Services.DataConnectors.DataConnectorHandlerRegistry>();
+// Phase 4 of the Data Stores plan — Transformer + Analyzer registries
+// (built-ins + plugin-contributed). Built-ins are singletons because they
+// hold no per-request state; the registry composes the live union of
+// DI-registered + plugin-contributed implementations on each call.
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.FilterRowsTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.DedupeTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.ColumnRenameCastTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.JoinTwoInputsTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.NullFillTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.DateNormalizeTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.RegexExtractTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.SchemaInferTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.PivotTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.UnpivotTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.CsvToJsonTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.JsonToCsvTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.JsonFlattenTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformer,
+    AutoNate.Web.Services.Transformers.Builtin.XlsxToCsvTransformer>();
+builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginTransformerRegistry,
+    AutoNate.Web.Plugins.PluginTransformerRegistry>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Transformers.ITransformerRegistry,
+    AutoNate.Web.Services.Transformers.TransformerRegistry>();
+
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.SummaryStatisticsAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.NullRateAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.DistinctCountAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.TopKAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.GroupByAggregateAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.HistogramBinAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.CorrelationMatrixAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.AnomalyZScoreAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.AnomalyIqrAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.TrendLinearRegressionAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzer,
+    AutoNate.Web.Services.Analyzers.Builtin.KMeansClusterAnalyzer>();
+builder.Services.AddSingleton<AutoNate.Web.Plugins.IPluginAnalyzerRegistry,
+    AutoNate.Web.Plugins.PluginAnalyzerRegistry>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Analyzers.IAnalyzerRegistry,
+    AutoNate.Web.Services.Analyzers.AnalyzerRegistry>();
+
+// Datasets (Phase 2 of the Data Stores plan).
+builder.Services.AddScoped<AutoNate.Web.Services.Datasets.IDatasetStore,
+    AutoNate.Web.Services.Datasets.EfCoreDatasetStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Datasets.IDatasetExecutor,
+    AutoNate.Web.Services.Datasets.DatasetExecutor>();
+builder.Services.AddScoped<AutoNate.Web.Services.Datasets.Cached.ICachedDatasetMaterializer,
+    AutoNate.Web.Services.Datasets.Cached.CachedDatasetMaterializer>();
+// One-minute polling scheduler that drives cron-based cached-dataset
+// refresh. Manual /api/datasets/{id}/refresh calls go through the
+// materializer directly without this loop.
+builder.Services.AddHostedService<AutoNate.Web.Services.Datasets.Cached.DatasetRefreshScheduler>();
+
+// Phase 5 of the Data Stores plan — Analytics Pipelines.
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.IPipelineStore,
+    AutoNate.Web.Services.Pipelines.EfCorePipelineStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.IPipelineRunStore,
+    AutoNate.Web.Services.Pipelines.EfCorePipelineRunStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.DatasetSourceRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.TransformerNodeRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.AnalyzerNodeRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunner,
+    AutoNate.Web.Services.Pipelines.Execution.DatasetSinkRunner>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.INodeRunnerRegistry,
+    AutoNate.Web.Services.Pipelines.Execution.NodeRunnerRegistry>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Orchestration.PipelineOrchestrator>();
+// Polls every 5s for Queued pipeline_runs rows and dispatches the oldest
+// few to the orchestrator. Same one-loop-per-host model as the dataset
+// refresh scheduler.
+builder.Services.AddHostedService<AutoNate.Web.Services.Pipelines.Orchestration.PipelineRunWorker>();
+
+// Phase 6 of the Data Stores plan — user-authored code transformers /
+// analyzers. The JetStreamCodeNodeRunner is registered Scoped because
+// TransformerNodeRunner / AnalyzerNodeRunner consume it via constructor
+// injection alongside the registries (also Scoped). When Nats:Url isn't
+// configured, the runner will fail on first publish — but the Phase 4
+// fallthrough path means non-code transformers keep working regardless.
+builder.Services.AddScoped<AutoNate.Web.Services.Transformers.Code.ICodeTransformerStore,
+    AutoNate.Web.Services.Transformers.Code.EfCoreCodeTransformerStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.JetStreamCodeNodeRunner>();
 
 // Agent provider abstraction. Per-provider HttpClients have generous timeouts
 // because token streaming for a tool-using turn can run minutes.
@@ -828,7 +1015,16 @@ if (app.Environment.IsDevelopment()
     }
 }
 
-await DatabaseSchemaInitializer.EnsureAsync(app.Services);
+await using (var dbInitScope = app.Services.CreateAsyncScope())
+{
+    var initializers = dbInitScope.ServiceProvider
+        .GetServices<AutoNate.Web.Persistence.IDatabaseInitializer>()
+        .OrderBy(i => i.Order);
+    foreach (var initializer in initializers)
+    {
+        await initializer.InitializeAsync();
+    }
+}
 
 // Provision JetStream streams before any subscriber tries to subscribe and
 // before the first publish. JetStream requires every published subject to be
@@ -1229,6 +1425,7 @@ app.MapQueryEndpoints();
 app.MapAqlSchemaEndpoints();
 app.MapAqlSuggestEndpoints();
 app.MapSavedQueryEndpoints();
+app.MapPublicQueryShareEndpoints();
 app.MapStatusAppearanceEndpoints();
 app.MapSiteAppearanceEndpoints();
 app.MapSiteSettingsEndpoints();
@@ -1236,6 +1433,13 @@ app.MapAdminPluginsEndpoints();
 app.MapAdminProjectionsEndpoints();
 app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
+app.MapDataStoreEndpoints();
+app.MapDataConnectorEndpoints();
+app.MapDatasetEndpoints();
+app.MapTransformerEndpoints();
+app.MapAnalyzerEndpoints();
+app.MapPipelineEndpoints();
+app.MapCodeTransformerEndpoints();
 app.MapAgentModelEndpoints();
 app.MapAgentEndpoints();
 

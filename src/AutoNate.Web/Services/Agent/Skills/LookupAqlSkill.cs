@@ -309,7 +309,13 @@ public sealed class LookupAqlSkill : IAgentSkill
                     description = ex.Description,
                     query = ex.Query
                 }).ToArray(),
-                hasDynamicFields = string.Equals(entity.Name, "Records", StringComparison.OrdinalIgnoreCase)
+                hasDynamicFields = string.Equals(entity.Name, "Records", StringComparison.OrdinalIgnoreCase),
+                // Parameterized-FROM metadata (Phase 2 of the Data Stores plan).
+                // True means the entity is referenced as `FROM Name("...")` and
+                // the chatbot must NOT draft a bare `FROM Name`.
+                acceptsEntityArgument = entity.AcceptsEntityArgument,
+                requiresEntityArgument = entity.RequiresEntityArgument,
+                entityArgumentHint = entity.EntityArgumentHint
             }
         });
     }

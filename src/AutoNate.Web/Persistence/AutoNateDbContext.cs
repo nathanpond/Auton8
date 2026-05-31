@@ -1692,7 +1692,15 @@ public partial class AutoNateDbContext : DbContext
         });
 
         OnModelCreatingPartial(modelBuilder);
+        OnDataStoresModelCreating(modelBuilder);
     }
 
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
+
+    // Feature-scoped partial — implemented in AutoNateDbContext.DataStores.cs.
+    // Added per docs/plans/2026-05-30-data-stores-implementation.md so the
+    // DataStores feature can land its entity mappings in its own partial
+    // without colliding with the projection-cache partial's
+    // OnModelCreatingPartial implementation.
+    partial void OnDataStoresModelCreating(ModelBuilder modelBuilder);
 }

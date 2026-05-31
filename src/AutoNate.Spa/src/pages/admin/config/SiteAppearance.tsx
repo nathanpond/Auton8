@@ -22,6 +22,7 @@ import {
 import {
   DEFAULT_SITE_APPEARANCE,
   areSiteAppearancesEqual,
+  checkContrastWarnings,
   coerceSiteAppearance,
   normalizeHex,
   toUpdateSiteAppearanceRequest,
@@ -155,6 +156,10 @@ export default function SiteAppearancePage() {
   const hasDraft = draft !== null;
   const currentDraft = draft ?? savedAppearance;
   const isDirty = hasDraft && !areSiteAppearancesEqual(currentDraft, savedAppearance);
+  // WCAG 1.4.3 / 1.4.11 advisory: surface low-contrast pairs to the admin
+  // but do NOT block save — admins may have a legitimate brand-override or
+  // debug reason to ship a sub-threshold value temporarily.
+  const contrastWarnings = useMemo(() => checkContrastWarnings(currentDraft), [currentDraft]);
 
   useEffect(() => {
     if (!hasDraft) return;
@@ -250,6 +255,27 @@ export default function SiteAppearancePage() {
         {saveMessage && (
           <Alert color={saveMessage === SAVED_MESSAGE ? "green" : "red"} variant="light">
             {saveMessage}
+          </Alert>
+        )}
+
+        {contrastWarnings.length > 0 && (
+          <Alert color="yellow" variant="light" title="Accessibility advisory">
+            <Text size="sm" mb={6}>
+              The current theme has {contrastWarnings.length} color
+              {contrastWarnings.length === 1 ? " pair" : " pairs"} below the WCAG 2.0 AA contrast
+              floor. You can still save — this is advisory, not a block — but the marked surfaces
+              will be hard to read for users with low vision.
+            </Text>
+            <Stack gap={4} component="ul" style={{ paddingLeft: 18, margin: 0 }}>
+              {contrastWarnings.map((w) => (
+                <li key={w.pairLabel}>
+                  <Text size="sm" span>
+                    <strong>{w.pairLabel}</strong>: {w.ratio.toFixed(2)}:1 (needs {w.required.toFixed(1)}:1
+                    {w.reason === "text" ? " for text" : " for UI components"})
+                  </Text>
+                </li>
+              ))}
+            </Stack>
           </Alert>
         )}
 

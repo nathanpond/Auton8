@@ -39,6 +39,7 @@ import {
   listSavedQueries,
   updateSavedQuery
 } from "@/api/savedQueries";
+import SavedQueryShareModal from "@/pages/query/SavedQueryShareModal";
 import { useQueryPagePageContext } from "@/pages/query/useQueryPagePageContext";
 import { AxiosError } from "axios";
 
@@ -202,6 +203,9 @@ export default function QueryPage() {
   const [saveDescription, setSaveDescription] = useState("");
   const [saveShared, setSaveShared] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Phase 3 share modal — opens for the currently-selected owned query.
+  const [shareOpen, setShareOpen] = useState(false);
 
   const savedQueriesQuery = useQuery({
     queryKey: ["saved-queries"],
@@ -507,6 +511,17 @@ export default function QueryPage() {
                   {isUpdate ? "Update" : "Save"}
                 </Button>
               </Tooltip>
+              {selectedQuery && canUpdateSelected ? (
+                <Tooltip label="Generate a public share link for this query" withArrow position="top">
+                  <Button
+                    variant="default"
+                    onClick={() => setShareOpen(true)}
+                    leftSection={<i className="fa fa-share-nodes" aria-hidden />}
+                  >
+                    Share
+                  </Button>
+                </Tooltip>
+              ) : null}
               <Button onClick={() => void runQuery()} loading={running}>
                 Execute
               </Button>
@@ -514,6 +529,12 @@ export default function QueryPage() {
           </Group>
         </Stack>
       </Paper>
+
+      <SavedQueryShareModal
+        savedQuery={selectedQuery}
+        opened={shareOpen}
+        onClose={() => setShareOpen(false)}
+      />
 
       {errors && errors.length > 0 && (
         <Alert color="red" title="Query errors" icon={<i className="fa fa-circle-exclamation" />}>

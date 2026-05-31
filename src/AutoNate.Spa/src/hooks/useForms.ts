@@ -53,7 +53,9 @@ export function useFormVersions(id: string | null) {
 }
 
 // Polled query that drives /formdev/:shortCode. The 1s refetch keeps the
-// preview tab nearly-live without wiring SSE.
+// preview tab nearly-live without wiring SSE. refetchIntervalInBackground
+// pauses the poll when the tab is hidden — a forgotten preview tab would
+// otherwise hit the server 60 times/minute forever.
 export function useFormDevSnapshot(shortCode: string | null) {
   return useQuery<FormDraftSnapshot | null>({
     queryKey: formDevQueryKey(shortCode ?? "unset"),
@@ -61,6 +63,7 @@ export function useFormDevSnapshot(shortCode: string | null) {
       shortCode ? getFormDevSnapshot(shortCode, signal) : Promise.resolve(null),
     enabled: Boolean(shortCode),
     refetchInterval: 1000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true
   });
 }

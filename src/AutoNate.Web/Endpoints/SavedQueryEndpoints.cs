@@ -1,3 +1,4 @@
+using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Events;
@@ -147,8 +148,113 @@ public static class SavedQueryEndpoints
               "Store enforces owner-only delete; returns NotFound for both " +
               "missing rows and non-owners.");
 
+        // ---- Phase 3 share-token surface -------------------------------------
+
+        group.MapGet("/{id:guid}/shares", async (
+            Guid id,
+            HttpContext http,
+            ISavedQueryStore queryStore,
+            ISavedQueryShareTokenStore tokenStore,
+            CancellationToken ct) =>
+        {
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+            // Only the owner sees the list of share tokens issued on their
+            // own query — non-owners with `query:share` on the kind would
+            // still need their own view of the underlying row, and we don't
+            // surface foreign-issued tokens here.
+            var existing = await queryStore.GetForActorAsync(id, actorId, ct);
+            if (existing is null || existing.OwnerUserId != actorId) return Results.NotFound();
+            var tokens = await tokenStore.ListForQueryAsync(id, ct);
+            return Results.Ok(tokens.Select(MapTokenDto).ToList());
+        }).AuthorizedInHandler(
+            "Owner-only list of issued share tokens. Token hashes are NOT " +
+            "surfaced — only metadata (id, expiry, label, use count).");
+
+        group.MapPost("/{id:guid}/shares", async (
+            Guid id,
+            IssueShareTokenRequest request,
+            HttpContext http,
+            ISavedQueryStore queryStore,
+            ISavedQueryShareTokenStore tokenStore,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+            var existing = await queryStore.GetForActorAsync(id, actorId, ct);
+            if (existing is null || existing.OwnerUserId != actorId) return Results.NotFound();
+            try
+            {
+                var issued = await tokenStore.IssueAsync(
+                    new IssueShareTokenInput(
+                        SavedQueryId: id,
+                        ExpiresAtUtc: request?.ExpiresAtUtc,
+                        MaxUses: request?.MaxUses,
+                        Label: request?.Label),
+                    actorId, ct);
+
+                await auditPublisher.PublishAsync(
+                    QueryEventTopic.TopicName,
+                    QueryEventTypes.SavedQuerySaved,
+                    QueryResourceKinds.SavedQuery,
+                    resource: new { id, name = existing.Name },
+                    details: new
+                    {
+                        share = "issued",
+                        tokenId = issued.Row.Id,
+                        expiresAtUtc = issued.Row.ExpiresAtUtc,
+                        maxUses = issued.Row.MaxUses,
+                    },
+                    ct);
+
+                return Results.Created(
+                    $"/api/saved-queries/{id}/shares/{issued.Row.Id}",
+                    new IssuedShareTokenDto(
+                        Token: MapTokenDto(issued.Row),
+                        RawToken: issued.RawToken,
+                        ShareUrl: BuildShareUrl(http, issued.RawToken)));
+            }
+            catch (SavedQueryNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.Query, Actions.Share);
+
+        group.MapDelete("/{id:guid}/shares/{tokenId:guid}", async (
+            Guid id,
+            Guid tokenId,
+            HttpContext http,
+            ISavedQueryStore queryStore,
+            ISavedQueryShareTokenStore tokenStore,
+            CancellationToken ct) =>
+        {
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+            var existing = await queryStore.GetForActorAsync(id, actorId, ct);
+            if (existing is null || existing.OwnerUserId != actorId) return Results.NotFound();
+            var revoked = await tokenStore.RevokeAsync(tokenId, ct);
+            return revoked ? Results.NoContent() : Results.NotFound();
+        }).DisableAntiforgery()
+          .AuthorizedInHandler(
+              "Owner-only revoke of a share token they previously issued.");
+
         return app;
     }
+
+    private static string BuildShareUrl(HttpContext http, string rawToken)
+    {
+        var request = http.Request;
+        // Path-only URL; the SPA prepends the rendered host when it copies
+        // the value to the clipboard. Keeping it path-relative means dev
+        // and prod hosts both render correctly without a config knob.
+        return $"{request.Scheme}://{request.Host}/api/public/queries/share/{rawToken}";
+    }
+
+    private static SavedQueryShareTokenDto MapTokenDto(SavedQueryShareToken t) =>
+        new(t.Id, t.IssuedBy, t.IssuedAtUtc, t.ExpiresAtUtc, t.RevokedAtUtc,
+            t.MaxUses, t.UseCount, t.LastUsedAtUtc, t.Label);
 
     private static SavedQueryDto MapDto(SavedQuery q, Guid actorId) =>
         new(q.Id, q.Name, q.Description, q.QueryText, q.IsShared,
@@ -180,4 +286,28 @@ public static class SavedQueryEndpoints
         Guid OwnerUserId,
         DateTime CreatedAtUtc,
         DateTime UpdatedAtUtc);
+
+    public sealed record IssueShareTokenRequest(
+        DateTime? ExpiresAtUtc,
+        int? MaxUses,
+        string? Label);
+
+    // Metadata-only token view. RawToken is returned ONLY by POST /shares;
+    // every subsequent GET surfaces this redacted shape so a DB or list
+    // call can't reconstruct a working URL.
+    public sealed record SavedQueryShareTokenDto(
+        Guid Id,
+        Guid IssuedBy,
+        DateTime IssuedAtUtc,
+        DateTime? ExpiresAtUtc,
+        DateTime? RevokedAtUtc,
+        int? MaxUses,
+        int UseCount,
+        DateTime? LastUsedAtUtc,
+        string? Label);
+
+    public sealed record IssuedShareTokenDto(
+        SavedQueryShareTokenDto Token,
+        string RawToken,
+        string ShareUrl);
 }

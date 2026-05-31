@@ -22,9 +22,7 @@ export type FolderDto = {
 
 export type FolderPageResponse = { items: FolderDto[]; totalCount: number };
 
-// Documents and templates share this DTO; the SPA can filter / route on
-// `kind`. Phase 2 only exposes `document`; `template` lights up when the
-// template gallery ships (Phase 6).
+// Documents and templates share this DTO; the SPA filters / routes on `kind`.
 export type DocumentKind = "document" | "template";
 
 export type DocumentDto = {
