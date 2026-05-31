@@ -571,6 +571,7 @@ function NotebookRow({
               gap: 2,
               alignItems: "center",
               paddingLeft: 12,
+              zIndex: menuOpen ? 2 : 1,
               background: hover ? notesTheme.hover : "#fff",
               boxShadow: `-12px 0 8px -6px ${hover ? notesTheme.hover : "#fff"}`,
               borderRadius: 4
@@ -823,6 +824,7 @@ function PageRow({
               gap: 2,
               alignItems: "center",
               paddingLeft: 12,
+              zIndex: menuOpen ? 2 : 1,
               background: active
                 ? notesTheme.selected
                 : hover

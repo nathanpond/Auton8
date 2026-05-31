@@ -179,6 +179,60 @@ public sealed class PermissionGatingTests : E2ETestBase
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 
+    [Fact]
+    public async Task LimitedUser_DocumentOverrideGrantAndRevoke_ChangesVisibility()
+    {
+        await using var adminSession = await NewSignedInAsAdminAsync();
+        var admin = adminSession.Page.APIRequest;
+        var seeder = new ApiSeeder(admin);
+        var project = await seeder.CreateProjectAsync(TestNames.Prefixed("gated-doc-project"));
+        var document = await seeder.CreateDocumentAsync(project.Id, TestNames.Prefixed("gated-doc"));
+        var (userId, username, password) = await MintLimitedUserAsync();
+
+        await using var limitedContext = await Fixture.NewContextAsync();
+        var page = await limitedContext.NewPageAsync();
+        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        Assert.DoesNotContain(document.Title, await ListProjectDocumentTitlesAsync(page.APIRequest, project.Id));
+
+        var grant = await admin.PostAsync($"/api/content/documents/{document.Id}/permissions", new()
+        {
+            DataObject = new { principalKind = "user", principalId = userId.ToString(), action = "view" }
+        });
+        Assert.True(grant.Ok, await grant.TextAsync());
+        var grantJson = await grant.JsonAsync();
+        var grantId = grantJson!.Value.GetProperty("id").GetGuid();
+        Assert.Contains(document.Title, await ListProjectDocumentTitlesAsync(page.APIRequest, project.Id));
+
+        var revoke = await admin.DeleteAsync($"/api/content/documents/{document.Id}/permissions/{grantId}");
+        Assert.True(revoke.Ok, await revoke.TextAsync());
+        Assert.DoesNotContain(document.Title, await ListProjectDocumentTitlesAsync(page.APIRequest, project.Id));
+    }
+
+    [Fact]
+    public async Task LimitedUser_ProjectMembershipRoleAndRemoval_ChangesVisibility()
+    {
+        await using var adminSession = await NewSignedInAsAdminAsync();
+        var admin = adminSession.Page.APIRequest;
+        var project = await new ApiSeeder(admin).CreateProjectAsync(TestNames.Prefixed("member-project"));
+        var (userId, username, password) = await MintLimitedUserAsync();
+
+        await using var limitedContext = await Fixture.NewContextAsync();
+        var page = await limitedContext.NewPageAsync();
+        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        Assert.DoesNotContain(project.Name, await ListProjectNamesAsync(page.APIRequest));
+
+        await PutProjectRoleAsync(admin, project.Id, userId, "viewer");
+        Assert.Contains(project.Name, await ListProjectNamesAsync(page.APIRequest));
+        await PutProjectRoleAsync(admin, project.Id, userId, "contributor");
+        var members = await page.APIRequest.GetAsync($"/api/content/projects/{project.Id}/members");
+        Assert.True(members.Ok, await members.TextAsync());
+        Assert.Contains("contributor", await members.TextAsync());
+
+        var remove = await admin.DeleteAsync($"/api/content/projects/{project.Id}/members/{userId}");
+        Assert.True(remove.Ok, await remove.TextAsync());
+        Assert.DoesNotContain(project.Name, await ListProjectNamesAsync(page.APIRequest));
+    }
+
     /// <summary>
     /// Creates a limited user via the admin's request context and returns the
     /// new principal id + the username/password the test will use to sign in.
@@ -192,5 +246,39 @@ public sealed class PermissionGatingTests : E2ETestBase
         const string password = "P@ssword123!";
         var user = await adminSeeder.CreateUserAsync(username, password);
         return (user.UserId, username, password);
+    }
+
+    private static async Task<IReadOnlyList<string>> ListProjectDocumentTitlesAsync(
+        IAPIRequestContext request, Guid projectId)
+    {
+        var response = await request.GetAsync(
+            $"/api/content/documents/page?projectId={projectId}&atProjectRoot=true");
+        Assert.True(response.Ok, await response.TextAsync());
+        var json = await response.JsonAsync();
+        return json!.Value.GetProperty("items")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("title").GetString()!)
+            .ToList();
+    }
+
+    private static async Task PutProjectRoleAsync(
+        IAPIRequestContext request, Guid projectId, Guid userId, string role)
+    {
+        var response = await request.PutAsync($"/api/content/projects/{projectId}/members/{userId}", new()
+        {
+            DataObject = new { role }
+        });
+        Assert.True(response.Ok, await response.TextAsync());
+    }
+
+    private static async Task<IReadOnlyList<string>> ListProjectNamesAsync(IAPIRequestContext request)
+    {
+        var response = await request.GetAsync("/api/content/projects/page");
+        Assert.True(response.Ok, await response.TextAsync());
+        var json = await response.JsonAsync();
+        return json!.Value.GetProperty("items")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("name").GetString()!)
+            .ToList();
     }
 }
