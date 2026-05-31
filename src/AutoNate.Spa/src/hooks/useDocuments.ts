@@ -152,6 +152,7 @@ export const documentKey = (documentId: string | null) =>
   ["documents", "document", documentId] as const;
 export const documentVersionsKey = (documentId: string | null) =>
   ["documents", "document-versions", documentId] as const;
+export const templatesKey = ["documents", "templates", "all"] as const;
 
 // All top-level documents in a project (folder_id IS NULL). The kind filter
 // keeps document and template lists separate so the template gallery doesn't
@@ -194,7 +195,9 @@ export function useCreateDocument() {
   return useMutation({
     mutationFn: createDocument,
     onSuccess: (created) => {
-      if (created.folderId) {
+      if (created.kind === "template") {
+        qc.invalidateQueries({ queryKey: templatesKey });
+      } else if (created.folderId) {
         qc.invalidateQueries({ queryKey: folderChildrenKey(created.folderId) });
       } else {
         qc.invalidateQueries({
@@ -219,7 +222,9 @@ export function useUpdateDocument() {
     onSuccess: (updated, vars) => {
       qc.invalidateQueries({ queryKey: documentKey(updated.id) });
       qc.invalidateQueries({ queryKey: documentVersionsKey(updated.id) });
-      if (updated.folderId) {
+      if (updated.kind === "template") {
+        qc.invalidateQueries({ queryKey: templatesKey });
+      } else if (updated.folderId) {
         qc.invalidateQueries({ queryKey: folderChildrenKey(updated.folderId) });
       } else {
         qc.invalidateQueries({
@@ -251,7 +256,9 @@ export function useDeleteDocument() {
       kind: DocumentKind;
     }) => deleteDocument(vars.id),
     onSuccess: (_void, vars) => {
-      if (vars.folderId) {
+      if (vars.kind === "template") {
+        qc.invalidateQueries({ queryKey: templatesKey });
+      } else if (vars.folderId) {
         qc.invalidateQueries({ queryKey: folderChildrenKey(vars.folderId) });
       } else {
         qc.invalidateQueries({
@@ -292,8 +299,6 @@ export function useDeleteDocumentVersion() {
 // Cross-project templates list — all templates the caller has
 // Document.View on, regardless of project membership. Used by the
 // /documents/templates gallery page.
-export const templatesKey = ["documents", "templates", "all"] as const;
-
 export function useTemplates() {
   return useQuery<DocumentDto[]>({
     queryKey: templatesKey,

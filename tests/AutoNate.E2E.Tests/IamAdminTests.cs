@@ -87,4 +87,92 @@ public sealed class IamAdminTests : E2ETestBase
             page.GetByRole(AriaRole.Button, new() { Name = "How permissions work" }))
             .ToBeVisibleAsync();
     }
+
+    [Fact]
+    public async Task AdminGrants_CreateAndRevokeGrant_UpdatesTable()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var username = TestNames.Prefixed("grant-user");
+        await seeder.CreateUserAsync(username, "Password123!");
+
+        await page.GotoAsync("/admin/grants");
+        await page.GetByRole(AriaRole.Combobox, new() { Name = "Principal", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = username, Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add", Exact = true }).ClickAsync();
+
+        var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = username });
+        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        Task? acceptDialogTask = null;
+        page.Dialog += (_, dialog) => acceptDialogTask = dialog.AcceptAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Revoke grant" }).ClickAsync();
+        if (acceptDialogTask is not null) await acceptDialogTask;
+        await Assertions.Expect(row).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    [Fact]
+    public async Task PermissionChecker_ShowsAllowAndDenyVerdicts()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var allowedUser = await seeder.CreateUserAsync(TestNames.Prefixed("checker-allow"), "Password123!");
+        var deniedUser = await seeder.CreateUserAsync(TestNames.Prefixed("checker-deny"), "Password123!");
+        await seeder.GrantAsync("user", allowedUser.UserId, "view", "/record/*");
+        var explainResponse = await page.APIRequest.PostAsync("/api/admin/explain/", new()
+        {
+            DataObject = new
+            {
+                asUserId = allowedUser.UserId,
+                action = "view",
+                targetKind = "record",
+                targetId = (string?)null
+            }
+        });
+        Assert.True(explainResponse.Ok, await explainResponse.TextAsync());
+        var explainJson = await explainResponse.JsonAsync();
+        Assert.Equal("allow", explainJson!.Value.GetProperty("effect").GetString());
+
+        await page.GotoAsync("/admin/explain");
+        await ExplainForUserAsync(page, allowedUser.Username);
+        await Assertions.Expect(page.GetByText("allow", new() { Exact = true }).First)
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await ExplainForUserAsync(page, deniedUser.Username);
+        await Assertions.Expect(page.GetByText("deny", new() { Exact = true }).First)
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    [Fact]
+    public async Task AdminRoles_AssignmentPersistsAcrossReload()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var roleName = TestNames.Prefixed("assigned-role");
+        var user = await seeder.CreateUserAsync(TestNames.Prefixed("role-user"), "Password123!");
+
+        await page.GotoAsync("/admin/roles");
+        await page.GetByPlaceholder("New role name").FillAsync(roleName);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await page.GetByText(roleName, new() { Exact = true }).ClickAsync();
+        await page.GetByPlaceholder("— pick user —").ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = user.Username, Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Assign", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Cell, new() { Name = user.Username, Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.ReloadAsync();
+        await page.GetByText(roleName, new() { Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Cell, new() { Name = user.Username, Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    private static async Task ExplainForUserAsync(IPage page, string username)
+    {
+        await page.GetByRole(AriaRole.Combobox, new() { Name = "User" }).ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = username, Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Explain" }).ClickAsync();
+    }
 }

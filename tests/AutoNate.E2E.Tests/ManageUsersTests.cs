@@ -81,4 +81,77 @@ public sealed class ManageUsersTests : E2ETestBase
             page.GetByRole(AriaRole.Button, new() { Name = "Reset password for admin" }))
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
+
+    [Fact]
+    public async Task ManageUsers_ResetPassword_AllowsLoginWithNewPassword()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var username = $"e2euser_{TestNames.ShortSlug()}";
+        const string originalPassword = "P@ssword123!";
+        const string newPassword = "N3wP@ssword456!";
+
+        await page.GotoAsync("/manage-users");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add user" }).ClickAsync();
+        var addUserDialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Add User" });
+        await addUserDialog.GetByLabel("Username").FillAsync(username);
+        await addUserDialog.GetByLabel("First Name").FillAsync("E2E");
+        await addUserDialog.GetByLabel("Last Name").FillAsync("Reset");
+        await addUserDialog.GetByLabel("Email").FillAsync($"{username}@e2e.local");
+        await addUserDialog.GetByLabel("Password").FillAsync(originalPassword);
+        await addUserDialog.GetByRole(AriaRole.Button, new() { Name = "Add User" }).ClickAsync();
+        await Assertions.Expect(addUserDialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = $"Reset password for {username}" })
+            .ClickAsync();
+        var resetDialog = page.GetByRole(AriaRole.Dialog,
+            new() { Name = $"Reset password for {username}" });
+        await resetDialog.GetByLabel("New password").FillAsync(newPassword);
+        await resetDialog.GetByRole(AriaRole.Button, new() { Name = "Reset password" }).ClickAsync();
+        await Assertions.Expect(resetDialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Admin User" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Logout" }).ClickAsync();
+        await page.WaitForURLAsync("**/", new() { Timeout = 10_000 });
+
+        await AutoNateE2EFixture.SignInAsync(page, username, newPassword);
+        Assert.Matches("/home", page.Url);
+        var meResponse = await page.APIRequest.GetAsync("/api/auth/me");
+        var me = await meResponse.JsonAsync();
+        Assert.Equal(username, me!.Value.GetProperty("username").GetString());
+    }
+
+    [Fact]
+    public async Task ManageUsers_EditAndDeleteUser_UpdatesTheList()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var username = $"e2euser_{TestNames.ShortSlug()}";
+
+        await page.GotoAsync("/manage-users");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add user" }).ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Add User" });
+        await dialog.GetByLabel("Username").FillAsync(username);
+        await dialog.GetByLabel("First Name").FillAsync("Before");
+        await dialog.GetByLabel("Last Name").FillAsync("Edit");
+        await dialog.GetByLabel("Email").FillAsync($"{username}@e2e.local");
+        await dialog.GetByLabel("Password").FillAsync("P@ssword123!");
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Add User" }).ClickAsync();
+        await Assertions.Expect(page.GetByText(username, new() { Exact = true }).First)
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GetByText(username, new() { Exact = true }).First.ClickAsync();
+        dialog = page.GetByRole(AriaRole.Dialog, new() { Name = $"Edit {username}" });
+        await dialog.GetByLabel("First Name").FillAsync("After");
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+        await Assertions.Expect(page.GetByText("After Edit", new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = $"Delete {username}" }).ClickAsync();
+        dialog = page.GetByRole(AriaRole.Dialog, new() { Name = $"Delete {username}?" });
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Delete user" }).ClickAsync();
+        await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText(username, new() { Exact = true }).First)
+            .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
 }

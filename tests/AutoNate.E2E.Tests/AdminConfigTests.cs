@@ -107,4 +107,42 @@ public sealed class AdminConfigTests : E2ETestBase
             page.GetByRole(AriaRole.Button, new() { Name = "Reset" }))
             .ToBeVisibleAsync();
     }
+
+    [Fact]
+    public async Task GeneralSettings_NotificationsHeaderToggle_PersistsAfterReload()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        await page.GotoAsync("/admin/config/general");
+        var toggle = page.GetByLabel("Show notifications in header");
+        await Assertions.Expect(toggle).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        var originalValue = await toggle.IsCheckedAsync();
+
+        try
+        {
+            await toggle.ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "Save changes" }).ClickAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Status))
+                .ToHaveTextAsync("Settings saved.");
+
+            await page.ReloadAsync();
+            toggle = page.GetByLabel("Show notifications in header");
+            await Assertions.Expect(toggle).ToBeVisibleAsync(new() { Timeout = 15_000 });
+            Assert.Equal(!originalValue, await toggle.IsCheckedAsync());
+        }
+        finally
+        {
+            await page.GotoAsync("/admin/config/general");
+            toggle = page.GetByLabel("Show notifications in header");
+            await Assertions.Expect(toggle).ToBeVisibleAsync(new() { Timeout = 15_000 });
+            if (await toggle.IsCheckedAsync() != originalValue)
+            {
+                await toggle.ClickAsync();
+                await page.GetByRole(AriaRole.Button, new() { Name = "Save changes" }).ClickAsync();
+                await Assertions.Expect(page.GetByRole(AriaRole.Status))
+                    .ToHaveTextAsync("Settings saved.");
+            }
+        }
+    }
 }
