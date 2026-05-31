@@ -16,4 +16,10 @@ public interface IDataPaths
     string UploadsRoot { get; }
     string RepositoriesRoot { get; }
     string TempRoot { get; }
+
+    // Per docs/plans/2026-05-30-data-stores-implementation.md. Each FileType
+    // DataStore owns a subdirectory keyed by its id under here. Same volume
+    // semantics as the rest of the IDataPaths roots — never served via
+    // middleware; access goes through DataStoreEndpoints.
+    string DatastoresRoot { get; }
 }

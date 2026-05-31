@@ -192,6 +192,23 @@ function walkClauses(tokens: Token[]): ClauseWalk {
         // Capture entity name if the next token is an identifier.
         if (i + 1 < tokens.length && tokens[i + 1].kind === "identifier") {
           entity = tokens[i + 1].lexeme;
+          // Parameterized FROM (Phase 2 of the Data Stores plan):
+          // `Entity("arg")`. Skip past the (string) suffix when present
+          // so the downstream clause-keyword detection treats the entity
+          // reference as a single unit and the dispatcher recognizes that
+          // we've moved past the entity name.
+          let j = i + 2;
+          if (j < tokens.length && tokens[j].kind === "lparen") {
+            j++;
+            if (j < tokens.length && tokens[j].kind === "string") {
+              j++;
+              if (j < tokens.length && tokens[j].kind === "rparen") {
+                j++;
+              }
+            }
+            // Fast-forward the outer loop past the consumed suffix.
+            i = j - 1;
+          }
         }
         break;
       case "WHERE":
@@ -253,6 +270,11 @@ function dispatchExpecting(
       }
       if (last?.kind === "identifier") {
         // We've named an entity — the next legal thing is another clause.
+        return { kind: "clauseKeyword", alreadyUsed: walk.alreadyUsed };
+      }
+      // Parameterized FROM closed with `)` — same downstream expectation
+      // as a bare entity identifier (next is a clause keyword).
+      if (last?.kind === "rparen") {
         return { kind: "clauseKeyword", alreadyUsed: walk.alreadyUsed };
       }
       return { kind: "entity" };

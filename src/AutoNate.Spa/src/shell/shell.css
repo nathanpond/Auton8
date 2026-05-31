@@ -62,3 +62,35 @@
     font-weight: 600;
     pointer-events: none;
 }
+
+/* Skip-to-content link (WCAG 2.4.1). Hidden until keyboard focus lands on
+   it — visually offscreen but reachable via Tab as the very first focusable
+   element on the page. When focused, snaps into the top-left corner. */
+.skip-to-content {
+    position: absolute;
+    left: 0.5rem;
+    top: -3rem;
+    z-index: 2000;
+    padding: 0.5rem 0.75rem;
+    background: var(--mantine-color-body);
+    color: var(--mantine-color-text);
+    border: 2px solid var(--mantine-primary-color-filled);
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: top 120ms ease;
+}
+
+.skip-to-content:focus,
+.skip-to-content:focus-visible {
+    top: 0.5rem;
+    outline: 2px solid var(--mantine-primary-color-filled);
+    outline-offset: 2px;
+}
+
+/* Suppress the focus outline that lands on the main-content wrapper itself
+   when the skip link jumps focus to it — the page heading underneath still
+   shows native focus when reached via Tab. */
+.app-shell-content:focus {
+    outline: none;
+}

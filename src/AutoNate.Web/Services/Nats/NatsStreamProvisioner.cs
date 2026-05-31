@@ -85,6 +85,19 @@ public sealed class NatsStreamProvisioner(
         })
         {
             MaxAge = StreamMaxAge
+        },
+        // Phase 6 of the Data Stores plan — user-authored transformer /
+        // analyzer code-node execution. The host's JetStreamCodeNodeRunner
+        // publishes one message per node invocation on
+        // `pipeline-code-run.<runId>.<nodeId>`; the `services/executor/`
+        // sidecar subscribes via a durable consumer named `executor` and
+        // replies via NATS reply subject. Ephemeral: 24h retention.
+        new StreamConfig(name: "pipeline-code-runs", subjects: new[]
+        {
+            "pipeline-code-run.>"
+        })
+        {
+            MaxAge = TimeSpan.FromHours(24)
         }
     ];
 

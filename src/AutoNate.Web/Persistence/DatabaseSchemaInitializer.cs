@@ -3361,6 +3361,282 @@ internal static class DatabaseSchemaInitializer
             ON record_activity_rollup_cache (bucket_day DESC);
         """;
 
+    // Data Stores + DataConnectors metadata tables in the primary AutoNate DB
+    // (docs/plans/2026-05-30-data-stores-implementation.md). The actual per-
+    // datastore SQL schemas + read-only roles live in the second cluster DB
+    // `autonate_datastores`, provisioned by DatastoresDatabaseInitializer in
+    // a follow-up commit. File bytes live on disk under DataPaths.DatastoresRoot.
+    // Names are globally unique (LOWER) so the Phase 2 AQL `Dataset("name")`
+    // lookups have a stable single handle.
+    private const string DataStoresSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS datastores (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            kind SMALLINT NOT NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datastores_name
+            ON datastores (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_datastores_owner_user_id
+            ON datastores (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_datastores_kind
+            ON datastores (kind);
+
+        CREATE TABLE IF NOT EXISTS dataconnectors (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            kind TEXT NOT NULL,
+            config JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            last_fetched_at_utc TIMESTAMPTZ NULL,
+            cursor TEXT NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_dataconnectors_name
+            ON dataconnectors (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_dataconnectors_owner_user_id
+            ON dataconnectors (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_dataconnectors_kind
+            ON dataconnectors (kind);
+
+        CREATE TABLE IF NOT EXISTS datastore_files (
+            id UUID PRIMARY KEY,
+            datastore_id UUID NOT NULL REFERENCES datastores (id) ON DELETE CASCADE,
+            folder_path TEXT NOT NULL DEFAULT '/',
+            filename TEXT NOT NULL,
+            storage_key TEXT NOT NULL,
+            size_bytes BIGINT NOT NULL,
+            content_type TEXT NULL,
+            uploaded_by UUID NOT NULL,
+            uploaded_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_datastore_files_datastore_id
+            ON datastore_files (datastore_id);
+
+        CREATE INDEX IF NOT EXISTS ix_datastore_files_datastore_folder
+            ON datastore_files (datastore_id, folder_path);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datastore_files_path
+            ON datastore_files (datastore_id, folder_path, LOWER(filename));
+
+        CREATE TABLE IF NOT EXISTS datastore_tables (
+            id UUID PRIMARY KEY,
+            datastore_id UUID NOT NULL REFERENCES datastores (id) ON DELETE CASCADE,
+            schema_name TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            column_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
+            row_count BIGINT NOT NULL DEFAULT 0,
+            created_by UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_datastore_tables_datastore_id
+            ON datastore_tables (datastore_id);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datastore_tables_datastore_schema_table
+            ON datastore_tables (datastore_id, schema_name, LOWER(table_name));
+
+        CREATE TABLE IF NOT EXISTS connector_runs (
+            id UUID PRIMARY KEY,
+            dataconnector_id UUID NOT NULL REFERENCES dataconnectors (id) ON DELETE CASCADE,
+            started_at_utc TIMESTAMPTZ NOT NULL,
+            completed_at_utc TIMESTAMPTZ NULL,
+            status TEXT NOT NULL,
+            rows_fetched BIGINT NOT NULL DEFAULT 0,
+            error_message TEXT NULL,
+            cursor_before TEXT NULL,
+            cursor_after TEXT NULL,
+            triggered_by UUID NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_connector_runs_dataconnector_id
+            ON connector_runs (dataconnector_id);
+
+        CREATE INDEX IF NOT EXISTS ix_connector_runs_started_at_utc
+            ON connector_runs (started_at_utc DESC);
+        """;
+
+    // Datasets metadata table (Phase 2 of the Data Stores plan). The actual
+    // cached rows live in `autonate_datastores.cache_<datasetid>` schemas,
+    // provisioned by CachedDatasetStore on first refresh. Names are
+    // case-insensitively unique so AQL `Dataset("name")` lookups have a
+    // single stable handle.
+    private const string DatasetsSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS datasets (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            mode SMALLINT NOT NULL,
+            column_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
+            refresh_cron TEXT NULL,
+            last_refreshed_at_utc TIMESTAMPTZ NULL,
+            source_kind TEXT NOT NULL,
+            source_id UUID NOT NULL,
+            source_table_name TEXT NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_datasets_name
+            ON datasets (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_datasets_owner_user_id
+            ON datasets (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_datasets_source
+            ON datasets (source_kind, source_id);
+        """;
+
+    // Phase 3 of the Data Stores plan — anonymous share tokens for saved
+    // AQL queries. Stored as SHA-256 hex of the token so a DB read can't
+    // reconstruct a working URL. ON DELETE CASCADE from saved_queries
+    // sweeps every token when the underlying query is removed.
+    private const string SavedQueryShareTokensSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS saved_query_share_tokens (
+            id UUID PRIMARY KEY,
+            saved_query_id UUID NOT NULL REFERENCES saved_queries (id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL,
+            issued_by UUID NOT NULL,
+            issued_at_utc TIMESTAMPTZ NOT NULL,
+            expires_at_utc TIMESTAMPTZ NULL,
+            revoked_at_utc TIMESTAMPTZ NULL,
+            max_uses INTEGER NULL,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at_utc TIMESTAMPTZ NULL,
+            label TEXT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_query_share_tokens_token_hash
+            ON saved_query_share_tokens (token_hash);
+
+        CREATE INDEX IF NOT EXISTS ix_saved_query_share_tokens_saved_query_id
+            ON saved_query_share_tokens (saved_query_id);
+        """;
+
+    // Analytics pipelines (Phase 5 of the Data Stores plan). The DAG lives
+    // in `pipelines.graph` (jsonb). pipeline_runs captures a snapshot of
+    // the graph at enqueue time so a concurrent edit can't mutate a
+    // queued run. pipeline_run_steps records per-node status/timings/row
+    // counts as the orchestrator walks the topologically-sorted graph.
+    // ExecuteSqlRawAsync runs the SQL through `String.Format`, which treats
+    // `{`/`}` as format-token delimiters. JSON literals embedded as column
+    // defaults have to double the braces or the EF format pass throws
+    // FormatException before the statement ever reaches Postgres. Other
+    // jsonb defaults in this file (search for `'{{}}'::jsonb`) follow the
+    // same convention.
+    private const string PipelinesSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS pipelines (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            graph JSONB NOT NULL DEFAULT '{{"nodes":[],"edges":[]}}'::jsonb,
+            schedule_cron TEXT NULL,
+            last_run_at_utc TIMESTAMPTZ NULL,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_pipelines_name
+            ON pipelines (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_pipelines_owner_user_id
+            ON pipelines (owner_user_id);
+
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+            id UUID PRIMARY KEY,
+            pipeline_id UUID NOT NULL REFERENCES pipelines (id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'Queued',
+            graph_snapshot JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            queued_at_utc TIMESTAMPTZ NOT NULL,
+            started_at_utc TIMESTAMPTZ NULL,
+            completed_at_utc TIMESTAMPTZ NULL,
+            error_message TEXT NULL,
+            triggered_by UUID NOT NULL,
+            trigger_kind TEXT NOT NULL DEFAULT 'manual'
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_runs_pipeline_id
+            ON pipeline_runs (pipeline_id);
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_runs_status
+            ON pipeline_runs (status);
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_runs_queued_at_utc
+            ON pipeline_runs (queued_at_utc DESC);
+
+        CREATE TABLE IF NOT EXISTS pipeline_run_steps (
+            id UUID PRIMARY KEY,
+            pipeline_run_id UUID NOT NULL REFERENCES pipeline_runs (id) ON DELETE CASCADE,
+            node_key TEXT NOT NULL,
+            node_kind TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Queued',
+            started_at_utc TIMESTAMPTZ NULL,
+            completed_at_utc TIMESTAMPTZ NULL,
+            row_count BIGINT NULL,
+            error_message TEXT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_pipeline_run_steps_pipeline_run_id
+            ON pipeline_run_steps (pipeline_run_id);
+        """;
+
+    // User-authored transformers / analyzers (Phase 6 of the Data Stores
+    // plan). The code itself executes in `services/executor/` under V8 or
+    // Pyodide isolates unless `is_unsafe` flips the runtime to host-side
+    // CPython (which the `transformer:executeunsafe` permission gates).
+    private const string CodeTransformersSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS code_transformers (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NULL,
+            kind TEXT NOT NULL,
+            language TEXT NOT NULL,
+            code TEXT NOT NULL DEFAULT '',
+            is_unsafe BOOLEAN NOT NULL DEFAULT FALSE,
+            owner_user_id UUID NOT NULL,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_code_transformers_name
+            ON code_transformers (LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS ix_code_transformers_owner_user_id
+            ON code_transformers (owner_user_id);
+
+        CREATE INDEX IF NOT EXISTS ix_code_transformers_kind
+            ON code_transformers (kind);
+        """;
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -3427,6 +3703,11 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowEventLogSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(ProcessRetentionConfigSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordActivityRollupSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DataStoresSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DatasetsSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(SavedQueryShareTokensSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(PipelinesSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(CodeTransformersSchemaSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

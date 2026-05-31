@@ -1,0 +1,22 @@
+{
+  "name": "autonate-executor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "User-authored transformer/analyzer code executor for AutoNate. Subscribes to NATS pipeline-code-run.> and replies with a sandboxed JS (isolated-vm) or Python (Pyodide) result. .NET owns scheduling, persistence, and per-run state.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch & node --watch dist/index.js"
+  },
+  "dependencies": {
+    "isolated-vm": "^5.0.1",
+    "nats": "^2.29.2",
+    "pyodide": "^0.26.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.6.0"
+  }
+}

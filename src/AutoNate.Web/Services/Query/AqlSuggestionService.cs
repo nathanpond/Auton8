@@ -138,8 +138,12 @@ public sealed class AqlSuggestionService(
         sb.AppendLine();
         sb.AppendLine("AQL grammar:");
         sb.AppendLine(
-            "  Shape: FROM <Entity> [WHERE <expr>] [ORDER BY <col> [ASC|DESC]] " +
+            "  Shape: FROM <Entity>[(\"<arg>\")] [WHERE <expr>] [ORDER BY <col> [ASC|DESC]] " +
             "[COLUMNS(<c1>, ...)] [GROUP(<col>, ...)] [LIMIT <n>]. Clauses MUST appear in this exact order.");
+        sb.AppendLine(
+            "  Most entities are bare (FROM Records); a few take a string-literal argument that names " +
+            "a concrete surface (e.g. FROM Dataset(\"sales\") queries the dataset named 'sales'). The " +
+            "list below marks parameterized entities with their argument hint.");
         sb.AppendLine(
             "  ORDER BY (when present) comes BEFORE COLUMNS, and you CANNOT ORDER BY an aggregate " +
             "alias defined in COLUMNS — a grouped count is just COLUMNS(...) GROUP(...) with no ORDER BY.");
@@ -163,7 +167,10 @@ public sealed class AqlSuggestionService(
         {
             if (!registry.TryGet(name, out var entity)) continue;
             var cols = string.Join(", ", entity.StaticSchema.Select(c => c.Name));
-            sb.AppendLine($"  FROM {entity.Name}: {cols}");
+            var entityRef = entity.AcceptsEntityArgument
+                ? $"{entity.Name}(\"<{entity.EntityArgumentHint ?? "name"}>\")"
+                : entity.Name;
+            sb.AppendLine($"  FROM {entityRef}: {cols}");
             if (string.Equals(entity.Name, "Records", StringComparison.OrdinalIgnoreCase))
             {
                 sb.AppendLine(

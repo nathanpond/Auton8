@@ -15,6 +15,19 @@ import EdgeTypeEditor from "@/pages/edge-types/EdgeTypeEditor";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
 import { ConfigIndex } from "@/pages/admin/config/sections";
 import FormEditor from "@/pages/admin/config/forms/FormEditor";
+import { lazy, Suspense } from "react";
+const PipelineEditor = lazy(() => import("@/pages/admin/pipelines/PipelineEditor"));
+const PipelineRunHistory = lazy(() => import("@/pages/admin/pipelines/PipelineRunHistory"));
+const PipelineEditorRoute = () => (
+  <Suspense fallback={null}>
+    <PipelineEditor />
+  </Suspense>
+);
+const PipelineRunHistoryRoute = () => (
+  <Suspense fallback={null}>
+    <PipelineRunHistory />
+  </Suspense>
+);
 import FormDevView from "@/pages/forms/FormDevView";
 import FormPublicView from "@/pages/forms/FormPublicView";
 import TaskFormPage from "@/pages/workflow-tasks/TaskFormPage";
@@ -71,7 +84,12 @@ const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] 
   { path: "forms", templateKey: "configForms" },
   { path: "form-mappings", templateKey: "configFormMappings" },
   { path: "chatbot-settings", templateKey: "configChatbotSettings" },
-  { path: "chatbot-models", templateKey: "configChatbotModels" }
+  { path: "chatbot-models", templateKey: "configChatbotModels" },
+  { path: "datastores", templateKey: "dataStores" },
+  { path: "dataconnectors", templateKey: "dataConnectors" },
+  { path: "datasets", templateKey: "datasets" },
+  { path: "pipelines", templateKey: "pipelines" },
+  { path: "code-transformers", templateKey: "codeTransformers" }
 ];
 
 // Absolute-path → templateKey index, materialized once for the validator.
@@ -197,6 +215,8 @@ export const APP_ROUTES: AppRoute[] = [
         element: template(a.templateKey)
       })),
       { path: "forms/:id", element: protect(<FormEditor />) },
+      { path: "pipelines/:id", element: protect(<PipelineEditorRoute />) },
+      { path: "pipelines/:id/runs", element: protect(<PipelineRunHistoryRoute />) },
       // Catch-all so menu items added by plugins under /admin/config/* render
       // inside ConfigLayout's sidebar shell. The dynamic page component reads
       // the menu_item config (path/content/contentType) and renders it.

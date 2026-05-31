@@ -538,6 +538,7 @@ function UserMenu({
     <Menu position="bottom-end" shadow="md" width={220} zIndex={1100}>
       <Menu.Target>
         <UnstyledButton
+          aria-label={`Open user menu for ${displayName}`}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -555,7 +556,7 @@ function UserMenu({
           onMouseLeave={clearHeaderHover}
         >
           <Avatar size={28} radius="xl" color="gray">
-            <i className="fa fa-user" />
+            <i className="fa fa-user" aria-hidden="true" />
           </Avatar>
           <Box
             component="span"
@@ -564,7 +565,7 @@ function UserMenu({
           >
             {displayName}
           </Box>
-          <i className="fa fa-angle-down" style={{ fontSize: 11, opacity: 0.7 }} />
+          <i className="fa fa-angle-down" aria-hidden="true" style={{ fontSize: 11, opacity: 0.7 }} />
         </UnstyledButton>
       </Menu.Target>
       <Menu.Dropdown>

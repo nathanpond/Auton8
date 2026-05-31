@@ -365,12 +365,18 @@ public sealed class FlowableClient(
         }
     }
 
-    private async Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
+    private Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
         IReadOnlyList<FlowableHistoricProcessInstanceResponse> historicInstances,
         CancellationToken cancellationToken)
+        => ResolveProcessDefinitionNamesAsync(
+            historicInstances.Select(instance => instance.ProcessDefinitionId),
+            cancellationToken);
+
+    private async Task<Dictionary<string, string>> ResolveProcessDefinitionNamesAsync(
+        IEnumerable<string?> candidateIds,
+        CancellationToken cancellationToken)
     {
-        var processDefinitionIds = historicInstances
-            .Select(instance => instance.ProcessDefinitionId)
+        var processDefinitionIds = candidateIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -1051,36 +1057,12 @@ public sealed class FlowableClient(
             .ToArray();
     }
 
-    private async Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
+    private Task<Dictionary<string, string>> GetProcessDefinitionNamesByIdAsync(
         IEnumerable<FlowableTaskResponse> tasks,
         CancellationToken cancellationToken)
-    {
-        var processDefinitionIds = tasks
-            .Select(task => task.ProcessDefinitionId)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        var namesById = new Dictionary<string, string>(StringComparer.Ordinal);
-
-        foreach (var processDefinitionId in processDefinitionIds)
-        {
-            using var processDefinitionResponse = await _httpClient.GetAsync(
-                $"service/repository/process-definitions/{Uri.EscapeDataString(processDefinitionId!)}",
-                cancellationToken);
-            await EnsureSuccessAsync(processDefinitionResponse, $"query process definition '{processDefinitionId}'");
-
-            var processDefinition = await DeserializeAsync<FlowableProcessDefinitionResponse>(processDefinitionResponse, cancellationToken);
-            var resolvedName = FirstNonEmpty(processDefinition.Name, processDefinition.Key, processDefinition.Id);
-
-            if (!string.IsNullOrWhiteSpace(resolvedName))
-            {
-                namesById[processDefinitionId!] = resolvedName;
-            }
-        }
-
-        return namesById;
-    }
+        => ResolveProcessDefinitionNamesAsync(
+            tasks.Select(task => task.ProcessDefinitionId),
+            cancellationToken);
 
     public async Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default)
     {

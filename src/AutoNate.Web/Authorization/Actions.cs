@@ -53,4 +53,20 @@ public static class Actions
     public const string Acknowledge = "acknowledge";
     public const string Resolve = "resolve";
     public const string Remediate = "remediate";
+
+    // Data Stores & Analytics Pipeline (docs/plans/2026-05-30-data-stores-implementation.md).
+    // Refresh: trigger a cached dataset / connector pull on demand.
+    // Run: execute a pipeline (manual kick-off, in addition to scheduled runs).
+    // Schedule: edit refresh frequency / pipeline cron.
+    // ExecuteUnsafe: opt out of the Pyodide/V8-isolate sandbox on user-authored
+    //   transformer/analyzer code — gates the full-CPython runner path.
+    // Share: issue a share token for a saved query (analog of the document
+    //   share surface).
+    // Connect: invoke a data connector's "test connection" probe.
+    public const string Refresh = "refresh";
+    public const string Run = "run";
+    public const string Schedule = "schedule";
+    public const string ExecuteUnsafe = "executeunsafe";
+    public const string Share = "share";
+    public const string Connect = "connect";
 }

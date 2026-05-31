@@ -75,11 +75,22 @@ function buildOptions(editorCtx: EditorContext, deps: CompletionDeps): Completio
       return clauseKeywordOptions(editorCtx.expecting.alreadyUsed, editorCtx.clause);
 
     case "entity":
-      return schema.entities.map((e) => ({
-        label: e.name,
-        type: "namespace",
-        apply: e.name + " "
-      }));
+      return schema.entities.map((e) => {
+        // Parameterized FROM (Phase 2 of the Data Stores plan): entities
+        // that take an argument get a `Name("` apply string so the user
+        // immediately lands inside the quotes. Bare entities preserve the
+        // trailing-space behavior that lets the next clause keyword flow.
+        const apply = e.acceptsEntityArgument ? `${e.name}("` : `${e.name} `;
+        const detail = e.acceptsEntityArgument
+          ? e.entityArgumentHint ?? "parameterized"
+          : undefined;
+        return {
+          label: e.name,
+          type: "namespace",
+          apply,
+          detail
+        };
+      });
 
     case "field":
       return fieldOptions(editorCtx, schema, entityContext);
