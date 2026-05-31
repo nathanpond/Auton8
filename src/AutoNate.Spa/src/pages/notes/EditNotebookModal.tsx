@@ -110,6 +110,7 @@ export function EditNotebookModal({ notebook, onClose, onSave, submitting }: Pro
             <Label>Name</Label>
             <input
               autoFocus
+              aria-label="Notebook name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {

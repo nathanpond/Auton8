@@ -121,4 +121,143 @@ public sealed class DocumentsTests : E2ETestBase
             page.GetByRole(AriaRole.Heading, new() { Name = "Template Gallery" }))
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
     }
+
+    [Fact]
+    public async Task TemplateGallery_CreateTemplate_HidesFromProjectView_AndDeletes()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var project = await seeder.CreateProjectAsync(TestNames.Prefixed("templateproj"));
+        var templateTitle = TestNames.Prefixed("template");
+
+        await page.GotoAsync("/documents/templates");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New template" }).ClickAsync();
+        var createDialog = page.GetByRole(AriaRole.Dialog, new() { Name = "New template" });
+        await createDialog.GetByRole(AriaRole.Combobox, new() { Name = "Project" }).ClickAsync();
+        await page.GetByRole(AriaRole.Option, new() { Name = project.Name, Exact = true }).ClickAsync();
+        await createDialog.GetByLabel("Template title").FillAsync(templateTitle);
+
+        var editorPageTask = session.Context.WaitForPageAsync();
+        await createDialog.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        var editorPage = await editorPageTask;
+        await editorPage.CloseAsync();
+        await Assertions.Expect(page.GetByText(templateTitle, new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GotoAsync($"/documents/p/{project.Id}");
+        await Assertions.Expect(page.GetByText(templateTitle, new() { Exact = true }))
+            .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GotoAsync("/documents/templates");
+        await Assertions.Expect(page.GetByText(templateTitle, new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Template actions" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Delete" }).ClickAsync();
+        var deleteDialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Delete template" });
+        await deleteDialog.GetByRole(AriaRole.Button, new() { Name = "Delete" }).ClickAsync();
+
+        await Assertions.Expect(deleteDialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText(templateTitle, new() { Exact = true }))
+            .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    [Fact]
+    public async Task ProjectDocuments_FolderDeepLink_RestoresAfterReload()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var project = await seeder.CreateProjectAsync(TestNames.Prefixed("deeplinkproj"));
+        var folderName = TestNames.Prefixed("folder");
+
+        await page.GotoAsync($"/documents/p/{project.Id}");
+        await CreateFolderAsync(page, folderName);
+        await page.GetByText(folderName, new() { Exact = true }).Last.ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = folderName }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        var folderUrl = page.Url;
+        await page.ReloadAsync();
+
+        Assert.Equal(folderUrl, page.Url);
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = folderName }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "New subfolder" }))
+            .ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task ProjectDocuments_RenameAndDeleteDocument_ViaCardMenu()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var project = await seeder.CreateProjectAsync(TestNames.Prefixed("docmutationproj"));
+        var originalTitle = TestNames.Prefixed("doc");
+        var renamedTitle = TestNames.Prefixed("doc-renamed");
+        await seeder.CreateDocumentAsync(project.Id, originalTitle);
+
+        await page.GotoAsync($"/documents/p/{project.Id}");
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = originalTitle }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Document menu" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Rename" }).ClickAsync();
+        var renameDialog = page.GetByRole(AriaRole.Dialog);
+        await renameDialog.GetByLabel("Title").FillAsync(renamedTitle);
+        await renameDialog.GetByRole(AriaRole.Button, new() { Name = "Rename" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = renamedTitle }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Document menu" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Delete document" }).ClickAsync();
+        var deleteDialog = page.GetByRole(AriaRole.Dialog);
+        await deleteDialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = renamedTitle }))
+            .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    [Fact]
+    public async Task ProjectDocuments_RenameAndDeleteFolder_ViaTreeMenu()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var seeder = new ApiSeeder(page.APIRequest);
+        var project = await seeder.CreateProjectAsync(TestNames.Prefixed("foldermutationproj"));
+        var originalName = TestNames.Prefixed("folder");
+        var renamedName = TestNames.Prefixed("folder-renamed");
+
+        await page.GotoAsync($"/documents/p/{project.Id}");
+        await CreateFolderAsync(page, originalName);
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Folder menu" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Rename" }).ClickAsync();
+        var renameDialog = page.GetByRole(AriaRole.Dialog);
+        await renameDialog.GetByLabel("Name").FillAsync(renamedName);
+        await renameDialog.GetByRole(AriaRole.Button, new() { Name = "Rename" }).ClickAsync();
+        await Assertions.Expect(page.GetByText(renamedName, new() { Exact = true }).First)
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Folder menu" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Delete folder" }).ClickAsync();
+        var deleteDialog = page.GetByRole(AriaRole.Dialog);
+        await deleteDialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+        await Assertions.Expect(deleteDialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText(renamedName, new() { Exact = true }))
+            .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    private static async Task CreateFolderAsync(IPage page, string folderName)
+    {
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Project root" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await page.GetByRole(AriaRole.Button, new() { Name = "New folder", Exact = true }).ClickAsync();
+        var dialog = page.GetByRole(AriaRole.Dialog);
+        await dialog.GetByLabel("Name").FillAsync(folderName);
+        await dialog.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText(folderName, new() { Exact = true }).First)
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
 }
