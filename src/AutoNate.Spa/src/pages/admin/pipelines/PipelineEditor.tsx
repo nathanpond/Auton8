@@ -228,7 +228,7 @@ function PipelineEditorInner() {
     mutationFn: () => runPipeline(id!),
     onSuccess: () => {
       notifications.show({ message: "Pipeline run queued.", color: "green" });
-      navigate(`/admin/config/pipelines/${id}/runs`);
+      navigate(`/pipelines/${id}/runs`);
     }
   });
 
@@ -251,12 +251,12 @@ function PipelineEditorInner() {
       <Group justify="space-between" align="center">
         <Title order={2}>{pipelineQuery.data?.name ?? "Pipeline"}</Title>
         <Group>
-          <Button variant="default" onClick={() => navigate("/admin/config/pipelines")}>
+          <Button variant="default" onClick={() => navigate("/pipelines")}>
             Back to list
           </Button>
           <Button
             variant="default"
-            onClick={() => navigate(`/admin/config/pipelines/${id}/runs`)}
+            onClick={() => navigate(`/pipelines/${id}/runs`)}
           >
             Run history
           </Button>

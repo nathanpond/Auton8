@@ -3153,6 +3153,83 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    // Adds a top-level "Data" group to the main menu with the five data-feature
+    // pages as template children (Data Stores / Data Connectors / Datasets /
+    // Pipelines / Code Transformers). The pages were previously anchored under
+    // /admin/config/* and only reachable to admins via the Site Configuration
+    // shell; they are permissionable user features, so they belong on the main
+    // menu. Idempotent via auth_seed_state. Default paths are flat — admin can
+    // rename through Pages / Menus.
+    private const string DataMainMenuSeedSql =
+        """
+        DO $$
+        DECLARE
+            main_id UUID := '00000000-0000-0000-0001-000000000001';
+            data_group_id UUID;
+            next_sort INT;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'main_menu_data_v1') THEN
+                IF EXISTS (SELECT 1 FROM menus WHERE id = main_id)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM menu_items
+                       WHERE menu_id = main_id
+                         AND parent_id IS NULL
+                         AND display_name = 'Data'
+                         AND item_type = 'group'
+                   )
+                THEN
+                    SELECT COALESCE(MAX(sort_order), -1) + 1 INTO next_sort
+                    FROM menu_items
+                    WHERE menu_id = main_id AND parent_id IS NULL;
+
+                    data_group_id := gen_random_uuid();
+
+                    INSERT INTO menu_items (
+                        id, menu_id, parent_id, sort_order, display_name, icon,
+                        item_type, config, is_visible, is_system,
+                        created_at_utc, updated_at_utc
+                    )
+                    VALUES (
+                        data_group_id, main_id, NULL, next_sort,
+                        'Data', 'fa fa-warehouse', 'group', '{{}}'::jsonb,
+                        TRUE, TRUE, NOW(), NOW()
+                    );
+
+                    INSERT INTO menu_items (
+                        id, menu_id, parent_id, sort_order, display_name, icon,
+                        item_type, config, is_visible, is_system,
+                        created_at_utc, updated_at_utc
+                    )
+                    VALUES
+                        (gen_random_uuid(), main_id, data_group_id, 0,
+                         'Data Stores', 'fa fa-database', 'template',
+                         '{{"templateKey":"dataStores","path":"/datastores"}}'::jsonb,
+                         TRUE, TRUE, NOW(), NOW()),
+                        (gen_random_uuid(), main_id, data_group_id, 1,
+                         'Data Connectors', 'fa fa-plug', 'template',
+                         '{{"templateKey":"dataConnectors","path":"/dataconnectors"}}'::jsonb,
+                         TRUE, TRUE, NOW(), NOW()),
+                        (gen_random_uuid(), main_id, data_group_id, 2,
+                         'Datasets', 'fa fa-table', 'template',
+                         '{{"templateKey":"datasets","path":"/datasets"}}'::jsonb,
+                         TRUE, TRUE, NOW(), NOW()),
+                        (gen_random_uuid(), main_id, data_group_id, 3,
+                         'Pipelines', 'fa fa-diagram-project', 'template',
+                         '{{"templateKey":"pipelines","path":"/pipelines"}}'::jsonb,
+                         TRUE, TRUE, NOW(), NOW()),
+                        (gen_random_uuid(), main_id, data_group_id, 4,
+                         'Code Transformers', 'fa fa-code', 'template',
+                         '{{"templateKey":"codeTransformers","path":"/code-transformers"}}'::jsonb,
+                         TRUE, TRUE, NOW(), NOW());
+                END IF;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('main_menu_data_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+        END $$;
+        """;
+
     // Projection framework bookkeeping. projection_versions tracks active vs.
     // shadow rows during reprojection; projection_watermarks holds per-feed
     // poll cursors so a restart doesn't replay history.
@@ -3708,6 +3785,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(SavedQueryShareTokensSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PipelinesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(CodeTransformersSchemaSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(DataMainMenuSeedSql, cancellationToken);
 
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value

@@ -22,32 +22,56 @@ public abstract class E2ETestBase
     /// Opens a fresh browser context (own cookie jar), signs in as the seeded
     /// <c>admin</c>/<c>admin</c> super-admin, and returns a disposable session
     /// that closes the context on <c>await using</c> exit. The returned page is
-    /// already at <c>/home</c> after the post-login redirect.
+    /// already at <c>/home</c> after the post-login redirect. The session also
+    /// installs a <see cref="ConsoleErrorGuard"/> that fails the test if any
+    /// non-allowlisted <c>console.error</c> or uncaught page error appears —
+    /// catches the React/Mantine/DOM regressions that "h1 appears" assertions
+    /// silently pass through.
     /// </summary>
     protected async Task<SignedInSession> NewSignedInAsAdminAsync()
     {
         var context = await Fixture.NewContextAsync();
         var page = await context.NewPageAsync();
+        // Install the guard BEFORE sign-in so a busted login or post-login
+        // render still trips the gate. Sign-in itself navigates to / and then
+        // /home; either page emitting an error fails the test on dispose.
+        var guard = new ConsoleErrorGuard(page);
         await AutoNateE2EFixture.SignInAsAdminAsync(page);
-        return new SignedInSession(context, page);
+        return new SignedInSession(context, page, guard);
     }
 }
 
 /// <summary>
 /// Owned pairing of a browser context and a signed-in page. Disposes the
-/// context (and therefore all of its pages) on scope exit so tests can use the
-/// idiomatic <c>await using var session = …</c> pattern.
+/// console-error guard first (so its assertion can fail the test before the
+/// context is torn down), then the context (and therefore all of its pages).
+/// Tests use the idiomatic <c>await using var session = …</c> pattern.
 /// </summary>
 public sealed class SignedInSession : IAsyncDisposable
 {
     public IBrowserContext Context { get; }
     public IPage Page { get; }
+    public ConsoleErrorGuard ConsoleErrors { get; }
 
-    internal SignedInSession(IBrowserContext context, IPage page)
+    internal SignedInSession(IBrowserContext context, IPage page, ConsoleErrorGuard guard)
     {
         Context = context;
         Page = page;
+        ConsoleErrors = guard;
     }
 
-    public ValueTask DisposeAsync() => Context.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        // Guard first — it throws if it found errors, and the test should see
+        // that as the failure. Wrap context disposal in try/finally so even a
+        // throwing guard cleans up the browser context.
+        try
+        {
+            await ConsoleErrors.DisposeAsync();
+        }
+        finally
+        {
+            await Context.DisposeAsync();
+        }
+    }
 }

@@ -69,9 +69,9 @@ public sealed class AuthShellTests : E2ETestBase
 
         // Top-level main-menu items seeded by DatabaseSchemaInitializer's
         // initial main-menu block + later additions (Documents,
-        // DocumentsMenuItemSeedSql; Query, query_menu_v1). Use a header role
-        // filter so we don't collide with the same words appearing on the
-        // dashboard body.
+        // DocumentsMenuItemSeedSql; Query, query_menu_v1; Data,
+        // main_menu_data_v1). Use a header role filter so we don't collide
+        // with the same words appearing on the dashboard body.
         var header = page.GetByRole(AriaRole.Banner);
         await Assertions.Expect(header.GetByText("Dashboard", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
@@ -82,6 +82,8 @@ public sealed class AuthShellTests : E2ETestBase
         await Assertions.Expect(header.GetByText("Documents", new() { Exact = true }))
             .ToBeVisibleAsync();
         await Assertions.Expect(header.GetByText("Query", new() { Exact = true }))
+            .ToBeVisibleAsync();
+        await Assertions.Expect(header.GetByText("Data", new() { Exact = true }))
             .ToBeVisibleAsync();
     }
 
