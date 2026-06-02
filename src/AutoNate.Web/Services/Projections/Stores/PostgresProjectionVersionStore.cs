@@ -15,7 +15,10 @@ public sealed class PostgresProjectionVersionStore : IProjectionVersionStore
     public async Task<ProjectionVersionRecord?> GetActiveAsync(string name, CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.Database
+        // ToArrayAsync rather than FirstOrDefaultAsync: EF's row-limiting-without-OrderBy
+        // analyzer (warning 10103) can't see the LIMIT 1 inside the raw SQL string and would
+        // otherwise log a false positive on every poll cycle. SQL guarantees at most one row.
+        var rows = await db.Database
             .SqlQuery<VersionRow>($"""
                 SELECT name AS "Name", version AS "Version", status AS "Status",
                        started_at_utc AS "StartedAtUtc", completed_at_utc AS "CompletedAtUtc"
@@ -23,8 +26,8 @@ public sealed class PostgresProjectionVersionStore : IProjectionVersionStore
                 WHERE name = {name} AND status = 'active'
                 LIMIT 1
                 """)
-            .FirstOrDefaultAsync(cancellationToken);
-        return row is null ? null : Map(row);
+            .ToArrayAsync(cancellationToken);
+        return rows.Length == 0 ? null : Map(rows[0]);
     }
 
     public async Task SetActiveAsync(string name, int version, CancellationToken cancellationToken)

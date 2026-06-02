@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
@@ -92,7 +93,11 @@ export default function DataStoresPage() {
         id: "name",
         accessorKey: "name",
         header: "Name",
-        cell: ({ row }) => <Text fw={500}>{row.original.name}</Text>
+        cell: ({ row }) => (
+          <Link to={`/datastores/${row.original.id}`}>
+            <Text fw={500}>{row.original.name}</Text>
+          </Link>
+        )
       },
       {
         id: "kind",

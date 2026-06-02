@@ -6,10 +6,10 @@ namespace AutoNate.E2E.Tests;
 
 /// <summary>
 /// Smoke + create-modal + editor-mounts coverage for the Phase 5 + Phase 6
-/// admin pages of the Data Stores &amp; Analytics Pipeline plan
+/// pages of the Data Stores &amp; Analytics Pipeline plan
 /// (<c>docs/plans/2026-05-30-data-stores-implementation.md</c>):
-/// <c>/admin/config/pipelines</c>, the lazy-loaded React Flow editor at
-/// <c>/admin/config/pipelines/{id}</c>, and <c>/admin/config/code-transformers</c>.
+/// <c>/pipelines</c>, the lazy-loaded React Flow editor at
+/// <c>/pipelines/{id}</c>, and <c>/code-transformers</c>.
 /// Pipelines also gets a "create then click into the editor" test that
 /// proves the lazy-loaded React Flow chunk mounts — the editor route was
 /// one of the files whose strict-mode TS errors fell out of the broken
@@ -28,7 +28,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
 
-        await page.GotoAsync("/admin/config/pipelines");
+        await page.GotoAsync("/pipelines");
 
         await Assertions.Expect(
             page.GetByRole(AriaRole.Heading, new() { Name = "Analytics Pipelines", Exact = true }))
@@ -44,7 +44,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     {
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-        await page.GotoAsync("/admin/config/pipelines");
+        await page.GotoAsync("/pipelines");
 
         await page.GetByRole(AriaRole.Button, new() { Name = "New pipeline" }).ClickAsync();
 
@@ -61,7 +61,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     {
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-        await page.GotoAsync("/admin/config/pipelines");
+        await page.GotoAsync("/pipelines");
 
         var name = TestNames.Prefixed("pipe");
         await page.GetByRole(AriaRole.Button, new() { Name = "New pipeline" }).ClickAsync();
@@ -71,10 +71,10 @@ public sealed class PipelinesAdminTests : E2ETestBase
         await modal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
 
         // The list row links into the editor; clicking the name navigates
-        // to /admin/config/pipelines/{id}.
+        // to /pipelines/{id}.
         await Assertions.Expect(page.GetByText(name).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
         await page.GetByText(name).First.ClickAsync();
-        await page.WaitForURLAsync("**/admin/config/pipelines/*", new() { Timeout = 15_000 });
+        await page.WaitForURLAsync("**/pipelines/*", new() { Timeout = 15_000 });
 
         // PipelineEditor.tsx — the toolbar carries the pipeline name as
         // an h2, and the left palette has the four node-kind buttons.
@@ -109,7 +109,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
 
-        await page.GotoAsync("/admin/config/code-transformers");
+        await page.GotoAsync("/code-transformers");
 
         await Assertions.Expect(
             page.GetByRole(AriaRole.Heading, new() { Name = "Code Transformers", Exact = true }))
@@ -125,7 +125,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     {
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-        await page.GotoAsync("/admin/config/code-transformers");
+        await page.GotoAsync("/code-transformers");
 
         var name = TestNames.Prefixed("code");
         await page.GetByRole(AriaRole.Button, new() { Name = "New code transformer" }).ClickAsync();

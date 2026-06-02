@@ -103,7 +103,7 @@ export default function PipelinesPage() {
         accessorKey: "name",
         header: "Name",
         cell: ({ row }) => (
-          <Link to={`/admin/config/pipelines/${row.original.id}`}>
+          <Link to={`/pipelines/${row.original.id}`}>
             <Text fw={500}>{row.original.name}</Text>
           </Link>
         )

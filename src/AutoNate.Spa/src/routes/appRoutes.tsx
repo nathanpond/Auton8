@@ -18,6 +18,7 @@ import FormEditor from "@/pages/admin/config/forms/FormEditor";
 import { lazy, Suspense } from "react";
 const PipelineEditor = lazy(() => import("@/pages/admin/pipelines/PipelineEditor"));
 const PipelineRunHistory = lazy(() => import("@/pages/admin/pipelines/PipelineRunHistory"));
+const DataStoreDetail = lazy(() => import("@/pages/admin/datastores/DataStoreDetailPage"));
 const PipelineEditorRoute = () => (
   <Suspense fallback={null}>
     <PipelineEditor />
@@ -26,6 +27,11 @@ const PipelineEditorRoute = () => (
 const PipelineRunHistoryRoute = () => (
   <Suspense fallback={null}>
     <PipelineRunHistory />
+  </Suspense>
+);
+const DataStoreDetailRoute = () => (
+  <Suspense fallback={null}>
+    <DataStoreDetail />
   </Suspense>
 );
 import FormDevView from "@/pages/forms/FormDevView";
@@ -84,12 +90,7 @@ const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] 
   { path: "forms", templateKey: "configForms" },
   { path: "form-mappings", templateKey: "configFormMappings" },
   { path: "chatbot-settings", templateKey: "configChatbotSettings" },
-  { path: "chatbot-models", templateKey: "configChatbotModels" },
-  { path: "datastores", templateKey: "dataStores" },
-  { path: "dataconnectors", templateKey: "dataConnectors" },
-  { path: "datasets", templateKey: "datasets" },
-  { path: "pipelines", templateKey: "pipelines" },
-  { path: "code-transformers", templateKey: "codeTransformers" }
+  { path: "chatbot-models", templateKey: "configChatbotModels" }
 ];
 
 // Absolute-path → templateKey index, materialized once for the validator.
@@ -202,6 +203,22 @@ export const APP_ROUTES: AppRoute[] = [
   // navigation target for tasks where the author chose Form Page.
   { path: "workflow-tasks/:taskId/form", element: protect(<TaskFormPage />) },
 
+  // Pipeline editor + run history — parametric routes for the analytics
+  // pipelines feature. The list page (PipelinesPage) is a placeable template
+  // (admin chooses its menu path); the per-id editor + runs sub-pages are
+  // hard-routed under /pipelines/ so the editor URL is stable regardless of
+  // where the admin mounts the list. The list page's row clicks navigate to
+  // /pipelines/:id; the editor's Back button uses navigate(-1) so it returns
+  // to whichever path the user came from.
+  { path: "pipelines/:id", element: protect(<PipelineEditorRoute />) },
+  { path: "pipelines/:id/runs", element: protect(<PipelineRunHistoryRoute />) },
+
+  // Data store detail (file browser for FileType stores; CSV ingest wizard
+  // for SqlType stores). Same shape as pipelines: list page is placeable;
+  // the per-id detail is a hardcoded top-level route. ?folder=/path drives
+  // the file browser's current location so the URL is shareable.
+  { path: "datastores/:id", element: protect(<DataStoreDetailRoute />) },
+
   // Site Configuration shell — children are page templates rendered inside the
   // layout's <Outlet />. Mounted at the templates' default_path so the URL
   // works whether reached through the site-config menu or directly.
@@ -215,8 +232,6 @@ export const APP_ROUTES: AppRoute[] = [
         element: template(a.templateKey)
       })),
       { path: "forms/:id", element: protect(<FormEditor />) },
-      { path: "pipelines/:id", element: protect(<PipelineEditorRoute />) },
-      { path: "pipelines/:id/runs", element: protect(<PipelineRunHistoryRoute />) },
       // Catch-all so menu items added by plugins under /admin/config/* render
       // inside ConfigLayout's sidebar shell. The dynamic page component reads
       // the menu_item config (path/content/contentType) and renders it.

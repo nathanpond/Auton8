@@ -165,10 +165,10 @@ export default function PipelineRunHistory() {
           Run history — {pipelineQuery.data?.name ?? "Pipeline"}
         </Title>
         <Group>
-          <Button variant="default" onClick={() => navigate(`/admin/config/pipelines/${id}`)}>
+          <Button variant="default" onClick={() => navigate(`/pipelines/${id}`)}>
             Open editor
           </Button>
-          <Button variant="default" onClick={() => navigate("/admin/config/pipelines")}>
+          <Button variant="default" onClick={() => navigate("/pipelines")}>
             Back to list
           </Button>
         </Group>

@@ -120,6 +120,22 @@ export async function deleteDataStoreFile(id: string, fileId: string): Promise<v
   await api.delete(`${BASE}/${id}/files/${fileId}`);
 }
 
+// Browsers can issue an authenticated GET to a same-origin URL using the same
+// session cookie that backs the API client; returning a plain URL lets the
+// consumer use a regular <a href> + download attribute and avoids buffering
+// the file through axios (the server sets Content-Disposition).
+export function dataStoreFileDownloadUrl(id: string, fileId: string): string {
+  return `${BASE}/${id}/files/${fileId}`;
+}
+
+export async function createDataStoreFolder(id: string, folderPath: string): Promise<void> {
+  await api.post(`${BASE}/${id}/folders`, { folderPath });
+}
+
+export async function deleteDataStoreFolder(id: string, folderPath: string): Promise<void> {
+  await api.delete(`${BASE}/${id}/folders`, { params: { path: folderPath } });
+}
+
 export async function previewCsvIngest(id: string, file: File): Promise<CsvIngestPreview> {
   const form = new FormData();
   form.append("file", file);

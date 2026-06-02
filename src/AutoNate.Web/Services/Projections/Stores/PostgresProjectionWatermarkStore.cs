@@ -19,14 +19,18 @@ public sealed class PostgresProjectionWatermarkStore : IProjectionWatermarkStore
     public async Task<DateTimeOffset?> GetAsync(string feedName, CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.Database
+        // ToArrayAsync rather than FirstOrDefaultAsync: EF's row-limiting-without-OrderBy
+        // analyzer (warning 10103) can't see the LIMIT 1 inside the raw SQL string and would
+        // otherwise log a false positive on every poll cycle. SQL guarantees at most one row.
+        var rows = await db.Database
             .SqlQuery<WatermarkRow>($"""
                 SELECT watermark_utc AS "WatermarkUtc"
                 FROM projection_watermarks
                 WHERE feed_name = {feedName}
                 LIMIT 1
                 """)
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToArrayAsync(cancellationToken);
+        var row = rows.Length == 0 ? null : (WatermarkRow?)rows[0];
         return row is null
             ? null
             : new DateTimeOffset(DateTime.SpecifyKind(row.WatermarkUtc, DateTimeKind.Utc));
