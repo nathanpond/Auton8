@@ -218,7 +218,13 @@ public sealed class WorkflowExecutionTests : E2ETestBase
         var taskName = page.GetByText(workflowName).First;
         await Assertions.Expect(taskName).ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        await page.GetByRole(AriaRole.Button, new() { Name = "Open", Exact = true }).ClickAsync();
+        // Flowable state is shared across the dev DB so stale workflow
+        // executions from previous runs leave their own "Open" buttons
+        // in the My Tasks table. Scope the click to the row containing
+        // this test's unique workflowName so we don't trip strict-mode
+        // when 5+ "Open" buttons sit beside each other.
+        var taskRow = page.GetByRole(AriaRole.Row).Filter(new() { HasText = workflowName });
+        await taskRow.GetByRole(AriaRole.Button, new() { Name = "Open", Exact = true }).ClickAsync();
         var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Review" });
         await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Complete Task" }).ClickAsync();
