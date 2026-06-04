@@ -61,3 +61,26 @@ export async function updateCodeTransformer(
 export async function deleteCodeTransformer(id: string): Promise<void> {
   await api.delete(`${BASE}/${id}`);
 }
+
+export type TestCodeTransformerRequest = {
+  // Override the stored row's code with the editor's current buffer so
+  // the author can iterate without saving. Empty falls back to the
+  // stored code.
+  code?: string;
+  config?: Record<string, string>;
+  inputRows?: Record<string, unknown>[];
+};
+
+export type TestCodeTransformerResult = {
+  success: boolean;
+  errorMessage: string | null;
+  outputRows: Record<string, unknown>[];
+};
+
+export async function testCodeTransformer(
+  id: string,
+  req: TestCodeTransformerRequest
+): Promise<TestCodeTransformerResult> {
+  const { data } = await api.post<TestCodeTransformerResult>(`${BASE}/${id}/test`, req);
+  return data;
+}

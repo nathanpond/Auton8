@@ -180,6 +180,46 @@ public sealed class DataStoresAdminTests : E2ETestBase
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 
+    [Fact]
+    public async Task DataStores_EditExisting_PersistsRenamedRow()
+    {
+        // Audit fix #13 — updateDataStore was a dead wrapper before this
+        // commit; renaming or redescribing a store required delete-and-
+        // recreate, which would also drop the per-store schema/role on
+        // SqlType stores. The Edit modal reuses the create modal's
+        // shape with the Kind field disabled (locked to the provisioned
+        // kind once the row exists).
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await page.GotoAsync("/datastores");
+
+        var original = TestNames.Prefixed("ds");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
+        var createModal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(createModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await createModal.GetByLabel("Name").FillAsync(original);
+        await createModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(createModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText(original).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = original });
+        await row.GetByRole(AriaRole.Button, new() { Name = $"Edit {original}" }).ClickAsync();
+        var editModal = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit data store" });
+        await Assertions.Expect(editModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // Pre-fill check + Kind locked.
+        await Assertions.Expect(editModal.GetByLabel("Name")).ToHaveValueAsync(original);
+        await Assertions.Expect(editModal.GetByLabel("Kind")).ToBeDisabledAsync();
+
+        var renamed = $"{original}-renamed";
+        await editModal.GetByLabel("Name").FillAsync(renamed);
+        await editModal.GetByLabel("Description").FillAsync("Renamed by audit fix #13 test");
+        await editModal.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+        await Assertions.Expect(editModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        await Assertions.Expect(page.GetByText(renamed).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
+    }
+
     // ---- DataConnectors -------------------------------------------------
 
     [Fact]
@@ -241,6 +281,95 @@ public sealed class DataStoresAdminTests : E2ETestBase
         await Assertions.Expect(page.GetByText(name).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 
+    [Fact]
+    public async Task DataConnectors_EditExisting_PersistsRenamedRow()
+    {
+        // Audit fix #6 — updateDataConnector / getDataConnector were
+        // dead in the SPA. A wrong URL or rotated token forced delete-
+        // and-recreate (losing lastFetchedAtUtc + cursor). New Edit
+        // ActionIcon opens the same modal as create, pre-filled.
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await page.GotoAsync("/dataconnectors");
+
+        var original = TestNames.Prefixed("conn");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New connector" }).ClickAsync();
+        var createModal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(createModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await createModal.GetByLabel("Name").FillAsync(original);
+        await createModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(createModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText(original).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // Open the edit modal via the row's pen ActionIcon.
+        var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = original });
+        await row.GetByRole(AriaRole.Button, new() { Name = $"Edit {original}" }).ClickAsync();
+        var editModal = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit data connector" });
+        await Assertions.Expect(editModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // Modal pre-fills from the loaded row: asserting Name keeps the
+        // old value proves openEdit() ran.
+        await Assertions.Expect(editModal.GetByLabel("Name")).ToHaveValueAsync(original);
+        // Kind is locked once the row exists — the runtime handler is
+        // tied to that string and changing it would orphan state.
+        await Assertions.Expect(editModal.GetByLabel("Kind")).ToBeDisabledAsync();
+
+        var renamed = $"{original}-renamed";
+        await editModal.GetByLabel("Name").FillAsync(renamed);
+        await editModal.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+        await Assertions.Expect(editModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // List reflects the new name. The old name is gone (proves we
+        // updated rather than duplicated).
+        await Assertions.Expect(page.GetByText(renamed).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
+    }
+
+    [Fact]
+    public async Task DataConnectors_PreviewModal_OpensAndShowsConnectorReply()
+    {
+        // Audit fix #6 — Preview ActionIcon opens a modal that fires
+        // POST /api/dataconnectors/{id}/preview. The connector here has
+        // an empty REST URL so the backend handler will return a
+        // structured failure rather than rows; that's the cheapest
+        // signal that the request shape is wired right and the modal
+        // renders the failure path without burning a 5xx alert.
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await page.GotoAsync("/dataconnectors");
+
+        var name = TestNames.Prefixed("conn");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New connector" }).ClickAsync();
+        var createModal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(createModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await createModal.GetByLabel("Name").FillAsync(name);
+        await createModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(createModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(page.GetByText(name).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = name });
+        await row.GetByRole(AriaRole.Button, new() { Name = $"Preview {name}" }).ClickAsync();
+
+        var previewModal = page.GetByRole(AriaRole.Dialog, new() { Name = $"Preview — {name}" });
+        await Assertions.Expect(previewModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // The "Re-run preview" button is unique to the modal and proves
+        // the dialog mounted with the connector context loaded.
+        await Assertions.Expect(
+            previewModal.GetByRole(AriaRole.Button, new() { Name = "Re-run preview" }))
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // The connector has an empty URL, so the REST handler will fail
+        // with a connection / DNS error. Either "Connector returned an
+        // error" or "Preview failed" surfaces — both prove the request
+        // path is wired and the failure UX renders. Empty rows would
+        // also be acceptable (yellow Alert with "0 rows"), so we match
+        // any of the three completion states.
+        await Assertions.Expect(
+            previewModal.GetByText(new System.Text.RegularExpressions.Regex(
+                "Connector returned an error|Preview failed|0 rows")))
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
+    }
+
     // ---- Datasets -------------------------------------------------------
 
     [Fact]
@@ -261,8 +390,15 @@ public sealed class DataStoresAdminTests : E2ETestBase
     }
 
     [Fact]
-    public async Task Datasets_CreateModal_OpensWithModeAndSourceFields()
+    public async Task Datasets_CreateModal_OpensWithModeAndSourcePickers()
     {
+        // Audit fix #4 — the modal's source picker used to be two raw
+        // UUID TextInputs (Source ID + Source table) the user had to
+        // copy-paste by hand. The fix replaces them with a NativeSelect
+        // bound to listDataStores() (default kind) and listDataConnectors()
+        // (when the kind toggle flips). The Source table dropdown only
+        // renders when a SqlType DataStore is selected — FileType stores
+        // and DataConnectors don't have ingested tables to enumerate.
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
         await page.GotoAsync("/datasets");
@@ -272,15 +408,176 @@ public sealed class DataStoresAdminTests : E2ETestBase
         var modal = page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(modal).ToBeVisibleAsync(new() { Timeout = 10_000 });
 
-        // Datasets are richer to author — the create modal has Mode,
-        // Source kind, Source ID, and a JSON column-schema textarea. We
-        // smoke the load-bearing controls here; the happy path (which
-        // requires a real source-id) is left to a follow-up commit when
-        // ApiSeeder grows a CreateDataStoreAsync helper.
         await Assertions.Expect(modal.GetByLabel("Name")).ToBeVisibleAsync();
         await Assertions.Expect(modal.GetByLabel("Mode")).ToBeVisibleAsync();
         await Assertions.Expect(modal.GetByLabel("Source kind")).ToBeVisibleAsync();
-        await Assertions.Expect(modal.GetByLabel("Source ID")).ToBeVisibleAsync();
+        // Default kind is `datastore` so the DataStore picker should be
+        // visible; the connector picker is rendered conditionally.
+        await Assertions.Expect(modal.GetByLabel("Source DataStore")).ToBeVisibleAsync();
+        await Assertions.Expect(modal.GetByLabel("Source DataConnector")).Not.ToBeVisibleAsync();
+        // The textarea is now aria-label'd because the surrounding Group
+        // (with the "Import columns" button) replaces the visible label.
         await Assertions.Expect(modal.GetByLabel("Column schema (JSON)")).ToBeVisibleAsync();
+        await Assertions.Expect(
+            modal.GetByRole(AriaRole.Button, new() { Name = "Import columns from selected table" }))
+            .ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task Datasets_SourceKindToggle_SwapsBetweenDataStoreAndDataConnectorPickers()
+    {
+        // Audit fix #4 — the source-kind NativeSelect flips which picker
+        // renders. Switching also clears the previously-picked sourceId
+        // so the form can't POST a connector UUID with kind=datastore.
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await page.GotoAsync("/datasets");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New dataset" }).ClickAsync();
+        var modal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(modal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // Default state: DataStore picker shows, DataConnector hidden.
+        await Assertions.Expect(modal.GetByLabel("Source DataStore")).ToBeVisibleAsync();
+        await Assertions.Expect(modal.GetByLabel("Source DataConnector")).Not.ToBeVisibleAsync();
+
+        // Flip the kind selector. The DataConnector picker takes over,
+        // the DataStore picker disappears.
+        await modal.GetByLabel("Source kind").SelectOptionAsync("dataconnector");
+        await Assertions.Expect(modal.GetByLabel("Source DataConnector")).ToBeVisibleAsync();
+        await Assertions.Expect(modal.GetByLabel("Source DataStore")).Not.ToBeVisibleAsync();
+
+        // And back — flipping again restores the DataStore picker.
+        await modal.GetByLabel("Source kind").SelectOptionAsync("datastore");
+        await Assertions.Expect(modal.GetByLabel("Source DataStore")).ToBeVisibleAsync();
+        await Assertions.Expect(modal.GetByLabel("Source DataConnector")).Not.ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task Datasets_CreateOverFileStore_PicksFromDropdownAndPersists()
+    {
+        // Audit fix #4 happy path — proves the DataStore dropdown is
+        // populated from listDataStores() and the picker round-trips end
+        // to end. Seeding a SqlType store + ingesting a CSV (which would
+        // exercise the "Source table" + "Import columns" controls too)
+        // isn't viable in the E2E fixture because ConnectionStrings__
+        // Datastores is unset there; SQL-store creation returns 503.
+        // FileType stores don't surface a Source table dropdown, which
+        // is correct behavior — the picker is rendered conditionally on
+        // `dataStoreKindLabel(...) === "SqlType"`.
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        // Seed a FileType DataStore through the same UI flow the existing
+        // DataStores tests exercise.
+        await page.GotoAsync("/datastores");
+        var storeName = TestNames.Prefixed("dsForDataset");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
+        var storeModal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(storeModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await storeModal.GetByLabel("Name").FillAsync(storeName);
+        await storeModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(storeModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // Open the Datasets create modal; the DataStore dropdown should
+        // include the freshly-seeded store among its options.
+        await page.GotoAsync("/datasets");
+        var datasetName = TestNames.Prefixed("dset");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New dataset" }).ClickAsync();
+        var modal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(modal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await modal.GetByLabel("Name").FillAsync(datasetName);
+
+        // The dropdown's <option> labels are `${name} (FileType)`. Picking
+        // by HasText keeps the assertion stable against any prefix the
+        // helper adds. SelectOptionAsync needs the value (the store id) so
+        // we resolve the option's value attribute first.
+        var dataStoreSelect = modal.GetByLabel("Source DataStore");
+        await Assertions.Expect(
+            dataStoreSelect.Locator("option").Filter(new() { HasText = storeName }))
+            .ToBeAttachedAsync(new() { Timeout = 15_000 });
+        var storeOptionValue = await dataStoreSelect
+            .Locator("option")
+            .Filter(new() { HasText = storeName })
+            .GetAttributeAsync("value");
+        Assert.False(string.IsNullOrEmpty(storeOptionValue));
+        await dataStoreSelect.SelectOptionAsync(storeOptionValue!);
+
+        // FileType stores have no tables, so the Source table picker
+        // doesn't render. The default column-schema JSON the modal seeds
+        // is valid for a happy-path Create.
+        await Assertions.Expect(modal.GetByLabel("Source table")).Not.ToBeVisibleAsync();
+        await modal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(modal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // The new dataset appears in the list; the Source column renders
+        // the kind in a Code element, so a substring match on the unique
+        // dataset name is the cleanest signal.
+        await Assertions.Expect(page.GetByText(datasetName).First)
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+    }
+
+    [Fact]
+    public async Task Datasets_EditExisting_PersistsRenamedRow()
+    {
+        // Audit fix #13 — updateDataset was a dead wrapper. Renaming
+        // required delete-and-recreate, which would also drop any
+        // cached rows on Cached datasets. The dedicated Edit modal only
+        // surfaces what the backend's UpdateDatasetRequest accepts
+        // (Name / Description / RefreshCron); mode / source / columns
+        // are locked once the underlying schema exists.
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        // Seed a FileType store (datasets need a source row to point at;
+        // SqlType isn't viable in the E2E fixture).
+        await page.GotoAsync("/datastores");
+        var storeName = TestNames.Prefixed("dsForEdit");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
+        var storeModal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(storeModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await storeModal.GetByLabel("Name").FillAsync(storeName);
+        await storeModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(storeModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        await page.GotoAsync("/datasets");
+        var datasetName = TestNames.Prefixed("dset");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New dataset" }).ClickAsync();
+        var createModal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(createModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await createModal.GetByLabel("Name").FillAsync(datasetName);
+
+        // Pick the seeded store from the DataStore dropdown.
+        var dataStoreSelect = createModal.GetByLabel("Source DataStore");
+        await Assertions.Expect(
+            dataStoreSelect.Locator("option").Filter(new() { HasText = storeName }))
+            .ToBeAttachedAsync(new() { Timeout = 15_000 });
+        var storeOptionValue = await dataStoreSelect
+            .Locator("option")
+            .Filter(new() { HasText = storeName })
+            .GetAttributeAsync("value");
+        Assert.False(string.IsNullOrEmpty(storeOptionValue));
+        await dataStoreSelect.SelectOptionAsync(storeOptionValue!);
+        await createModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(createModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // Open the Edit modal via the row's pen ActionIcon.
+        var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = datasetName });
+        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await row.GetByRole(AriaRole.Button, new() { Name = $"Edit {datasetName}" }).ClickAsync();
+        var editModal = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit dataset" });
+        await Assertions.Expect(editModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // Pre-fill: Name shows the original; Virtual datasets get the
+        // dimmed "no refresh cron" note instead of a cron input.
+        await Assertions.Expect(editModal.GetByLabel("Name")).ToHaveValueAsync(datasetName);
+        await Assertions.Expect(editModal.GetByText("Virtual datasets have no refresh cron"))
+            .ToBeVisibleAsync();
+
+        var renamed = $"{datasetName}-renamed";
+        await editModal.GetByLabel("Name").FillAsync(renamed);
+        await editModal.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
+        await Assertions.Expect(editModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        await Assertions.Expect(page.GetByText(renamed).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 }

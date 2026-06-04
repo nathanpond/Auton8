@@ -51,6 +51,23 @@ public sealed class EfCorePipelineRunStore(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<RunCancellationResult> RequestCancellationAsync(
+        Guid runId, DateTime utcNow, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.PipelineRuns.SingleOrDefaultAsync(r => r.Id == runId, cancellationToken);
+        if (entity is null) return RunCancellationResult.NotFound;
+        if (entity.Status != PipelineRunStatuses.Queued && entity.Status != PipelineRunStatuses.Running)
+        {
+            return RunCancellationResult.AlreadyTerminal;
+        }
+        entity.Status = PipelineRunStatuses.Cancelled;
+        entity.CompletedAtUtc = utcNow;
+        entity.ErrorMessage = "Cancelled by request.";
+        await db.SaveChangesAsync(cancellationToken);
+        return RunCancellationResult.Cancelled;
+    }
+
     public async Task MarkCompletedAsync(
         Guid runId, string status, string? errorMessage, DateTime utcNow, CancellationToken cancellationToken = default)
     {
@@ -110,6 +127,7 @@ public sealed class EfCorePipelineRunStore(
 
     public async Task MarkStepCompletedAsync(
         Guid stepId, string status, long? rowCount, string? errorMessage, DateTime utcNow,
+        IReadOnlyList<PipelineRunStepLog>? logs = null,
         CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -119,6 +137,10 @@ public sealed class EfCorePipelineRunStore(
         entity.CompletedAtUtc = utcNow;
         entity.RowCount = rowCount;
         entity.ErrorMessage = errorMessage;
+        if (logs is not null && logs.Count > 0)
+        {
+            entity.LogsJson = System.Text.Json.JsonSerializer.Serialize(logs);
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 

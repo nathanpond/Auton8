@@ -3676,8 +3676,18 @@ internal static class DatabaseSchemaInitializer
             started_at_utc TIMESTAMPTZ NULL,
             completed_at_utc TIMESTAMPTZ NULL,
             row_count BIGINT NULL,
-            error_message TEXT NULL
+            error_message TEXT NULL,
+            -- Per-step log buffer (audit fix #11). JSONB array of log
+            -- entries (timestampUtc, level, message) the orchestrator
+            -- accumulates during execution and writes on step
+            -- completion. Default `[]` so existing rows + concurrent
+            -- writers stay consistent.
+            logs_json JSONB NOT NULL DEFAULT '[]'::jsonb
         );
+
+        -- Idempotent migration for databases provisioned before fix #11.
+        ALTER TABLE pipeline_run_steps
+            ADD COLUMN IF NOT EXISTS logs_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 
         CREATE INDEX IF NOT EXISTS ix_pipeline_run_steps_pipeline_run_id
             ON pipeline_run_steps (pipeline_run_id);

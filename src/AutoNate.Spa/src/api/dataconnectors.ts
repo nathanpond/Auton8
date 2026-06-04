@@ -77,3 +77,18 @@ export async function testDataConnector(id: string): Promise<ConnectorTestResult
   const res = await api.post<ConnectorTestResult>(`${BASE}/${id}/test`);
   return res.data;
 }
+
+export type DataConnectorPreviewResult = {
+  success: boolean;
+  errorMessage: string | null;
+  columns: string[];
+  rows: Record<string, unknown>[];
+};
+
+export async function previewDataConnector(
+  id: string,
+  maxRows: number = 5
+): Promise<DataConnectorPreviewResult> {
+  const res = await api.post<DataConnectorPreviewResult>(`${BASE}/${id}/preview`, { maxRows });
+  return res.data;
+}

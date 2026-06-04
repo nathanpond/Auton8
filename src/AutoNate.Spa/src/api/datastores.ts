@@ -56,6 +56,18 @@ export type CsvIngestResult = {
   rowsInserted: number;
 };
 
+// Returned by GET /api/datastores/{id}/tables — the metadata for every
+// ingested table in a SQL DataStore, with the column schema parsed inline
+// so the Datasets create modal can do both "pick a source table" and
+// "import columns from that table" off a single fetch.
+export type DataStoreTable = {
+  id: string;
+  schemaName: string;
+  tableName: string;
+  columns: CsvColumn[];
+  rowCount: number;
+};
+
 const BASE = "/api/datastores";
 
 // Map the persisted smallint into the enum the SPA renders.
@@ -88,6 +100,14 @@ export async function updateDataStore(
 
 export async function deleteDataStore(id: string): Promise<void> {
   await api.delete(`${BASE}/${id}`);
+}
+
+export async function listDataStoreTables(
+  id: string,
+  signal?: AbortSignal
+): Promise<DataStoreTable[]> {
+  const res = await api.get<DataStoreTable[]>(`${BASE}/${id}/tables`, { signal });
+  return res.data;
 }
 
 export async function listDataStoreFiles(
