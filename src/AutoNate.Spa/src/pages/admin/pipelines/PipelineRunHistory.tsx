@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  ActionIcon,
   Alert,
   Badge,
   Box,
@@ -10,8 +11,10 @@ import {
   Paper,
   Stack,
   Text,
-  Title
+  Title,
+  Tooltip
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import {
   DataTable,
   type DataTableColumn
@@ -19,9 +22,12 @@ import {
 import {
   PipelineRun,
   PipelineRunStep,
+  PipelineRunStepLog,
+  cancelPipelineRun,
   getPipeline,
   getPipelineRun,
-  listPipelineRuns
+  listPipelineRuns,
+  retryPipelineRun
 } from "@/api/pipelines";
 
 const STATUS_COLOR: Record<PipelineRun["status"], string> = {
@@ -32,18 +38,71 @@ const STATUS_COLOR: Record<PipelineRun["status"], string> = {
   Cancelled: "yellow"
 };
 
-const RUN_COLUMN_WIDTHS = ["140px", "180px", "180px", "180px", "120px", "2fr"];
-const STEP_COLUMN_WIDTHS = ["1fr", "140px", "140px", "100px", "2fr"];
+const RUN_COLUMN_WIDTHS = ["140px", "180px", "180px", "180px", "120px", "1fr", "100px"];
+const STEP_COLUMN_WIDTHS = ["1fr", "140px", "140px", "100px", "2fr", "80px"];
+
+const ACTIVE_RUN_STATUSES: PipelineRun["status"][] = ["Queued", "Running"];
+const RETRYABLE_RUN_STATUSES: PipelineRun["status"][] = ["Failed", "Cancelled"];
+
+// Audit fix #11 — color-code known log levels; unknown levels fall
+// back to dimmed text so plugin runners can emit whatever vocabulary
+// they want without breaking the table render.
+const LOG_LEVEL_COLOR: Record<string, string> = {
+  info: "blue",
+  warn: "yellow",
+  error: "red"
+};
 
 export default function PipelineRunHistory() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  // Audit fix #11 — clicking a step row in the table expands its log
+  // panel below. Null = no expansion. Same pattern as the step ID
+  // selector for runs above.
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
 
   const pipelineQuery = useQuery({
     queryKey: ["pipeline", id],
     queryFn: ({ signal }) => getPipeline(id!, signal),
     enabled: !!id
+  });
+
+  // Audit fix #10 — cancel + retry. Cancel flips Queued/Running to
+  // Cancelled (backend); the orchestrator's between-node check (in
+  // PipelineOrchestrator) bails on the next iteration. Retry enqueues
+  // a fresh run with the original graph snapshot so a retry exercises
+  // the same DAG even if the saved graph has since changed. Both
+  // invalidate the runs query so the table reflects new state and the
+  // 2s auto-poll catches the transition.
+  const cancelMutation = useMutation({
+    mutationFn: (runId: string) => cancelPipelineRun(id!, runId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", id] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-run-detail", id] });
+      notifications.show({ message: "Run cancellation requested.", color: "yellow" });
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
+        (err instanceof Error ? err.message : "Cancel failed.");
+      notifications.show({ message, color: "red" });
+    }
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: (runId: string) => retryPipelineRun(id!, runId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", id] });
+      notifications.show({ message: "Pipeline run re-queued.", color: "green" });
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
+        (err instanceof Error ? err.message : "Retry failed.");
+      notifications.show({ message, color: "red" });
+    }
   });
 
   const runsQuery = useQuery({
@@ -116,9 +175,53 @@ export default function PipelineRunHistory() {
           ) : (
             <Text c="dimmed">—</Text>
           )
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const run = row.original;
+          const isActive = ACTIVE_RUN_STATUSES.includes(run.status);
+          const isRetryable = RETRYABLE_RUN_STATUSES.includes(run.status);
+          return (
+            <Group gap={4} wrap="nowrap" onClick={(e) => e.stopPropagation()}>
+              {isActive ? (
+                <Tooltip label="Cancel run">
+                  <ActionIcon
+                    color="yellow"
+                    variant="subtle"
+                    aria-label={`Cancel run ${run.id}`}
+                    loading={cancelMutation.isPending && cancelMutation.variables === run.id}
+                    onClick={() => {
+                      if (window.confirm("Cancel this run? Any node currently executing will finish first.")) {
+                        cancelMutation.mutate(run.id);
+                      }
+                    }}
+                  >
+                    <i className="fa fa-stop" />
+                  </ActionIcon>
+                </Tooltip>
+              ) : null}
+              {isRetryable ? (
+                <Tooltip label="Retry run (re-queue with original graph)">
+                  <ActionIcon
+                    color="green"
+                    variant="subtle"
+                    aria-label={`Retry run ${run.id}`}
+                    loading={retryMutation.isPending && retryMutation.variables === run.id}
+                    onClick={() => retryMutation.mutate(run.id)}
+                  >
+                    <i className="fa fa-rotate-right" />
+                  </ActionIcon>
+                </Tooltip>
+              ) : null}
+            </Group>
+          );
+        }
       }
     ],
-    []
+    [cancelMutation, retryMutation]
   );
 
   const stepColumns = useMemo<DataTableColumn<PipelineRunStep>[]>(
@@ -151,10 +254,35 @@ export default function PipelineRunHistory() {
           ) : (
             <Text c="dimmed">—</Text>
           )
+      },
+      {
+        id: "logs",
+        accessorFn: (row) => row.logs?.length ?? 0,
+        header: "Logs",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const count = row.original.logs?.length ?? 0;
+          if (count === 0) return <Text c="dimmed">—</Text>;
+          const isOpen = selectedStepId === row.original.id;
+          return (
+            <Badge
+              variant={isOpen ? "filled" : "light"}
+              color={isOpen ? "blue" : "gray"}
+              style={{ cursor: "pointer" }}
+            >
+              {count}
+            </Badge>
+          );
+        }
       }
     ],
-    []
+    [selectedStepId]
   );
+
+  const selectedStep = useMemo(() => {
+    if (!selectedStepId) return null;
+    return runDetailQuery.data?.steps.find((s) => s.id === selectedStepId) ?? null;
+  }, [selectedStepId, runDetailQuery.data]);
 
   if (!id) return null;
 
@@ -204,13 +332,73 @@ export default function PipelineRunHistory() {
                 columnWidths={STEP_COLUMN_WIDTHS}
                 emptyMessage="No steps recorded."
                 loadingMessage="Loading step detail…"
+                onRowClick={(row) =>
+                  setSelectedStepId((current) => (current === row.id ? null : row.id))
+                }
               />
             ) : (
               <Text c="dimmed">Loading step detail…</Text>
             )}
+
+            {selectedStep ? (
+              <Paper p="sm" withBorder aria-label="Step logs">
+                <Stack gap="xs">
+                  <Group justify="space-between">
+                    <Title order={5}>
+                      Logs — {selectedStep.nodeKey} ({selectedStep.nodeKind})
+                    </Title>
+                    <Badge variant="light">
+                      {selectedStep.logs?.length ?? 0} entries
+                    </Badge>
+                  </Group>
+                  {(selectedStep.logs ?? []).length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      No log entries captured for this step.
+                    </Text>
+                  ) : (
+                    <Stack gap={4}>
+                      {selectedStep.logs.map((entry, i) => (
+                        <StepLogEntry key={i} entry={entry} />
+                      ))}
+                    </Stack>
+                  )}
+                </Stack>
+              </Paper>
+            ) : null}
           </Stack>
         </Paper>
       ) : null}
     </Stack>
+  );
+}
+
+// Single log row. The timestamp + level badge sit on a line of their
+// own so a long message wraps cleanly without pushing the metadata
+// out of view. Pre-wrap preserves the orchestrator's stack-trace
+// formatting on Failed entries.
+function StepLogEntry({ entry }: { entry: PipelineRunStepLog }) {
+  const color = LOG_LEVEL_COLOR[entry.level.toLowerCase()] ?? "gray";
+  const ts = new Date(entry.timestampUtc).toLocaleTimeString();
+  return (
+    <Box>
+      <Group gap={6} mb={2}>
+        <Text size="xs" c="dimmed" style={{ fontFamily: "var(--mantine-font-family-monospace)" }}>
+          {ts}
+        </Text>
+        <Badge size="xs" color={color} variant="light">
+          {entry.level}
+        </Badge>
+      </Group>
+      <Text
+        size="xs"
+        style={{
+          fontFamily: "var(--mantine-font-family-monospace)",
+          whiteSpace: "pre-wrap",
+          margin: 0
+        }}
+      >
+        {entry.message}
+      </Text>
+    </Box>
   );
 }

@@ -6,6 +6,8 @@ import {
   Badge,
   Box,
   Button,
+  Code,
+  Divider,
   Group,
   Modal,
   NativeSelect,
@@ -18,6 +20,9 @@ import {
   Tooltip
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import CodeMirror from "@uiw/react-codemirror";
+import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
 import {
   DataTable,
   type DataTableColumn
@@ -26,9 +31,11 @@ import {
   CodeTransformer,
   CodeTransformerKind,
   CodeTransformerLanguage,
+  TestCodeTransformerResult,
   createCodeTransformer,
   deleteCodeTransformer,
   listCodeTransformers,
+  testCodeTransformer,
   updateCodeTransformer
 } from "@/api/codeTransformers";
 
@@ -76,6 +83,19 @@ export default function CodeTransformersPage() {
   const [isUnsafe, setIsUnsafe] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Test-run panel state. Only meaningful in edit mode (the test endpoint
+  // requires a saved row id). The textarea defaults exercise the
+  // transformer's pass-through path so a fresh author can click Run and
+  // see something interpretable without authoring sample data.
+  const DEFAULT_TEST_INPUT = useMemo(
+    () => JSON.stringify([{ id: 1, name: "demo" }, { id: 2, name: "row" }], null, 2),
+    []
+  );
+  const [testInputJson, setTestInputJson] = useState(DEFAULT_TEST_INPUT);
+  const [testConfigJson, setTestConfigJson] = useState("{}");
+  const [testResult, setTestResult] = useState<TestCodeTransformerResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
   function resetForm() {
     setEditingId(null);
     setName("");
@@ -85,6 +105,10 @@ export default function CodeTransformersPage() {
     setCode(JS_TRANSFORMER_STARTER);
     setIsUnsafe(false);
     setSubmitError(null);
+    setTestInputJson(DEFAULT_TEST_INPUT);
+    setTestConfigJson("{}");
+    setTestResult(null);
+    setTestError(null);
   }
 
   useEffect(() => {
@@ -145,6 +169,68 @@ export default function CodeTransformersPage() {
       notifications.show({ message: "Code transformer deleted.", color: "green" });
     }
   });
+
+  // Test-run mutation — POSTs the editor's current buffer + sample input
+  // to /api/code-transformers/{id}/test. Folds backend "failed with
+  // error" responses into the result object rather than reactQuery's
+  // onError so the panel can render the message inline.
+  const testMutation = useMutation({
+    mutationFn: (vars: {
+      id: string;
+      code: string;
+      inputRows: Record<string, unknown>[];
+      config: Record<string, string>;
+    }) =>
+      testCodeTransformer(vars.id, {
+        code: vars.code,
+        inputRows: vars.inputRows,
+        config: vars.config
+      }),
+    onSuccess: (result) => {
+      setTestResult(result);
+      setTestError(null);
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
+        (err instanceof Error ? err.message : "Test run failed.");
+      setTestError(message);
+      setTestResult(null);
+    }
+  });
+
+  function runTest() {
+    if (!editingId) return;
+    let parsedInput: Record<string, unknown>[];
+    let parsedConfig: Record<string, string>;
+    try {
+      const raw = JSON.parse(testInputJson);
+      if (!Array.isArray(raw)) throw new Error("Sample input must be a JSON array of row objects.");
+      parsedInput = raw;
+    } catch (err) {
+      setTestError(`Sample input JSON is invalid: ${err instanceof Error ? err.message : err}`);
+      setTestResult(null);
+      return;
+    }
+    try {
+      const raw = JSON.parse(testConfigJson);
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("Config must be a JSON object of string→string entries.");
+      }
+      parsedConfig = raw as Record<string, string>;
+    } catch (err) {
+      setTestError(`Config JSON is invalid: ${err instanceof Error ? err.message : err}`);
+      setTestResult(null);
+      return;
+    }
+    setTestError(null);
+    testMutation.mutate({
+      id: editingId,
+      code,
+      inputRows: parsedInput,
+      config: parsedConfig
+    });
+  }
 
   function openCreate() {
     resetForm();
@@ -324,25 +410,54 @@ export default function CodeTransformersPage() {
               checked={isUnsafe}
               onChange={(e) => setIsUnsafe(e.currentTarget.checked)}
             />
-            <Textarea
-              label="Code"
-              description={
-                kind === "transformer"
+            <Box>
+              <Text size="sm" fw={500} mb={4}>
+                Code
+              </Text>
+              <Text size="xs" c="dimmed" mb={6}>
+                {kind === "transformer"
                   ? "Define a `transform(inputs, config)` function that returns rows."
-                  : "Define an `analyze(input, config)` function that returns rows."
-              }
-              autosize
-              minRows={12}
-              value={code}
-              onChange={(e) => setCode(e.currentTarget.value)}
-              styles={{
-                input: {
-                  fontFamily: "var(--mantine-font-family-monospace)",
-                  fontSize: 13,
-                  lineHeight: 1.5
-                }
-              }}
-            />
+                  : "Define an `analyze(input, config)` function that returns rows."}
+                {language === "python" ? (
+                  <>
+                    {" "}
+                    Python runs in a Pyodide WASM runtime in the executor sidecar; the first
+                    test run cold-starts that runtime and can take up to ~10 seconds.
+                  </>
+                ) : null}
+              </Text>
+              <Box
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                  borderRadius: "var(--mantine-radius-sm)",
+                  overflow: "hidden"
+                }}
+                aria-label="Code editor"
+              >
+                <CodeMirror
+                  value={code}
+                  onChange={setCode}
+                  height="320px"
+                  extensions={[
+                    language === "python"
+                      ? python()
+                      : javascript({ jsx: false, typescript: false })
+                  ]}
+                  basicSetup={{
+                    lineNumbers: true,
+                    foldGutter: true,
+                    highlightActiveLine: true,
+                    highlightActiveLineGutter: true,
+                    bracketMatching: true,
+                    closeBrackets: true,
+                    autocompletion: true,
+                    indentOnInput: true,
+                    syntaxHighlighting: true,
+                    history: true
+                  }}
+                />
+              </Box>
+            </Box>
             {submitError ? <Alert color="red">{submitError}</Alert> : null}
             <Group justify="flex-end" mt="sm">
               <Button variant="default" onClick={() => setModalOpen(false)}>
@@ -355,6 +470,93 @@ export default function CodeTransformersPage() {
                 {editingId ? "Save" : "Create"}
               </Button>
             </Group>
+
+            {editingId ? (
+              <>
+                <Divider
+                  my="md"
+                  label="Test run"
+                  labelPosition="left"
+                  styles={{ label: { fontWeight: 600 } }}
+                />
+                <Text size="xs" c="dimmed">
+                  Dispatches the editor's current code (unsaved edits included) against the
+                  sample below via the executor sidecar. Output rows render below; sidecar
+                  errors are caught and shown inline.
+                </Text>
+                <Group grow align="flex-start" wrap="wrap">
+                  <Textarea
+                    aria-label="Sample input (JSON)"
+                    label={
+                      kind === "transformer"
+                        ? "Sample input rows (JSON array)"
+                        : "Sample analyzer input (JSON array of rows)"
+                    }
+                    description="Treated as a single input frame; columns are inferred from the union of keys."
+                    autosize
+                    minRows={6}
+                    value={testInputJson}
+                    onChange={(e) => setTestInputJson(e.currentTarget.value)}
+                    styles={{
+                      input: {
+                        fontFamily: "var(--mantine-font-family-monospace)",
+                        fontSize: 12
+                      }
+                    }}
+                  />
+                  <Textarea
+                    aria-label="Test config (JSON)"
+                    label="Config (JSON object)"
+                    description="Flat string→string map, same shape as a pipeline node config."
+                    autosize
+                    minRows={6}
+                    value={testConfigJson}
+                    onChange={(e) => setTestConfigJson(e.currentTarget.value)}
+                    styles={{
+                      input: {
+                        fontFamily: "var(--mantine-font-family-monospace)",
+                        fontSize: 12
+                      }
+                    }}
+                  />
+                </Group>
+                <Group justify="flex-end">
+                  <Button
+                    variant="default"
+                    leftSection={<i className="fa fa-play" />}
+                    loading={testMutation.isPending}
+                    onClick={runTest}
+                  >
+                    Run test
+                  </Button>
+                </Group>
+                {testError ? <Alert color="red">{testError}</Alert> : null}
+                {testResult ? (
+                  testResult.success ? (
+                    <Alert color="green" title={`Output (${testResult.outputRows.length} row(s))`}>
+                      <Box
+                        component="pre"
+                        aria-label="Test output"
+                        style={{
+                          margin: 0,
+                          maxHeight: 240,
+                          overflow: "auto",
+                          fontFamily: "var(--mantine-font-family-monospace)",
+                          fontSize: 12,
+                          whiteSpace: "pre-wrap"
+                        }}
+                      >
+                        {JSON.stringify(testResult.outputRows, null, 2)}
+                      </Box>
+                    </Alert>
+                  ) : (
+                    <Alert color="red" title="Test run failed">
+                      <Code block>{testResult.errorMessage ?? "(no message)"}</Code>
+                    </Alert>
+                  )
+                ) : null}
+              </>
+            ) : null}
           </Stack>
         </form>
       </Modal>

@@ -19,12 +19,16 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Group,
+  Modal,
   NativeSelect,
+  NumberInput,
   Paper,
   Stack,
+  Switch,
   Text,
   Textarea,
   TextInput,
@@ -39,8 +43,15 @@ import {
   runPipeline,
   updatePipeline
 } from "@/api/pipelines";
-import { listTransformers } from "@/api/transformers";
-import { listAnalyzers } from "@/api/analyzers";
+import {
+  ConfigFieldSchema,
+  TransformerConfigSchema,
+  getTransformerSchema,
+  listTransformers
+} from "@/api/transformers";
+import { getAnalyzerSchema, listAnalyzers } from "@/api/analyzers";
+import { listCodeTransformers } from "@/api/codeTransformers";
+import CronExpressionBuilder from "@/components/CronExpressionBuilder";
 
 // Per-node form data shape stored in `node.data`. The graph round-trip
 // keeps these fields in sync with the backend PipelineNode shape; React
@@ -148,6 +159,110 @@ export default function PipelineEditor() {
   );
 }
 
+// Schema-driven config form for a transformer / analyzer node (audit
+// fix #7). Each field renders to the Mantine control the schema's
+// `type` declares; the value flows back as a string so the runtime
+// can read it through its existing IReadOnlyDictionary<string, string>
+// surface unchanged. Defaults are shown in placeholder text rather
+// than auto-written into the config dict, so an unset field stays
+// absent (the backend OptionalConfig(...) ?? default kicks in).
+function SchemaFormFields({
+  schema,
+  config,
+  onChange
+}: {
+  schema: TransformerConfigSchema;
+  config: Record<string, string>;
+  onChange: (name: string, value: string) => void;
+}) {
+  return (
+    <Stack gap="xs" aria-label="Node config fields">
+      {schema.fields.length === 0 ? (
+        <Text size="xs" c="dimmed">
+          {schema.displayName} takes no configuration.
+        </Text>
+      ) : null}
+      {schema.fields.map((field) => (
+        <SchemaField
+          key={field.name}
+          field={field}
+          value={config[field.name] ?? ""}
+          onChange={(v) => onChange(field.name, v)}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+function SchemaField({
+  field,
+  value,
+  onChange
+}: {
+  field: ConfigFieldSchema;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const description = field.description ?? undefined;
+  const requiredAsterisk = field.required ? ` *` : "";
+  const labelText = `${field.label}${requiredAsterisk}`;
+  const placeholder =
+    field.placeholder ?? (field.defaultValue ? `default: ${field.defaultValue}` : undefined);
+
+  if (field.type === "select" && field.options) {
+    return (
+      <NativeSelect
+        label={labelText}
+        description={description}
+        data={field.options.map((opt) => ({ value: opt, label: opt }))}
+        value={value === "" ? field.defaultValue ?? field.options[0] ?? "" : value}
+        onChange={(e) => onChange(e.currentTarget.value)}
+      />
+    );
+  }
+
+  if (field.type === "boolean") {
+    // Backend reads booleans as "false" being the literal opt-out and
+    // anything-else (including absent) being true. Store the explicit
+    // string so the user's choice round-trips through JSON unchanged.
+    const checked = value === "" ? field.defaultValue !== "false" : value !== "false";
+    return (
+      <Switch
+        label={labelText}
+        description={description}
+        checked={checked}
+        onChange={(e) => onChange(e.currentTarget.checked ? "true" : "false")}
+      />
+    );
+  }
+
+  if (field.type === "number") {
+    const numeric = value === "" ? "" : Number(value);
+    return (
+      <NumberInput
+        label={labelText}
+        description={description}
+        placeholder={placeholder}
+        value={Number.isFinite(numeric) ? (numeric as number) : ""}
+        onChange={(v) => onChange(v === "" || v === null ? "" : String(v))}
+      />
+    );
+  }
+
+  // text + columns both render as a TextInput. "columns" is a hint to
+  // the user (comma-separated list) — backend's SplitColumnList handles
+  // the parse. No client-side validation beyond required-check.
+  return (
+    <TextInput
+      label={labelText}
+      description={description}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value)}
+    />
+  );
+}
+
 function PipelineEditorInner() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -167,6 +282,18 @@ function PipelineEditorInner() {
   const analyzersQuery = useQuery({
     queryKey: ["analyzers", "list"],
     queryFn: ({ signal }) => listAnalyzers(signal)
+  });
+
+  // Phase 6 code transformers — user-authored JS / Python that run in the
+  // `services/executor/` sidecar. The backend's TransformerNodeRunner /
+  // AnalyzerNodeRunner resolves a node's `key` against the built-in registry
+  // first and falls through to the code-transformer store by name; without
+  // this list in the dropdown, a code transformer authored on
+  // /code-transformers can't be referenced from a pipeline node at all.
+  // Filtered into the transformer vs analyzer dropdown by `kind`.
+  const codeTransformersQuery = useQuery({
+    queryKey: ["code-transformers", "list"],
+    queryFn: ({ signal }) => listCodeTransformers(signal)
   });
 
   const [nodes, setNodes, onNodesChange] = useNodesState<PipelineFlowNode>([]);
@@ -232,10 +359,70 @@ function PipelineEditorInner() {
     }
   });
 
+  // Metadata edit modal — separate mutation from the graph save so a name /
+  // schedule change doesn't require the user to also re-save the React Flow
+  // graph (which would also bump updated_at and overwrite any unrelated
+  // graph edits in flight). Backend treats each PUT field independently:
+  // null = leave unchanged, empty string = clear (cron + description), so
+  // we send the trimmed value as-is.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsName, setSettingsName] = useState("");
+  const [settingsDescription, setSettingsDescription] = useState("");
+  const [settingsCron, setSettingsCron] = useState("");
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  function openSettings() {
+    setSettingsName(pipelineQuery.data?.name ?? "");
+    setSettingsDescription(pipelineQuery.data?.description ?? "");
+    setSettingsCron(pipelineQuery.data?.scheduleCron ?? "");
+    setSettingsError(null);
+    setSettingsOpen(true);
+  }
+
+  const metadataMutation = useMutation({
+    mutationFn: () =>
+      updatePipeline(id!, {
+        name: settingsName.trim(),
+        description: settingsDescription.trim(),
+        scheduleCron: settingsCron.trim()
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pipeline", id] });
+      queryClient.invalidateQueries({ queryKey: ["pipelines", "list"] });
+      setSettingsOpen(false);
+      notifications.show({ message: "Pipeline settings saved.", color: "green" });
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
+        (err instanceof Error ? err.message : "Save failed.");
+      setSettingsError(message);
+    }
+  });
+
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId]
   );
+
+  // Per-node schema fetch (audit fix #7). Only fires when the selected
+  // node is a transformer/analyzer with a chosen key — code-transformer
+  // names also flow through these endpoints and 404 (no built-in
+  // schema), at which point the editor falls back to the JSON Textarea.
+  const schemaKind = selectedNode?.data.kind ?? null;
+  const schemaKey = selectedNode?.data.key ?? "";
+  const schemaQuery = useQuery({
+    queryKey: ["node-schema", schemaKind, schemaKey],
+    queryFn: ({ signal }) =>
+      schemaKind === "transformer"
+        ? getTransformerSchema(schemaKey, signal)
+        : schemaKind === "analyzer"
+        ? getAnalyzerSchema(schemaKey, signal)
+        : Promise.resolve(null),
+    enabled:
+      schemaKey !== "" && (schemaKind === "transformer" || schemaKind === "analyzer"),
+    staleTime: 5 * 60 * 1000
+  });
 
   function updateSelectedNode(updater: (data: PipelineNodeData) => PipelineNodeData) {
     if (!selectedNodeId) return;
@@ -244,15 +431,42 @@ function PipelineEditorInner() {
     );
   }
 
+  function updateSelectedNodeConfig(name: string, value: string) {
+    updateSelectedNode((d) => {
+      const next = { ...(d.config ?? {}) };
+      if (value === "") delete next[name];
+      else next[name] = value;
+      return { ...d, config: next };
+    });
+  }
+
   if (!id) return null;
 
   return (
     <Stack gap="sm" style={{ height: "calc(100vh - 220px)" }}>
       <Group justify="space-between" align="center">
-        <Title order={2}>{pipelineQuery.data?.name ?? "Pipeline"}</Title>
+        <Group gap="sm" align="center">
+          <Title order={2}>{pipelineQuery.data?.name ?? "Pipeline"}</Title>
+          {pipelineQuery.data?.scheduleCron ? (
+            <Badge variant="light" size="sm" leftSection={<i className="fa fa-clock" />}>
+              {pipelineQuery.data.scheduleCron}
+            </Badge>
+          ) : (
+            <Badge variant="default" size="sm" color="gray">
+              manual
+            </Badge>
+          )}
+        </Group>
         <Group>
           <Button variant="default" onClick={() => navigate("/pipelines")}>
             Back to list
+          </Button>
+          <Button
+            variant="default"
+            leftSection={<i className="fa fa-gear" />}
+            onClick={openSettings}
+          >
+            Settings
           </Button>
           <Button
             variant="default"
@@ -277,6 +491,55 @@ function PipelineEditorInner() {
           </Button>
         </Group>
       </Group>
+
+      <Modal
+        opened={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Pipeline settings"
+        centered
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!settingsName.trim()) {
+              setSettingsError("Name is required.");
+              return;
+            }
+            setSettingsError(null);
+            metadataMutation.mutate();
+          }}
+        >
+          <Stack gap="sm">
+            <TextInput
+              label="Name"
+              required
+              value={settingsName}
+              onChange={(e) => setSettingsName(e.currentTarget.value)}
+              data-autofocus
+            />
+            <TextInput
+              label="Description"
+              value={settingsDescription}
+              onChange={(e) => setSettingsDescription(e.currentTarget.value)}
+            />
+            <CronExpressionBuilder
+              label="Schedule"
+              description="Optional. Pick a preset or choose Custom to type a cron. v1 only triggers schedules of the form `*/N * * * *`."
+              value={settingsCron}
+              onChange={setSettingsCron}
+            />
+            {settingsError ? <Alert color="red">{settingsError}</Alert> : null}
+            <Group justify="flex-end" mt="sm">
+              <Button variant="default" onClick={() => setSettingsOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={metadataMutation.isPending}>
+                Save settings
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
 
       {pipelineQuery.error ? (
         <Alert color="red">Failed to load pipeline.</Alert>
@@ -336,7 +599,19 @@ function PipelineEditorInner() {
                     ...(transformersQuery.data ?? []).map((t) => ({
                       value: t.key,
                       label: t.displayName
-                    }))
+                    })),
+                    // Code transformers share the node's `key` field with
+                    // built-ins; the backend resolver tries the built-in
+                    // registry first and falls through to the code store by
+                    // name, so a name collision lets the built-in shadow the
+                    // code transformer. The "(code)" suffix makes the
+                    // collision visible in the dropdown if it happens.
+                    ...(codeTransformersQuery.data ?? [])
+                      .filter((c) => c.kind === "transformer")
+                      .map((c) => ({
+                        value: c.name,
+                        label: `${c.name} (code)`
+                      }))
                   ]}
                   value={selectedNode.data.key}
                   onChange={(e) =>
@@ -351,7 +626,13 @@ function PipelineEditorInner() {
                     ...(analyzersQuery.data ?? []).map((a) => ({
                       value: a.key,
                       label: a.displayName
-                    }))
+                    })),
+                    ...(codeTransformersQuery.data ?? [])
+                      .filter((c) => c.kind === "analyzer")
+                      .map((c) => ({
+                        value: c.name,
+                        label: `${c.name} (code)`
+                      }))
                   ]}
                   value={selectedNode.data.key}
                   onChange={(e) =>
@@ -367,25 +648,49 @@ function PipelineEditorInner() {
                   }
                 />
               )}
-              <Textarea
-                label="Config (JSON)"
-                description="Flat string→string map. Each transformer/analyzer documents its own keys."
-                autosize
-                minRows={4}
-                value={JSON.stringify(selectedNode.data.config ?? {}, null, 2)}
-                onChange={(e) => {
-                  try {
-                    const parsed = JSON.parse(e.currentTarget.value);
-                    updateSelectedNode((d) => ({ ...d, config: parsed }));
-                  } catch {
-                    // Ignore invalid JSON until the user fixes it; the save
-                    // path validates on submit.
+              {/*
+                Audit fix #7 — kind-specific form when /api/transformers/
+                {key}/schema (or /analyzers/{key}/schema) returns a schema
+                for the picked key. Code transformers and plugin-
+                contributed kinds return 404 and fall through to the
+                freeform JSON Textarea below. The two branches share the
+                same `data.config` map so toggling between editors
+                preserves whatever the author already typed.
+              */}
+              {(selectedNode.data.kind === "transformer" ||
+                selectedNode.data.kind === "analyzer") &&
+              schemaQuery.data ? (
+                <SchemaFormFields
+                  schema={schemaQuery.data}
+                  config={selectedNode.data.config ?? {}}
+                  onChange={updateSelectedNodeConfig}
+                />
+              ) : (
+                <Textarea
+                  label="Config (JSON)"
+                  description={
+                    selectedNode.data.kind === "transformer" ||
+                    selectedNode.data.kind === "analyzer"
+                      ? "No published schema for this kind. Flat string→string map; consult the kind's docs for valid keys."
+                      : "Flat string→string map. Each transformer/analyzer documents its own keys."
                   }
-                }}
-                styles={{
-                  input: { fontFamily: "var(--mantine-font-family-monospace)", fontSize: 13 }
-                }}
-              />
+                  autosize
+                  minRows={4}
+                  value={JSON.stringify(selectedNode.data.config ?? {}, null, 2)}
+                  onChange={(e) => {
+                    try {
+                      const parsed = JSON.parse(e.currentTarget.value);
+                      updateSelectedNode((d) => ({ ...d, config: parsed }));
+                    } catch {
+                      // Ignore invalid JSON until the user fixes it; the save
+                      // path validates on submit.
+                    }
+                  }}
+                  styles={{
+                    input: { fontFamily: "var(--mantine-font-family-monospace)", fontSize: 13 }
+                  }}
+                />
+              )}
               <Button
                 color="red"
                 variant="light"

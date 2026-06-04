@@ -7,6 +7,7 @@ import Login from "./pages/login/Login";
 import DynamicPageRoute from "./pages/dynamic-page/DynamicPageRoute";
 import DocumentEditorPage from "./pages/documents/DocumentEditorPage";
 import DocumentPreviewPage from "./pages/documents/DocumentPreviewPage";
+import PublicSharedQueryPage from "./pages/query/PublicSharedQueryPage";
 import { renderAppRoutes } from "./routes/appRoutes";
 
 export default function Router() {
@@ -40,6 +41,15 @@ export default function Router() {
           </ProtectedRoute>
         }
       />
+
+      {/* Public share recipient surface (audit fix #9). NOT wrapped in
+          ProtectedRoute — anonymous recipients land here via a link
+          pasted into Slack / email / a wiki page. The page calls the
+          /api/public/queries/share/{token} endpoint which authenticates
+          via the share token rather than a session cookie. Outside the
+          AppShell so there's no nav chrome or attempt to load the
+          user's menus when no user is signed in. */}
+      <Route path="/q/:token" element={<PublicSharedQueryPage />} />
 
       <Route element={<AppShell />}>
         {renderAppRoutes()}

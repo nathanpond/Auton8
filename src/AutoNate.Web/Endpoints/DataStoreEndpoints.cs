@@ -1,9 +1,11 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.DataStores;
 using AutoNate.Web.Services.DataStores.File;
 using AutoNate.Web.Services.DataStores.Sql;
+using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -255,6 +257,41 @@ public static class DataStoreEndpoints
 
         // --- SQL-type sub-surface --------------------------------------------------
 
+        // List the tables that have been ingested into a SQL DataStore.
+        // Returns the metadata + the inferred column schema inline so the
+        // Datasets SPA can populate a per-table picker AND fill the dataset's
+        // column list with one click — both of which were the central
+        // ergonomic blockers called out by the data-feature UI audit.
+        // FileType stores return an empty list rather than 4xx so the SPA
+        // can call this unconditionally and present "no tables" in the UI.
+        group.MapGet("/{id:guid}/tables", async (
+            Guid id, AutoNateDbContext db, CancellationToken ct) =>
+        {
+            var rows = await db.DataStoreTables
+                .Where(t => t.DataStoreId == id)
+                .OrderBy(t => t.TableName)
+                .ToListAsync(ct);
+            var dtos = new List<DataStoreTableDto>(rows.Count);
+            foreach (var row in rows)
+            {
+                List<CsvColumn> columns;
+                try
+                {
+                    columns = JsonSerializer.Deserialize<List<CsvColumn>>(row.ColumnSchemaJson)
+                        ?? new List<CsvColumn>();
+                }
+                catch (JsonException)
+                {
+                    // A hand-edited or corrupted row shouldn't take the
+                    // whole list down — surface what we can and continue.
+                    columns = new List<CsvColumn>();
+                }
+                dtos.Add(new DataStoreTableDto(
+                    row.Id, row.SchemaName, row.TableName, columns, row.RowCount));
+            }
+            return Results.Ok(dtos);
+        }).RequirePermission(EntityKinds.DataStore, Actions.View);
+
         group.MapPost("/{id:guid}/tables/preview", async (
             Guid id, HttpContext http, CsvIngestor ingestor, CancellationToken ct) =>
         {
@@ -324,3 +361,10 @@ public sealed record class CreateDataStoreRequest(string Name, string? Descripti
 public sealed record class UpdateDataStoreRequest(string? Name, string? Description);
 
 public sealed record class FolderRequest(string FolderPath);
+
+public sealed record class DataStoreTableDto(
+    Guid Id,
+    string SchemaName,
+    string TableName,
+    IReadOnlyList<CsvColumn> Columns,
+    long RowCount);

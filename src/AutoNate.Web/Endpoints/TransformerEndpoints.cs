@@ -7,10 +7,10 @@ namespace AutoNate.Web.Endpoints;
 
 // Catalog endpoints for the Phase 5 React Flow node palette to populate.
 // Read-only: Phase 5 introduces actual run endpoints (orchestrated through
-// pipelines). v1 surface is a flat list of (key, displayName, inputArity)
-// for transformers and (key, displayName) for analyzers — config schemas
-// are intentionally not surfaced here; they're authored in the node form
-// from documentation today and will be machine-readable in a follow-up.
+// pipelines). The flat list is (key, displayName, inputArity) for
+// transformers and (key, displayName) for analyzers; the per-key schema
+// endpoint (audit fix #7) drives the pipeline editor's node-config form
+// so authors don't hand-edit JSON for the 14 built-ins.
 public static class TransformerEndpoints
 {
     public static IEndpointRouteBuilder MapTransformerEndpoints(this IEndpointRouteBuilder app)
@@ -23,6 +23,16 @@ public static class TransformerEndpoints
                 .OrderBy(t => t.Key, StringComparer.Ordinal)
                 .Select(t => new TransformerCatalogEntry(t.Key, t.DisplayName, t.InputArity))
                 .ToList());
+        }).RequireKindPermission(EntityKinds.Transformer, Actions.List);
+
+        // Per-key config schema for built-ins. Plugin-contributed
+        // transformers don't have a schema today; 404 lets the SPA fall
+        // back to its freeform JSON Textarea without a kind probe.
+        group.MapGet("/{key}/schema", (string key) =>
+        {
+            return BuiltinSchemas.Transformers.TryGetValue(key, out var schema)
+                ? Results.Ok(schema)
+                : Results.NotFound();
         }).RequireKindPermission(EntityKinds.Transformer, Actions.List);
 
         return app;
@@ -43,6 +53,13 @@ public static class AnalyzerEndpoints
                 .OrderBy(a => a.Key, StringComparer.Ordinal)
                 .Select(a => new AnalyzerCatalogEntry(a.Key, a.DisplayName))
                 .ToList());
+        }).RequireKindPermission(EntityKinds.Analyzer, Actions.List);
+
+        group.MapGet("/{key}/schema", (string key) =>
+        {
+            return BuiltinSchemas.Analyzers.TryGetValue(key, out var schema)
+                ? Results.Ok(schema)
+                : Results.NotFound();
         }).RequireKindPermission(EntityKinds.Analyzer, Actions.List);
 
         return app;

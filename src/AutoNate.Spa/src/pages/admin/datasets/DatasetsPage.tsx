@@ -1,5 +1,5 @@
-import { FormEvent, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
   Alert,
@@ -30,8 +30,16 @@ import {
   deleteDataset,
   listDatasets,
   modeLabel,
-  refreshDataset
+  refreshDataset,
+  updateDataset
 } from "@/api/datasets";
+import {
+  kindLabel as dataStoreKindLabel,
+  listDataStoreTables,
+  listDataStores
+} from "@/api/datastores";
+import { listDataConnectors } from "@/api/dataconnectors";
+import CronExpressionBuilder from "@/components/CronExpressionBuilder";
 
 const QUERY_KEY = ["datasets", "list"] as const;
 const COLUMN_WIDTHS = ["1fr", "100px", "1fr", "1fr", "180px", "130px"];
@@ -48,17 +56,80 @@ export default function DatasetsPage() {
   const [sourceId, setSourceId] = useState("");
   const [sourceTableName, setSourceTableName] = useState("");
   const [refreshCron, setRefreshCron] = useState("*/5 * * * *");
-  const [columnsJson, setColumnsJson] = useState(
-    JSON.stringify(
-      [
-        { name: "Id", postgresType: "text" },
-        { name: "Name", postgresType: "text" }
-      ] satisfies DatasetColumn[],
-      null,
-      2
-    )
+  const DEFAULT_COLUMNS_JSON = useMemo(
+    () =>
+      JSON.stringify(
+        [
+          { name: "Id", postgresType: "text" },
+          { name: "Name", postgresType: "text" }
+        ] satisfies DatasetColumn[],
+        null,
+        2
+      ),
+    []
   );
+  const [columnsJson, setColumnsJson] = useState(DEFAULT_COLUMNS_JSON);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Source picker queries. The lists are tiny so we always pull both up
+  // front (and cache them via React Query) — the toggle between
+  // `datastore` / `dataconnector` flips which Select renders. Tables are
+  // only fetched when a SQL DataStore is selected.
+  const dataStoresQuery = useQuery({
+    queryKey: ["datastores", "list"],
+    queryFn: ({ signal }) => listDataStores(signal),
+    enabled: createOpen
+  });
+  const dataConnectorsQuery = useQuery({
+    queryKey: ["dataconnectors", "list"],
+    queryFn: ({ signal }) => listDataConnectors(signal),
+    enabled: createOpen
+  });
+
+  const selectedDataStore = useMemo(
+    () =>
+      sourceKind === "datastore"
+        ? dataStoresQuery.data?.find((d) => d.id === sourceId) ?? null
+        : null,
+    [sourceKind, sourceId, dataStoresQuery.data]
+  );
+  const isSqlDataStore =
+    selectedDataStore !== null && dataStoreKindLabel(selectedDataStore.kind) === "SqlType";
+
+  // Only hit /tables when the user has actually picked a SQL DataStore.
+  // FileType stores and DataConnectors don't have tables to enumerate.
+  const tablesQuery = useQuery({
+    queryKey: ["datastores", "tables", sourceId],
+    queryFn: ({ signal }) => listDataStoreTables(sourceId, signal),
+    enabled: createOpen && sourceKind === "datastore" && !!sourceId && isSqlDataStore
+  });
+
+  // Switching sourceKind invalidates the previously picked sourceId/table:
+  // a DataStore UUID isn't a DataConnector UUID (and vice versa). Clearing
+  // here prevents the form posting a `datastore` kind with a connector id.
+  useEffect(() => {
+    setSourceId("");
+    setSourceTableName("");
+  }, [sourceKind]);
+
+  // Switching source store within `datastore` kind: clear the table pick,
+  // since the previous store's table names are meaningless for the new one.
+  useEffect(() => {
+    setSourceTableName("");
+  }, [sourceId]);
+
+  // "Import columns from selected table" replaces the textarea contents
+  // with the table's stored schema. The user can still edit before saving.
+  function importColumnsFromSelectedTable() {
+    if (!tablesQuery.data || !sourceTableName) return;
+    const table = tablesQuery.data.find((t) => t.tableName === sourceTableName);
+    if (!table) {
+      setSubmitError(`Table "${sourceTableName}" not found in selected DataStore.`);
+      return;
+    }
+    setColumnsJson(JSON.stringify(table.columns, null, 2));
+    setSubmitError(null);
+  }
 
   const createMutation = useMutation({
     mutationFn: createDataset,
@@ -92,6 +163,55 @@ export default function DatasetsPage() {
     }
   });
 
+  // Audit fix #13 — Edit modal. Separate from the create modal because
+  // the backend's UpdateDatasetRequest accepts only Name / Description /
+  // RefreshCron (mode / source / columns are locked once the cache
+  // table / virtual view exists). Reusing the create modal would mean
+  // hiding five fields in edit mode; a small dedicated modal is
+  // clearer.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editRefreshCron, setEditRefreshCron] = useState("");
+  const [editIsCached, setEditIsCached] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  function openEdit(row: Dataset) {
+    setEditingId(row.id);
+    setEditName(row.name);
+    setEditDescription(row.description ?? "");
+    setEditRefreshCron(row.refreshCron ?? "");
+    setEditIsCached(modeLabel(row.mode) === "Cached");
+    setEditError(null);
+    setEditOpen(true);
+  }
+
+  const editMutation = useMutation({
+    mutationFn: (vars: { id: string }) =>
+      updateDataset(vars.id, {
+        name: editName.trim(),
+        description: editDescription.trim() || null,
+        // Backend semantics: null = leave unchanged, empty string =
+        // clear (sets RefreshCron to null). Send the trimmed value
+        // verbatim so the user can clear an existing cron by emptying
+        // the field — important because Virtual datasets shouldn't
+        // carry a cron at all.
+        refreshCron: editIsCached ? editRefreshCron.trim() : ""
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      setEditOpen(false);
+      notifications.show({ message: "Dataset updated.", color: "green" });
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
+        (err instanceof Error ? err.message : "Update failed.");
+      setEditError(message);
+    }
+  });
+
   function resetForm() {
     setName("");
     setDescription("");
@@ -100,6 +220,7 @@ export default function DatasetsPage() {
     setSourceId("");
     setSourceTableName("");
     setRefreshCron("*/5 * * * *");
+    setColumnsJson(DEFAULT_COLUMNS_JSON);
     setSubmitError(null);
   }
 
@@ -199,6 +320,15 @@ export default function DatasetsPage() {
                 </ActionIcon>
               </Tooltip>
             ) : null}
+            <Tooltip label="Edit dataset">
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Edit ${row.original.name}`}
+                onClick={() => openEdit(row.original)}
+              >
+                <i className="fa fa-pen-to-square" />
+              </ActionIcon>
+            </Tooltip>
             <Tooltip label="Delete dataset">
               <ActionIcon
                 color="red"
@@ -289,30 +419,83 @@ export default function DatasetsPage() {
               value={sourceKind}
               onChange={(e) => setSourceKind(e.currentTarget.value)}
             />
-            <TextInput
-              label="Source ID"
-              description="The DataStore or DataConnector UUID this dataset draws from."
-              required
-              value={sourceId}
-              onChange={(e) => setSourceId(e.currentTarget.value)}
-            />
-            <TextInput
-              label="Source table"
-              description="Required for SQL DataStore sources. Leave blank for File datastore or connector sources."
-              value={sourceTableName}
-              onChange={(e) => setSourceTableName(e.currentTarget.value)}
-            />
-            {mode === "Cached" ? (
-              <TextInput
-                label="Refresh cron"
-                description="5-field cron. v1 recognizes the */N minutes form (e.g. '*/5 * * * *')."
-                value={refreshCron}
-                onChange={(e) => setRefreshCron(e.currentTarget.value)}
+            {sourceKind === "datastore" ? (
+              <NativeSelect
+                label="Source DataStore"
+                description="Lists the DataStores you can read. Pick a SQL store to enable the table picker and 'Import columns' below."
+                required
+                data={[
+                  { value: "", label: "Select a DataStore…" },
+                  ...(dataStoresQuery.data ?? []).map((s) => ({
+                    value: s.id,
+                    label: `${s.name} (${dataStoreKindLabel(s.kind)})`
+                  }))
+                ]}
+                value={sourceId}
+                onChange={(e) => setSourceId(e.currentTarget.value)}
+              />
+            ) : (
+              <NativeSelect
+                label="Source DataConnector"
+                description="Datasets over connectors must be Cached mode (the connector is polled on a refresh cron, never live)."
+                required
+                data={[
+                  { value: "", label: "Select a DataConnector…" },
+                  ...(dataConnectorsQuery.data ?? []).map((c) => ({
+                    value: c.id,
+                    label: `${c.name} (${c.kind})`
+                  }))
+                ]}
+                value={sourceId}
+                onChange={(e) => setSourceId(e.currentTarget.value)}
+              />
+            )}
+            {sourceKind === "datastore" && isSqlDataStore ? (
+              <NativeSelect
+                label="Source table"
+                description={
+                  tablesQuery.isLoading
+                    ? "Loading tables…"
+                    : (tablesQuery.data?.length ?? 0) === 0
+                    ? "This SQL DataStore has no ingested tables yet. Upload a CSV first."
+                    : "Required for SQL DataStore sources. Used as the FROM target in generated queries."
+                }
+                data={[
+                  { value: "", label: "Select a table…" },
+                  ...(tablesQuery.data ?? []).map((t) => ({
+                    value: t.tableName,
+                    label: `${t.tableName} (${t.rowCount.toLocaleString()} row${t.rowCount === 1 ? "" : "s"})`
+                  }))
+                ]}
+                value={sourceTableName}
+                onChange={(e) => setSourceTableName(e.currentTarget.value)}
               />
             ) : null}
+            {mode === "Cached" ? (
+              <CronExpressionBuilder
+                label="Refresh cron"
+                description="How often Cached datasets re-materialize. Pick a preset or choose Custom."
+                value={refreshCron}
+                onChange={setRefreshCron}
+              />
+            ) : null}
+            <Group justify="space-between" align="flex-end" gap="sm">
+              <Text size="sm" fw={500}>
+                Column schema (JSON)
+              </Text>
+              <Button
+                variant="default"
+                size="compact-sm"
+                leftSection={<i className="fa fa-download" />}
+                disabled={!sourceTableName || !tablesQuery.data?.length}
+                onClick={importColumnsFromSelectedTable}
+              >
+                Import columns from selected table
+              </Button>
+            </Group>
             <Textarea
-              label="Column schema (JSON)"
-              description={`Allowed postgresType values: ${POSTGRES_TYPES.join(", ")}.`}
+              aria-label="Column schema (JSON)"
+              description={`Allowed postgresType values: ${POSTGRES_TYPES.join(", ")}. Edit by hand, or click "Import columns" to pull the schema from the picked table above.`}
               autosize
               minRows={6}
               value={columnsJson}
@@ -328,6 +511,61 @@ export default function DatasetsPage() {
               </Button>
               <Button type="submit" loading={createMutation.isPending}>
                 Create
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
+
+      <Modal
+        opened={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="Edit dataset"
+        centered
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!editName.trim()) {
+              setEditError("Name is required.");
+              return;
+            }
+            if (!editingId) return;
+            editMutation.mutate({ id: editingId });
+          }}
+        >
+          <Stack gap="sm">
+            <TextInput
+              label="Name"
+              required
+              value={editName}
+              onChange={(e) => setEditName(e.currentTarget.value)}
+              data-autofocus
+            />
+            <TextInput
+              label="Description"
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.currentTarget.value)}
+            />
+            {editIsCached ? (
+              <CronExpressionBuilder
+                label="Refresh cron"
+                description="Pick a preset or choose Custom. Empty (Manual only) clears the schedule on save."
+                value={editRefreshCron}
+                onChange={setEditRefreshCron}
+              />
+            ) : (
+              <Text size="xs" c="dimmed">
+                Virtual datasets have no refresh cron. Switch mode by recreating the dataset.
+              </Text>
+            )}
+            {editError ? <Alert color="red">{editError}</Alert> : null}
+            <Group justify="flex-end" mt="sm">
+              <Button variant="default" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={editMutation.isPending}>
+                Save
               </Button>
             </Group>
           </Stack>

@@ -51,6 +51,17 @@ export type PipelineRun = {
   triggerKind: string;
 };
 
+// Audit fix #11 — per-step log entries the orchestrator captures
+// during execution (start, success/cancel/fail boundary, full
+// exception message + stack snippet on failure). Plugin runners can
+// emit their own entries via the future IStepLogger surface; the
+// SPA color-codes the known levels and falls back to dimmed text.
+export type PipelineRunStepLog = {
+  timestampUtc: string;
+  level: string;
+  message: string;
+};
+
 export type PipelineRunStep = {
   id: string;
   pipelineRunId: string;
@@ -61,6 +72,7 @@ export type PipelineRunStep = {
   completedAtUtc: string | null;
   rowCount: number | null;
   errorMessage: string | null;
+  logs: PipelineRunStepLog[];
 };
 
 export type PipelineRunDetail = {
@@ -124,5 +136,17 @@ export async function getPipelineRun(
   signal?: AbortSignal
 ): Promise<PipelineRunDetail> {
   const { data } = await api.get<PipelineRunDetail>(`${BASE}/${id}/runs/${runId}`, { signal });
+  return data;
+}
+
+export async function cancelPipelineRun(id: string, runId: string): Promise<void> {
+  await api.post(`${BASE}/${id}/runs/${runId}/cancel`);
+}
+
+export async function retryPipelineRun(
+  id: string,
+  runId: string
+): Promise<PipelineRun> {
+  const { data } = await api.post<PipelineRun>(`${BASE}/${id}/runs/${runId}/retry`);
   return data;
 }

@@ -27,7 +27,8 @@ import {
   createDataStore,
   deleteDataStore,
   kindLabel,
-  listDataStores
+  listDataStores,
+  updateDataStore
 } from "@/api/datastores";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 
@@ -37,27 +38,76 @@ const COLUMN_WIDTHS = ["1fr", "120px", "2fr", "180px", "60px"];
 export default function DataStoresPage() {
   useDocumentTitle("Data Stores");
   const queryClient = useQueryClient();
-  const [createOpen, setCreateOpen] = useState(false);
+  // Same Modal renders create + edit (matches DataConnectorsPage / Code
+  // TransformersPage). editingId === null means create mode; non-null
+  // pre-fills the form from that row and the submit branches to PUT.
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<DataStoreKind>("FileType");
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  function resetForm() {
+    setEditingId(null);
+    setName("");
+    setDescription("");
+    setKind("FileType");
+    setSubmitError(null);
+  }
+
+  function openCreate() {
+    resetForm();
+    setModalOpen(true);
+  }
+
+  function openEdit(row: DataStore) {
+    setEditingId(row.id);
+    setName(row.name);
+    setDescription(row.description ?? "");
+    // Kind is informational in edit mode (the dropdown is disabled
+    // below). Setting it from the row keeps the displayed value
+    // accurate without changing the in-flight kind.
+    setKind(kindLabel(row.kind));
+    setSubmitError(null);
+    setModalOpen(true);
+  }
+
   const createMutation = useMutation({
     mutationFn: createDataStore,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      setCreateOpen(false);
-      setName("");
-      setDescription("");
-      setKind("FileType");
-      setSubmitError(null);
+      setModalOpen(false);
+      resetForm();
       notifications.show({ message: "Data store created.", color: "green" });
     },
     onError: (err: unknown) => {
       const message =
         (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
         (err instanceof Error ? err.message : "Create failed.");
+      setSubmitError(message);
+    }
+  });
+
+  const editMutation = useMutation({
+    mutationFn: (vars: { id: string }) =>
+      updateDataStore(vars.id, {
+        name: name.trim(),
+        description: description.trim() || null
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      // Detail page caches a single row keyed by id — bust that too so
+      // navigating back into the store reflects the new name.
+      queryClient.invalidateQueries({ queryKey: ["datastores", "detail"] });
+      setModalOpen(false);
+      resetForm();
+      notifications.show({ message: "Data store updated.", color: "green" });
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
+        (err instanceof Error ? err.message : "Update failed.");
       setSubmitError(message);
     }
   });
@@ -80,11 +130,15 @@ export default function DataStoresPage() {
       setSubmitError("Name is required.");
       return;
     }
-    createMutation.mutate({
-      name: name.trim(),
-      description: description.trim() || null,
-      kind
-    });
+    if (editingId) {
+      editMutation.mutate({ id: editingId });
+    } else {
+      createMutation.mutate({
+        name: name.trim(),
+        description: description.trim() || null,
+        kind
+      });
+    }
   }
 
   const columns = useMemo<DataTableColumn<DataStore>[]>(
@@ -126,20 +180,31 @@ export default function DataStoresPage() {
         header: "",
         enableSorting: false,
         cell: ({ row }) => (
-          <Tooltip label="Delete data store">
-            <ActionIcon
-              color="red"
-              variant="subtle"
-              aria-label={`Delete ${row.original.name}`}
-              onClick={() => {
-                if (window.confirm(`Delete data store "${row.original.name}"?`)) {
-                  deleteMutation.mutate(row.original.id);
-                }
-              }}
-            >
-              <i className="fa fa-trash" />
-            </ActionIcon>
-          </Tooltip>
+          <Group gap={4} wrap="nowrap">
+            <Tooltip label="Edit data store">
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Edit ${row.original.name}`}
+                onClick={() => openEdit(row.original)}
+              >
+                <i className="fa fa-pen-to-square" />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Delete data store">
+              <ActionIcon
+                color="red"
+                variant="subtle"
+                aria-label={`Delete ${row.original.name}`}
+                onClick={() => {
+                  if (window.confirm(`Delete data store "${row.original.name}"?`)) {
+                    deleteMutation.mutate(row.original.id);
+                  }
+                }}
+              >
+                <i className="fa fa-trash" />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         )
       }
     ],
@@ -150,7 +215,7 @@ export default function DataStoresPage() {
     <Stack gap="md">
       <Group justify="space-between" align="center">
         <Title order={1}>Data Stores</Title>
-        <Button leftSection={<i className="fa fa-plus" />} onClick={() => setCreateOpen(true)}>
+        <Button leftSection={<i className="fa fa-plus" />} onClick={openCreate}>
           New data store
         </Button>
       </Group>
@@ -174,7 +239,12 @@ export default function DataStoresPage() {
         />
       </Box>
 
-      <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="New data store" centered>
+      <Modal
+        opened={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editingId ? "Edit data store" : "New data store"}
+        centered
+      >
         <form onSubmit={onSubmit}>
           <Stack gap="sm">
             <TextInput
@@ -197,14 +267,21 @@ export default function DataStoresPage() {
               ]}
               value={kind}
               onChange={(e) => setKind(e.currentTarget.value as DataStoreKind)}
+              // Kind is fixed once the store is provisioned — a SQL store
+              // owns a per-id schema and role in autonate_datastores;
+              // changing the kind would orphan that infrastructure.
+              disabled={editingId !== null}
             />
             {submitError ? <Alert color="red">{submitError}</Alert> : null}
             <Group justify="flex-end" mt="sm">
-              <Button variant="default" onClick={() => setCreateOpen(false)}>
+              <Button variant="default" onClick={() => setModalOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" loading={createMutation.isPending}>
-                Create
+              <Button
+                type="submit"
+                loading={createMutation.isPending || editMutation.isPending}
+              >
+                {editingId ? "Save" : "Create"}
               </Button>
             </Group>
           </Stack>

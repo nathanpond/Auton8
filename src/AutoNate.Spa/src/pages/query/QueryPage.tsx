@@ -36,6 +36,7 @@ import {
 import {
   type SavedQuery,
   createSavedQuery,
+  deleteSavedQuery,
   listSavedQueries,
   updateSavedQuery
 } from "@/api/savedQueries";
@@ -393,6 +394,28 @@ export default function QueryPage() {
     }
   });
 
+  // Delete mutation — gated to the owner of the loaded saved query.
+  // Audit fix #8: the only mutations reachable from this page before
+  // were save / update / share, so a user could rename or share a saved
+  // query but never remove one. On success we clear the selection so
+  // the editor doesn't keep pointing at a row that no longer exists.
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteSavedQuery(id),
+    onSuccess: (_data, id) => {
+      queryClient.setQueryData<SavedQuery[]>(["saved-queries"], (old) =>
+        old ? old.filter((q) => q.id !== id) : []
+      );
+      void queryClient.invalidateQueries({ queryKey: ["saved-queries"] });
+      if (selectedQueryId === id) setSelectedQueryId(null);
+    }
+  });
+
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedQuery) return;
+    if (!window.confirm(`Delete saved query "${selectedQuery.name}"?`)) return;
+    deleteMutation.mutate(selectedQuery.id);
+  }, [selectedQuery, deleteMutation]);
+
   const handleSaveSubmit = useCallback(() => {
     setSaveError(null);
     if (saveName.trim().length === 0) {
@@ -519,6 +542,24 @@ export default function QueryPage() {
                     leftSection={<i className="fa fa-share-nodes" aria-hidden />}
                   >
                     Share
+                  </Button>
+                </Tooltip>
+              ) : null}
+              {selectedQuery && canUpdateSelected ? (
+                <Tooltip
+                  label={`Delete saved query "${selectedQuery.name}"`}
+                  withArrow
+                  position="top"
+                >
+                  <Button
+                    color="red"
+                    variant="default"
+                    onClick={handleDeleteSelected}
+                    loading={deleteMutation.isPending}
+                    aria-label={`Delete saved query ${selectedQuery.name}`}
+                    leftSection={<i className="fa fa-trash" aria-hidden />}
+                  >
+                    Delete
                   </Button>
                 </Tooltip>
               ) : null}

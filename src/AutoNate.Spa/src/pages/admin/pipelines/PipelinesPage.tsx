@@ -29,6 +29,7 @@ import {
 } from "@/api/pipelines";
 
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import CronExpressionBuilder from "@/components/CronExpressionBuilder";
 
 const QUERY_KEY = ["pipelines", "list"] as const;
 const COLUMN_WIDTHS = ["1fr", "2fr", "140px", "180px", "130px"];
@@ -39,6 +40,7 @@ export default function PipelinesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [scheduleCron, setScheduleCron] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const createMutation = useMutation({
@@ -48,6 +50,7 @@ export default function PipelinesPage() {
       setCreateOpen(false);
       setName("");
       setDescription("");
+      setScheduleCron("");
       setSubmitError(null);
       notifications.show({ message: "Pipeline created.", color: "green" });
     },
@@ -92,6 +95,10 @@ export default function PipelinesPage() {
     createMutation.mutate({
       name: name.trim(),
       description: description.trim() || null,
+      // Empty string is the backend's "clear" signal; on create that's the
+      // same as null. Trim so a user typing "   " doesn't get a stored cron
+      // string of whitespace.
+      scheduleCron: scheduleCron.trim() || null,
       graph: { nodes: [], edges: [] }
     });
   }
@@ -207,6 +214,12 @@ export default function PipelinesPage() {
               label="Description"
               value={description}
               onChange={(e) => setDescription(e.currentTarget.value)}
+            />
+            <CronExpressionBuilder
+              label="Schedule"
+              description="Optional. Pick a preset or choose Custom to type a cron. v1 only triggers schedules of the form `*/N * * * *`."
+              value={scheduleCron}
+              onChange={setScheduleCron}
             />
             {submitError ? <Alert color="red">{submitError}</Alert> : null}
             <Group justify="flex-end" mt="sm">

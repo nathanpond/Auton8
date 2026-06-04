@@ -212,6 +212,7 @@ public partial class AutoNateDbContext
             entity.Property(e => e.CompletedAtUtc).HasColumnName("completed_at_utc");
             entity.Property(e => e.RowCount).HasColumnName("row_count");
             entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
+            entity.Property(e => e.LogsJson).HasColumnName("logs_json").HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<SavedQueryShareToken>(entity =>
