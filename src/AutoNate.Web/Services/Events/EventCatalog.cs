@@ -5,6 +5,7 @@ using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Dashboards;
+using AutoNate.Web.Services.DataStores;
 using AutoNate.Web.Services.Query;
 using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Records;
@@ -190,6 +191,14 @@ public static class EventCatalog
         new("auditContext", "object", "Shared audit context — actor, IP, user-agent, request id, route template, authOutcome.")
     ];
 
+    private static readonly EventCatalogPayloadField[] DataStorePayloadFields =
+    [
+        new("resourceKind", "string", "One of 'datastore', 'datastore.file', 'datastore.folder', or 'datastore.table'."),
+        new("resource", "object | null", "Small payload identifying the affected resource. For 'datastore': { id, name }. For 'datastore.file': { id (fileId), datastoreId, folderPath, filename }. For 'datastore.folder': { datastoreId, path }. For 'datastore.table': { id (tableId), datastoreId, schemaName, tableName }. null on datastore.list.viewed."),
+        new("details", "object | null", "Event-specific extras: { resultCount } for list.viewed; { kind } for created; { previousName } for updated; { sizeBytes, contentType } for file uploads/downloads/deletes; { previousFolderPath, previousFilename } for renames/moves; { sourceFileId, sourceFolderPath, sourceFilename, sizeBytes } for file copies; { filesDeleted } / { filesAffected } / { filesCopied } for folder ops; { sourcePath } for folder copy; { rowsInserted, columnCount } for table ingest."),
+        new("auditContext", "object", "Shared audit context — actor (the user who performed the action), IP, user-agent, request id, route template, authOutcome. For datastore.file.downloaded this is the only persistent record of who exfiltrated which bytes; correlate with request log via auditContext.requestId.")
+    ];
+
     private static readonly EventCatalogPayloadField[] ViewEventPayloadFields =
     [
         new("resourceKind", "string", "Domain-specific kind of the resource viewed (e.g. 'record', 'iam.user', 'workflow.model'). null/unset for cross-resource list events like list.viewed where there is no single resource."),
@@ -255,7 +264,11 @@ public static class EventCatalog
         new(
             QueryEventTopic.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
-            "AutoNate.Web — published from the AQL Query page-template surface once per /api/query call (success or validation failure). Carries the raw query text plus row/column counts and timing; never carries the result rows themselves.")
+            "AutoNate.Web — published from the AQL Query page-template surface once per /api/query call (success or validation failure). Carries the raw query text plus row/column counts and timing; never carries the result rows themselves."),
+        new(
+            DataStoreEventTopic.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from the Data Stores admin surface for every store CRUD, every file upload/download/delete/rename/move/copy, every folder create/delete/rename/move/copy, and every successful CSV ingest. The datastore.file.downloaded event in particular is the only persistent record of who exfiltrated which bytes — without it the request log has no actor id.")
     ];
 
     public static readonly EventCatalogCategory[] Categories =
@@ -1570,6 +1583,80 @@ public static class EventCatalog
                     "A user deleted one of their saved AQL queries.",
                     "Fires from DELETE /api/saved-queries/{id} on the success path.",
                     ["resource: { id, name }. details: null."])
+            ]),
+        new(
+            "Data Stores",
+            "Lifecycle events for data stores and the content they hold. File-type stores publish per-file and per-folder events (upload, download, delete, rename, move, copy); SQL-type stores publish a single table.ingested event per successful CSV ingest. The datastore.file.downloaded event is critical for data-exfiltration audits — it carries the actor that streamed bytes off the server and the size of those bytes, which the access log does not.",
+            DataStorePayloadFields,
+            [
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.Created,
+                    "A new data store was created.",
+                    "Fires from POST /api/datastores on the success path, after the metadata row commits and (for SQL stores) the per-store schema + role have been provisioned.",
+                    ["resource: { id, name }.", "details: { kind } — 'FileType' or 'SqlType'."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.Updated,
+                    "A data store's metadata (name and/or description) was changed.",
+                    "Fires from PUT /api/datastores/{id} on the success path.",
+                    ["resource: { id, name } reflects the post-update name.", "details: { previousName } so the row can be traced through prior events keyed on the old name."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.Deleted,
+                    "A data store and (for SQL) its per-store schema were deleted.",
+                    "Fires from DELETE /api/datastores/{id} after the deprovision + delete chain completes.",
+                    ["resource: { id, name }. details: null."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.ListViewed,
+                    "An admin loaded the data stores list page.",
+                    "Fires from GET /api/datastores on the success path.",
+                    ["resource: null.", "details: { resultCount }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.Viewed,
+                    "An admin opened a specific data store detail page.",
+                    "Fires from GET /api/datastores/{id} on the success path.",
+                    ["resource: { id, name }. details: null."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FileUploaded,
+                    "A file was uploaded into a file-type data store.",
+                    "Fires from POST /api/datastores/{id}/files on the success path, after the bytes are on disk and the metadata row has committed.",
+                    ["resource: { id (fileId), datastoreId, folderPath, filename }.", "details: { sizeBytes, contentType }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FileDeleted,
+                    "A file was deleted from a file-type data store.",
+                    "Fires from DELETE /api/datastores/{id}/files/{fileId} on the success path.",
+                    ["resource: { id (fileId), datastoreId, folderPath, filename }.", "details: { sizeBytes } captured before the row was removed."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FileRenamed,
+                    "A file was renamed within its current folder.",
+                    "Fires from PATCH /api/datastores/{id}/files/{fileId} when the request changed the filename but not the folder.",
+                    ["resource reflects the new filename.", "details: { previousFolderPath, previousFilename } captures the prior identity."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FileMoved,
+                    "A file was moved to a different folder (the filename may have changed in the same call).",
+                    "Fires from PATCH /api/datastores/{id}/files/{fileId} whenever the folder path changes, regardless of whether the filename also changes.",
+                    ["resource reflects the post-move folder + filename.", "details: { previousFolderPath, previousFilename }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FileCopied,
+                    "A file was duplicated to a target folder with a fresh fileId and fresh on-disk bytes.",
+                    "Fires from POST /api/datastores/{id}/files/{fileId}/copy on the success path.",
+                    ["resource carries the NEW fileId, folderPath, filename.", "details: { sourceFileId, sourceFolderPath, sourceFilename, sizeBytes }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FileDownloaded,
+                    "A file's bytes were streamed back to a caller.",
+                    "Fires from GET /api/datastores/{id}/files/{fileId} BEFORE the response body streams, so the event lands even if the client disconnects mid-stream. Critical for exfiltration audit — the request log has no actor id, this event is the only persistent record of who took which bytes.",
+                    ["resource: { id (fileId), datastoreId, folderPath, filename }.", "details: { sizeBytes, contentType }.", "Correlate to request log via auditContext.requestId."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FolderCreated,
+                    "A folder was created in a file-type data store.",
+                    "Fires from POST /api/datastores/{id}/folders on the success path (idempotent — repeated creates of an existing folder still publish).",
+                    ["resource: { datastoreId, path }. details: null."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FolderDeleted,
+                    "A folder and every file beneath it were deleted.",
+                    "Fires from DELETE /api/datastores/{id}/folders?path=… on the success path.",
+                    ["resource: { datastoreId, path }.", "details: { filesDeleted } is the count of file rows removed (cascade)."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FolderRenamed,
+                    "A folder was renamed within its current parent.",
+                    "Fires from PATCH /api/datastores/{id}/folders when the parent of newPath matches the parent of path.",
+                    ["resource: { datastoreId, path } reflects newPath.", "details: { previousPath, filesAffected }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FolderMoved,
+                    "A folder was moved to a different parent.",
+                    "Fires from PATCH /api/datastores/{id}/folders when the parent of newPath differs from the parent of path.",
+                    ["resource: { datastoreId, path } reflects newPath.", "details: { previousPath, filesAffected }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.FolderCopied,
+                    "A folder and every file beneath it were duplicated to a target prefix with fresh ids and fresh on-disk bytes.",
+                    "Fires from POST /api/datastores/{id}/folders/copy on the success path.",
+                    ["resource: { datastoreId, path } reflects targetPath.", "details: { sourcePath, filesCopied }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.TableIngested,
+                    "A CSV file was successfully ingested into a SQL-type data store as a new table.",
+                    "Fires from POST /api/datastores/{id}/tables on the success path, after the per-store schema's table was created and rows committed. The preview endpoint (POST /tables/preview) does not emit an event — preview does not touch persistent state.",
+                    ["resource: { id (tableId), datastoreId, schemaName, tableName }.", "details: { rowsInserted, columnCount }."])
             ])
     ];
 

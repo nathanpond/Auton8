@@ -156,6 +156,49 @@ export async function deleteDataStoreFolder(id: string, folderPath: string): Pro
   await api.delete(`${BASE}/${id}/folders`, { params: { path: folderPath } });
 }
 
+// Rename and/or move a file. Pass null for fields you don't want to change.
+export async function renameOrMoveDataStoreFile(
+  id: string,
+  fileId: string,
+  newFolderPath: string | null,
+  newFilename: string | null
+): Promise<DataStoreFile> {
+  const res = await api.patch<DataStoreFile>(`${BASE}/${id}/files/${fileId}`, {
+    newFolderPath,
+    newFilename
+  });
+  return res.data;
+}
+
+export async function copyDataStoreFile(
+  id: string,
+  fileId: string,
+  targetFolderPath: string,
+  newFilename: string | null
+): Promise<DataStoreFile> {
+  const res = await api.post<DataStoreFile>(`${BASE}/${id}/files/${fileId}/copy`, {
+    targetFolderPath,
+    newFilename
+  });
+  return res.data;
+}
+
+export async function renameOrMoveDataStoreFolder(
+  id: string,
+  path: string,
+  newPath: string
+): Promise<void> {
+  await api.patch(`${BASE}/${id}/folders`, { path, newPath });
+}
+
+export async function copyDataStoreFolder(
+  id: string,
+  sourcePath: string,
+  targetPath: string
+): Promise<void> {
+  await api.post(`${BASE}/${id}/folders/copy`, { sourcePath, targetPath });
+}
+
 export async function previewCsvIngest(id: string, file: File): Promise<CsvIngestPreview> {
   const form = new FormData();
   form.append("file", file);
