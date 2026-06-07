@@ -53,7 +53,10 @@ public interface IFileDataStoreService
         Guid fileId,
         CancellationToken cancellationToken = default);
 
-    Task DeleteFileAsync(
+    // Returns the deleted entity so callers (the audit-event publisher in
+    // particular) know what folder/filename was removed without a second
+    // round-trip.
+    Task<DataStoreFile> DeleteFileAsync(
         Guid datastoreId,
         Guid fileId,
         CancellationToken cancellationToken = default);
@@ -66,8 +69,57 @@ public interface IFileDataStoreService
         string folderPath,
         CancellationToken cancellationToken = default);
 
-    Task DeleteFolderAsync(
+    // Returns the count of file rows deleted so the audit-event publisher
+    // can record the blast radius without re-querying.
+    Task<int> DeleteFolderAsync(
         Guid datastoreId,
         string folderPath,
+        CancellationToken cancellationToken = default);
+
+    // Rename and/or move a single file. At least one of newFolderPath or
+    // newFilename must be set. Same folder + same name is a no-op. The on-
+    // disk storage key is unchanged (folder/name are metadata-only). Returns
+    // the pre-mutation folder/filename alongside the post-mutation entity
+    // so the audit-event publisher can record "from where, to where"
+    // without a second read.
+    Task<(string PreviousFolderPath, string PreviousFilename, DataStoreFile Current)>
+        RenameOrMoveFileAsync(
+            Guid datastoreId,
+            Guid fileId,
+            string? newFolderPath,
+            string? newFilename,
+            Guid actorId,
+            CancellationToken cancellationToken = default);
+
+    // Copy a single file's bytes and metadata. newFilename defaults to the
+    // source filename. Allocates a fresh fileId + storage key and duplicates
+    // bytes on disk so the source and copy are independent. Returns the
+    // source and the new copy so the audit event can carry both ids/paths.
+    Task<(DataStoreFile Source, DataStoreFile Copy)> CopyFileAsync(
+        Guid datastoreId,
+        Guid fileId,
+        string targetFolderPath,
+        string? newFilename,
+        Guid actorId,
+        CancellationToken cancellationToken = default);
+
+    // Rename and/or move a folder. Rewrites folder_path on every file at
+    // or below oldPath. Rejected on root, on moving a folder into its own
+    // descendants, and on case-insensitive name collisions in the target.
+    Task<int> RenameOrMoveFolderAsync(
+        Guid datastoreId,
+        string oldPath,
+        string newPath,
+        Guid actorId,
+        CancellationToken cancellationToken = default);
+
+    // Recursive folder copy. Each file under oldPath is duplicated to the
+    // matching position under newPath with a fresh fileId and a fresh
+    // on-disk copy of its bytes. Returns the number of file rows created.
+    Task<int> CopyFolderAsync(
+        Guid datastoreId,
+        string oldPath,
+        string newPath,
+        Guid actorId,
         CancellationToken cancellationToken = default);
 }

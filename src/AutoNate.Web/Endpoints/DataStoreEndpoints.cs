@@ -1,10 +1,12 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.DataStores;
 using AutoNate.Web.Services.DataStores.File;
 using AutoNate.Web.Services.DataStores.Sql;
+using AutoNate.Web.Services.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
@@ -22,16 +24,52 @@ public static class DataStoreEndpoints
     {
         var group = app.MapGroup("/api/datastores").RequireAuthorization();
 
-        group.MapGet("/", async (IDataStoreStore store, CancellationToken ct) =>
+        // Per-store View grants drive what shows up here — users with View on
+        // /datastore/<id> see that store, users with /datastore/* see all of
+        // them, users with no datastore grants get an empty list. The shape
+        // matches the RecordType / Role / Group list endpoints so the SPA
+        // doesn't need a special-case "you can see this but not open it"
+        // affordance. AuthorizedInHandler (vs RequireKindPermission) skips
+        // the binary List gate entirely: an actor with no grants gets back
+        // []; an actor with a single per-store grant gets back one row.
+        group.MapGet("/", async (
+            HttpContext http,
+            IAuthorizer authorizer,
+            IDbContextFactory<AutoNateDbContext> dbContextFactory,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
-            var rows = await store.ListAsync(ct);
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            var query = db.DataStores.AsNoTracking().OrderBy(d => d.Name);
+            var visible = await authorizer.FilterQueryAsync(
+                db, http.User, EntityKinds.DataStore, Actions.View, query, ct);
+            var rows = await visible.ToListAsync(ct);
+            await auditPublisher.PublishAsync(
+                DataStoreEventTopic.TopicName,
+                DataStoreEventTypes.ListViewed,
+                DataStoreResourceKinds.DataStore,
+                resource: null,
+                details: new { resultCount = rows.Count },
+                ct);
             return Results.Ok(rows);
-        }).RequireKindPermission(EntityKinds.DataStore, Actions.List);
+        }).AuthorizedInHandler("filters via FilterQueryAsync(DataStore, View); empty grants -> empty list");
 
-        group.MapGet("/{id:guid}", async (Guid id, IDataStoreStore store, CancellationToken ct) =>
+        group.MapGet("/{id:guid}", async (
+            Guid id,
+            IDataStoreStore store,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
             var row = await store.GetAsync(id, ct);
-            return row is null ? Results.NotFound() : Results.Ok(row);
+            if (row is null) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                DataStoreEventTopic.TopicName,
+                DataStoreEventTypes.Viewed,
+                DataStoreResourceKinds.DataStore,
+                resource: new { id = row.Id, name = row.Name },
+                details: null,
+                ct);
+            return Results.Ok(row);
         }).RequirePermission(EntityKinds.DataStore, Actions.View);
 
         group.MapPost("/", async (
@@ -39,6 +77,7 @@ public static class DataStoreEndpoints
             HttpContext http,
             IDataStoreStore store,
             SqlDataStoreProvisioner provisioner,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
@@ -66,6 +105,13 @@ public static class DataStoreEndpoints
                     // explicit reprovision endpoint added later.
                     await provisioner.ProvisionAsync(row.Id, ct);
                 }
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.Created,
+                    DataStoreResourceKinds.DataStore,
+                    resource: new { id = row.Id, name = row.Name },
+                    details: new { kind = kind.ToString() },
+                    ct);
                 return Results.Created($"/api/datastores/{row.Id}", row);
             }
             catch (DataStoreNameConflictException ex)
@@ -84,6 +130,7 @@ public static class DataStoreEndpoints
             UpdateDataStoreRequest request,
             HttpContext http,
             IDataStoreStore store,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
@@ -91,10 +138,22 @@ public static class DataStoreEndpoints
             if (actorId == Guid.Empty) return Results.Unauthorized();
             try
             {
+                // Snapshot the previous name for the audit event before we
+                // overwrite it — admins legitimately rename stores and the
+                // log needs to show "old → new" so the renamed row can be
+                // traced through prior events keyed on the old name.
+                var previous = await store.GetAsync(id, ct);
                 var row = await store.UpdateAsync(
                     id,
                     new UpdateDataStoreInput(request.Name, request.Description),
                     actorId, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.Updated,
+                    DataStoreResourceKinds.DataStore,
+                    resource: new { id = row.Id, name = row.Name },
+                    details: new { previousName = previous?.Name },
+                    ct);
                 return Results.Ok(row);
             }
             catch (DataStoreNotFoundException)
@@ -112,13 +171,27 @@ public static class DataStoreEndpoints
             Guid id,
             IDataStoreStore store,
             SqlDataStoreProvisioner provisioner,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
+            // Read the row before deleting so the audit event can carry the
+            // store name. The provisioner/delete chain leaves no rollback
+            // path if the audit publish fails, but the noop publisher is
+            // resilient and the Dapr publisher swallows + logs on failure.
+            var existing = await store.GetAsync(id, ct);
             // Sweep the per-datastore schema/role before deleting the row so
             // the cluster reflects the final state if either step fails.
             await provisioner.DeprovisionAsync(id, ct);
             var deleted = await store.DeleteAsync(id, ct);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            if (!deleted) return Results.NotFound();
+            await auditPublisher.PublishAsync(
+                DataStoreEventTopic.TopicName,
+                DataStoreEventTypes.Deleted,
+                DataStoreResourceKinds.DataStore,
+                resource: new { id, name = existing?.Name },
+                details: null,
+                ct);
+            return Results.NoContent();
         }).RequirePermission(EntityKinds.DataStore, Actions.Delete);
 
         // --- File-type sub-surface -------------------------------------------------
@@ -145,6 +218,7 @@ public static class DataStoreEndpoints
             Guid id,
             HttpContext http,
             IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
             if (!http.Request.HasFormContentType) return Results.BadRequest(new { reason = "Multipart form required." });
@@ -160,6 +234,23 @@ public static class DataStoreEndpoints
                 await using var stream = file.OpenReadStream();
                 var entity = await files.UploadAsync(
                     id, folder, file.FileName, file.ContentType, stream, actorId, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.FileUploaded,
+                    DataStoreResourceKinds.File,
+                    resource: new
+                    {
+                        id = entity.Id,
+                        datastoreId = id,
+                        folderPath = entity.FolderPath,
+                        filename = entity.Filename
+                    },
+                    details: new
+                    {
+                        sizeBytes = entity.SizeBytes,
+                        contentType = entity.ContentType
+                    },
+                    ct);
                 return Results.Created($"/api/datastores/{id}/files/{entity.Id}", entity);
             }
             catch (FileDataStoreNotFoundException)
@@ -178,11 +269,36 @@ public static class DataStoreEndpoints
           .DisableAntiforgery();
 
         group.MapGet("/{id:guid}/files/{fileId:guid}", async (
-            Guid id, Guid fileId, IFileDataStoreService files, CancellationToken ct) =>
+            Guid id,
+            Guid fileId,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
             try
             {
                 var (metadata, content) = await files.DownloadAsync(id, fileId, ct);
+                // Publish before streaming so the audit lands even if the
+                // client disconnects mid-stream. From an exfiltration-audit
+                // standpoint, the access decision is what matters; whether
+                // every byte actually reached the client is secondary.
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.FileDownloaded,
+                    DataStoreResourceKinds.File,
+                    resource: new
+                    {
+                        id = metadata.Id,
+                        datastoreId = id,
+                        folderPath = metadata.FolderPath,
+                        filename = metadata.Filename
+                    },
+                    details: new
+                    {
+                        sizeBytes = metadata.SizeBytes,
+                        contentType = metadata.ContentType
+                    },
+                    ct);
                 return Results.File(
                     content,
                     contentType: metadata.ContentType ?? "application/octet-stream",
@@ -195,11 +311,28 @@ public static class DataStoreEndpoints
         }).RequirePermission(EntityKinds.DataStore, Actions.View);
 
         group.MapDelete("/{id:guid}/files/{fileId:guid}", async (
-            Guid id, Guid fileId, IFileDataStoreService files, CancellationToken ct) =>
+            Guid id,
+            Guid fileId,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
             try
             {
-                await files.DeleteFileAsync(id, fileId, ct);
+                var deleted = await files.DeleteFileAsync(id, fileId, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.FileDeleted,
+                    DataStoreResourceKinds.File,
+                    resource: new
+                    {
+                        id = deleted.Id,
+                        datastoreId = id,
+                        folderPath = deleted.FolderPath,
+                        filename = deleted.Filename
+                    },
+                    details: new { sizeBytes = deleted.SizeBytes },
+                    ct);
                 return Results.NoContent();
             }
             catch (FileDataStoreFileNotFoundException)
@@ -209,12 +342,23 @@ public static class DataStoreEndpoints
         }).RequirePermission(EntityKinds.DataStore, Actions.Edit);
 
         group.MapPost("/{id:guid}/folders", async (
-            Guid id, FolderRequest request, IFileDataStoreService files, CancellationToken ct) =>
+            Guid id,
+            FolderRequest request,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
             try
             {
                 await files.CreateFolderAsync(id, request.FolderPath, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.FolderCreated,
+                    DataStoreResourceKinds.Folder,
+                    resource: new { datastoreId = id, path = request.FolderPath },
+                    details: null,
+                    ct);
                 return Results.NoContent();
             }
             catch (FileDataStoreNotFoundException)
@@ -232,17 +376,260 @@ public static class DataStoreEndpoints
         // explicit annotation. Take the folder path as a `path` query
         // parameter instead — `?path=/foo/bar` is the canonical shape.
         group.MapDelete("/{id:guid}/folders", async (
-            Guid id, string path, IFileDataStoreService files, CancellationToken ct) =>
+            Guid id,
+            string path,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(path)) return Results.BadRequest(new { reason = "path is required." });
             try
             {
-                await files.DeleteFolderAsync(id, path, ct);
+                var filesDeleted = await files.DeleteFolderAsync(id, path, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.FolderDeleted,
+                    DataStoreResourceKinds.Folder,
+                    resource: new { datastoreId = id, path },
+                    details: new { filesDeleted },
+                    ct);
                 return Results.NoContent();
             }
             catch (FileDataStoreNotFoundException)
             {
                 return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+        }).RequirePermission(EntityKinds.DataStore, Actions.Edit)
+          .DisableAntiforgery();
+
+        // Rename and/or move a single file. Both fields are optional; at
+        // least one must be set. Same-folder + same-name is a no-op 200.
+        group.MapPatch("/{id:guid}/files/{fileId:guid}", async (
+            Guid id,
+            Guid fileId,
+            RenameFileRequest request,
+            HttpContext http,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+            try
+            {
+                var (prevFolder, prevFilename, entity) = await files.RenameOrMoveFileAsync(
+                    id, fileId, request.NewFolderPath, request.NewFilename, actorId, ct);
+                // Classify by folder change: any folder delta is a move (the
+                // filename may have changed in the same call), no folder
+                // delta is a rename. The details payload disambiguates.
+                var folderChanged = !string.Equals(prevFolder, entity.FolderPath, StringComparison.Ordinal);
+                var filenameChanged = !string.Equals(prevFilename, entity.Filename, StringComparison.Ordinal);
+                if (folderChanged || filenameChanged)
+                {
+                    await auditPublisher.PublishAsync(
+                        DataStoreEventTopic.TopicName,
+                        folderChanged ? DataStoreEventTypes.FileMoved : DataStoreEventTypes.FileRenamed,
+                        DataStoreResourceKinds.File,
+                        resource: new
+                        {
+                            id = entity.Id,
+                            datastoreId = id,
+                            folderPath = entity.FolderPath,
+                            filename = entity.Filename
+                        },
+                        details: new
+                        {
+                            previousFolderPath = prevFolder,
+                            previousFilename = prevFilename
+                        },
+                        ct);
+                }
+                return Results.Ok(entity);
+            }
+            catch (FileDataStoreNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (FileDataStoreFileNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (FileDataStoreFilenameConflictException ex)
+            {
+                return Results.Conflict(new { reason = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+        }).RequirePermission(EntityKinds.DataStore, Actions.Edit)
+          .DisableAntiforgery();
+
+        // Copy a single file. Allocates a fresh fileId; the SPA refreshes
+        // the target folder to see the new entry rather than reading the
+        // response body, but we still return the new metadata for clients
+        // that want it.
+        group.MapPost("/{id:guid}/files/{fileId:guid}/copy", async (
+            Guid id,
+            Guid fileId,
+            CopyFileRequest request,
+            HttpContext http,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+            try
+            {
+                var (source, copy) = await files.CopyFileAsync(
+                    id, fileId, request.TargetFolderPath, request.NewFilename, actorId, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.FileCopied,
+                    DataStoreResourceKinds.File,
+                    resource: new
+                    {
+                        id = copy.Id,
+                        datastoreId = id,
+                        folderPath = copy.FolderPath,
+                        filename = copy.Filename
+                    },
+                    details: new
+                    {
+                        sourceFileId = source.Id,
+                        sourceFolderPath = source.FolderPath,
+                        sourceFilename = source.Filename,
+                        sizeBytes = copy.SizeBytes
+                    },
+                    ct);
+                return Results.Created(
+                    $"/api/datastores/{id}/files/{copy.Id}", copy);
+            }
+            catch (FileDataStoreNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (FileDataStoreFileNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (FileDataStoreFilenameConflictException ex)
+            {
+                return Results.Conflict(new { reason = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+        }).RequirePermission(EntityKinds.DataStore, Actions.Edit)
+          .DisableAntiforgery();
+
+        // Rename and/or move a folder. Rewrites folder_path on every file
+        // under the source prefix. The SPA computes newPath itself for
+        // both rename (same parent) and move (different parent) cases.
+        group.MapPatch("/{id:guid}/folders", async (
+            Guid id,
+            RenameFolderRequest request,
+            HttpContext http,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+            try
+            {
+                var filesAffected = await files.RenameOrMoveFolderAsync(id, request.Path, request.NewPath, actorId, ct);
+                // Classify by parent change: same parent = rename, different
+                // parent = move. The SPA uses the same PATCH for both, so we
+                // distinguish on the server based on path shape.
+                var prevParent = ParentOf(request.Path);
+                var newParent = ParentOf(request.NewPath);
+                var folderChanged = !string.Equals(prevParent, newParent, StringComparison.Ordinal);
+                if (filesAffected > 0)
+                {
+                    await auditPublisher.PublishAsync(
+                        DataStoreEventTopic.TopicName,
+                        folderChanged ? DataStoreEventTypes.FolderMoved : DataStoreEventTypes.FolderRenamed,
+                        DataStoreResourceKinds.Folder,
+                        resource: new { datastoreId = id, path = request.NewPath },
+                        details: new
+                        {
+                            previousPath = request.Path,
+                            filesAffected
+                        },
+                        ct);
+                }
+                return Results.NoContent();
+            }
+            catch (FileDataStoreNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (FileDataStoreFilenameConflictException ex)
+            {
+                return Results.Conflict(new { reason = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+        }).RequirePermission(EntityKinds.DataStore, Actions.Edit)
+          .DisableAntiforgery();
+
+        // Recursive folder copy. Every file under sourcePath gets a fresh
+        // id and a fresh on-disk byte copy at the corresponding location
+        // under targetPath.
+        group.MapPost("/{id:guid}/folders/copy", async (
+            Guid id,
+            CopyFolderRequest request,
+            HttpContext http,
+            IFileDataStoreService files,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+            try
+            {
+                var filesCopied = await files.CopyFolderAsync(id, request.SourcePath, request.TargetPath, actorId, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.FolderCopied,
+                    DataStoreResourceKinds.Folder,
+                    resource: new { datastoreId = id, path = request.TargetPath },
+                    details: new
+                    {
+                        sourcePath = request.SourcePath,
+                        filesCopied
+                    },
+                    ct);
+                return Results.NoContent();
+            }
+            catch (FileDataStoreNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (FileDataStoreFilenameConflictException ex)
+            {
+                return Results.Conflict(new { reason = ex.Message });
             }
             catch (InvalidOperationException ex)
             {
@@ -314,7 +701,11 @@ public static class DataStoreEndpoints
           .DisableAntiforgery();
 
         group.MapPost("/{id:guid}/tables", async (
-            Guid id, HttpContext http, CsvIngestor ingestor, CancellationToken ct) =>
+            Guid id,
+            HttpContext http,
+            CsvIngestor ingestor,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken ct) =>
         {
             if (!http.Request.HasFormContentType) return Results.BadRequest(new { reason = "Multipart form required." });
             var actorId = http.GetActorId();
@@ -343,6 +734,23 @@ public static class DataStoreEndpoints
             {
                 await using var stream = file.OpenReadStream();
                 var result = await ingestor.IngestAsync(id, tableName, columns, stream, actorId, ct);
+                await auditPublisher.PublishAsync(
+                    DataStoreEventTopic.TopicName,
+                    DataStoreEventTypes.TableIngested,
+                    DataStoreResourceKinds.Table,
+                    resource: new
+                    {
+                        id = result.TableId,
+                        datastoreId = id,
+                        schemaName = result.SchemaName,
+                        tableName = result.TableName
+                    },
+                    details: new
+                    {
+                        rowsInserted = result.RowsInserted,
+                        columnCount = columns.Count
+                    },
+                    ct);
                 return Results.Created($"/api/datastores/{id}/tables/{result.TableId}", result);
             }
             catch (InvalidOperationException ex)
@@ -354,6 +762,16 @@ public static class DataStoreEndpoints
 
         return app;
     }
+
+    // Parent of a POSIX-style path. "/" stays "/"; "/a" → "/"; "/a/b" → "/a".
+    // Used to distinguish a folder rename (same parent) from a folder move
+    // (different parent) for the audit event classification.
+    private static string ParentOf(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path == "/") return "/";
+        var idx = path.LastIndexOf('/');
+        return idx <= 0 ? "/" : path.Substring(0, idx);
+    }
 }
 
 public sealed record class CreateDataStoreRequest(string Name, string? Description, string Kind);
@@ -361,6 +779,14 @@ public sealed record class CreateDataStoreRequest(string Name, string? Descripti
 public sealed record class UpdateDataStoreRequest(string? Name, string? Description);
 
 public sealed record class FolderRequest(string FolderPath);
+
+public sealed record class RenameFileRequest(string? NewFolderPath, string? NewFilename);
+
+public sealed record class CopyFileRequest(string TargetFolderPath, string? NewFilename);
+
+public sealed record class RenameFolderRequest(string Path, string NewPath);
+
+public sealed record class CopyFolderRequest(string SourcePath, string TargetPath);
 
 public sealed record class DataStoreTableDto(
     Guid Id,

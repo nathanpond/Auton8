@@ -6,6 +6,7 @@ using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.BusWatcher;
 using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Dashboards;
+using AutoNate.Web.Services.DataStores;
 using AutoNate.Web.Services.ExternalConnections;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.Query;
@@ -81,7 +82,10 @@ public sealed class NatsStreamProvisioner(
             // AQL query.executed / query.failed events emitted by the /api/query
             // endpoint. Same outbox-loop failure mode as the dashboards stream
             // if this isn't registered.
-            $"{QueryEventTopic.TopicRoot}.>"
+            $"{QueryEventTopic.TopicRoot}.>",
+            // DataStore CRUD + file/folder operations + CSV ingest. Critical
+            // for "who took bytes out" audit via datastore.file.downloaded.
+            $"{DataStoreEventTopic.TopicRoot}.>"
         })
         {
             MaxAge = StreamMaxAge
