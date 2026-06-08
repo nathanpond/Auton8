@@ -49,11 +49,41 @@ export type CsvIngestPreview = {
   sampleRowCount: number;
 };
 
+export type CsvIngestMode = "insert" | "append" | "replace";
+
 export type CsvIngestResult = {
   tableId: string;
   schemaName: string;
   tableName: string;
   rowsInserted: number;
+  // Mode-outcome metadata. Replaced/Appended are mutually exclusive — both
+  // false on a fresh insert. PreviousRowCount is the row count of the
+  // existing table before this call (null on fresh insert). SchemaChanged
+  // is only meaningful on the replace path.
+  replaced: boolean;
+  appended: boolean;
+  previousRowCount: number | null;
+  schemaChanged: boolean;
+};
+
+// Server returns this 409 body when POST /tables hits an existing table.
+// conflictKind:
+//   - "exists": caller passed mode=insert (or omitted). Operator can pick
+//     append or replace from the conflict UI.
+//   - "schemaMismatch": caller passed mode=append but the schemas differ.
+//     The UI keeps the operator in the conflict view with Append disabled
+//     and the diff displayed; the only paths forward are Replace or Cancel.
+export type CsvIngestConflictKind = "exists" | "schemaMismatch";
+
+export type CsvIngestConflict = {
+  reason: string;
+  conflictKind: CsvIngestConflictKind;
+  existingTableId: string;
+  sanitizedTableName: string;
+  existingRowCount: number;
+  existingColumns: CsvColumn[];
+  // Only set when conflictKind === "schemaMismatch".
+  incomingColumns?: CsvColumn[];
 };
 
 // Returned by GET /api/datastores/{id}/tables — the metadata for every
@@ -107,6 +137,33 @@ export async function listDataStoreTables(
   signal?: AbortSignal
 ): Promise<DataStoreTable[]> {
   const res = await api.get<DataStoreTable[]>(`${BASE}/${id}/tables`, { signal });
+  return res.data;
+}
+
+export type DataStoreTablePreviewColumn = { name: string; postgresType: string };
+
+// Top-N preview of the rows physically stored in `ds_<id>.<table>`. Lives
+// on the DataStore detail page so an admin can sanity-check an ingest
+// without first defining a Dataset over the table. Server hard-caps the
+// row count (currently 200) regardless of what limit we pass.
+export type DataStoreTablePreview = {
+  schemaName: string;
+  tableName: string;
+  columns: DataStoreTablePreviewColumn[];
+  rows: Record<string, unknown>[];
+  totalRowCount: number;
+};
+
+export async function previewDataStoreTable(
+  id: string,
+  tableId: string,
+  limit?: number,
+  signal?: AbortSignal
+): Promise<DataStoreTablePreview> {
+  const res = await api.get<DataStoreTablePreview>(
+    `${BASE}/${id}/tables/${tableId}/preview`,
+    { params: limit ? { limit } : undefined, signal }
+  );
   return res.data;
 }
 
@@ -212,14 +269,32 @@ export async function ingestCsv(
   id: string,
   tableName: string,
   columns: CsvColumn[],
-  file: File
+  file: File,
+  mode: CsvIngestMode = "insert"
 ): Promise<CsvIngestResult> {
   const form = new FormData();
   form.append("tableName", tableName);
   form.append("columns", JSON.stringify(columns));
   form.append("file", file);
+  if (mode !== "insert") form.append("mode", mode);
   const res = await api.post<CsvIngestResult>(`${BASE}/${id}/tables`, form, {
     headers: { "Content-Type": "multipart/form-data" }
   });
   return res.data;
+}
+
+// Type guard for the 409 conflict body returned by POST /tables when a
+// table by that name already exists. Callers should catch the axios error,
+// inspect response.status === 409, and pass response.data through this to
+// drive the SPA's append/replace confirm flow.
+export function isCsvIngestConflict(body: unknown): body is CsvIngestConflict {
+  if (!body || typeof body !== "object") return false;
+  const b = body as Record<string, unknown>;
+  return (
+    typeof b.existingTableId === "string" &&
+    typeof b.sanitizedTableName === "string" &&
+    typeof b.existingRowCount === "number" &&
+    Array.isArray(b.existingColumns) &&
+    (b.conflictKind === "exists" || b.conflictKind === "schemaMismatch")
+  );
 }

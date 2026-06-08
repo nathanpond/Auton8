@@ -1505,6 +1505,21 @@ if (Directory.Exists(app.Environment.WebRootPath))
     app.UseStaticFiles();
     app.MapStaticAssets();
 
+    // /api/* must NOT fall through to the SPA index. A missing or
+    // unregistered API route should produce a clean 404; serving index.html
+    // for /api hides routing bugs and — because the static-files pipeline
+    // attaches ETag/Last-Modified — lets the browser heuristically cache
+    // the HTML body against that exact (path,query) pair. Subsequent
+    // requests then keep returning the cached HTML even after the real
+    // endpoint ships. Register a more-specific fallback for /api/{**rest}
+    // first; ASP.NET Core resolves the most-specific fallback template,
+    // so the catch-all SPA fallback below only runs for non-/api paths.
+    app.MapFallback("/api/{**rest}", (HttpContext http) =>
+    {
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.NotFound();
+    }).ExcludeFromDescription();
+
     // React SPA is the only UI now and is mounted at the site root. Any URL that isn't a
     // physical file or an explicitly-mapped endpoint falls back to the SPA index so
     // react-router can pick it up client-side.
