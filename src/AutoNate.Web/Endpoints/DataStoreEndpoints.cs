@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
@@ -8,6 +9,7 @@ using AutoNate.Web.Services.DataStores.File;
 using AutoNate.Web.Services.DataStores.Sql;
 using AutoNate.Web.Services.Events;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -679,6 +681,94 @@ public static class DataStoreEndpoints
             return Results.Ok(dtos);
         }).RequirePermission(EntityKinds.DataStore, Actions.View);
 
+        // Top-N sample of an already-ingested table. Powers the "what's in
+        // this datastore?" preview on the DataStore detail page so an admin
+        // can see column headers + a few rows without first having to
+        // define a Dataset over the table. SELECT-all against the per-store
+        // schema, hard-clamped to MaxPreviewRows so a bad ?limit value can't
+        // pull a million-row table over the wire.
+        group.MapGet("/{id:guid}/tables/{tableId:guid}/preview", async (
+            Guid id,
+            Guid tableId,
+            int? limit,
+            AutoNateDbContext db,
+            IDatastoresConnectionFactory connectionFactory,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            if (!connectionFactory.IsEnabled)
+            {
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+            var row = await db.DataStoreTables
+                .AsNoTracking()
+                .Where(t => t.Id == tableId && t.DataStoreId == id)
+                .SingleOrDefaultAsync(ct);
+            if (row is null) return Results.NotFound();
+
+            const int MaxPreviewRows = 200;
+            const int DefaultPreviewRows = 30;
+            var cap = limit is null or <= 0
+                ? DefaultPreviewRows
+                : Math.Min(limit.Value, MaxPreviewRows);
+
+            // SchemaName + TableName came from CsvIngestor's sanitiser
+            // (alphanumeric/underscore only). Quote-escape defensively anyway
+            // so a future migration that loosens the sanitiser doesn't open
+            // an injection channel here.
+            var quotedSchema = QuoteIdentifier(row.SchemaName);
+            var quotedTable = QuoteIdentifier(row.TableName);
+            var sql = $"SELECT * FROM {quotedSchema}.{quotedTable} LIMIT {cap}";
+
+            try
+            {
+                await using var conn = await connectionFactory.OpenAsync(ct);
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                var columns = new List<DataStoreTablePreviewColumn>(reader.FieldCount);
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    columns.Add(new DataStoreTablePreviewColumn(
+                        reader.GetName(i),
+                        reader.GetDataTypeName(i)));
+                }
+
+                var rows = new List<Dictionary<string, object?>>();
+                while (await reader.ReadAsync(ct))
+                {
+                    var dict = new Dictionary<string, object?>(reader.FieldCount, StringComparer.Ordinal);
+                    for (var i = 0; i < reader.FieldCount; i++)
+                    {
+                        // Project every value through ToString so System.Text.Json never
+                        // has to grapple with an Npgsql-specific type (NpgsqlRange,
+                        // NpgsqlInterval, JsonDocument, byte[], etc.). The preview is
+                        // a read-only UI sample, so the loss of fidelity vs. a typed
+                        // payload doesn't matter and the simpler shape side-steps a
+                        // whole class of "unsupported type" 500s.
+                        dict[reader.GetName(i)] = await reader.IsDBNullAsync(i, ct)
+                            ? null
+                            : Convert.ToString(reader.GetValue(i), CultureInfo.InvariantCulture);
+                    }
+                    rows.Add(dict);
+                }
+
+                return Results.Ok(new DataStoreTablePreviewDto(
+                    row.SchemaName, row.TableName, columns, rows, row.RowCount));
+            }
+            catch (PostgresException ex)
+            {
+                var logger = loggerFactory.CreateLogger("AutoNate.Web.Endpoints.DataStoreEndpoints");
+                logger.LogWarning(ex,
+                    "Datastore table preview failed for {Schema}.{Table} (SqlState {SqlState}).",
+                    row.SchemaName, row.TableName, ex.SqlState);
+                return Results.Problem(
+                    title: "Preview failed",
+                    detail: $"Postgres {ex.SqlState}: {ex.MessageText}",
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        }).RequirePermission(EntityKinds.DataStore, Actions.View);
+
         group.MapPost("/{id:guid}/tables/preview", async (
             Guid id, HttpContext http, CsvIngestor ingestor, CancellationToken ct) =>
         {
@@ -721,7 +811,14 @@ public static class DataStoreEndpoints
             List<CsvColumn>? columns;
             try
             {
-                columns = JsonSerializer.Deserialize<List<CsvColumn>>(columnsJson);
+                // JsonSerializerDefaults.Web = camelCase property matching, the
+                // shape the SPA sends back from PreviewAsync's response
+                // ({"name": "...", "postgresType": "..."}). With the default
+                // (PascalCase) options both fields deserialize as null, and the
+                // ingestor's SanitizeColumnName fallback renames every column
+                // to col_1, col_2, ... silently.
+                columns = JsonSerializer.Deserialize<List<CsvColumn>>(
+                    columnsJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
             }
             catch (JsonException ex)
             {
@@ -730,13 +827,48 @@ public static class DataStoreEndpoints
             if (columns is null || columns.Count == 0)
                 return Results.BadRequest(new { reason = "At least one column is required." });
 
+            // Default opt-out: a fresh re-ingest of the same CSV without an
+            // explicit mode returns 409 so the SPA can show the schema-diff
+            // / bound-dataset impact warning and let the operator pick
+            // append vs replace. Accepted values: "insert" (default),
+            // "append", "replace".
+            var modeRaw = form["mode"].FirstOrDefault();
+            if (!TryParseIngestMode(modeRaw, out var mode))
+            {
+                return Results.BadRequest(new
+                {
+                    reason = $"Unknown ingest mode '{modeRaw}'. Use 'insert', 'append', or 'replace'."
+                });
+            }
+
             try
             {
                 await using var stream = file.OpenReadStream();
-                var result = await ingestor.IngestAsync(id, tableName, columns, stream, actorId, ct);
+                var result = await ingestor.IngestAsync(
+                    id, tableName, columns, stream, actorId, mode, ct);
+                var eventType = result.Appended
+                    ? DataStoreEventTypes.TableAppended
+                    : result.Replaced
+                        ? DataStoreEventTypes.TableReplaced
+                        : DataStoreEventTypes.TableIngested;
+                object details = result.Appended
+                    ? new
+                    {
+                        rowsAppended = result.RowsInserted,
+                        totalRowsAfter = (result.PreviousRowCount ?? 0) + result.RowsInserted,
+                        previousRowCount = result.PreviousRowCount,
+                        columnCount = columns.Count
+                    }
+                    : new
+                    {
+                        rowsInserted = result.RowsInserted,
+                        columnCount = columns.Count,
+                        previousRowCount = result.PreviousRowCount,
+                        schemaChanged = result.SchemaChanged
+                    };
                 await auditPublisher.PublishAsync(
                     DataStoreEventTopic.TopicName,
-                    DataStoreEventTypes.TableIngested,
+                    eventType,
                     DataStoreResourceKinds.Table,
                     resource: new
                     {
@@ -745,13 +877,37 @@ public static class DataStoreEndpoints
                         schemaName = result.SchemaName,
                         tableName = result.TableName
                     },
-                    details: new
-                    {
-                        rowsInserted = result.RowsInserted,
-                        columnCount = columns.Count
-                    },
+                    details: details,
                     ct);
                 return Results.Created($"/api/datastores/{id}/tables/{result.TableId}", result);
+            }
+            catch (DataStoreTableExistsException ex)
+            {
+                return Results.Conflict(new
+                {
+                    reason = ex.Message,
+                    conflictKind = "exists",
+                    existingTableId = ex.ExistingTableId,
+                    sanitizedTableName = ex.SanitizedTableName,
+                    existingRowCount = ex.ExistingRowCount,
+                    existingColumns = ex.ExistingColumns
+                });
+            }
+            catch (DataStoreTableSchemaMismatchException ex)
+            {
+                // Distinct conflictKind so the SPA can keep the operator in
+                // the conflict view with Append disabled (rather than
+                // bouncing them back to ready as a generic failure).
+                return Results.Conflict(new
+                {
+                    reason = ex.Message,
+                    conflictKind = "schemaMismatch",
+                    existingTableId = ex.ExistingTableId,
+                    sanitizedTableName = ex.SanitizedTableName,
+                    existingRowCount = ex.ExistingRowCount,
+                    existingColumns = ex.ExistingColumns,
+                    incomingColumns = ex.IncomingColumns
+                });
             }
             catch (InvalidOperationException ex)
             {
@@ -771,6 +927,36 @@ public static class DataStoreEndpoints
         if (string.IsNullOrEmpty(path) || path == "/") return "/";
         var idx = path.LastIndexOf('/');
         return idx <= 0 ? "/" : path.Substring(0, idx);
+    }
+
+    private static string QuoteIdentifier(string identifier)
+        => "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+
+    // Parse the `mode` form field on POST /tables. Empty/null = Insert
+    // (the default), matching the prior behavior where no mode field meant
+    // "fail with 409 if the table already exists."
+    private static bool TryParseIngestMode(string? raw, out CsvIngestMode mode)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            mode = CsvIngestMode.Insert;
+            return true;
+        }
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "insert":
+                mode = CsvIngestMode.Insert;
+                return true;
+            case "append":
+                mode = CsvIngestMode.Append;
+                return true;
+            case "replace":
+                mode = CsvIngestMode.Replace;
+                return true;
+            default:
+                mode = CsvIngestMode.Insert;
+                return false;
+        }
     }
 }
 
@@ -794,3 +980,12 @@ public sealed record class DataStoreTableDto(
     string TableName,
     IReadOnlyList<CsvColumn> Columns,
     long RowCount);
+
+public sealed record class DataStoreTablePreviewColumn(string Name, string PostgresType);
+
+public sealed record class DataStoreTablePreviewDto(
+    string SchemaName,
+    string TableName,
+    IReadOnlyList<DataStoreTablePreviewColumn> Columns,
+    IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
+    long TotalRowCount);

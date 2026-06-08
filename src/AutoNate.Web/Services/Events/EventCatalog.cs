@@ -1656,7 +1656,15 @@ public static class EventCatalog
                 new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.TableIngested,
                     "A CSV file was successfully ingested into a SQL-type data store as a new table.",
                     "Fires from POST /api/datastores/{id}/tables on the success path, after the per-store schema's table was created and rows committed. The preview endpoint (POST /tables/preview) does not emit an event — preview does not touch persistent state.",
-                    ["resource: { id (tableId), datastoreId, schemaName, tableName }.", "details: { rowsInserted, columnCount }."])
+                    ["resource: { id (tableId), datastoreId, schemaName, tableName }.", "details: { rowsInserted, columnCount }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.TableReplaced,
+                    "A CSV re-ingest dropped the prior physical table and replaced it with fresh contents.",
+                    "Fires from POST /api/datastores/{id}/tables when the caller passed mode=replace and a metadata row for (datastoreId, tableName) already existed. The schema-change branch is reported in details so downstream Virtual datasets bound to the same SourceTableName can be reconciled.",
+                    ["resource: { id (tableId), datastoreId, schemaName, tableName }.", "details: { rowsInserted, columnCount, previousRowCount, schemaChanged }."]),
+                new EventCatalogEntry(DataStoreEventTopic.TopicName, DataStoreEventTypes.TableAppended,
+                    "Additional CSV rows were appended to an existing table after a schema match was verified.",
+                    "Fires from POST /api/datastores/{id}/tables when the caller passed mode=append. Schema mismatch short-circuits with a 409 before any write, so this event always implies an additive same-schema write.",
+                    ["resource: { id (tableId), datastoreId, schemaName, tableName }.", "details: { rowsAppended, totalRowsAfter, previousRowCount, columnCount }."])
             ])
     ];
 

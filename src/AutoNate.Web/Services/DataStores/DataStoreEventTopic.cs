@@ -57,4 +57,17 @@ public static class DataStoreEventTypes
     // doesn't touch persistent state and would flood the log on every CSV
     // drag-into-the-modal.
     public const string TableIngested = "datastore.table.ingested";
+
+    // Same endpoint, but the caller passed replaceExisting=true and the
+    // target table already existed — the prior physical table was dropped
+    // and a fresh one created with the new CSV's contents. Distinct from
+    // Ingested so audit consumers can flag overwrites (which can break
+    // downstream Virtual datasets bound to the same SourceTableName).
+    public const string TableReplaced = "datastore.table.replaced";
+
+    // Same endpoint, mode=append. Schema-matched the existing table and the
+    // new CSV's rows were COPYed in alongside the prior data; the metadata
+    // RowCount was incremented (not reset). Append refuses when schemas
+    // differ, so this event always implies a same-schema additive write.
+    public const string TableAppended = "datastore.table.appended";
 }

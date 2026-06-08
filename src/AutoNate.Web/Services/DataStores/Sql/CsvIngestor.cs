@@ -17,7 +17,63 @@ public sealed record class CsvIngestPreview(
 
 public sealed record class CsvColumn(string Name, string PostgresType);
 
-public sealed record class CsvIngestResult(Guid TableId, string SchemaName, string TableName, long RowsInserted);
+// Drives CsvIngestor.IngestAsync when the target table already exists.
+// Insert = fail with a conflict so the operator can choose what to do.
+// Append = add the new rows on top, but only if (name,type) sets match.
+// Replace = drop + recreate + COPY the new rows.
+public enum CsvIngestMode
+{
+    Insert = 0,
+    Append = 1,
+    Replace = 2,
+}
+
+public sealed record class CsvIngestResult(
+    Guid TableId,
+    string SchemaName,
+    string TableName,
+    long RowsInserted,
+    bool Replaced,
+    bool Appended,
+    long? PreviousRowCount,
+    bool SchemaChanged);
+
+// Thrown by CsvIngestor.IngestAsync when a metadata row for the target
+// (datastoreId, sanitizedTable) already exists and the caller did not opt
+// in to replace. The endpoint converts this to a 409 carrying these fields
+// so the SPA can present the schema-diff / bound-dataset impact warning
+// before retrying with mode=replace.
+public sealed class DataStoreTableExistsException(
+    Guid existingTableId,
+    string sanitizedTableName,
+    long existingRowCount,
+    IReadOnlyList<CsvColumn> existingColumns)
+    : Exception($"A table named '{sanitizedTableName}' already exists in this datastore.")
+{
+    public Guid ExistingTableId { get; } = existingTableId;
+    public string SanitizedTableName { get; } = sanitizedTableName;
+    public long ExistingRowCount { get; } = existingRowCount;
+    public IReadOnlyList<CsvColumn> ExistingColumns { get; } = existingColumns;
+}
+
+// Thrown when mode=Append but the new CSV's (name,type) set differs from
+// the existing table's schema. Carries both schemas so the endpoint can
+// surface a 409 the SPA renders as a same-as-conflict view with the
+// Append button forced disabled.
+public sealed class DataStoreTableSchemaMismatchException(
+    Guid existingTableId,
+    string sanitizedTableName,
+    long existingRowCount,
+    IReadOnlyList<CsvColumn> existingColumns,
+    IReadOnlyList<CsvColumn> incomingColumns)
+    : Exception($"Append rejected — table '{sanitizedTableName}' has a different schema than the uploaded CSV.")
+{
+    public Guid ExistingTableId { get; } = existingTableId;
+    public string SanitizedTableName { get; } = sanitizedTableName;
+    public long ExistingRowCount { get; } = existingRowCount;
+    public IReadOnlyList<CsvColumn> ExistingColumns { get; } = existingColumns;
+    public IReadOnlyList<CsvColumn> IncomingColumns { get; } = incomingColumns;
+}
 
 // CSV → Postgres table ingestor for SqlType DataStores. v1 is straight-
 // through: read the header, infer column types from a sample, CREATE
@@ -81,6 +137,7 @@ public sealed class CsvIngestor(
         IReadOnlyList<CsvColumn> columns,
         Stream csv,
         Guid actorId,
+        CsvIngestMode mode = CsvIngestMode.Insert,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(csv);
@@ -106,9 +163,75 @@ public sealed class CsvIngestor(
         var schema = SqlDataStoreProvisioner.SchemaNameFor(dataStoreId);
         var qualified = $"\"{schema}\".\"{sanitizedTable}\"";
 
-        // Create table.
-        await using (var conn = await connectionFactory.OpenAsync(cancellationToken))
+        // Conflict + mode handling. The (datastoreId, schemaName, tableName)
+        // unique index would catch a duplicate at SaveChanges time, but EF
+        // surfaces that as a generic DbUpdateException — much harder for the
+        // endpoint layer to translate into a structured 409 carrying the
+        // existing schema. Do the lookup explicitly so the conflict path is
+        // first-class. The race against a concurrent ingest still leans on
+        // the unique constraint; that path produces a 500 which is the right
+        // outcome for a genuinely concurrent operator action.
+        await using var preDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var existing = await preDb.DataStoreTables.AsNoTracking()
+            .SingleOrDefaultAsync(
+                t => t.DataStoreId == dataStoreId && t.TableName == sanitizedTable,
+                cancellationToken);
+
+        var schemaChanged = false;
+        long? previousRowCount = null;
+        var isAppend = false;
+        if (existing is not null)
         {
+            var existingColumns = DecodeColumns(existing.ColumnSchemaJson);
+            previousRowCount = existing.RowCount;
+
+            switch (mode)
+            {
+                case CsvIngestMode.Insert:
+                    throw new DataStoreTableExistsException(
+                        existing.Id, sanitizedTable, existing.RowCount, existingColumns);
+
+                case CsvIngestMode.Append:
+                    // Append refuses on any schema delta — the COPY would
+                    // either fail on a missing column or silently NULL out
+                    // a value the operator expected to be present. Force
+                    // them through the conflict UI to either fix the CSV or
+                    // pick Replace explicitly.
+                    if (!ColumnsEqualBySet(existingColumns, columns))
+                    {
+                        throw new DataStoreTableSchemaMismatchException(
+                            existing.Id, sanitizedTable, existing.RowCount,
+                            existingColumns, columns);
+                    }
+                    // Use the existing table's column order/types for the
+                    // COPY so a reordered CSV still lines up correctly.
+                    columns = existingColumns;
+                    isAppend = true;
+                    break;
+
+                case CsvIngestMode.Replace:
+                    schemaChanged = !ColumnsEqualBySet(existingColumns, columns);
+                    // Drop the physical table; the metadata row gets reused
+                    // below so per-table grants + dataset bindings keep
+                    // pointing at the same record.
+                    await using (var dropConn = await connectionFactory.OpenAsync(cancellationToken))
+                    {
+                        await using var dropCmd = new NpgsqlCommand($"DROP TABLE IF EXISTS {qualified} CASCADE;", dropConn);
+                        await dropCmd.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                    log.LogInformation(
+                        "Dropped existing table {Schema}.{Table} for replace-ingest in datastore {Id}.",
+                        schema, sanitizedTable, dataStoreId);
+                    break;
+            }
+        }
+
+        // Create table. Append re-runs CREATE TABLE IF NOT EXISTS as a
+        // belt-and-braces check; the schema-set match above already
+        // verified the columns match.
+        if (!isAppend)
+        {
+            await using var conn = await connectionFactory.OpenAsync(cancellationToken);
             var columnDefs = string.Join(", ", columns.Select(c =>
                 $"\"{c.Name}\" {EnsureSafePostgresType(c.PostgresType)}"));
             var createSql = $"CREATE TABLE IF NOT EXISTS {qualified} ({columnDefs});";
@@ -129,6 +252,20 @@ public sealed class CsvIngestor(
             if (!await parser.ReadAsync() || !parser.ReadHeader())
                 throw new InvalidOperationException("CSV has no header row.");
 
+            // For append, the canonical column order comes from the existing
+            // table — map the incoming CSV's header positions to the
+            // canonical names so the COPY writes the right field into the
+            // right column even if the CSV's columns are reordered.
+            var csvHeaders = parser.HeaderRecord
+                ?? throw new InvalidOperationException("CSV header could not be parsed.");
+            var csvHeaderIndexByCanonicalName = new Dictionary<string, int>(columns.Count, StringComparer.Ordinal);
+            for (var i = 0; i < csvHeaders.Length; i++)
+            {
+                var canonical = SanitizeColumnName(csvHeaders[i], i);
+                if (!csvHeaderIndexByCanonicalName.ContainsKey(canonical))
+                    csvHeaderIndexByCanonicalName[canonical] = i;
+            }
+
             await using var conn = await connectionFactory.OpenAsync(cancellationToken);
             var columnList = string.Join(", ", columns.Select(c => $"\"{c.Name}\""));
             var copySql = $"COPY {qualified} ({columnList}) FROM STDIN (FORMAT BINARY)";
@@ -138,7 +275,8 @@ public sealed class CsvIngestor(
                 await writer.StartRowAsync(cancellationToken);
                 for (var i = 0; i < columns.Count; i++)
                 {
-                    var raw = parser.GetField(i);
+                    var csvIdx = csvHeaderIndexByCanonicalName.TryGetValue(columns[i].Name, out var idx) ? idx : i;
+                    var raw = parser.GetField(csvIdx);
                     if (raw is null || raw.Length == 0)
                     {
                         await writer.WriteNullAsync(cancellationToken);
@@ -151,25 +289,81 @@ public sealed class CsvIngestor(
             await writer.CompleteAsync(cancellationToken);
         }
 
-        // Metadata row.
+        // Metadata row — UPDATE on replace/append (preserves Id), INSERT on
+        // first ingest. Append adds to the prior row count; replace resets.
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = new DataStoreTable
+        DataStoreTable entity;
+        if (existing is not null)
         {
-            Id = Guid.NewGuid(),
-            DataStoreId = dataStoreId,
-            SchemaName = schema,
-            TableName = sanitizedTable,
-            ColumnSchemaJson = JsonSerializer.Serialize(columns),
-            RowCount = rowsInserted,
-            CreatedBy = actorId,
-            CreatedAtUtc = DateTime.UtcNow,
-        };
-        db.DataStoreTables.Add(entity);
+            entity = await db.DataStoreTables.SingleAsync(t => t.Id == existing.Id, cancellationToken);
+            if (isAppend)
+            {
+                entity.RowCount = existing.RowCount + rowsInserted;
+                // ColumnSchemaJson stays as-is — we already enforced match.
+            }
+            else
+            {
+                entity.ColumnSchemaJson = JsonSerializer.Serialize(columns);
+                entity.RowCount = rowsInserted;
+            }
+        }
+        else
+        {
+            entity = new DataStoreTable
+            {
+                Id = Guid.NewGuid(),
+                DataStoreId = dataStoreId,
+                SchemaName = schema,
+                TableName = sanitizedTable,
+                ColumnSchemaJson = JsonSerializer.Serialize(columns),
+                RowCount = rowsInserted,
+                CreatedBy = actorId,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            db.DataStoreTables.Add(entity);
+        }
         await db.SaveChangesAsync(cancellationToken);
         log.LogInformation(
-            "CSV ingested {Rows} rows into {Schema}.{Table} for datastore {Id}.",
+            "CSV {Mode} {Rows} rows into {Schema}.{Table} for datastore {Id}.",
+            existing is null ? "ingested" : isAppend ? "appended" : "re-ingested",
             rowsInserted, schema, sanitizedTable, dataStoreId);
-        return new CsvIngestResult(entity.Id, schema, sanitizedTable, rowsInserted);
+        return new CsvIngestResult(
+            entity.Id, schema, sanitizedTable, rowsInserted,
+            Replaced: existing is not null && !isAppend,
+            Appended: isAppend,
+            PreviousRowCount: previousRowCount,
+            SchemaChanged: schemaChanged);
+    }
+
+    private static IReadOnlyList<CsvColumn> DecodeColumns(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<CsvColumn>();
+        try
+        {
+            return JsonSerializer.Deserialize<List<CsvColumn>>(json) ?? new List<CsvColumn>();
+        }
+        catch (JsonException)
+        {
+            // A hand-edited or corrupted row shouldn't block the replace
+            // path — fall through with an empty list, which forces the
+            // schemaChanged flag on (every new column looks like an add).
+            return Array.Empty<CsvColumn>();
+        }
+    }
+
+    // Set-equality on (name, postgresType). Order doesn't matter — COPY
+    // names the columns explicitly — but each column in one side must have
+    // an exact match (same name + same type) in the other.
+    private static bool ColumnsEqualBySet(IReadOnlyList<CsvColumn> a, IReadOnlyList<CsvColumn> b)
+    {
+        if (a.Count != b.Count) return false;
+        var aByName = a.ToDictionary(c => c.Name, c => c.PostgresType, StringComparer.Ordinal);
+        foreach (var col in b)
+        {
+            if (!aByName.TryGetValue(col.Name, out var aType)) return false;
+            if (!string.Equals(aType, col.PostgresType, StringComparison.Ordinal)) return false;
+        }
+        return true;
     }
 
     private static async Task WriteTypedAsync(
