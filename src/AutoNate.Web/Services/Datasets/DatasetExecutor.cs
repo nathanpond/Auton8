@@ -91,7 +91,9 @@ public sealed class DatasetExecutor(
         await using var conn = await connectionFactory.OpenAsync(cancellationToken);
         built.Command.Connection = conn;
 
-        var columns = schema.Select(c => new QueryColumnMeta(c.Name, c.DataType)).ToList();
+        var columns = built.Projection.Count > 0
+            ? built.Projection.Select(p => new QueryColumnMeta(p.DisplayName, p.DataType)).ToList()
+            : schema.Select(c => new QueryColumnMeta(c.Name, c.DataType)).ToList();
         var rows = new List<IReadOnlyDictionary<string, object?>>();
 
         await using var reader = await built.Command.ExecuteReaderAsync(cancellationToken);

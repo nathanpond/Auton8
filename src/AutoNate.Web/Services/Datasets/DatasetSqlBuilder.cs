@@ -13,7 +13,15 @@ namespace AutoNate.Web.Services.Datasets;
 // — this builder returns null when it can't translate cleanly.
 internal static class DatasetSqlBuilder
 {
-    public sealed record Built(NpgsqlCommand Command, int ParameterCount);
+    internal sealed record ProjectionItem(
+        string DisplayName,
+        QueryDataType DataType,
+        AqlSelectItem Source);
+
+    public sealed record Built(
+        NpgsqlCommand Command,
+        int ParameterCount,
+        IReadOnlyList<ProjectionItem> Projection);
 
     public static Built Build(
         string schemaName,
@@ -26,14 +34,13 @@ internal static class DatasetSqlBuilder
         var sb = new StringBuilder();
         var byName = schema.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
 
-        // Projection: COLUMNS or `*`. Aggregates aren't pushed down in v1 —
-        // any aggregate falls back to in-memory grouping; the caller checks
-        // query.Columns shape before invoking this builder.
+        var projection = ResolveProjection(query, byName);
+
         sb.Append("SELECT ");
-        if (query.Columns is { Count: > 0 } cols && cols.All(c => !c.IsAggregate))
+        if (projection.Count > 0)
         {
-            sb.Append(string.Join(", ",
-                cols.Select(c => QuoteIdent(c.Field!))));
+            sb.Append(string.Join(", ", projection.Select(p =>
+                ProjectionToSql(p.Source) + " AS " + QuoteIdent(p.DisplayName))));
         }
         else
         {
@@ -57,14 +64,35 @@ internal static class DatasetSqlBuilder
             }
         }
 
+        if (query.Group is { Count: > 0 } group)
+        {
+            var groupParts = group
+                .Where(g => byName.ContainsKey(g))
+                .Select(QuoteIdent)
+                .ToList();
+            if (groupParts.Count > 0)
+            {
+                sb.Append(" GROUP BY ");
+                sb.Append(string.Join(", ", groupParts));
+            }
+        }
+
         if (query.OrderBy is { Count: > 0 })
         {
             var parts = new List<string>();
             foreach (var o in query.OrderBy)
             {
-                if (o.Item.IsAggregate || o.Item.Field is null) continue;
-                if (!byName.ContainsKey(o.Item.Field)) continue;
-                parts.Add($"{QuoteIdent(o.Item.Field)} {(o.Descending ? "DESC" : "ASC")}");
+                string? expr = null;
+                if (o.Item.IsAggregate)
+                {
+                    expr = ProjectionToSql(o.Item);
+                }
+                else if (o.Item.Field is not null && byName.ContainsKey(o.Item.Field))
+                {
+                    expr = QuoteIdent(o.Item.Field);
+                }
+                if (expr is null) continue;
+                parts.Add($"{expr} {(o.Descending ? "DESC" : "ASC")}");
             }
             if (parts.Count > 0)
             {
@@ -81,7 +109,78 @@ internal static class DatasetSqlBuilder
         }
 
         cmd.CommandText = sb.ToString();
-        return new Built(cmd, paramIndex);
+        return new Built(cmd, paramIndex, projection);
+    }
+
+    // Resolve the projected columns. Explicit COLUMNS wins. If GROUP is
+    // set without COLUMNS, project the group columns (a bare `SELECT *`
+    // would violate aggregation rules). Otherwise leave empty so the
+    // caller emits `*`.
+    private static IReadOnlyList<ProjectionItem> ResolveProjection(
+        AqlQuery query,
+        IReadOnlyDictionary<string, QueryColumn> byName)
+    {
+        if (query.Columns is { Count: > 0 } cols)
+        {
+            return cols.Select(c => ToProjection(c, byName)).ToList();
+        }
+        if (query.Group is { Count: > 0 } group)
+        {
+            return group
+                .Where(g => byName.ContainsKey(g))
+                .Select(g => new ProjectionItem(
+                    g, byName[g].DataType, new AqlSelectItem(g, null, null)))
+                .ToList();
+        }
+        return Array.Empty<ProjectionItem>();
+    }
+
+    private static ProjectionItem ToProjection(
+        AqlSelectItem item,
+        IReadOnlyDictionary<string, QueryColumn> byName)
+    {
+        if (item.IsAggregate)
+        {
+            // COUNT/AVG always return numeric; MIN/MAX/MEDIAN keep the
+            // underlying column's type when known.
+            var dt = QueryDataType.Number;
+            if (item.AggregateFn is not "COUNT" and not "AVG"
+                && item.AggregateField is not null
+                && byName.TryGetValue(item.AggregateField, out var aggCol))
+            {
+                dt = aggCol.DataType;
+            }
+            return new ProjectionItem(item.DisplayName, dt, item);
+        }
+        var dataType = item.Field is not null && byName.TryGetValue(item.Field, out var c)
+            ? c.DataType
+            : QueryDataType.String;
+        return new ProjectionItem(item.DisplayName, dataType, item);
+    }
+
+    private static string ProjectionToSql(AqlSelectItem item)
+    {
+        if (item.IsAggregate)
+        {
+            var fn = item.AggregateFn!;
+            if (item.AggregateField is null)
+            {
+                return fn == "COUNT"
+                    ? "COUNT(*)"
+                    : throw new InvalidOperationException($"{fn}() requires a column argument.");
+            }
+            var expr = QuoteIdent(item.AggregateField);
+            return fn switch
+            {
+                "COUNT" => $"COUNT({expr})",
+                "MIN" => $"MIN({expr})",
+                "MAX" => $"MAX({expr})",
+                "AVG" => $"AVG({expr})",
+                "MEDIAN" => $"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {expr})",
+                _ => throw new InvalidOperationException($"Unknown aggregate '{fn}'."),
+            };
+        }
+        return QuoteIdent(item.Field!);
     }
 
     private static int? ResolveLimit(int? userLimit, int? hardCap)
