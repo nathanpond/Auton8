@@ -75,6 +75,28 @@ export function QuadrantChartConfigForm({
     return groups;
   }, [fieldsQuery.data]);
 
+  // Label column options: any record field, regardless of type. Labels
+  // identify individual points (e.g. record name, job title) so we don't
+  // restrict by data type or cardinality.
+  const recordLabelOptions = useMemo(() => {
+    const groups: { group: string; items: { value: string; label: string }[] }[] = [
+      { group: "Built-in", items: RECORD_BUILTIN_CATEGORY_OPTIONS.map((o) => ({ ...o })) }
+    ];
+    const fields = (fieldsQuery.data ?? [])
+      .filter((f) => !f.isArchived)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName));
+    if (fields.length > 0) {
+      groups.push({
+        group: "Custom fields",
+        items: fields.map((f) => ({
+          value: `${RECORD_CUSTOM_FIELD_PREFIX}${f.fieldKey}`,
+          label: f.displayName
+        }))
+      });
+    }
+    return groups;
+  }, [fieldsQuery.data]);
+
   // AQL column probing — same hook used by MantineChartConfigForm so the
   // result cache is shared. Keys distinguish the quadrant probe from the
   // bar/line/etc probe because the user might be configuring multiple
@@ -134,6 +156,7 @@ export function QuadrantChartConfigForm({
   // the built-in slot) so we render the selects either way.
   const numericOptions = isRecords ? recordNumericOptions : isAqlSource ? aqlNumericOptions : [];
   const categoryOptions = isRecords ? recordCategoryOptions : isAqlSource ? aqlAllColumnOptions : [];
+  const labelOptions = isRecords ? recordLabelOptions : isAqlSource ? aqlAllColumnOptions : [];
 
   const numericDescription = isRecords
     ? !recordTypeId
@@ -224,8 +247,28 @@ export function QuadrantChartConfigForm({
             comboboxProps={{ zIndex: 1080 }}
           />
           <Select
+            label="Label column (optional)"
+            description="Per-point identity shown as the tooltip header on hover (e.g. record name, job title). Any column."
+            data={
+              [
+                { value: NO_SELECTION_SENTINEL, label: "None — no label" },
+                ...((labelOptions as unknown) as Array<
+                  { value: string; label: string } | { group: string; items: { value: string; label: string }[] }
+                >)
+              ] as never
+            }
+            value={selectedOr(value.labelColumn)}
+            onChange={(v) =>
+              onChange({ ...value, labelColumn: v === NO_SELECTION_SENTINEL ? "" : (v ?? "") })
+            }
+            allowDeselect={false}
+            searchable
+            disabled={numericDisabled}
+            comboboxProps={{ zIndex: 1080 }}
+          />
+          <Select
             label="Category column (optional)"
-            description="Categorical column used to color points and show a legend."
+            description="Categorical column used to color points and show a legend. Best with up to 8 unique values — beyond that all points share a single color."
             data={
               [
                 { value: NO_SELECTION_SENTINEL, label: "None — single color" },
@@ -252,46 +295,10 @@ export function QuadrantChartConfigForm({
       )}
 
       <Accordion variant="separated" defaultValue={null}>
-        <Accordion.Item value="quadrant-labels">
-          <Accordion.Control>Quadrant labels & midpoints</Accordion.Control>
+        <Accordion.Item value="axis-labels">
+          <Accordion.Control>Axis labels</Accordion.Control>
           <Accordion.Panel>
             <Stack gap="sm">
-              <TextInput
-                label="Top-right label"
-                value={value.quadrantLabelTopRight}
-                onChange={(e) => onChange({ ...value, quadrantLabelTopRight: e.currentTarget.value })}
-              />
-              <TextInput
-                label="Top-left label"
-                value={value.quadrantLabelTopLeft}
-                onChange={(e) => onChange({ ...value, quadrantLabelTopLeft: e.currentTarget.value })}
-              />
-              <TextInput
-                label="Bottom-left label"
-                value={value.quadrantLabelBottomLeft}
-                onChange={(e) => onChange({ ...value, quadrantLabelBottomLeft: e.currentTarget.value })}
-              />
-              <TextInput
-                label="Bottom-right label"
-                value={value.quadrantLabelBottomRight}
-                onChange={(e) => onChange({ ...value, quadrantLabelBottomRight: e.currentTarget.value })}
-              />
-              <NumberInput
-                label="X midpoint"
-                description="Leave blank for median of the data."
-                value={value.xMidpoint ?? ""}
-                onChange={(v) =>
-                  onChange({ ...value, xMidpoint: typeof v === "number" ? v : null })
-                }
-              />
-              <NumberInput
-                label="Y midpoint"
-                description="Leave blank for median of the data."
-                value={value.yMidpoint ?? ""}
-                onChange={(v) =>
-                  onChange({ ...value, yMidpoint: typeof v === "number" ? v : null })
-                }
-              />
               <TextInput
                 label="X axis label"
                 value={value.xAxisLabel}
@@ -305,6 +312,51 @@ export function QuadrantChartConfigForm({
             </Stack>
           </Accordion.Panel>
         </Accordion.Item>
+        {value.showQuadrantOverlay ? (
+          <Accordion.Item value="quadrant-labels">
+            <Accordion.Control>Quadrant labels & midpoints</Accordion.Control>
+            <Accordion.Panel>
+              <Stack gap="sm">
+                <TextInput
+                  label="Top-right label"
+                  value={value.quadrantLabelTopRight}
+                  onChange={(e) => onChange({ ...value, quadrantLabelTopRight: e.currentTarget.value })}
+                />
+                <TextInput
+                  label="Top-left label"
+                  value={value.quadrantLabelTopLeft}
+                  onChange={(e) => onChange({ ...value, quadrantLabelTopLeft: e.currentTarget.value })}
+                />
+                <TextInput
+                  label="Bottom-left label"
+                  value={value.quadrantLabelBottomLeft}
+                  onChange={(e) => onChange({ ...value, quadrantLabelBottomLeft: e.currentTarget.value })}
+                />
+                <TextInput
+                  label="Bottom-right label"
+                  value={value.quadrantLabelBottomRight}
+                  onChange={(e) => onChange({ ...value, quadrantLabelBottomRight: e.currentTarget.value })}
+                />
+                <NumberInput
+                  label="X midpoint"
+                  description="Leave blank for median of the data."
+                  value={value.xMidpoint ?? ""}
+                  onChange={(v) =>
+                    onChange({ ...value, xMidpoint: typeof v === "number" ? v : null })
+                  }
+                />
+                <NumberInput
+                  label="Y midpoint"
+                  description="Leave blank for median of the data."
+                  value={value.yMidpoint ?? ""}
+                  onChange={(v) =>
+                    onChange({ ...value, yMidpoint: typeof v === "number" ? v : null })
+                  }
+                />
+              </Stack>
+            </Accordion.Panel>
+          </Accordion.Item>
+        ) : null}
       </Accordion>
 
       <TextInput

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { Alert, Box, Button, Loader, Paper, Stack, Text } from "@mantine/core";
+import { Alert, Box, Button, ColorSwatch, Group, Loader, Paper, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { ScatterChart } from "@mantine/charts";
 import { useNavigate } from "react-router-dom";
@@ -34,14 +34,20 @@ type QuadrantPoint = {
   x: number;
   y: number;
   size?: number;
+  // Per-point identity shown as the tooltip header. Independent of
+  // `category` (which drives colour); the user can set both, either, or
+  // neither.
+  label?: string;
   category?: string;
   recordKey?: string;
 };
 
-// Per-series color cycle when categoryColumn is set. Matches DONUT_COLORS
-// in MantineChartWidget.tsx so a Records-by-status quadrant and a
-// Records-by-status bar chart on the same dashboard share the same colour
-// for "Open", "Closed", etc.
+// Per-series color cycle when categoryColumn is set. The first 8 entries
+// match DONUT_COLORS in MantineChartWidget.tsx so a Records-by-status
+// quadrant and a Records-by-status bar chart on the same dashboard share
+// the same colour for "Open", "Closed", etc. The remaining 6 are picked
+// to be visually distinct from the first 8 — they only get used when a
+// category column has more than 8 unique values.
 const CATEGORY_COLOR_CYCLE = [
   "teal.6",
   "blue.5",
@@ -50,16 +56,22 @@ const CATEGORY_COLOR_CYCLE = [
   "pink.5",
   "violet.5",
   "cyan.6",
-  "yellow.6"
+  "yellow.6",
+  "red.6",
+  "grape.5",
+  "indigo.6",
+  "lime.6",
+  "orange.8",
+  "gray.7"
 ];
 
-// Maximum number of categorical series we'll render before collapsing to a
-// single uniform series. Matches the colour cycle length above. Without
-// this cap a high-cardinality category column (e.g. one row per unique
-// title) would spawn a series-per-row, blow up the legend to dozens of
-// chips, and squash the plot into a tiny strip. The category value still
-// rides on each point's payload so the per-point tooltip still shows it
-// on hover.
+// Maximum number of categorical series we'll render before collapsing to
+// a single uniform series. Matches the colour cycle length above so every
+// series gets a distinct colour. Without this cap a high-cardinality
+// category column (e.g. one row per unique title) would spawn a
+// series-per-row, blow up the legend to dozens of chips, and squash the
+// plot into a tiny strip. The category value still rides on each point's
+// payload so the per-point tooltip still shows it on hover.
 const MAX_CATEGORY_SERIES = CATEGORY_COLOR_CYCLE.length;
 
 export function QuadrantChartWidget({ config }: WidgetRuntimeProps<QuadrantChartWidgetConfig>) {
@@ -102,10 +114,11 @@ function RecordsQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
       if (x === null || y === null) continue;
       const size = config.sizeColumn ? readRecordNumber(r, config.sizeColumn, fieldByKey) ?? undefined : undefined;
       const category = config.categoryColumn ? readRecordCategory(r, config.categoryColumn) : undefined;
-      out.push({ x, y, size, category, recordKey: r.key });
+      const label = config.labelColumn ? readRecordCategory(r, config.labelColumn) : undefined;
+      out.push({ x, y, size, label, category, recordKey: r.key });
     }
     return out;
-  }, [recordsQuery.data, fieldsQuery.data, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.categoryColumn]);
+  }, [recordsQuery.data, fieldsQuery.data, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.labelColumn, config.categoryColumn]);
 
   if (!recordTypeId) return <InfoState message='"All records" isn’t supported yet — pick a record type in widget settings.' />;
   if (!config.xAxisColumn || !config.yAxisColumn) return <InfoState message="Pick an X and Y column in widget settings." />;
@@ -154,7 +167,7 @@ function SavedQueryQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
   const points = useMemo<QuadrantPoint[]>(() => {
     if (!config.xAxisColumn || !config.yAxisColumn) return [];
     return aqlRowsToPoints(resultQuery.data, config);
-  }, [resultQuery.data, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.categoryColumn]);
+  }, [resultQuery.data, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.labelColumn, config.categoryColumn]);
 
   if (!savedQueryId) return <InfoState message="Pick a saved query in widget settings." />;
   if (savedQueriesQuery.isLoading || resultQuery.isLoading) return <LoadingState />;
@@ -178,7 +191,7 @@ function AdHocAqlQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
   const points = useMemo<QuadrantPoint[]>(() => {
     if (!config.xAxisColumn || !config.yAxisColumn) return [];
     return aqlRowsToPoints(resultQuery.data, config);
-  }, [resultQuery.data, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.categoryColumn]);
+  }, [resultQuery.data, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.labelColumn, config.categoryColumn]);
 
   if (!queryText) return <InfoState message="Write an AQL query in widget settings." />;
   if (resultQuery.isLoading) return <LoadingState />;
@@ -218,6 +231,10 @@ function QuadrantChartCanvas({
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [dragRect, setDragRect] = useState<PixelRect | null>(null);
+  // Hovering a legend chip dims every series except the matching one,
+  // restoring the Mantine built-in legend's mouseover behaviour now that
+  // we render the legend ourselves outside the chart container.
+  const [hoveredSeries, setHoveredSeries] = useState<string | null>(null);
 
   const { xMid, yMid } = useMemo(() => {
     const xs = points.map((p) => p.x);
@@ -434,11 +451,13 @@ function QuadrantChartCanvas({
         flexDirection: "column"
       }}
     >
-      <QuadrantLabelRow
-        left={config.quadrantLabelTopLeft}
-        right={config.quadrantLabelTopRight}
-        hasYAxisLabel={!!config.yAxisLabel}
-      />
+      {config.showQuadrantOverlay ? (
+        <QuadrantLabelRow
+          left={config.quadrantLabelTopLeft}
+          right={config.quadrantLabelTopRight}
+          hasYAxisLabel={!!config.yAxisLabel}
+        />
+      ) : null}
       <Box
         ref={wrapperRef}
         style={{ flex: "1 1 auto", minHeight: 0, position: "relative" }}
@@ -459,11 +478,15 @@ function QuadrantChartCanvas({
           }}
           xAxisProps={xAxisProps}
           yAxisProps={yAxisProps}
-          referenceLines={[
-            { x: xMid, color: "gray.5", strokeDasharray: "4 4" },
-            { y: yMid, color: "gray.5", strokeDasharray: "4 4" }
-          ]}
-          withLegend={series.length > 1}
+          referenceLines={
+            config.showQuadrantOverlay
+              ? [
+                  { x: xMid, color: "gray.5", strokeDasharray: "4 4" },
+                  { y: yMid, color: "gray.5", strokeDasharray: "4 4" }
+                ]
+              : undefined
+          }
+          withLegend={false}
           withTooltip={!dragRect}
           tooltipProps={{
             cursor: { strokeDasharray: "3 3" },
@@ -473,23 +496,32 @@ function QuadrantChartCanvas({
           scatterProps={{
             onClick: handlePointClick as never,
             style: { cursor: "pointer" },
-            ...(sizeBounds
-              ? {
-                  shape: ((shapeProps: { cx?: number; cy?: number; fill?: string; payload?: QuadrantPoint }) => {
-                    const sz = shapeProps.payload?.size;
-                    const r = typeof sz === "number" ? scaleRadius(sz, sizeBounds.min, sizeBounds.max) : 4;
-                    return (
-                      <circle
-                        cx={shapeProps.cx ?? 0}
-                        cy={shapeProps.cy ?? 0}
-                        r={r}
-                        fill={shapeProps.fill ?? "currentColor"}
-                        fillOpacity={0.8}
-                      />
-                    );
-                  }) as never
-                }
-              : {})
+            // Always render via a custom shape so we can apply
+            // (a) per-point sizing when `sizeColumn` is set and
+            // (b) per-series dimming when the user is hovering a legend
+            // chip. Without this we'd need to swap series fills in state
+            // on every hover, which would re-key the chart and lose the
+            // animation. The fallback radius (4) matches Mantine's
+            // default scatter dot, so charts without sizing or hover
+            // look identical to the built-in render.
+            shape: ((shapeProps: { cx?: number; cy?: number; fill?: string; payload?: QuadrantPoint }) => {
+              const sz = shapeProps.payload?.size;
+              const r =
+                sizeBounds && typeof sz === "number"
+                  ? scaleRadius(sz, sizeBounds.min, sizeBounds.max)
+                  : 4;
+              const cat = shapeProps.payload?.category;
+              const dimmed = hoveredSeries !== null && hoveredSeries !== cat;
+              return (
+                <circle
+                  cx={shapeProps.cx ?? 0}
+                  cy={shapeProps.cy ?? 0}
+                  r={r}
+                  fill={shapeProps.fill ?? "currentColor"}
+                  fillOpacity={dimmed ? 0.15 : 0.85}
+                />
+              );
+            }) as never
           }}
         />
         {overlayPos ? (
@@ -520,11 +552,20 @@ function QuadrantChartCanvas({
           </Button>
         ) : null}
       </Box>
-      <QuadrantLabelRow
-        left={config.quadrantLabelBottomLeft}
-        right={config.quadrantLabelBottomRight}
-        hasYAxisLabel={!!config.yAxisLabel}
-      />
+      {config.showQuadrantOverlay ? (
+        <QuadrantLabelRow
+          left={config.quadrantLabelBottomLeft}
+          right={config.quadrantLabelBottomRight}
+          hasYAxisLabel={!!config.yAxisLabel}
+        />
+      ) : null}
+      {series.length > 1 ? (
+        <QuadrantLegend
+          series={series}
+          hoveredSeries={hoveredSeries}
+          onHover={setHoveredSeries}
+        />
+      ) : null}
     </Box>
   );
 }
@@ -569,13 +610,75 @@ function QuadrantLabelRow({
   );
 }
 
+// Categorical legend rendered as its own flex row below the bottom
+// corner-label row. Mantine's built-in ScatterChart legend lives INSIDE
+// the chart container — when the category cardinality is high enough to
+// wrap onto multiple rows, the legend overflows the chart's allocated
+// height and visually collides with the bottom corner labels we already
+// render outside the plot. Rendering it here gives us a dedicated row
+// that the chart can't push into.
+function QuadrantLegend({
+  series,
+  hoveredSeries,
+  onHover
+}: {
+  series: SeriesShape[];
+  hoveredSeries: string | null;
+  onHover: (name: string | null) => void;
+}) {
+  return (
+    <Box
+      style={{
+        flex: "0 0 auto",
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px 12px",
+        justifyContent: "center",
+        paddingTop: 4,
+        paddingBottom: 2,
+        paddingLeft: 16,
+        paddingRight: 16
+      }}
+    >
+      {series.map((s) => {
+        const dimmed = hoveredSeries !== null && hoveredSeries !== s.name;
+        return (
+          <Group
+            key={s.name}
+            gap={6}
+            wrap="nowrap"
+            align="center"
+            onMouseEnter={() => onHover(s.name)}
+            onMouseLeave={() => onHover(null)}
+            style={{ cursor: "default", opacity: dimmed ? 0.4 : 1, transition: "opacity 80ms ease" }}
+          >
+            <ColorSwatch color={mantineTokenToCssVar(s.color)} size={10} withShadow={false} />
+            <Text size="xs" c="dimmed">{s.name}</Text>
+          </Group>
+        );
+      })}
+    </Box>
+  );
+}
+
+// Convert a Mantine theme color token (e.g. "teal.6") into a CSS value
+// the browser can paint. Tokens map 1:1 to Mantine's auto-generated CSS
+// variables (`--mantine-color-<name>-<shade>`).
+function mantineTokenToCssVar(token: string): string {
+  if (/^[a-z]+\.\d$/i.test(token)) {
+    return `var(--mantine-color-${token.replace(".", "-")})`;
+  }
+  return token;
+}
+
 // ---- Helpers ----
 
 // Custom tooltip body. Replaces Mantine's default ChartTooltip so the
-// category value (which lives on each point's payload, not on the series)
-// is always available on hover — important when the high-cardinality
-// guard has collapsed many categories into a single series and the
-// default tooltip would only show the generic series name.
+// per-point label + category are always available on hover, even when
+// the high-cardinality guard collapsed many categories into a single
+// series (where the default tooltip would only show the generic series
+// name). Header prefers `label` (per-point identity); category renders
+// as a secondary line below.
 function renderPointTooltip(
   props: { active?: boolean; payload?: ReadonlyArray<{ payload?: QuadrantPoint }> },
   config: QuadrantChartWidgetConfig
@@ -585,11 +688,20 @@ function renderPointTooltip(
   if (!p) return null;
   const xLabel = config.xAxisLabel || "X";
   const yLabel = config.yAxisLabel || "Y";
+  const header = p.label ?? p.category ?? null;
+  // Only show the category as a sub-line when it isn't already serving
+  // as the header (i.e. label was set and is distinct from category).
+  const subCategory = p.label && p.category && p.category !== p.label ? p.category : null;
   return (
     <Paper p="xs" shadow="md" withBorder radius="sm" style={{ pointerEvents: "none" }}>
-      {p.category ? (
-        <Text size="sm" fw={600} mb={4}>
-          {p.category}
+      {header ? (
+        <Text size="sm" fw={600} mb={subCategory ? 2 : 4}>
+          {header}
+        </Text>
+      ) : null}
+      {subCategory ? (
+        <Text size="xs" c="dimmed" mb={4}>
+          {subCategory}
         </Text>
       ) : null}
       <Stack gap={2}>
@@ -716,6 +828,10 @@ function aqlRowsToPoints(
   if (!xKey || !yKey) return [];
   const sizeKey = config.sizeColumn && cols.has(config.sizeColumn) ? config.sizeColumn : null;
   const catKey = config.categoryColumn && cols.has(config.categoryColumn) ? config.categoryColumn : null;
+  const labelKey = config.labelColumn && cols.has(config.labelColumn) ? config.labelColumn : null;
+
+  const stringOrDash = (raw: unknown): string =>
+    raw === null || raw === undefined || raw === "" ? "—" : String(raw);
 
   const out: QuadrantPoint[] = [];
   for (const row of res.rows) {
@@ -723,13 +839,14 @@ function aqlRowsToPoints(
     const y = coerceNumber(row[yKey]);
     if (x === null || y === null) continue;
     const size = sizeKey ? coerceNumber(row[sizeKey]) ?? undefined : undefined;
-    const category = catKey ? (row[catKey] === null || row[catKey] === undefined || row[catKey] === "" ? "—" : String(row[catKey])) : undefined;
+    const category = catKey ? stringOrDash(row[catKey]) : undefined;
+    const label = labelKey ? stringOrDash(row[labelKey]) : undefined;
     // Convention: a row column literally named "recordKey" enables click
     // navigation. Optional, opt-in.
     const recordKeyRaw = row["recordKey"];
     const recordKey =
       typeof recordKeyRaw === "string" && recordKeyRaw.length > 0 ? recordKeyRaw : undefined;
-    out.push({ x, y, size, category, recordKey });
+    out.push({ x, y, size, label, category, recordKey });
   }
   return out;
 }
