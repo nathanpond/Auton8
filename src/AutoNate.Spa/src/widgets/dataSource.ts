@@ -10,7 +10,7 @@ import { z } from "zod";
 // `undefined` because Zod's optional handling + Mantine's Select-clear flow
 // both produce "" cleanly and we never need to distinguish "missing" from
 // "all".
-export const DATA_SOURCE_TYPES = ["records", "workflows", "savedQuery"] as const;
+export const DATA_SOURCE_TYPES = ["records", "workflows", "savedQuery", "adHocAql"] as const;
 export type DataSourceType = (typeof DATA_SOURCE_TYPES)[number];
 
 export const dataSourceSchema = z.object({
@@ -21,7 +21,13 @@ export const dataSourceSchema = z.object({
   workflowModelId: z.string().default(""),
   // Only meaningful when type === "savedQuery". Empty string = "no query
   // selected" — runtime renders a "pick a query" prompt in that state.
-  savedQueryId: z.string().default("")
+  savedQueryId: z.string().default(""),
+  // Only meaningful when type === "adHocAql". The raw AQL text the widget
+  // executes at render time. Empty string = "no query entered" — runtime
+  // renders a "write a query" prompt in that state. The text is stored
+  // inline on the widget config rather than in a SavedQuery row so users
+  // can build one-off charts without polluting the saved-queries list.
+  adHocAqlQuery: z.string().default("")
 });
 
 export type DataSourceConfig = z.infer<typeof dataSourceSchema>;
@@ -30,7 +36,8 @@ export const DEFAULT_DATA_SOURCE: DataSourceConfig = {
   type: "records",
   recordTypeId: "",
   workflowModelId: "",
-  savedQueryId: ""
+  savedQueryId: "",
+  adHocAqlQuery: ""
 };
 
 // Human label for the "all" sentinel. Used inside DataSourcePicker and the

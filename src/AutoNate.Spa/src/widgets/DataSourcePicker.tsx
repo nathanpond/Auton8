@@ -1,9 +1,10 @@
 import { useMemo } from "react";
-import { Select, Stack } from "@mantine/core";
+import { Input, Select, Stack } from "@mantine/core";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useSavedQueries } from "@/hooks/useSavedQueries";
 import type { SavedQuery } from "@/api/savedQueries";
+import AqlEditor from "@/components/aql-editor/AqlEditor";
 import {
   ALL_MODELS_LABEL,
   ALL_RECORDS_LABEL,
@@ -17,7 +18,8 @@ const ALL_VALUE = "__all__";
 const TYPE_LABELS: Record<DataSourceType, string> = {
   records: "Records",
   workflows: "Workflows",
-  savedQuery: "Saved Queries"
+  savedQuery: "Saved Queries",
+  adHocAql: "Ad-hoc AQL"
 };
 
 type Props = {
@@ -29,6 +31,7 @@ type Props = {
     recordTypeId?: string;
     workflowModelId?: string;
     savedQueryId?: string;
+    adHocAqlQuery?: string;
   };
   // Limit the picker to a subset of types. Defaults to every registered
   // data source. Use this to hide a type from widgets that can't render it
@@ -97,6 +100,10 @@ export function DataSourcePicker({ value, onChange, errors, allowedTypes }: Prop
     onChange({ ...value, savedQueryId: next ?? "" });
   };
 
+  const handleAdHocAqlChange = (next: string) => {
+    onChange({ ...value, adHocAqlQuery: next });
+  };
+
   return (
     <Stack gap="xs">
       <Select
@@ -161,6 +168,22 @@ export function DataSourcePicker({ value, onChange, errors, allowedTypes }: Prop
           }
           comboboxProps={{ zIndex: 1080 }}
         />
+      )}
+      {value.type === "adHocAql" && (
+        <Input.Wrapper
+          label="Query"
+          description="Runs each time the widget renders. Cmd/Ctrl+Enter to format."
+          error={errors?.adHocAqlQuery}
+        >
+          <AqlEditor
+            value={value.adHocAqlQuery}
+            onChange={handleAdHocAqlChange}
+            onExecute={() => undefined}
+            minHeight="8em"
+            maxHeight="16em"
+            placeholder='FROM Records COLUMNS(Status, COUNT()) GROUP(Status)'
+          />
+        </Input.Wrapper>
       )}
     </Stack>
   );

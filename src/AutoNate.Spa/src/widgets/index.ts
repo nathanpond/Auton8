@@ -3,6 +3,7 @@
 // add one import line here.
 import "./data-table/DataTableWidget.config";
 import "./mantine-chart/MantineChartWidget.config";
+import "./quadrant-chart/QuadrantChartWidget.config";
 
 export { registerWidget, getWidget, listWidgets, mergeWidgetConfig } from "./registry";
 export type { WidgetDefinition, WidgetRuntimeProps, WidgetConfigFormProps } from "./registry";
