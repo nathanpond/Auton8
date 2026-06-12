@@ -46,6 +46,10 @@ export function MantineChartConfigForm({
   const isRecords = sourceType === "records";
   const isWorkflows = sourceType === "workflows";
   const isSavedQuery = sourceType === "savedQuery";
+  const isAdHocAql = sourceType === "adHocAql";
+  // Both saved and ad-hoc AQL sources go through /api/query and need the
+  // same label/value column mapping, so we treat them uniformly below.
+  const isAqlSource = isSavedQuery || isAdHocAql;
 
   const recordTypeId = isRecords ? value.dataSource.recordTypeId : "";
 
@@ -74,21 +78,30 @@ export function MantineChartConfigForm({
     return groups;
   }, [fieldsQuery.data]);
 
-  // Saved-query column probing. Resolving label/value columns needs the
-  // query's column list, which is only known after execution. We share the
-  // same react-query key the runtime uses so this is a cache hit when the
-  // user is configuring an already-rendered widget.
+  // AQL column probing. Resolving label/value columns needs the query's
+  // column list, which is only known after execution. The same probe
+  // serves both saved-query and ad-hoc AQL sources — the only difference
+  // is where the query text comes from. The queryKey matches the runtime
+  // chart's queryKey so the picker probe is a cache hit when configuring
+  // an already-rendered widget.
   const savedQueriesQuery = useSavedQueries();
   const savedQueryId = isSavedQuery ? value.dataSource.savedQueryId : "";
   const savedQuery = useMemo(
     () => (savedQueriesQuery.data ?? []).find((q) => q.id === savedQueryId) ?? null,
     [savedQueriesQuery.data, savedQueryId]
   );
-  const savedQueryText = savedQuery?.queryText ?? "";
+  const aqlQueryText = isSavedQuery
+    ? (savedQuery?.queryText ?? "")
+    : isAdHocAql
+      ? value.dataSource.adHocAqlQuery
+      : "";
+  const probeQueryKey = isSavedQuery
+    ? ["widget", "saved-query-chart", savedQueryId, aqlQueryText]
+    : ["widget", "ad-hoc-aql-chart", aqlQueryText];
   const probeQuery = useQuery<AqlQueryResponse>({
-    queryKey: ["widget", "saved-query-chart", savedQueryId, savedQueryText],
-    queryFn: ({ signal }) => executeQuery(savedQueryText, signal),
-    enabled: isSavedQuery && Boolean(savedQueryId) && Boolean(savedQueryText),
+    queryKey: probeQueryKey,
+    queryFn: ({ signal }) => executeQuery(aqlQueryText, signal),
+    enabled: isAqlSource && Boolean(aqlQueryText) && (isAdHocAql || Boolean(savedQueryId)),
     staleTime: 30_000
   });
 
@@ -112,14 +125,14 @@ export function MantineChartConfigForm({
   // is set yet, seed it with the first column so the runtime can render
   // without forcing the user to open settings just to pick a default.
   useEffect(() => {
-    if (!isSavedQuery) return;
+    if (!isAqlSource) return;
     if (savedQueryColumns.length === 0) return;
     if (value.savedQueryLabelColumn) return;
     onChange({ ...value, savedQueryLabelColumn: savedQueryColumns[0].name });
     // Including `value` in deps would loop on every keystroke — onChange
     // is referentially stable enough in practice and we guard above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSavedQuery, savedQueryColumns]);
+  }, [isAqlSource, savedQueryColumns]);
 
   // If the currently-selected groupBy points at a custom field the new
   // record type doesn't have, surface it as-is so the user sees what's
@@ -188,7 +201,8 @@ export function MantineChartConfigForm({
           type: errors["dataSource.type"],
           recordTypeId: errors["dataSource.recordTypeId"],
           workflowModelId: errors["dataSource.workflowModelId"],
-          savedQueryId: errors["dataSource.savedQueryId"]
+          savedQueryId: errors["dataSource.savedQueryId"],
+          adHocAqlQuery: errors["dataSource.adHocAqlQuery"]
         }}
       />
       {isRecords && (
@@ -252,13 +266,15 @@ export function MantineChartConfigForm({
           )}
         </>
       )}
-      {isSavedQuery && (
+      {isAqlSource && (
         <>
           <Select
             label="Label column"
             description={
-              !savedQueryId
-                ? "Pick a saved query first."
+              !aqlQueryText
+                ? isSavedQuery
+                  ? "Pick a saved query first."
+                  : "Write an AQL query first."
                 : probeQuery.isLoading
                   ? "Loading query columns…"
                   : "Column used as the x-axis bucket or slice name."
@@ -268,14 +284,16 @@ export function MantineChartConfigForm({
             onChange={(v) => onChange({ ...value, savedQueryLabelColumn: v ?? "" })}
             allowDeselect={false}
             searchable={(labelColumnOptions.length ?? 0) > 6}
-            disabled={!savedQueryId || probeQuery.isLoading}
+            disabled={!aqlQueryText || probeQuery.isLoading}
             comboboxProps={{ zIndex: 1080 }}
           />
           <Select
             label="Value column"
             description={
-              !savedQueryId
-                ? "Pick a saved query first."
+              !aqlQueryText
+                ? isSavedQuery
+                  ? "Pick a saved query first."
+                  : "Write an AQL query first."
                 : "Numeric column to sum per bucket. Pick 'Count rows' to count occurrences instead."
             }
             data={valueColumnOptions}
@@ -287,12 +305,12 @@ export function MantineChartConfigForm({
               })
             }
             allowDeselect={false}
-            disabled={!savedQueryId || probeQuery.isLoading}
+            disabled={!aqlQueryText || probeQuery.isLoading}
             comboboxProps={{ zIndex: 1080 }}
           />
           {probeQuery.isError && (
             <Text c="red" size="xs">
-              Could not load query columns — the saved query failed to execute.
+              Could not load query columns — the query failed to execute.
             </Text>
           )}
         </>

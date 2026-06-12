@@ -49,6 +49,9 @@ export function MantineChartWidget({ config }: WidgetRuntimeProps<MantineChartWi
   if (config.dataSource.type === "savedQuery") {
     return <SavedQueryChart config={config} />;
   }
+  if (config.dataSource.type === "adHocAql") {
+    return <AdHocAqlChart config={config} />;
+  }
   return <WorkflowsChart config={config} />;
 }
 
@@ -290,6 +293,52 @@ function SavedQueryChart({ config }: { config: MantineChartWidgetConfig }) {
   if (data.length === 0) return <EmptyState />;
 
   const groupByLabel = config.savedQueryLabelColumn || (resultQuery.data?.columns[0]?.name ?? "Label");
+  return renderChart(data, config, groupByLabel);
+}
+
+// Inline AQL text owned by the widget itself. Same execution + column
+// mapping pipeline as SavedQueryChart, but the query lives on
+// `dataSource.adHocAqlQuery` instead of being looked up by id. The
+// label/value column config keys are shared with savedQuery — both
+// derive their data from /api/query rows, so the mapping has the same
+// shape.
+function AdHocAqlChart({ config }: { config: MantineChartWidgetConfig }) {
+  const queryText = config.dataSource.adHocAqlQuery?.trim() ?? "";
+
+  const resultQuery = useQuery<AqlQueryResponse>({
+    queryKey: ["widget", "ad-hoc-aql-chart", queryText],
+    queryFn: ({ signal }) => executeQuery(queryText, signal),
+    enabled: Boolean(queryText),
+    staleTime: 30_000
+  });
+
+  const data = useMemo<ChartPoint[]>(() => {
+    const res = resultQuery.data;
+    if (!res || res.columns.length === 0) return [];
+    return bucketizeAqlRows(
+      res,
+      config.savedQueryLabelColumn,
+      config.savedQueryValueColumn
+    );
+  }, [resultQuery.data, config.savedQueryLabelColumn, config.savedQueryValueColumn]);
+
+  if (!queryText) {
+    return (
+      <Box p="sm">
+        <Alert color="blue" variant="light">
+          Write an AQL query in widget settings.
+        </Alert>
+      </Box>
+    );
+  }
+  if (resultQuery.isLoading) return <LoadingState />;
+  if (resultQuery.isError) {
+    return <ErrorState message="Failed to execute the query." />;
+  }
+  if (data.length === 0) return <EmptyState />;
+
+  const groupByLabel =
+    config.savedQueryLabelColumn || (resultQuery.data?.columns[0]?.name ?? "Label");
   return renderChart(data, config, groupByLabel);
 }
 
