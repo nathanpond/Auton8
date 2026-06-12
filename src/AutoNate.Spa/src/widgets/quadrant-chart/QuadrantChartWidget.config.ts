@@ -16,7 +16,12 @@ export const quadrantChartWidgetSchema = z.object({
   yAxisColumn: z.string().default(""),
   // Optional 3rd numeric dimension for bubble size.
   sizeColumn: z.string().default(""),
+  // Optional per-point identity shown as the tooltip header on hover
+  // (e.g. record name, job title). Any column type; cardinality unrestricted.
+  labelColumn: z.string().default(""),
   // Optional categorical column for per-point coloring (drives the legend).
+  // Low-cardinality only — when the column has more unique values than the
+  // colour cycle can express the runtime collapses to a single series.
   categoryColumn: z.string().default(""),
   // null = auto (data midpoint). Lets users pin a strategic threshold.
   xMidpoint: z.number().nullable().default(null),
@@ -29,7 +34,15 @@ export const quadrantChartWidgetSchema = z.object({
   xAxisLabel: z.string().default(""),
   yAxisLabel: z.string().default(""),
   // Mantine color token used when categoryColumn is empty.
-  seriesColor: z.string().default("teal.6")
+  seriesColor: z.string().default("teal.6"),
+  // When true (the default), the chart renders the four corner labels
+  // and the crossing midpoint reference lines that make it a *quadrant*
+  // chart. When false the same component is a plain scatter — same X/Y
+  // axes, optional bubble sizing, optional category coloring, optional
+  // label, click-to-record nav, shift+drag zoom — minus the overlay.
+  // Wired so a single widget component serves both `chart-quadrant` and
+  // `chart-scatter` registry entries (see below).
+  showQuadrantOverlay: z.boolean().default(true)
 });
 
 export type QuadrantChartWidgetConfig = z.infer<typeof quadrantChartWidgetSchema>;
@@ -60,6 +73,24 @@ const QUADRANT_THUMBNAIL =
 <circle cx="176" cy="100" r="3" fill="#32a932"/>
 </svg>`);
 
+// Shared default config; the two registry entries below override only
+// the fields that differ (`showQuadrantOverlay` + the seed quadrant
+// labels). Keeping a single source for the rest avoids drift if we add
+// new scatter-relevant fields to the schema later.
+const COMMON_DEFAULTS = {
+  dataSource: DEFAULT_DATA_SOURCE,
+  xAxisColumn: "",
+  yAxisColumn: "",
+  sizeColumn: "",
+  labelColumn: "",
+  categoryColumn: "",
+  xMidpoint: null,
+  yMidpoint: null,
+  xAxisLabel: "",
+  yAxisLabel: "",
+  seriesColor: "teal.6"
+} as const;
+
 registerWidget<QuadrantChartWidgetConfig>({
   type: "chart-quadrant",
   category: "Charts",
@@ -69,20 +100,60 @@ registerWidget<QuadrantChartWidgetConfig>({
   thumbnail: QUADRANT_THUMBNAIL,
   defaultSize: { w: 6, h: 5, minW: 4, minH: 4 },
   defaultConfig: {
-    dataSource: DEFAULT_DATA_SOURCE,
-    xAxisColumn: "",
-    yAxisColumn: "",
-    sizeColumn: "",
-    categoryColumn: "",
-    xMidpoint: null,
-    yMidpoint: null,
+    ...COMMON_DEFAULTS,
     quadrantLabelTopRight: "High X / High Y",
     quadrantLabelTopLeft: "Low X / High Y",
     quadrantLabelBottomLeft: "Low X / Low Y",
     quadrantLabelBottomRight: "High X / Low Y",
-    xAxisLabel: "",
-    yAxisLabel: "",
-    seriesColor: "teal.6"
+    showQuadrantOverlay: true
+  },
+  schema: quadrantChartWidgetSchema,
+  Component: QuadrantChartWidget,
+  ConfigForm: QuadrantChartConfigForm
+} satisfies WidgetDefinition<QuadrantChartWidgetConfig>);
+
+// Scatter chart thumbnail — same canvas dimensions and chrome as the
+// other chart entries, but without the dashed crossing midlines that
+// distinguish the quadrant version.
+const SCATTER_THUMBNAIL =
+  "data:image/svg+xml;base64," +
+  btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150">
+<rect width="200" height="150" fill="#ffffff" stroke="#dee2e6"/>
+<rect x="10" y="14" width="60" height="6" rx="1" fill="#727cb6"/>
+<line x1="14" y1="128" x2="190" y2="128" stroke="#dee2e6"/>
+<line x1="20" y1="34" x2="20" y2="128" stroke="#dee2e6"/>
+<line x1="20" y1="98" x2="190" y2="98" stroke="#eeeeee" stroke-dasharray="2 2"/>
+<line x1="20" y1="68" x2="190" y2="68" stroke="#eeeeee" stroke-dasharray="2 2"/>
+<circle cx="40" cy="98" r="4" fill="#00acac"/>
+<circle cx="58" cy="84" r="4" fill="#348fe2"/>
+<circle cx="72" cy="62" r="4" fill="#f59c1a"/>
+<circle cx="92" cy="74" r="4" fill="#32a932"/>
+<circle cx="108" cy="52" r="4" fill="#fb5597"/>
+<circle cx="124" cy="80" r="4" fill="#9b5cf6"/>
+<circle cx="138" cy="44" r="4" fill="#49b6d6"/>
+<circle cx="156" cy="66" r="4" fill="#f7c948"/>
+<circle cx="172" cy="56" r="4" fill="#00acac"/>
+<circle cx="180" cy="92" r="4" fill="#348fe2"/>
+</svg>`);
+
+registerWidget<QuadrantChartWidgetConfig>({
+  type: "chart-scatter",
+  category: "Charts",
+  title: "Scatter chart",
+  description:
+    "Plot points on X/Y axes to spot correlations, clusters, and outliers. Supports optional bubble sizing, per-category coloring, and per-point labels.",
+  thumbnail: SCATTER_THUMBNAIL,
+  defaultSize: { w: 6, h: 5, minW: 4, minH: 4 },
+  defaultConfig: {
+    ...COMMON_DEFAULTS,
+    // Quadrant-overlay fields keep their schema defaults but never
+    // render — kept on the config so a user can flip the overlay back
+    // on later without losing labels they typed.
+    quadrantLabelTopRight: "High X / High Y",
+    quadrantLabelTopLeft: "Low X / High Y",
+    quadrantLabelBottomLeft: "Low X / Low Y",
+    quadrantLabelBottomRight: "High X / Low Y",
+    showQuadrantOverlay: false
   },
   schema: quadrantChartWidgetSchema,
   Component: QuadrantChartWidget,
