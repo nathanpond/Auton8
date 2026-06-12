@@ -4,6 +4,7 @@
 import "./data-table/DataTableWidget.config";
 import "./mantine-chart/MantineChartWidget.config";
 import "./quadrant-chart/QuadrantChartWidget.config";
+import "./composite-chart/CompositeChartWidget.config";
 
 export { registerWidget, getWidget, listWidgets, mergeWidgetConfig } from "./registry";
 export type { WidgetDefinition, WidgetRuntimeProps, WidgetConfigFormProps } from "./registry";

@@ -101,12 +101,14 @@ function RecordsQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
     Boolean(recordTypeId)
   );
 
+  const fieldByKey = useMemo(
+    () => new Map<string, RecordTypeField>((fieldsQuery.data ?? []).map((f) => [f.fieldKey, f])),
+    [fieldsQuery.data]
+  );
+
   const points = useMemo<QuadrantPoint[]>(() => {
     if (!config.xAxisColumn || !config.yAxisColumn) return [];
     const items = recordsQuery.data?.items ?? [];
-    const fieldByKey = new Map<string, RecordTypeField>(
-      (fieldsQuery.data ?? []).map((f) => [f.fieldKey, f])
-    );
     const out: QuadrantPoint[] = [];
     for (const r of items) {
       const x = readRecordNumber(r, config.xAxisColumn, fieldByKey);
@@ -118,14 +120,21 @@ function RecordsQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
       out.push({ x, y, size, label, category, recordKey: r.key });
     }
     return out;
-  }, [recordsQuery.data, fieldsQuery.data, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.labelColumn, config.categoryColumn]);
+  }, [recordsQuery.data, fieldByKey, config.xAxisColumn, config.yAxisColumn, config.sizeColumn, config.labelColumn, config.categoryColumn]);
+
+  // Resolve the size column's display name so the tooltip can show
+  // "Headcount: 245" instead of a generic "Size: 245".
+  const sizeColumnLabel = useMemo(
+    () => resolveRecordColumnLabel(config.sizeColumn, fieldByKey),
+    [config.sizeColumn, fieldByKey]
+  );
 
   if (!recordTypeId) return <InfoState message='"All records" isn’t supported yet — pick a record type in widget settings.' />;
   if (!config.xAxisColumn || !config.yAxisColumn) return <InfoState message="Pick an X and Y column in widget settings." />;
   if (recordsQuery.isLoading) return <LoadingState />;
   if (recordsQuery.isError) return <ErrorState message="Failed to load records." />;
   if (points.length === 0) return <EmptyState />;
-  return <QuadrantChartCanvas config={config} points={points} />;
+  return <QuadrantChartCanvas config={config} points={points} sizeColumnLabel={sizeColumnLabel} />;
 }
 
 // Workflows have no numeric properties on executions and only version
@@ -176,7 +185,8 @@ function SavedQueryQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
   if (resultQuery.isError) return <ErrorState message="Failed to execute the saved query." />;
   if (!config.xAxisColumn || !config.yAxisColumn) return <InfoState message="Pick an X and Y column in widget settings." />;
   if (points.length === 0) return <EmptyState />;
-  return <QuadrantChartCanvas config={config} points={points} />;
+  // For AQL the size column name IS its display label — no mapping.
+  return <QuadrantChartCanvas config={config} points={points} sizeColumnLabel={config.sizeColumn || null} />;
 }
 
 function AdHocAqlQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
@@ -198,7 +208,8 @@ function AdHocAqlQuadrant({ config }: { config: QuadrantChartWidgetConfig }) {
   if (resultQuery.isError) return <ErrorState message="Failed to execute the query." />;
   if (!config.xAxisColumn || !config.yAxisColumn) return <InfoState message="Pick an X and Y column in widget settings." />;
   if (points.length === 0) return <EmptyState />;
-  return <QuadrantChartCanvas config={config} points={points} />;
+  // For AQL the size column name IS its display label — no mapping.
+  return <QuadrantChartCanvas config={config} points={points} sizeColumnLabel={config.sizeColumn || null} />;
 }
 
 // ---- Chart canvas ----
@@ -215,10 +226,15 @@ type PixelRect = { left: number; top: number; right: number; bottom: number };
 
 function QuadrantChartCanvas({
   config,
-  points
+  points,
+  sizeColumnLabel
 }: {
   config: QuadrantChartWidgetConfig;
   points: QuadrantPoint[];
+  // Human-readable name for the size column (e.g. record field
+  // displayName or AQL column name). Used as the tooltip row label.
+  // `null` when no size column is configured.
+  sizeColumnLabel: string | null;
 }) {
   const navigate = useNavigate();
 
@@ -491,7 +507,7 @@ function QuadrantChartCanvas({
           tooltipProps={{
             cursor: { strokeDasharray: "3 3" },
             content: ((props: { active?: boolean; payload?: ReadonlyArray<{ payload?: QuadrantPoint }> }) =>
-              renderPointTooltip(props, config)) as never
+              renderPointTooltip(props, config, sizeColumnLabel)) as never
           }}
           scatterProps={{
             onClick: handlePointClick as never,
@@ -681,7 +697,8 @@ function mantineTokenToCssVar(token: string): string {
 // as a secondary line below.
 function renderPointTooltip(
   props: { active?: boolean; payload?: ReadonlyArray<{ payload?: QuadrantPoint }> },
-  config: QuadrantChartWidgetConfig
+  config: QuadrantChartWidgetConfig,
+  sizeColumnLabel: string | null
 ): ReactNode {
   if (!props.active || !props.payload?.length) return null;
   const p = props.payload[0]?.payload;
@@ -692,6 +709,10 @@ function renderPointTooltip(
   // Only show the category as a sub-line when it isn't already serving
   // as the header (i.e. label was set and is distinct from category).
   const subCategory = p.label && p.category && p.category !== p.label ? p.category : null;
+  // Size row label prefers the user-facing column name (resolved by the
+  // data-source handler), falls back to a generic "Size" so existing
+  // configs without a resolvable column still render.
+  const sizeRowLabel = sizeColumnLabel || "Size";
   return (
     <Paper p="xs" shadow="md" withBorder radius="sm" style={{ pointerEvents: "none" }}>
       {header ? (
@@ -713,12 +734,30 @@ function renderPointTooltip(
         </Text>
         {config.sizeColumn && typeof p.size === "number" ? (
           <Text size="xs" c="dimmed">
-            Size: {formatTooltipNumber(p.size)}
+            {sizeRowLabel}: {formatTooltipNumber(p.size)}
           </Text>
         ) : null}
       </Stack>
     </Paper>
   );
+}
+
+// Resolve a record-source column key (`keyNumber` or `field:<fieldKey>`)
+// back to a user-facing display name, using the record-type field
+// metadata. Returns null when there's no column configured; falls back
+// to the raw key when the field isn't found so the tooltip never
+// renders an empty label.
+function resolveRecordColumnLabel(
+  columnKey: string,
+  fieldByKey: Map<string, RecordTypeField>
+): string | null {
+  if (!columnKey) return null;
+  if (columnKey === RECORD_BUILTIN_KEY_NUMBER) return "Key number";
+  if (columnKey.startsWith(RECORD_CUSTOM_FIELD_PREFIX)) {
+    const fieldKey = columnKey.slice(RECORD_CUSTOM_FIELD_PREFIX.length);
+    return fieldByKey.get(fieldKey)?.displayName ?? fieldKey;
+  }
+  return columnKey;
 }
 
 // Axis-tick formatter used while zoomed. Drag-derived domain bounds are
@@ -761,7 +800,7 @@ function median(nums: number[]): number {
 // Read a numeric field off a record. Returns null when the source is
 // non-numeric or empty, which the caller treats as "skip this point" so
 // missing values don't drag points to (0, 0).
-function readRecordNumber(
+export function readRecordNumber(
   r: RecordModel,
   columnKey: string,
   fieldByKey: Map<string, RecordTypeField>
@@ -781,7 +820,7 @@ function readRecordNumber(
   return null;
 }
 
-function readRecordCategory(r: RecordModel, columnKey: string): string {
+export function readRecordCategory(r: RecordModel, columnKey: string): string {
   switch (columnKey) {
     case "status":
       return r.status ?? "—";

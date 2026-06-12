@@ -136,6 +136,50 @@ const SCATTER_THUMBNAIL =
 <circle cx="180" cy="92" r="4" fill="#348fe2"/>
 </svg>`);
 
+// Bubble chart thumbnail — variable-radius circles, no crossing lines.
+// Visually distinct from the scatter thumbnail so users can tell them
+// apart in the picker grid.
+const BUBBLE_THUMBNAIL =
+  "data:image/svg+xml;base64," +
+  btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150">
+<rect width="200" height="150" fill="#ffffff" stroke="#dee2e6"/>
+<rect x="10" y="14" width="60" height="6" rx="1" fill="#727cb6"/>
+<line x1="14" y1="128" x2="190" y2="128" stroke="#dee2e6"/>
+<line x1="20" y1="34" x2="20" y2="128" stroke="#dee2e6"/>
+<circle cx="50" cy="92" r="6" fill="#00acac" fill-opacity="0.7"/>
+<circle cx="78" cy="70" r="10" fill="#348fe2" fill-opacity="0.7"/>
+<circle cx="108" cy="56" r="14" fill="#f59c1a" fill-opacity="0.7"/>
+<circle cx="140" cy="84" r="8" fill="#32a932" fill-opacity="0.7"/>
+<circle cx="166" cy="100" r="5" fill="#fb5597" fill-opacity="0.7"/>
+<circle cx="62" cy="108" r="4" fill="#9b5cf6" fill-opacity="0.7"/>
+<circle cx="124" cy="100" r="11" fill="#49b6d6" fill-opacity="0.7"/>
+<circle cx="172" cy="58" r="7" fill="#f7c948" fill-opacity="0.7"/>
+</svg>`);
+
+registerWidget<QuadrantChartWidgetConfig>({
+  type: "chart-bubble",
+  category: "Charts",
+  title: "Bubble chart",
+  description:
+    "Scatter plot with point radius scaled by a third numeric column. Useful for X × Y × magnitude — priority × effort × impact, salary × score × headcount.",
+  thumbnail: BUBBLE_THUMBNAIL,
+  defaultSize: { w: 6, h: 5, minW: 4, minH: 4 },
+  defaultConfig: {
+    ...COMMON_DEFAULTS,
+    // Same quadrant-overlay defaults as the other scatter variant — kept
+    // on the config so the user can toggle the overlay back on later
+    // without losing labels.
+    quadrantLabelTopRight: "High X / High Y",
+    quadrantLabelTopLeft: "Low X / High Y",
+    quadrantLabelBottomLeft: "Low X / Low Y",
+    quadrantLabelBottomRight: "High X / Low Y",
+    showQuadrantOverlay: false
+  },
+  schema: quadrantChartWidgetSchema,
+  Component: QuadrantChartWidget,
+  ConfigForm: QuadrantChartConfigForm
+} satisfies WidgetDefinition<QuadrantChartWidgetConfig>);
+
 registerWidget<QuadrantChartWidgetConfig>({
   type: "chart-scatter",
   category: "Charts",
