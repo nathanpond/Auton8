@@ -707,6 +707,16 @@ builder.Services.AddScoped<IAgentSkill, ManageRecordEdgesSkill>();
 // form-fill auto-discovery handles the rest via InspectPageSkill.
 builder.Services.AddScoped<IAgentSkill, DesignSurfacesLookupSkill>();
 
+// Data-stack agent surface: chatbot-driven inspection + CRUD for data stores,
+// datasets, and dashboards. Mirrors the same per-endpoint auth gates the
+// REST surfaces enforce so the bot can never act past the caller's grants.
+builder.Services.AddScoped<IAgentSkill, LookupDataStoresSkill>();
+builder.Services.AddScoped<IAgentSkill, ManageDataStoresSkill>();
+builder.Services.AddScoped<IAgentSkill, LookupDatasetsSkill>();
+builder.Services.AddScoped<IAgentSkill, ManageDatasetsSkill>();
+builder.Services.AddScoped<IAgentSkill, LookupDashboardsSkill>();
+builder.Services.AddScoped<IAgentSkill, ManageDashboardsSkill>();
+
 builder.Services.AddScoped<ISkillRegistry, SkillRegistry>();
 
 // Page-query bridge: a singleton router that holds in-flight TaskCompletionSource
@@ -902,9 +912,10 @@ builder.Services.AddHostedService<AutoNate.Web.Plugins.PluginScheduledJobsHosted
 builder.Services.AddHttpClient(); // DaprApplicationEventPublisher needs IHttpClientFactory
 builder.Services.Configure<FormOptions>(o =>
 {
-    // Plugin uploads can run up to MaxUploadBytes; keep multipart in sync.
-    o.MultipartBodyLengthLimit = 52_428_800;
+    // Kestrel's MaxRequestBodySize is the outer gate; keep multipart in sync.
+    o.MultipartBodyLengthLimit = 1_073_741_824;
 });
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 1_073_741_824);
 builder.Services.AddScoped<IRecordTypeStore, EfCoreRecordTypeStore>();
 builder.Services.AddScoped<IRecordStore, EfCoreRecordStore>();
 builder.Services.AddScoped<IRecordHistoryStore, EfCoreRecordHistoryStore>();

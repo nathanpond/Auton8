@@ -76,7 +76,7 @@ public sealed class AqlSuggestionService(
         return new AqlSuggestion(query, valid, errors, explanation);
     }
 
-    private async Task<string> CompleteAsync(
+    private static async Task<string> CompleteAsync(
         IChatProvider provider, string system, IReadOnlyList<ChatMessage> messages, CancellationToken ct)
     {
         var request = new ChatRequest(

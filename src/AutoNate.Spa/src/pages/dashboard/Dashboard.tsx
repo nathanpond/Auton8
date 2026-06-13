@@ -21,7 +21,8 @@ import {
   useUpdateWidget
 } from "@/hooks/useDashboards";
 import type { DashboardWidget } from "@/api/dashboards";
-import type { WidgetDefinition } from "@/widgets";
+import { getWidget, type WidgetDefinition } from "@/widgets";
+import { useDashboardPagePageContext } from "./useDashboardPagePageContext";
 import "./dashboardStyles.css";
 
 // Per-mount config schema. `isUserConfigurable=false` flips the page into
@@ -204,6 +205,52 @@ function ConfigurableDashboard({ mountPath }: { mountPath: string }) {
       { onSuccess: (created) => setSelectedId(created.id) }
     );
   };
+
+  // Page-context provider — exposes the live dashboard, widgets, and
+  // modal state to the chatbot. Mutating actions reuse the same handlers
+  // the canvas + toolbar use, so the in-memory state stays consistent.
+  useDashboardPagePageContext({
+    dashboards,
+    selectedId,
+    dashboard: dashboardQuery.data ?? null,
+    widgets,
+    configWidgetId: configWidget?.id ?? null,
+    pickerOpen,
+    renameOpen,
+    deleteOpen,
+    selectDashboard: setSelectedId,
+    openPicker: () => setPickerOpen(true),
+    closePicker: () => setPickerOpen(false),
+    openRename: () => setRenameOpen(true),
+    openDelete: () => setDeleteOpen(true),
+    openWidgetConfig: (widgetId) => {
+      const w = widgets.find((x) => x.id === widgetId);
+      if (w) setConfigWidget(w);
+    },
+    closeWidgetConfig: () => setConfigWidget(null),
+    removeWidget: (widgetId) => {
+      const w = widgets.find((x) => x.id === widgetId);
+      if (w) setWidgetToRemove(w);
+    },
+    repositionWidget: (widgetId, grid) => {
+      const w = widgets.find((x) => x.id === widgetId);
+      if (!w) return;
+      // Mirror DashboardCanvas's onLayoutChange — send the whole layout
+      // (every widget) so server-side ReplaceLayoutAsync sees the move
+      // applied to one widget while leaving the others at their current
+      // positions.
+      const positions = widgets.map((other) =>
+        other.id === widgetId
+          ? { widgetId: other.id, ...grid }
+          : { widgetId: other.id, gridX: other.gridX, gridY: other.gridY, gridW: other.gridW, gridH: other.gridH }
+      );
+      replaceLayout.mutate(positions);
+    },
+    addWidgetOfType: (widgetType) => {
+      const def = getWidget(widgetType);
+      if (def) handleAddWidget(def);
+    }
+  });
 
   return (
     <Stack className="dashboard-page" p="md">

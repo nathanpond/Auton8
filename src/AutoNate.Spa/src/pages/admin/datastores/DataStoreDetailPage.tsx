@@ -52,6 +52,7 @@ import {
   extractValidationErrors
 } from "@/api/aql";
 import DataStoreFileManager from "./DataStoreFileManager";
+import { useDataStoreDetailPagePageContext } from "./useDataStoreDetailPagePageContext";
 
 export default function DataStoreDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -61,6 +62,24 @@ export default function DataStoreDetailPage() {
     queryKey: ["datastores", "detail", storeId],
     queryFn: () => getDataStore(storeId),
     enabled: !!storeId
+  });
+
+  // Parallel tables query (SqlPanel has its own; react-query dedupes). We
+  // need a copy at the top level so the page-context provider can expose
+  // the table list to the chatbot without crossing component boundaries.
+  const isSql = storeQuery.data ? kindLabel(storeQuery.data.kind) === "SqlType" : false;
+  const tablesQuery = useQuery<DataStoreTable[]>({
+    queryKey: ["datastores", storeId, "tables"],
+    queryFn: ({ signal }) => listDataStoreTables(storeId, signal),
+    enabled: !!storeId && isSql
+  });
+
+  useDataStoreDetailPagePageContext({
+    store: storeQuery.data ?? null,
+    isFiles: storeQuery.data ? kindLabel(storeQuery.data.kind) === "FileType" : false,
+    tables: tablesQuery.data ?? [],
+    tablesLoading: tablesQuery.isLoading,
+    refreshTables: () => tablesQuery.refetch()
   });
 
   useDocumentTitle(storeQuery.data ? `${storeQuery.data.name} — Data store` : "Data store");

@@ -27,6 +27,12 @@ const PATTERNS: Array<{ pattern: string; key: string }> = [
   // providers; per-page selection / dirty-state providers are a follow-up.
   { pattern: "/dashboard", key: "dashboard" },
   { pattern: "/dashboard/:id", key: "dashboard" },
+  // Data-stack pages (placeable templates default-mounted at these paths).
+  // Per-page providers ship data-stack snapshots + mutating actions so the
+  // chatbot can interact with the create/edit modals and selected rows.
+  { pattern: "/datastores", key: "data-stores" },
+  { pattern: "/datastores/:id", key: "data-store-detail" },
+  { pattern: "/datasets", key: "datasets" },
   { pattern: "/formdev/:shortCode", key: "form-editor" },
   { pattern: "/admin/config/forms/:id", key: "form-editor" },
   { pattern: "/admin/config/appearance", key: "appearance-editor" },

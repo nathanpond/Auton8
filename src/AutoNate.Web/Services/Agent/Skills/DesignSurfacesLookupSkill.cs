@@ -1,7 +1,6 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
-using AutoNate.Web.Services.Dashboards;
 using AutoNate.Web.Services.Forms;
 using AutoNate.Web.Services.SiteSettings;
 using AutoNate.Web.Services.Workflow;
@@ -9,13 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AutoNate.Web.Services.Agent.Skills;
 
-// Phase 5b — read-only design-surface diagnostics. One skill bundles all four
-// design domains (dashboards, forms, workflow models, appearance) because the
-// model rarely needs to drill into more than one at a time, and a single
-// catalog entry keeps the system-prompt token cost down.
+// Phase 5b — read-only design-surface diagnostics. Bundles forms, workflow
+// models, and appearance because the model rarely needs to drill into more
+// than one at a time, and a single catalog entry keeps the system-prompt
+// token cost down. Dashboards moved to their own LookupDashboardsSkill
+// (with widget-level access + the widget-type catalog).
 //
 // Per-domain auth gates mirror the existing endpoints:
-//   - Dashboards   : actor-scoped via IDashboardStore.ListForActorAsync
 //   - Forms        : IFormStore reads are open to authenticated callers
 //   - WorkflowModels: kind-level WorkflowModel:View, per-instance for get_
 //   - Appearance   : SiteConfig:view (admin DTO; the public /api/appearance
@@ -26,7 +25,7 @@ public sealed class DesignSurfacesLookupSkill : IAgentSkill
     public string Name => "design-surfaces";
 
     public string Description =>
-        "Read-only catalog of design-time entities: dashboards, forms, workflow models, and site appearance.";
+        "Read-only catalog of design-time entities: forms, workflow models, and site appearance.";
 
     public IReadOnlyList<AgentTool> Tools { get; }
 
@@ -34,25 +33,6 @@ public sealed class DesignSurfacesLookupSkill : IAgentSkill
     {
         Tools = new[]
         {
-            new AgentTool(
-                Name: "list_dashboards",
-                Description: "List dashboards the current user can see.",
-                JsonSchema: ParseSchema("""{ "type": "object", "properties": {}, "additionalProperties": false }"""),
-                Invoke: InvokeListDashboardsAsync),
-
-            new AgentTool(
-                Name: "get_dashboard",
-                Description: "Fetch one dashboard by id, including widgets and layout.",
-                JsonSchema: ParseSchema("""
-                    {
-                      "type": "object",
-                      "properties": { "id": { "type": "string" } },
-                      "required": ["id"],
-                      "additionalProperties": false
-                    }
-                    """),
-                Invoke: InvokeGetDashboardAsync),
-
             new AgentTool(
                 Name: "list_forms",
                 Description: "List forms with publication status.",
@@ -115,67 +95,7 @@ public sealed class DesignSurfacesLookupSkill : IAgentSkill
     }
 
     public string? SystemPromptFragment(AgentSessionContext context) =>
-        "Design-surface tools are read-only — for in-progress edits (unsaved drafts in the workflow studio, dashboard layout drag-in-flight, form-builder selection), prefer inspect_page / query_page on the active design page once those page-context providers ship. Authoring writes go through the SPA's existing UIs.";
-
-    // ---- dashboards -------------------------------------------------------
-
-    private static async Task<JsonElement> InvokeListDashboardsAsync(JsonElement args, AgentToolContext ctx, CancellationToken ct)
-    {
-        var store = ctx.Services.GetRequiredService<IDashboardStore>();
-        var rows = await store.ListForActorAsync(ctx.Session.UserId, ct);
-        return JsonSerializer.SerializeToElement(new
-        {
-            kind = "dashboards",
-            source = "IDashboardStore",
-            data = rows.Select(d => new
-            {
-                id = d.Id,
-                name = d.Name,
-                description = d.Description,
-                ownerUserId = d.OwnerUserId,
-                createdAtUtc = d.CreatedAtUtc,
-                updatedAtUtc = d.UpdatedAtUtc
-            }).ToArray()
-        });
-    }
-
-    private static async Task<JsonElement> InvokeGetDashboardAsync(JsonElement args, AgentToolContext ctx, CancellationToken ct)
-    {
-        if (!TryReadGuid(args, "id", out var id))
-            return Error("get_dashboard", "id is required and must be a GUID.");
-        var store = ctx.Services.GetRequiredService<IDashboardStore>();
-        var row = await store.GetForActorAsync(id, ctx.Session.UserId, ct);
-        if (row is null) return Error("get_dashboard", $"Dashboard {id} not found or not visible to current user.");
-        return JsonSerializer.SerializeToElement(new
-        {
-            kind = "dashboard",
-            source = "IDashboardStore",
-            data = new
-            {
-                dashboard = new
-                {
-                    id = row.Dashboard.Id,
-                    name = row.Dashboard.Name,
-                    description = row.Dashboard.Description,
-                    visibility = row.Dashboard.Visibility,
-                    scope = row.Dashboard.Scope,
-                    updatedAtUtc = row.Dashboard.UpdatedAtUtc
-                },
-                widgets = row.Widgets.Select(w => new
-                {
-                    id = w.Id,
-                    dashboardId = w.DashboardId,
-                    widgetType = w.WidgetType,
-                    title = w.Title,
-                    configJson = w.ConfigJsonb,
-                    gridX = w.GridX,
-                    gridY = w.GridY,
-                    gridW = w.GridW,
-                    gridH = w.GridH
-                }).ToArray()
-            }
-        });
-    }
+        "Design-surface tools are read-only — for in-progress edits (unsaved drafts in the workflow studio, form-builder selection), prefer inspect_page / query_page on the active design page once those page-context providers ship. Authoring writes go through the SPA's existing UIs. Dashboards are covered by the lookup-dashboards / manage-dashboards skills.";
 
     // ---- forms ------------------------------------------------------------
 
