@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
@@ -40,6 +40,7 @@ import {
 } from "@/api/datastores";
 import { listDataConnectors } from "@/api/dataconnectors";
 import CronExpressionBuilder from "@/components/CronExpressionBuilder";
+import { useDatasetsPagePageContext } from "./useDatasetsPagePageContext";
 
 const QUERY_KEY = ["datasets", "list"] as const;
 const COLUMN_WIDTHS = ["1fr", "100px", "1fr", "1fr", "180px", "130px"];
@@ -226,6 +227,10 @@ export default function DatasetsPage() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    submitCreate();
+  }
+
+  const submitCreate = useCallback(() => {
     if (!name.trim()) {
       setSubmitError("Name is required.");
       return;
@@ -261,7 +266,111 @@ export default function DatasetsPage() {
       sourceTableName: sourceTableName.trim() || null,
       refreshCron: mode === "Cached" ? refreshCron.trim() || null : null
     });
-  }
+  }, [name, description, mode, sourceKind, sourceId, sourceTableName, refreshCron, columnsJson, createMutation]);
+
+  // Parallel useQuery so the page-context provider has a live datasets list
+  // to expose to the chatbot. react-query dedupes the request with the
+  // DataTable's internal query so this is free at runtime.
+  const datasetsQuery = useQuery({ queryKey: QUERY_KEY, queryFn: () => listDatasets() });
+  const datasetsList = datasetsQuery.data ?? [];
+
+  const setCreateField = useCallback(
+    (field: "name" | "description" | "mode" | "sourceKind" | "sourceId" | "sourceTableName" | "refreshCron" | "columnsJson", value: string) => {
+      if (field === "name") setName(value);
+      else if (field === "description") setDescription(value);
+      else if (field === "mode") setMode(value as DatasetMode);
+      else if (field === "sourceKind") setSourceKind(value);
+      else if (field === "sourceId") setSourceId(value);
+      else if (field === "sourceTableName") setSourceTableName(value);
+      else if (field === "refreshCron") setRefreshCron(value);
+      else if (field === "columnsJson") setColumnsJson(value);
+    },
+    []
+  );
+
+  const setEditField = useCallback(
+    (field: "name" | "description" | "refreshCron", value: string) => {
+      if (field === "name") setEditName(value);
+      else if (field === "description") setEditDescription(value);
+      else if (field === "refreshCron") setEditRefreshCron(value);
+    },
+    []
+  );
+
+  const submitEdit = useCallback(() => {
+    if (!editName.trim()) {
+      setEditError("Name is required.");
+      return;
+    }
+    if (!editingId) return;
+    editMutation.mutate({ id: editingId });
+  }, [editName, editingId, editMutation]);
+
+  const closeModals = useCallback(() => {
+    setCreateOpen(false);
+    setEditOpen(false);
+  }, []);
+
+  const openCreateModal = useCallback(() => {
+    resetForm();
+    setCreateOpen(true);
+  }, []);
+
+  const deleteMutationRef = useRef(deleteMutation);
+  deleteMutationRef.current = deleteMutation;
+  const refreshMutationRef = useRef(refreshMutation);
+  refreshMutationRef.current = refreshMutation;
+  const deleteDatasetCb = useCallback(
+    (id: string) => deleteMutationRef.current.mutateAsync(id),
+    []
+  );
+  const refreshDatasetCb = useCallback(
+    (id: string) => refreshMutationRef.current.mutateAsync(id),
+    []
+  );
+
+  useDatasetsPagePageContext({
+    datasets: datasetsList,
+    loading: datasetsQuery.isLoading,
+    createModal: {
+      open: createOpen,
+      name,
+      description,
+      mode,
+      sourceKind,
+      sourceId,
+      sourceTableName,
+      refreshCron,
+      columnsJson,
+      submitError
+    },
+    editModal: {
+      open: editOpen,
+      editingId,
+      editName,
+      editDescription,
+      editRefreshCron,
+      editIsCached,
+      editError
+    },
+    sources: {
+      datastores: (dataStoresQuery.data ?? []).map((s) => ({ id: s.id, name: s.name, kind: s.kind })),
+      tables: (tablesQuery.data ?? []).map((t) => ({ tableName: t.tableName, rowCount: t.rowCount })),
+      connectors: (dataConnectorsQuery.data ?? []).map((c) => ({ id: c.id, name: c.name, kind: c.kind }))
+    },
+    openCreateModal,
+    openEditModal: (id) => {
+      const row = datasetsList.find((d) => d.id === id);
+      if (row) openEdit(row);
+    },
+    closeModals,
+    setCreateField,
+    setEditField,
+    submitCreate,
+    submitEdit,
+    deleteDataset: deleteDatasetCb,
+    refreshDataset: refreshDatasetCb
+  });
 
   const columns = useMemo<DataTableColumn<Dataset>[]>(
     () => [

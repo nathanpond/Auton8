@@ -1,6 +1,6 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActionIcon,
   Alert,
@@ -31,6 +31,7 @@ import {
   updateDataStore
 } from "@/api/datastores";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useDataStoresPagePageContext } from "./useDataStoresPagePageContext";
 
 const QUERY_KEY = ["datastores", "list"] as const;
 const COLUMN_WIDTHS = ["1fr", "120px", "2fr", "180px", "60px"];
@@ -126,6 +127,13 @@ export default function DataStoresPage() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    submit();
+  }
+
+  // Internal helper so submit() can be called both from the form's onSubmit
+  // and from the page-context provider's submit_modal action without
+  // synthesizing a fake event.
+  const submit = useCallback(() => {
     if (!name.trim()) {
       setSubmitError("Name is required.");
       return;
@@ -139,7 +147,52 @@ export default function DataStoresPage() {
         kind
       });
     }
-  }
+  }, [name, description, kind, editingId, createMutation, editMutation]);
+
+  // Mirror of the DataTable's underlying query so the page-context hook can
+  // expose the live list to the chatbot. react-query dedupes the request
+  // so this is free at runtime.
+  const storesQuery = useQuery({ queryKey: QUERY_KEY, queryFn: () => listDataStores() });
+  const stores = storesQuery.data ?? [];
+
+  const setModalField = useCallback((field: "name" | "description" | "kind", value: string) => {
+    if (field === "name") setName(value);
+    else if (field === "description") setDescription(value);
+    else if (field === "kind") setKind(value as DataStoreKind);
+  }, []);
+
+  const closeModal = useCallback(() => setModalOpen(false), []);
+
+  // Avoid recreating the deleteStore callback every render (the page-context
+  // hook would treat it as a fresh value and bump the snapshot version).
+  const deleteMutationRef = useRef(deleteMutation);
+  deleteMutationRef.current = deleteMutation;
+  const deleteStore = useCallback(
+    (id: string) => deleteMutationRef.current.mutateAsync(id),
+    []
+  );
+
+  useDataStoresPagePageContext({
+    stores,
+    loading: storesQuery.isLoading,
+    modal: {
+      open: modalOpen,
+      editingId,
+      name,
+      description,
+      kind,
+      submitError
+    },
+    openCreate,
+    openEdit: (id) => {
+      const row = stores.find((s) => s.id === id);
+      if (row) openEdit(row);
+    },
+    closeModal,
+    setModalField,
+    submitModal: submit,
+    deleteStore
+  });
 
   const columns = useMemo<DataTableColumn<DataStore>[]>(
     () => [
