@@ -16,10 +16,13 @@ internal static class WidgetConfigValidator
     // Discriminated outcome from a validation pass. `ParserErrors` is set
     // when the AQL didn't parse / type-check; `AvailableColumns` is set
     // when the AQL parsed but a column-mapping field referenced a column
-    // that doesn't exist in the result schema; both nulls + Ok=true means
-    // the config passed. `ValidatedSchema` is populated on success (when
-    // the config used adHocAql / savedQuery) so callers can surface the
-    // result column list to the agent for downstream styling decisions.
+    // that doesn't exist in the result schema; `ExecutionError` is set when
+    // the query parsed and column-mapped cleanly but blew up at runtime
+    // (broken dataset source, missing underlying table, permission error,
+    // etc.). All-null + Ok=true means the config passed. `ValidatedSchema`
+    // is populated on success (when the config used adHocAql / savedQuery)
+    // so callers can surface the result column list to the agent for
+    // downstream styling decisions.
     public sealed record Result(
         bool Ok,
         string? Message,
@@ -29,17 +32,24 @@ internal static class WidgetConfigValidator
         IReadOnlyList<string>? ParserErrors,
         string? SchemaSource,
         IReadOnlyList<QueryColumn>? AvailableColumns,
-        IReadOnlyList<QueryColumn>? ValidatedSchema)
+        IReadOnlyList<QueryColumn>? ValidatedSchema,
+        string? ExecutionError = null)
     {
         public static Result Pass(IReadOnlyList<QueryColumn>? schema) =>
             new(true, null, null, null, null, null, null, null, schema);
     }
 
+    // executeProbe=true triggers a hardCap=1 test execution after the parse +
+    // column-mapping checks pass. add_widget / update_widget opt in so a
+    // widget can't ship with a query that parses but blows up at runtime;
+    // build_widget_config_template stays probe-off because planning iterates
+    // many configs and the cost adds up.
     public static async Task<Result> ValidateAsync(
         string widgetType,
         JsonElement config,
         AgentToolContext ctx,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool executeProbe = false)
     {
         if (!TryReadDataSourceType(config, out var type))
         {
@@ -54,6 +64,7 @@ internal static class WidgetConfigValidator
         // either way, which keeps the column-existence pass below uniform.
         IReadOnlyList<QueryColumn>? validatedSchema = null;
         string? schemaSource = null;
+        string? probeQueryText = null;
         if (type == "adHocAql")
         {
             var query = ReadDataSourceString(config, "adHocAqlQuery") ?? string.Empty;
@@ -72,6 +83,7 @@ internal static class WidgetConfigValidator
             }
             validatedSchema = schema;
             schemaSource = "adHocAqlQuery";
+            probeQueryText = query;
         }
         else if (type == "savedQuery")
         {
@@ -99,6 +111,7 @@ internal static class WidgetConfigValidator
             }
             validatedSchema = schema;
             schemaSource = $"savedQuery '{sq.Name}'";
+            probeQueryText = sq.QueryText;
         }
 
         // Step 2 — when we have a result schema, verify every column-mapping
@@ -161,6 +174,33 @@ internal static class WidgetConfigValidator
             }
             // data-table: no column-mapping fields — its dataSource.type was
             // already gated to records|workflows by SupportedSources upstream.
+        }
+
+        // Step 3 — opt-in probe execution. Parse + column-mapping prove the
+        // query is well-formed against the dataset's *declared* schema, but
+        // a dataset can be declared correctly yet point at a non-existent
+        // source (fabricated sourceId, missing table, hand-edited row). The
+        // probe runs the actual query with hardCap=1; any runtime failure
+        // (Postgres error, dataset source not resolvable, permission denied)
+        // surfaces here instead of leaving the widget broken on the page.
+        if (executeProbe && probeQueryText is not null)
+        {
+            var executor = ctx.Services.GetRequiredService<IAqlExecutor>();
+            try
+            {
+                await executor.ExecuteAsync(probeQueryText, ctx.Session.User, hardCap: 1, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new Result(false,
+                    "Widget AQL parses cleanly but failed when executed (hardCap=1 probe). The widget would render an error on the dashboard. Fix the underlying issue (dataset source, table, permissions) before re-issuing.",
+                    "dataSource.adHocAqlQuery", null, probeQueryText, null, schemaSource, null, validatedSchema,
+                    ExecutionError: ex.Message);
+            }
         }
 
         return Result.Pass(validatedSchema);

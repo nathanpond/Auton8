@@ -418,9 +418,10 @@ function renderChart(
         />
       );
     case "funnel":
-      // FunnelChart treats the data as ordered top-to-bottom stages. We
-      // pre-sort by value desc in bucketize so the largest cohort sits on
-      // top — typical for sales-pipeline visualizations.
+      // FunnelChart treats the data as ordered top-to-bottom stages. Order
+      // comes from the data source: records/workflows bucketize sorts by
+      // count desc; AQL preserves the query's ORDER BY, so funnel users on
+      // AQL should write `ORDER BY <value> DESC` for a largest-on-top funnel.
       return (
         <FunnelChart
           h="100%"
@@ -763,6 +764,10 @@ function bucketize<T>(items: T[], labelFn: (item: T) => string): ChartPoint[] {
 // bucketize behaviour), and when set we sum the numeric coercion of each
 // row's value-column cell, which lets aggregated queries (e.g. one row
 // per status with an explicit COUNT) render without re-aggregating.
+// Output order = first-seen row order, which preserves the AQL ORDER BY.
+// Funnel / bars-list / desc-by-value charts should write `ORDER BY <value>
+// DESC` in their query; this function will no longer impose a value-desc
+// sort that clobbers a date-axis ORDER BY on time-series charts.
 function bucketizeAqlRows(
   res: AqlQueryResponse,
   labelColumn: string,
@@ -789,9 +794,7 @@ function bucketizeAqlRows(
     }
     buckets.set(label, (buckets.get(label) ?? 0) + delta);
   }
-  return Array.from(buckets.entries())
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value);
+  return Array.from(buckets.entries()).map(([label, value]) => ({ label, value }));
 }
 
 function labelForRecord(
