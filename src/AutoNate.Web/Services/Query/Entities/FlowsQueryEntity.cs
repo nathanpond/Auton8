@@ -127,10 +127,10 @@ public sealed class FlowsQueryEntity : IQueryEntity
             "FROM Flows WHERE Status = \"Completed\" ORDER BY DurationMs DESC LIMIT 10"),
         new QueryExample(
             "Counts grouped by status",
-            "FROM Flows COLUMNS(Status, COUNT() AS Total) GROUP(Status) ORDER BY Total DESC"),
+            "FROM Flows ORDER BY Total DESC COLUMNS(Status, COUNT() AS Total) GROUP(Status)"),
         new QueryExample(
             "In-progress workflows with their current step and assignee",
-            "FROM Flows WHERE Status = \"In-progress\" COLUMNS(Id, FlowName, CURRENTSTEP(Name) AS Step, CURRENTSTEP(Assignee) AS Assignee) ORDER BY StartDate DESC")
+            "FROM Flows WHERE Status = \"In-progress\" ORDER BY StartDate DESC COLUMNS(Id, FlowName, CURRENTSTEP(Name) AS Step, CURRENTSTEP(Assignee) AS Assignee)")
     };
 
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)

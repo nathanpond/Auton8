@@ -80,7 +80,12 @@ public sealed class ManageDashboardsSkill : IAgentSkill
 
             new AgentTool(
                 Name: "add_widget",
-                Description: "Add a widget to an owned dashboard. `widgetType` matches a SPA registry key (see lookup-dashboards.list_widget_types). `config` is the widget's full Zod-validated body; defaults are applied client-side if omitted entirely. Grid coords default to (0,0,4,3) if not set. Confirm-gated.",
+                Description:
+                    "Add a widget to an owned dashboard. `widgetType` matches a SPA registry key (see lookup-dashboards.list_widget_types). " +
+                    "`config` is the widget's full Zod-validated body; defaults are applied client-side if omitted entirely. " +
+                    "**The config blob is validated server-side BEFORE the proposal**: when dataSource.type is 'adHocAql' or 'savedQuery' the AQL gets parsed + type-checked and every column-mapping field (savedQueryLabelColumn, savedQueryValueColumn, bucketColumn, xAxisColumn, etc.) is checked to exist in the result schema. Validation failures return a ConfirmGate.Failed envelope with `parserErrors` (for grammar issues) or `availableColumns` (for unknown column names) — fix and re-issue. " +
+                    "On success the proposal includes `validatedSchema` so the user can see what data the chart will plot before approving. " +
+                    "Grid coords default to (0,0,4,3) if not set. Confirm-gated.",
                 JsonSchema: ParseSchema("""
                     {
                       "type": "object",
@@ -103,7 +108,11 @@ public sealed class ManageDashboardsSkill : IAgentSkill
 
             new AgentTool(
                 Name: "update_widget",
-                Description: "Update an existing widget's title, config, or grid position. Any field omitted is left as-is. `config`, when provided, replaces the entire body (no deep-merge server-side). Confirm-gated.",
+                Description:
+                    "Update an existing widget's title, config, or grid position. Any field omitted is left as-is. " +
+                    "`config`, when provided, replaces the entire body (no deep-merge server-side) AND gets the same server-side validation as add_widget: " +
+                    "AQL parse + type-check, plus column-existence checks for every column-mapping field. Validation runs against the widget's existing widgetType (which can't change via update). " +
+                    "Failures return a ConfirmGate.Failed envelope with `parserErrors` or `availableColumns` — fix and re-issue. Title/grid-only updates skip validation. Confirm-gated.",
                 JsonSchema: ParseSchema("""
                     {
                       "type": "object",
@@ -175,7 +184,12 @@ public sealed class ManageDashboardsSkill : IAgentSkill
     }
 
     public string? SystemPromptFragment(AgentSessionContext context) =>
-        "Dashboards are owner-only in v1 — mutations on someone else's dashboard return NotFound. When picking a widget type, first call lookup-dashboards.list_widget_types to see available types and their config shape, then compose the `config` field accordingly. Widget config is validated by the SPA's Zod schemas — a malformed config will render an error overlay on the dashboard.";
+        "Dashboards are owner-only in v1 — mutations on someone else's dashboard return NotFound. " +
+        "WIDGET CONFIG WORKFLOW (do this every time): " +
+        "(1) call lookup-dashboards.list_widget_types to see widget types, their TRUE configShape, and supportedSources. " +
+        "(2) call lookup-dashboards.build_widget_config_template with widgetType + mode + binding args to get a complete, schema-valid `config` blob. DO NOT compose configs by hand — the schemas have non-obvious field names (savedQueryLabelColumn, recordGroupBy, etc.) and the SPA silently falls back to 'All records' if you pass an invalid dataSource shape. " +
+        "(3) pass the returned config verbatim to add_widget / update_widget. " +
+        "DATASET BINDING REMINDER: there is NO 'dataset' dataSource type. Use mode='adHocAql' and put real AQL in adHocAqlQuery. AQL is NOT SQL — clauses are `FROM <entity>[(arg)] [WHERE ...] [ORDER BY ...] [COLUMNS(<items>)] [GROUP(<fields>)] [LIMIT n]` in that exact order; use `COLUMNS(...)` not `SELECT`, `GROUP(...)` not `GROUP BY`, `LIMIT n` not `TAKE n`. Example: `FROM Dataset(\"name\") ORDER BY date COLUMNS(date, AVG(value) AS avg_value) GROUP(date)`. labelColumn (sets savedQueryLabelColumn) is the X axis / slice label; valueColumn (sets savedQueryValueColumn) is the Y axis / value. data-table does NOT support adHocAql — use a chart widget for dataset visualizations.";
 
     private static async Task<JsonElement> InvokeCreateDashboardAsync(JsonElement args, AgentToolContext ctx, CancellationToken ct)
     {
@@ -300,13 +314,35 @@ public sealed class ManageDashboardsSkill : IAgentSkill
         var existing = await store.GetForActorAsync(dashboardId, ctx.Session.UserId, ct);
         if (existing is null) return ConfirmGate.Rejected(action, $"Dashboard {dashboardId} not found or not owned by current user.");
 
+        // Validate the config blob via the shared WidgetConfigValidator before
+        // we ever offer a proposal. Same parser + column-existence checks
+        // that build_widget_config_template runs — so a hand-composed config
+        // gets the same gating as a template-produced one. On failure we
+        // return a ConfirmGate.Failed envelope with the parser errors or the
+        // result schema's available columns, so the agent can correct and
+        // re-issue without the user ever seeing an approval prompt for a
+        // widget that can't render.
+        WidgetConfigValidator.Result? validation = null;
+        if (configEl.HasValue)
+        {
+            validation = await WidgetConfigValidator.ValidateAsync(widgetType, configEl.Value, ctx, ct);
+            if (!validation.Ok)
+                return BuildValidationFailedEnvelope("dashboard_widget_add_failed", action, validation);
+        }
+
         var preview = new
         {
             dashboardId,
             widgetType,
             title,
             grid = new { gridX, gridY, gridW, gridH },
-            configProvided = configEl.HasValue
+            configProvided = configEl.HasValue,
+            validatedSchema = validation?.ValidatedSchema?.Select(c => new
+            {
+                name = c.Name,
+                dataType = c.DataType.ToString().ToLowerInvariant(),
+                isAggregable = c.IsAggregable
+            }).ToList()
         };
         if (!ConfirmGate.IsConfirmed(args))
             return ConfirmGate.Proposal("dashboard_widget_add_proposal", action, preview);
@@ -356,6 +392,18 @@ public sealed class ManageDashboardsSkill : IAgentSkill
         var existingWidget = existing.Widgets.FirstOrDefault(w => w.Id == widgetId);
         if (existingWidget is null) return ConfirmGate.Rejected(action, $"Widget {widgetId} not found on dashboard {dashboardId}.");
 
+        // Validate the replacement config (when provided) against the EXISTING
+        // widget's type — clients can't change widgetType via update, so the
+        // validator uses what's already in the row. Title/grid-only updates
+        // skip validation entirely.
+        WidgetConfigValidator.Result? validation = null;
+        if (configEl.HasValue)
+        {
+            validation = await WidgetConfigValidator.ValidateAsync(existingWidget.WidgetType, configEl.Value, ctx, ct);
+            if (!validation.Ok)
+                return BuildValidationFailedEnvelope("dashboard_widget_update_failed", action, validation);
+        }
+
         var preview = new
         {
             dashboardId,
@@ -366,7 +414,13 @@ public sealed class ManageDashboardsSkill : IAgentSkill
                 title,
                 configProvided = configEl.HasValue,
                 grid = new { gridX, gridY, gridW, gridH }
-            }
+            },
+            validatedSchema = validation?.ValidatedSchema?.Select(c => new
+            {
+                name = c.Name,
+                dataType = c.DataType.ToString().ToLowerInvariant(),
+                isAggregable = c.IsAggregable
+            }).ToList()
         };
         if (!ConfirmGate.IsConfirmed(args))
             return ConfirmGate.Proposal("dashboard_widget_update_proposal", action, preview);
@@ -463,6 +517,46 @@ public sealed class ManageDashboardsSkill : IAgentSkill
         {
             return ConfirmGate.Failed("dashboard_layout_failed", action, $"Dashboard {dashboardId} not found or not owned by current user.");
         }
+    }
+
+    // Format a WidgetConfigValidator.Result as a ConfirmGate.Failed envelope
+    // with structured details. The Failed envelope is shaped identically to a
+    // committed-but-rejected widget mutation — the agent sees `error` +
+    // `details` and decides how to recover. The grammar hint is embedded
+    // whenever the failure was a parse error so the agent has the clause-
+    // order rule on-hand without re-querying.
+    private static JsonElement BuildValidationFailedEnvelope(
+        string kind, string action, WidgetConfigValidator.Result r)
+    {
+        object details;
+        if (r.ParserErrors is not null)
+        {
+            details = new
+            {
+                sourceField = r.SourceField,
+                queryText = r.QueryText,
+                parserErrors = r.ParserErrors,
+                grammarHint = WidgetConfigValidator.GrammarHint
+            };
+        }
+        else
+        {
+            details = new
+            {
+                fieldName = r.SourceField,
+                badValue = r.BadValue,
+                schemaSource = r.SchemaSource,
+                availableColumns = r.AvailableColumns?.Select(c => new
+                {
+                    name = c.Name,
+                    dataType = c.DataType.ToString().ToLowerInvariant(),
+                    isAggregable = c.IsAggregable
+                }).ToList()
+            };
+        }
+        return ConfirmGate.Failed(kind, action,
+            r.Message ?? "Widget config failed validation.",
+            details);
     }
 
     private static bool TryReadGuid(JsonElement args, string name, out Guid id)

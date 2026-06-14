@@ -138,6 +138,54 @@ function ConfigurableDashboard({ mountPath }: { mountPath: string }) {
   const removeWidget = useRemoveWidget(selectedId ?? "");
   const replaceLayout = useReplaceLayout(selectedId ?? "");
 
+  // Page-context provider — must run on EVERY render (hooks rule), so it
+  // sits above the loading / error early returns. Values are inlined from
+  // the queries; the action closures reference handler consts declared
+  // below — those are still in TDZ here at hook-call time, but the
+  // closures only run when the agent later invokes an action, by which
+  // point the function body has fully executed.
+  useDashboardPagePageContext({
+    dashboards: dashboardsQuery.data ?? [],
+    selectedId,
+    dashboard: dashboardQuery.data ?? null,
+    widgets: dashboardQuery.data?.widgets ?? [],
+    configWidgetId: configWidget?.id ?? null,
+    pickerOpen,
+    renameOpen,
+    deleteOpen,
+    selectDashboard: setSelectedId,
+    openPicker: () => setPickerOpen(true),
+    closePicker: () => setPickerOpen(false),
+    openRename: () => setRenameOpen(true),
+    openDelete: () => setDeleteOpen(true),
+    openWidgetConfig: (widgetId) => {
+      const ws = dashboardQuery.data?.widgets ?? [];
+      const w = ws.find((x) => x.id === widgetId);
+      if (w) setConfigWidget(w);
+    },
+    closeWidgetConfig: () => setConfigWidget(null),
+    removeWidget: (widgetId) => {
+      const ws = dashboardQuery.data?.widgets ?? [];
+      const w = ws.find((x) => x.id === widgetId);
+      if (w) setWidgetToRemove(w);
+    },
+    repositionWidget: (widgetId, grid) => {
+      const ws = dashboardQuery.data?.widgets ?? [];
+      const w = ws.find((x) => x.id === widgetId);
+      if (!w) return;
+      const positions = ws.map((other) =>
+        other.id === widgetId
+          ? { widgetId: other.id, ...grid }
+          : { widgetId: other.id, gridX: other.gridX, gridY: other.gridY, gridW: other.gridW, gridH: other.gridH }
+      );
+      replaceLayout.mutate(positions);
+    },
+    addWidgetOfType: (widgetType) => {
+      const def = getWidget(widgetType);
+      if (def) handleAddWidget(def);
+    }
+  });
+
   if (dashboardsQuery.isLoading) {
     return (
       <Center p="xl">
@@ -205,52 +253,6 @@ function ConfigurableDashboard({ mountPath }: { mountPath: string }) {
       { onSuccess: (created) => setSelectedId(created.id) }
     );
   };
-
-  // Page-context provider — exposes the live dashboard, widgets, and
-  // modal state to the chatbot. Mutating actions reuse the same handlers
-  // the canvas + toolbar use, so the in-memory state stays consistent.
-  useDashboardPagePageContext({
-    dashboards,
-    selectedId,
-    dashboard: dashboardQuery.data ?? null,
-    widgets,
-    configWidgetId: configWidget?.id ?? null,
-    pickerOpen,
-    renameOpen,
-    deleteOpen,
-    selectDashboard: setSelectedId,
-    openPicker: () => setPickerOpen(true),
-    closePicker: () => setPickerOpen(false),
-    openRename: () => setRenameOpen(true),
-    openDelete: () => setDeleteOpen(true),
-    openWidgetConfig: (widgetId) => {
-      const w = widgets.find((x) => x.id === widgetId);
-      if (w) setConfigWidget(w);
-    },
-    closeWidgetConfig: () => setConfigWidget(null),
-    removeWidget: (widgetId) => {
-      const w = widgets.find((x) => x.id === widgetId);
-      if (w) setWidgetToRemove(w);
-    },
-    repositionWidget: (widgetId, grid) => {
-      const w = widgets.find((x) => x.id === widgetId);
-      if (!w) return;
-      // Mirror DashboardCanvas's onLayoutChange — send the whole layout
-      // (every widget) so server-side ReplaceLayoutAsync sees the move
-      // applied to one widget while leaving the others at their current
-      // positions.
-      const positions = widgets.map((other) =>
-        other.id === widgetId
-          ? { widgetId: other.id, ...grid }
-          : { widgetId: other.id, gridX: other.gridX, gridY: other.gridY, gridW: other.gridW, gridH: other.gridH }
-      );
-      replaceLayout.mutate(positions);
-    },
-    addWidgetOfType: (widgetType) => {
-      const def = getWidget(widgetType);
-      if (def) handleAddWidget(def);
-    }
-  });
 
   return (
     <Stack className="dashboard-page" p="md">

@@ -79,6 +79,19 @@ internal static class DatasetSqlBuilder
 
         if (query.OrderBy is { Count: > 0 })
         {
+            // Aliases declared in COLUMNS(... AS name). Postgres resolves
+            // `ORDER BY "alias"` against the projection's AS clause natively,
+            // so we emit the alias as a quoted identifier when the ORDER BY
+            // field matches one. Validator (with SupportsAliasOrderBy=true)
+            // has already accepted the reference.
+            var aliasNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (query.Columns is not null)
+            {
+                foreach (var c in query.Columns)
+                {
+                    if (c.Alias is not null) aliasNames.Add(c.Alias);
+                }
+            }
             var parts = new List<string>();
             foreach (var o in query.OrderBy)
             {
@@ -87,9 +100,14 @@ internal static class DatasetSqlBuilder
                 {
                     expr = ProjectionToSql(o.Item);
                 }
-                else if (o.Item.Field is not null && byName.ContainsKey(o.Item.Field))
+                else if (o.Item.Field is not null)
                 {
-                    expr = QuoteIdent(o.Item.Field);
+                    // Alias wins over a source column of the same name —
+                    // matches SQL ORDER-BY-by-alias semantics.
+                    if (aliasNames.Contains(o.Item.Field) || byName.ContainsKey(o.Item.Field))
+                    {
+                        expr = QuoteIdent(o.Item.Field);
+                    }
                 }
                 if (expr is null) continue;
                 parts.Add($"{expr} {(o.Descending ? "DESC" : "ASC")}");

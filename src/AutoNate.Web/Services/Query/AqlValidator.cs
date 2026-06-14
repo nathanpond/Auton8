@@ -63,10 +63,40 @@ internal sealed class AqlValidator
             ValidateWhere(query.Where, entity, byName, errors);
         }
 
-        // ORDER BY items: each is either a column ref or an aggregate call.
+        // Aliases declared in COLUMNS(... AS name). Visible to ORDER BY only
+        // when the entity opts in via SupportsAliasOrderBy (Dataset does;
+        // LINQ-pushdown entities like Records/Flows/Notes don't, because
+        // their ORDER BY compilers resolve against the source schema and
+        // would silently drop alias references). Matches SQL ORDER-BY-by-
+        // alias semantics where the alias wins over a source column of the
+        // same name.
+        Dictionary<string, AqlSelectItem>? orderByAliases = null;
+        if (entity.SupportsAliasOrderBy && query.Columns is not null)
+        {
+            orderByAliases = new Dictionary<string, AqlSelectItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in query.Columns)
+            {
+                if (col.Alias is not null)
+                {
+                    orderByAliases.TryAdd(col.Alias, col);
+                }
+            }
+        }
+
+        AqlSelectItem ResolveOrderByItem(AqlSelectItem item)
+        {
+            if (orderByAliases is null) return item;
+            if (item.IsAggregate) return item;
+            if (item.Field is null) return item;
+            return orderByAliases.TryGetValue(item.Field, out var resolved) ? resolved : item;
+        }
+
+        // ORDER BY items: each is either a column ref, an aggregate call, or
+        // (when the entity opts in) a reference to a COLUMNS alias resolved
+        // back to its underlying aggregate/column expression.
         foreach (var item in query.OrderBy)
         {
-            ValidateSelectItem(item.Item, "ORDER BY", entity, byName, query.Group, errors);
+            ValidateSelectItem(ResolveOrderByItem(item.Item), "ORDER BY", entity, byName, query.Group, errors);
         }
 
         // COLUMNS items.
@@ -100,7 +130,7 @@ internal sealed class AqlValidator
                                $"Either add it to GROUP() or wrap it in COUNT/MIN/MAX/AVG/MEDIAN.");
                 }
             }
-            foreach (var item in query.OrderBy) AssertGroupingOk(item.Item, "ORDER BY");
+            foreach (var item in query.OrderBy) AssertGroupingOk(ResolveOrderByItem(item.Item), "ORDER BY");
             if (query.Columns is not null)
             {
                 foreach (var item in query.Columns) AssertGroupingOk(item, "COLUMNS()");
@@ -120,7 +150,7 @@ internal sealed class AqlValidator
                 }
                 errors.Add($"Aggregate '{fn}()' in {ctx} requires a GROUP(...) clause.");
             }
-            foreach (var item in query.OrderBy) AssertNoAggregate(item.Item, "ORDER BY");
+            foreach (var item in query.OrderBy) AssertNoAggregate(ResolveOrderByItem(item.Item), "ORDER BY");
             if (query.Columns is not null)
             {
                 foreach (var item in query.Columns) AssertNoAggregate(item, "COLUMNS()");

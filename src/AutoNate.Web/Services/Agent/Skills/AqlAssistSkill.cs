@@ -34,7 +34,14 @@ public sealed class AqlAssistSkill : IAgentSkill
         {
             new AgentTool(
                 Name: ValidateToolName,
-                Description: "Parse + type-check an AQL query string without executing. Returns errors with friendly messages so you can correct a draft before proposing it to the user. Side-effect free.",
+                Description:
+                    "Parse + type-check an AQL query string without executing. Side-effect free. " +
+                    "Returns `sourceColumns` (the entity's static schema — the fields/aggregates AVAILABLE inside the query, e.g. for use in WHERE / ORDER BY / aggregate-function args) " +
+                    "AND `resultColumns` (the POST-PROJECTION schema — the columns the executed query's rows will actually have, derived from the COLUMNS(...) clause). " +
+                    "Use `resultColumns` when binding the query to a chart widget or anything that consumes the result row stream (e.g. savedQueryLabelColumn / savedQueryValueColumn must reference a `resultColumns` name, NOT a `sourceColumns` name). " +
+                    "Use `sourceColumns` to learn what fields you can reference INSIDE the query. Without a COLUMNS(...) clause the two lists are identical. " +
+                    "⚠ Clause order is FROM → WHERE → ORDER BY → COLUMNS → GROUP → LIMIT. " +
+                    "ORDER BY-by-alias is entity-dependent: Dataset queries accept `ORDER BY <alias>` where <alias> was introduced via COLUMNS(... AS <alias>); other entities (Records, Flows, Notes, Workflow*) resolve ORDER BY only against the source schema, so for those repeat the expression instead — `ORDER BY AVG(value) DESC COLUMNS(date, AVG(value) AS avg_value) GROUP(date)`.",
                 JsonSchema: ParseSchema("""
                     {
                       "type": "object",
@@ -105,17 +112,30 @@ public sealed class AqlAssistSkill : IAgentSkill
             var prepared = await validator.ValidateAsync(ast, hardCap: 1000, ct);
 
             var ok = prepared.ValidationErrors.Count == 0;
+            // Source schema = what fields/aggregates the query CAN reference
+            // inside its clauses. Result schema = what columns the executed
+            // query's row stream will actually have (post-COLUMNS projection).
+            // Both are emitted so callers can pick the right one for their
+            // use case — widget axis bindings need resultColumns, query
+            // authoring uses sourceColumns.
+            var resultSchema = AqlResultSchema.Derive(ast, prepared.Schema);
             return Envelope("aql_validation", new
             {
                 queryText,
                 ok,
                 entity = prepared.Entity.Name,
-                columns = prepared.Schema.Select(c => new
+                sourceColumns = prepared.Schema.Select(c => new
                 {
                     name = c.Name,
                     dataType = c.DataType.ToString().ToLowerInvariant(),
                     isAggregable = c.IsAggregable,
                     isSystem = c.IsSystem
+                }).ToArray(),
+                resultColumns = resultSchema.Select(c => new
+                {
+                    name = c.Name,
+                    dataType = c.DataType.ToString().ToLowerInvariant(),
+                    isAggregable = c.IsAggregable
                 }).ToArray(),
                 errors = prepared.ValidationErrors,
                 hints = ok ? Array.Empty<string>() : BuildRemediationHints(queryText, prepared.ValidationErrors)
@@ -197,8 +217,44 @@ public sealed class AqlAssistSkill : IAgentSkill
                 "Clause order is FROM → WHERE → ORDER BY → COLUMNS → GROUP → LIMIT.");
         }
 
-        // Unknown field/entity — point the model at the introspection tool.
-        if (errors.Any(e => e.Contains("Unknown field", StringComparison.OrdinalIgnoreCase)))
+        // ORDER BY referencing a COLUMNS alias — the #1 cause of multi-turn
+        // stalling on dashboard chart queries. Clauses are parsed FROM →
+        // WHERE → ORDER BY → COLUMNS → GROUP → LIMIT, so an alias defined
+        // in COLUMNS(...AS X) isn't visible to ORDER BY. The validator
+        // reports "Unknown field 'X'" but the agent often guesses the fix
+        // wrong (trying ungrouped base columns, swapping clause order
+        // repeatedly). When we can detect this exact pattern, give a
+        // mechanical rewrite instruction with the literal field name.
+        var unknownFieldErrors = errors
+            .Where(e => e.Contains("Unknown field", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        bool emittedAliasHint = false;
+        if (unknownFieldErrors.Count > 0)
+        {
+            var aliases = ExtractColumnsAliases(queryText);
+            foreach (var err in unknownFieldErrors)
+            {
+                var nameMatch = Regex.Match(err, @"Unknown field [`'""]?(\w+)[`'""]?", RegexOptions.IgnoreCase);
+                if (!nameMatch.Success) continue;
+                var name = nameMatch.Groups[1].Value;
+                var aliasHit = aliases.FirstOrDefault(a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+                if (aliasHit is null) continue;
+                hints.Add(
+                    $"`{aliasHit}` is defined as an alias inside COLUMNS(... AS {aliasHit}), but this entity's " +
+                    "ORDER BY resolves only against the source schema — it does not see COLUMNS aliases. " +
+                    "(Dataset queries DO support ORDER BY-by-alias; this entity does not.) " +
+                    "Fix: repeat the underlying expression in ORDER BY instead of referencing the alias. " +
+                    $"Example: `ORDER BY {aliasHit} DESC ... COLUMNS(... AVG(field) AS {aliasHit} ...)` → " +
+                    $"`ORDER BY AVG(field) DESC ... COLUMNS(... AVG(field) AS {aliasHit} ...)`.");
+                emittedAliasHint = true;
+                break; // One targeted alias hint is enough; agent retries with this fix.
+            }
+        }
+
+        // Generic "unknown field" advice — skip when we already gave the
+        // more specific alias-in-ORDER-BY hint, so the agent isn't pulled
+        // two directions at once.
+        if (!emittedAliasHint && unknownFieldErrors.Count > 0)
         {
             hints.Add(
                 "Call describe_aql_entity with the FROM entity to see the exact column list " +
@@ -211,6 +267,32 @@ public sealed class AqlAssistSkill : IAgentSkill
         }
 
         return hints;
+    }
+
+    // Extract the alias names from a COLUMNS(...) clause. Used by the
+    // alias-in-ORDER-BY hint above. Hand-rolled paren matching because the
+    // body can contain nested aggregate calls like AVG(temperature) AS
+    // avg_temp, and balanced-paren regex isn't supported in .NET.
+    private static IReadOnlyList<string> ExtractColumnsAliases(string queryText)
+    {
+        var match = Regex.Match(queryText, @"\bCOLUMNS\s*\(", RegexOptions.IgnoreCase);
+        if (!match.Success) return Array.Empty<string>();
+        int i = match.Index + match.Length;
+        int depth = 1;
+        int start = i;
+        while (i < queryText.Length && depth > 0)
+        {
+            var ch = queryText[i];
+            if (ch == '(') depth++;
+            else if (ch == ')') { depth--; if (depth == 0) break; }
+            i++;
+        }
+        if (depth != 0) return Array.Empty<string>();
+        var body = queryText.Substring(start, i - start);
+        var aliases = new List<string>();
+        foreach (Match m in Regex.Matches(body, @"\bAS\s+(\w+)\b", RegexOptions.IgnoreCase))
+            aliases.Add(m.Groups[1].Value);
+        return aliases;
     }
 
     private static bool ContainsQuoted(string source, string keyword) =>
