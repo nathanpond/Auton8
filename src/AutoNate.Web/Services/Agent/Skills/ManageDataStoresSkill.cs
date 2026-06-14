@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Persistence;
@@ -194,8 +195,24 @@ public sealed class ManageDataStoresSkill : IAgentSkill
                     "`keyColumns` lists the source column names that identify each row (typically a date or id column); these become the leftmost columns in the output. " +
                     "All OTHER source columns are unpivoted: their values become rows, with the column name written into the `entityColumnName` column (default 'entity') " +
                     "and the cell value written into the `valueColumnName` column (default 'value'). " +
-                    "For XLSX, set `sheetName` or `sheetIndex`, `headerRow` (default 1) for the column names, and `descriptionRow` (optional) for a banner row above the headers " +
+                    "Use `ignoreColumns` to drop source columns entirely (neither key nor entity) — e.g. when the XLSX has a redundant datetime column at column B with an empty header (synthesized as 'col_2'), " +
+                    "pass `ignoreColumns: [\"col_2\"]` so it isn't unpivoted into junk rows. Case-insensitive; columns listed in both `keyColumns` and `ignoreColumns` are rejected. " +
+                    "Use `entityColumnSplit` when the entity headers share a common template — e.g. 'Average temperature in {city} (degree Celsius) - {country} - FSR - Daily' across 1800 columns. " +
+                    "Pass `{ template: \"...{city}...{country}...\", outputColumns: [\"city\", \"country\"] }` and the output replaces the single `entityColumnName` column with one column per placeholder, " +
+                    "writing the captured values from each source header. The regex is compiled once and run once per source header (not per row), so the per-row cost is essentially nothing even at multi-million-row scale, " +
+                    "and the output file shrinks dramatically (each captured city/country is written instead of the full ~70-char string on every row). " +
+                    "The template MUST match every non-key, non-ignored source header — if any header fails to match the tool refuses to commit and lists the failures so you can adjust the template or add the offender to `ignoreColumns`. " +
+                    "When `entityColumnSplit` is set, `entityColumnName` is ignored and `entityValueRenames` is rejected (the split defines the entity schema). " +
+                    "If the source key columns have unhelpful names (e.g. an XLSX with an empty header cell shows up as 'col_1'), use the inline object form in `keyColumns` to pair source and output names: " +
+                    "`keyColumns: [{\"source\": \"col_1\", \"output\": \"date\"}]` makes the leftmost output column header 'date' while still matching the unnamed source column. " +
+                    "Prefer this over the older `keyColumnRenames` map — the map is fragile because the confirm-gate re-call can drop just the rename and produce a CSV that looks correct in the proposal but ships with the original names. " +
+                    "`entityValueRenames` is a {sourceColumnName: outputEntityValue} map that rewrites the values written into the entity column (use it when the unpivoted source columns are poorly named). " +
+                    "All renames are case-insensitive on the lookup side; unmatched keys are rejected so a typo doesn't silently no-op. " +
+                    "For XLSX, set `sheetName` or `sheetIndex`, `headerRow` (default 1) for the column names, and `descriptionRow` (optional) for an extra metadata row (above OR below the headers) " +
                     "carrying longer-form labels that should be included as a per-output-row `description` column when `includeDescription: true`. " +
+                    "When the XLSX has MORE than one header / metadata row (e.g. row 1 = long descriptions, row 2 = short codes, row 3+ = data — common in FAO / World Bank / weather exports), " +
+                    "you MUST explicitly set `dataStartRow` to the first row of real data (e.g. `dataStartRow: 3`). The tool refuses to run if `dataStartRow` looks type-shifted from the rows below it, " +
+                    "since silently treating a secondary header row as data produces tens of MB of garbage CSV that has to be cleaned up. " +
                     "`skipMissingValues: true` (the default) drops output rows where the source cell is empty / null / 'NA' / 'NaN' / '?' / '-' so the output isn't padded with empty rows. " +
                     "Source format auto-detects from filename extension when `sourceFormat` is omitted.",
                 JsonSchema: ParseSchema("""
@@ -213,9 +230,55 @@ public sealed class ManageDataStoresSkill : IAgentSkill
                         "dataStartRow": { "type": ["integer", "null"], "minimum": 1, "description": "XLSX: first data row (default headerRow + 1)." },
                         "keyColumns": {
                           "type": "array",
-                          "items": { "type": "string" },
+                          "items": {
+                            "oneOf": [
+                              { "type": "string" },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "source": { "type": "string", "description": "Source column name (matches a header in the file)." },
+                                  "output": { "type": ["string", "null"], "description": "Optional output column name. When set, renames the column in the output CSV header. Bundling source + output in one item is more robust than `keyColumnRenames` because the confirm-gate re-call can't drop the rename without dropping the column itself." }
+                                },
+                                "required": ["source"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "minItems": 1,
-                          "description": "Source column names that identify each row (becomes leftmost columns in output). Case-insensitive."
+                          "description": "Source columns that identify each row (becomes leftmost columns in output). Each item is either a string (source column name, no rename) or an object { source, output? } that pairs the source column with its output header name. Source matching is case-insensitive."
+                        },
+                        "ignoreColumns": {
+                          "type": ["array", "null"],
+                          "items": { "type": "string" },
+                          "description": "Optional source column names to drop entirely — neither emitted as keys nor unpivoted into entity/value rows. Useful for redundant datetime columns with empty headers (synthesized as 'col_N'). Case-insensitive; must not overlap keyColumns."
+                        },
+                        "keyColumnRenames": {
+                          "type": ["object", "null"],
+                          "description": "DEPRECATED — prefer the inline { source, output } object form inside `keyColumns`. The map form survives in case an agent is more comfortable with it, but it is fragile: if the confirm-gate re-call accidentally drops this field, the rename silently no-ops while the rest of the call succeeds. Keys are case-insensitive against `keyColumns`; unmatched keys and conflicts with an inline `output` for the same source column are rejected.",
+                          "additionalProperties": { "type": "string" }
+                        },
+                        "entityValueRenames": {
+                          "type": ["object", "null"],
+                          "description": "Optional {sourceColumnName: outputEntityValue} map. Rewrites the values that get written into the entity column when the named source column is unpivoted. Useful when source headers are generic ('col_2') but you want meaningful entity names. Keys are case-insensitive against the source headers; unmatched keys are rejected. Mutually exclusive with entityColumnSplit.",
+                          "additionalProperties": { "type": "string" }
+                        },
+                        "entityColumnSplit": {
+                          "type": ["object", "null"],
+                          "description": "Replaces the single entity column with one column per {placeholder} parsed out of each source header. Use when entity headers share a common template — e.g. 'Average temperature in {city} (degree Celsius) - {country} - FSR - Daily'. The template MUST match every non-key, non-ignored source header.",
+                          "properties": {
+                            "template": {
+                              "type": "string",
+                              "description": "The source-header template. {name} placeholders capture variable parts; everything else is literal text matched verbatim. Each placeholder name must be a valid identifier and must appear in outputColumns."
+                            },
+                            "outputColumns": {
+                              "type": "array",
+                              "items": { "type": "string" },
+                              "minItems": 1,
+                              "description": "Output column names, in the order they should appear in the CSV. Must match the set of {name} placeholders in the template."
+                            }
+                          },
+                          "required": ["template", "outputColumns"],
+                          "additionalProperties": false
                         },
                         "entityColumnName": { "type": ["string", "null"] },
                         "valueColumnName": { "type": ["string", "null"] },
@@ -282,6 +345,10 @@ public sealed class ManageDataStoresSkill : IAgentSkill
         "FileType folder paths are POSIX-style with a leading '/' (e.g. '/raw/2026/'). Use lookup-data-stores tools first to find ids. " +
         "FILE CREATION: agents can write small text files via create_data_store_text_file (capped at 5MB) or unpivot a wide source file into a long-format CSV via unpivot_data_store_file_to_csv. " +
         "After profile_data_store_*_file identifies a wide-pivot layout and the user agrees to the unpivot recommendation, call unpivot_data_store_file_to_csv with `keyColumns` set to the key axis columns the profile flagged (usually the date column). The tool streams the conversion and saves the result alongside the source. " +
+        "BEFORE running the unpivot, look at the sample column names the profile returned. If they share a common templated shape — a fixed prefix and/or suffix wrapped around 1-3 variable parts (e.g. 'Average temperature in {city} (degree Celsius) - {country} - FSR - Daily', 'GDP per capita ({year}) - {country}', '{metric}_{region}_{year}') — proactively SUGGEST `entityColumnSplit` to the user with a concrete template before calling the tool. Splitting a 70-char repeated entity string into two short fields shrinks the output CSV 3-5x and makes the result queryable per-attribute without LIKE patterns. Surface the template and the resulting output schema in your proposal so the user can correct the template before commit. " +
+        "When renaming a key column (e.g. an XLSX with an empty header for the date column renders as 'col_1'), USE THE INLINE OBJECT FORM in keyColumns: `keyColumns: [{\"source\": \"col_1\", \"output\": \"date\"}]`. The older `keyColumnRenames` map is structurally fragile under the confirm-gate two-call pattern — if the rename map is accidentally omitted from the commit call, the output CSV silently ships with the original source name. The inline form bundles source and output together so dropping the rename means dropping the column. " +
+        "The unpivot proposal contains an `outputHeader` field showing the EXACT CSV header line that will be written. Read this back to the user so they can confirm column names before commit. The committed result echoes the same field — if it doesn't match what was in the proposal, a parameter was dropped on the confirm re-call and the run needs to be redone. " +
+        "When you confirm a confirm-gated tool, re-pass EVERY parameter from the original proposal call verbatim alongside `confirmed: true`. The tool is stateless between phases; any field you omit on the confirm call effectively reverts to its default. " +
         "INGEST FROM ONE DATASTORE TO ANOTHER: when a CSV already lives in a FileType data store and the user wants it queryable via AQL, do NOT ask them to download/re-upload — call ingest_data_store_csv_to_sql_table, which streams the source file directly into a SqlType store's table. Typical chain after unpivot: create_data_store(kind:'SqlType') → ingest_data_store_csv_to_sql_table → manage-datasets.create_dataset.";
 
     private static async Task<JsonElement> InvokeCreateAsync(JsonElement args, AgentToolContext ctx, CancellationToken ct)
@@ -683,9 +750,84 @@ public sealed class ManageDataStoresSkill : IAgentSkill
         if (string.IsNullOrWhiteSpace(destinationFilename))
             return ConfirmGate.Rejected(action, "destinationFilename is required.");
 
-        var keyColumns = ReadStringArray(args, "keyColumns");
-        if (keyColumns is null || keyColumns.Count == 0)
-            return ConfirmGate.Rejected(action, "keyColumns is required and must list at least one column name (e.g. [\"date\"]).");
+        // Parse keyColumns — each item can be a string OR { source, output? } object.
+        // Inline output is the preferred form (the confirm-gate re-call can't drop just the
+        // rename without dropping the column itself).
+        var keyColumnSpecs = ReadKeyColumnSpecs(args, out var keySpecError);
+        if (keySpecError is not null)
+            return ConfirmGate.Rejected(action, keySpecError);
+        if (keyColumnSpecs is null || keyColumnSpecs.Count == 0)
+            return ConfirmGate.Rejected(action, "keyColumns is required and must list at least one column (e.g. [\"date\"] or [{\"source\": \"col_1\", \"output\": \"date\"}]).");
+
+        // Source-name view for downstream code that thinks in source names (validation,
+        // ignoreColumns overlap detection, unpivot helpers).
+        var keyColumns = keyColumnSpecs.Select(s => s.Source).ToList();
+
+        var ignoreColumns = ReadStringArray(args, "ignoreColumns") ?? new List<string>();
+        if (ignoreColumns.Count > 0)
+        {
+            var keyLookup = new HashSet<string>(keyColumns, StringComparer.OrdinalIgnoreCase);
+            var overlap = ignoreColumns.FirstOrDefault(c => keyLookup.Contains(c));
+            if (overlap is not null)
+                return ConfirmGate.Rejected(action,
+                    $"ignoreColumns and keyColumns overlap on '{overlap}'. A column can be a key OR ignored, not both.");
+        }
+
+        // keyColumnRenames is the deprecated map form. Merge it into the spec list, rejecting
+        // conflicts where both an inline `output` AND a map entry target the same source column.
+        var keyColumnRenames = ReadStringMap(args, "keyColumnRenames");
+        if (keyColumnRenames is not null)
+        {
+            var keySet = new HashSet<string>(keyColumns, StringComparer.OrdinalIgnoreCase);
+            foreach (var rename in keyColumnRenames)
+            {
+                if (!keySet.Contains(rename.Key))
+                    return ConfirmGate.Rejected(action,
+                        $"keyColumnRenames key '{rename.Key}' does not match any source name in keyColumns ({string.Join(", ", keyColumns)}). " +
+                        "The map key must be the source column name; the value is the desired output header.");
+                if (string.IsNullOrWhiteSpace(rename.Value))
+                    return ConfirmGate.Rejected(action,
+                        $"keyColumnRenames['{rename.Key}'] is empty. Provide a non-empty output column name.");
+            }
+            // Merge map renames into the spec list (without clobbering inline outputs).
+            for (int i = 0; i < keyColumnSpecs.Count; i++)
+            {
+                if (!keyColumnRenames.TryGetValue(keyColumnSpecs[i].Source, out var mapOutput)) continue;
+                if (keyColumnSpecs[i].Output is { Length: > 0 } inlineOutput && !string.Equals(inlineOutput, mapOutput.Trim(), StringComparison.Ordinal))
+                    return ConfirmGate.Rejected(action,
+                        $"keyColumnRenames['{keyColumnSpecs[i].Source}'] = '{mapOutput}' conflicts with the inline output '{inlineOutput}' for the same source column. Use one form or make them agree.");
+                keyColumnSpecs[i] = keyColumnSpecs[i] with { Output = mapOutput.Trim() };
+            }
+        }
+
+        // Reject duplicate output headers (post-resolution).
+        var resolvedKeyHeaders = keyColumnSpecs.Select(s => s.Output is { Length: > 0 } o ? o : s.Source).ToList();
+        var dupKey = resolvedKeyHeaders
+            .GroupBy(h => h, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(g => g.Count() > 1)?.Key;
+        if (dupKey is not null)
+            return ConfirmGate.Rejected(action,
+                $"keyColumns resolves to duplicate output column '{dupKey}'. Each key column must produce a distinct output header.");
+
+        // entityValueRenames is validated against actual source headers inside the unpivot helper
+        // (we don't know them yet), but reject obviously-malformed entries (empty value) up front.
+        var entityValueRenames = ReadStringMap(args, "entityValueRenames");
+        if (entityValueRenames is not null)
+        {
+            foreach (var rename in entityValueRenames)
+                if (string.IsNullOrWhiteSpace(rename.Value))
+                    return ConfirmGate.Rejected(action,
+                        $"entityValueRenames['{rename.Key}'] is empty. Provide a non-empty entity value.");
+        }
+
+        // entityColumnSplit: parsed + regex-compiled here so syntax errors surface at proposal time.
+        // Header-coverage validation happens later — once we've read the source headers.
+        var entityColumnSplit = BuildEntityColumnSplit(args, out var entitySplitError);
+        if (entitySplitError is not null)
+            return ConfirmGate.Rejected(action, entitySplitError);
+        if (entityColumnSplit is not null && entityValueRenames is not null)
+            return ConfirmGate.Rejected(action,
+                "entityColumnSplit and entityValueRenames are mutually exclusive — the split defines the entity output schema, so per-source renames would be ambiguous. Pick one.");
 
         var entityColumnName = ReadString(args, "entityColumnName");
         if (string.IsNullOrWhiteSpace(entityColumnName)) entityColumnName = "entity";
@@ -731,6 +873,13 @@ public sealed class ManageDataStoresSkill : IAgentSkill
             ? sourceMeta.FolderPath
             : destinationFolder;
 
+        // The fully-resolved CSV header line that WILL be written on commit. Echoed in
+        // the proposal preview so the agent can read it back to the user verbatim — and
+        // echoed in the committed result so any divergence (e.g. agent dropped a rename
+        // on the commit re-call) is immediately visible side-by-side with the proposal.
+        var resolvedOutputHeader = BuildResolvedOutputHeader(
+            keyColumnSpecs, entityColumnSplit, entityColumnName!, valueColumnName!, includeDescription);
+
         var preview = new
         {
             dataStoreId,
@@ -740,12 +889,22 @@ public sealed class ManageDataStoresSkill : IAgentSkill
             sourceFormat,
             destinationFolder = actualDestinationFolder,
             destinationFilename,
-            keyColumns,
-            entityColumnName,
+            keyColumns = keyColumnSpecs.Select(s => s.Output is null
+                ? (object)s.Source
+                : new { source = s.Source, output = s.Output }).ToList(),
+            ignoreColumns = ignoreColumns.Count > 0 ? ignoreColumns : null,
+            keyColumnRenames,
+            entityValueRenames,
+            entityColumnSplit = entityColumnSplit is null
+                ? null
+                : new { template = entityColumnSplit.Template, outputColumns = entityColumnSplit.OutputColumns },
+            entityColumnName = entityColumnSplit is null ? entityColumnName : null,
             valueColumnName,
             includeDescription,
             skipMissingValues,
-            estimateNote = "Output rows ≈ source data rows × (totalColumns − keyColumns.length). Run profile_data_store_*_file first if the user wants a precise estimate."
+            outputHeader = resolvedOutputHeader,
+            estimateNote = "Output rows ≈ source data rows × (totalColumns − keyColumns.length − ignoreColumns.length). Run profile_data_store_*_file first if the user wants a precise estimate.",
+            confirmReminder = "When confirming, RE-PASS every parameter from this proposal verbatim (including keyColumns object items, keyColumnRenames, entityColumnSplit, ignoreColumns, dataStartRow, etc.) together with confirmed:true — the tool is stateless between proposal and commit. Compare the `outputHeader` in the committed result to this one to spot any dropped fields."
         };
         if (!ConfirmGate.IsConfirmed(args))
             return ConfirmGate.Proposal("unpivot_to_csv_proposal", action, preview);
@@ -779,32 +938,22 @@ public sealed class ManageDataStoresSkill : IAgentSkill
                 // VSTHRD103 analyzer is happy. The big hot loop happens inside
                 // the unpivot helpers, where sync StreamWriter.Write is the
                 // intentional choice.
-                var headerLine = new StringBuilder();
-                headerLine.Append(string.Join(",", keyColumns.Select(CsvEscape)));
-                headerLine.Append(',');
-                headerLine.Append(CsvEscape(entityColumnName));
-                if (includeDescription)
-                {
-                    headerLine.Append(',');
-                    headerLine.Append(CsvEscape("description"));
-                }
-                headerLine.Append(',');
-                headerLine.Append(CsvEscape(valueColumnName));
-                headerLine.Append('\n');
-                await outWriter.WriteAsync(headerLine.ToString().AsMemory(), ct);
+                await outWriter.WriteAsync((resolvedOutputHeader + "\n").AsMemory(), ct);
 
                 if (sourceFormat == "xlsx")
                 {
                     (outputRows, skippedRows) = await UnpivotXlsxAsync(
                         sourceStream, outWriter, sheetName, sheetIndex,
                         headerRow, descriptionRow, dataStartRow,
-                        keyColumns, includeDescription, skipMissingValues, ct);
+                        keyColumns, ignoreColumns, entityValueRenames, entityColumnSplit,
+                        includeDescription, skipMissingValues, ct);
                 }
                 else
                 {
                     (outputRows, skippedRows) = await UnpivotCsvAsync(
                         sourceStream, outWriter, delimiter,
-                        keyColumns, skipMissingValues, ct);
+                        keyColumns, ignoreColumns, entityValueRenames, entityColumnSplit,
+                        skipMissingValues, ct);
                 }
             }
 
@@ -815,6 +964,7 @@ public sealed class ManageDataStoresSkill : IAgentSkill
             sw.Stop();
             return ConfirmGate.Committed("unpivot_to_csv_committed", action, new
             {
+                outputHeader = resolvedOutputHeader,
                 dataStoreId,
                 sourceFileId,
                 sourceFilename = sourceFileMeta.Filename,
@@ -867,6 +1017,9 @@ public sealed class ManageDataStoresSkill : IAgentSkill
         StreamWriter outWriter,
         string delimiter,
         IReadOnlyList<string> keyColumns,
+        IReadOnlyList<string> ignoreColumns,
+        IReadOnlyDictionary<string, string>? entityValueRenames,
+        EntityColumnSplit? entityColumnSplit,
         bool skipMissing,
         CancellationToken ct)
     {
@@ -892,11 +1045,16 @@ public sealed class ManageDataStoresSkill : IAgentSkill
             keyIndices[k] = idx;
         }
         var keyIndexSet = new HashSet<int>(keyIndices);
+        var skipIndexSet = ResolveIgnoreIndices(ignoreColumns, headers, keyLookup, keyIndexSet);
 
-        // Pre-escape non-key entity names once — they're written N times each.
-        var entityEscaped = new string?[headers.Length];
-        for (int c = 0; c < headers.Length; c++)
-            if (!keyIndexSet.Contains(c)) entityEscaped[c] = CsvEscape(headers[c]);
+        ValidateEntityValueRenames(entityValueRenames, headers, keyIndexSet, skipIndexSet);
+
+        // Pre-build the entity fragment that gets written per source column. Without a split this
+        // is one CSV-escaped value; with a split it's the joined CSV-escaped captured values.
+        // Either way the write loop just emits it verbatim, so the hot path stays branchless.
+        var entityEscaped = entityColumnSplit is not null
+            ? PrecomputeSplitEntityFragments(headers, keyIndexSet, skipIndexSet, entityColumnSplit)
+            : BuildSimpleEntityFragments(headers, keyIndexSet, skipIndexSet, entityValueRenames);
 
         long outputRows = 0, skipped = 0;
         var keyBuf = new string?[keyColumns.Count];
@@ -911,7 +1069,7 @@ public sealed class ManageDataStoresSkill : IAgentSkill
             var keyCsv = string.Join(",", keyBuf.Select(CsvEscape));
             for (int c = 0; c < headers.Length; c++)
             {
-                if (keyIndexSet.Contains(c)) continue;
+                if (keyIndexSet.Contains(c) || skipIndexSet.Contains(c)) continue;
                 string? v = null;
                 try { v = csv.GetField(c); }
                 catch (CsvHelperException) { v = null; }
@@ -942,6 +1100,9 @@ public sealed class ManageDataStoresSkill : IAgentSkill
         int? descriptionRow,
         int dataStartRow,
         IReadOnlyList<string> keyColumns,
+        IReadOnlyList<string> ignoreColumns,
+        IReadOnlyDictionary<string, string>? entityValueRenames,
+        EntityColumnSplit? entityColumnSplit,
         bool includeDescription,
         bool skipMissing,
         CancellationToken ct)
@@ -985,16 +1146,30 @@ public sealed class ManageDataStoresSkill : IAgentSkill
             keyIndices[k] = idx;
         }
         var keyIndexSet = new HashSet<int>(keyIndices);
+        var skipIndexSet = ResolveIgnoreIndices(ignoreColumns, headers, keyLookup, keyIndexSet);
 
-        // Pre-escape entity names + optional descriptions once.
-        var entityEscaped = new string?[lastCol];
+        ValidateEntityValueRenames(entityValueRenames, headers, keyIndexSet, skipIndexSet);
+
+        // Sanity check: detect when dataStartRow is actually a second header row.
+        // FAO / World Bank / weather exports commonly have row 1 = long description,
+        // row 2 = short code, row 3+ = data. If the agent picks headerRow:1 and accepts
+        // the default dataStartRow (= headerRow + 1 = 2), every "data" row is the
+        // sub-header — producing 38MB of garbage CSV with literals like "Date string"
+        // in the date column and city codes in the value column.
+        // Rather than silently emit bad output, refuse and tell the agent what to fix.
+        DetectSecondaryHeaderRow(sheet, headers, keyIndexSet, skipIndexSet, dataStartRow, lastRow, lastCol);
+
+        // Pre-build entity fragments + optional descriptions once. With a split, each fragment
+        // already encodes multiple CSV cells joined by commas — the write loop emits it verbatim.
+        var entityEscaped = entityColumnSplit is not null
+            ? PrecomputeSplitEntityFragments(headers, keyIndexSet, skipIndexSet, entityColumnSplit)
+            : BuildSimpleEntityFragments(headers, keyIndexSet, skipIndexSet, entityValueRenames);
         var descEscaped = includeDescription ? new string?[lastCol] : null;
-        for (int c = 0; c < lastCol; c++)
+        if (descEscaped is not null)
         {
-            if (keyIndexSet.Contains(c)) continue;
-            entityEscaped[c] = CsvEscape(headers[c]);
-            if (descEscaped is not null)
+            for (int c = 0; c < lastCol; c++)
             {
+                if (keyIndexSet.Contains(c) || skipIndexSet.Contains(c)) continue;
                 var desc = descriptionRow.HasValue
                     ? sheet.Cell(descriptionRow.Value, c + 1).GetString()
                     : string.Empty;
@@ -1012,7 +1187,7 @@ public sealed class ManageDataStoresSkill : IAgentSkill
             var keyCsv = string.Join(",", keyBuf.Select(CsvEscape));
             for (int c = 0; c < lastCol; c++)
             {
-                if (keyIndexSet.Contains(c)) continue;
+                if (keyIndexSet.Contains(c) || skipIndexSet.Contains(c)) continue;
                 var val = XlsxCellToCanonicalString(sheet.Cell(r, c + 1));
                 if (IsMissing(val, skipMissing)) { skipped++; continue; }
                 outWriter.Write(keyCsv);
@@ -1032,6 +1207,360 @@ public sealed class ManageDataStoresSkill : IAgentSkill
         return await Task.FromResult((outputRows, skipped));
     }
 #pragma warning restore VSTHRD103
+
+    private static string ResolveEntityValue(string sourceHeader, IReadOnlyDictionary<string, string>? renames)
+        => renames is not null && renames.TryGetValue(sourceHeader, out var r) ? r.Trim() : sourceHeader;
+
+    // A key-column entry. Source is the column name in the input file; Output (when set) is
+    // the column name we'll write into the output CSV header. The two-field form is what
+    // makes the rename robust to the confirm-gate re-call dropping individual parameters.
+    private sealed record KeyColumnSpec(string Source, string? Output);
+
+    // Reproduce the exact CSV header line that the unpivot will write, so the proposal can
+    // show it AND the committed result can echo it. The hot-loop writer uses this same
+    // string verbatim — keeping there only one source of truth for header composition.
+    private static string BuildResolvedOutputHeader(
+        IReadOnlyList<KeyColumnSpec> keyColumnSpecs,
+        EntityColumnSplit? entityColumnSplit,
+        string entityColumnName,
+        string valueColumnName,
+        bool includeDescription)
+    {
+        var sb = new StringBuilder();
+        sb.Append(string.Join(",", keyColumnSpecs.Select(s =>
+            CsvEscape(s.Output is { Length: > 0 } o ? o : s.Source))));
+        sb.Append(',');
+        if (entityColumnSplit is not null)
+            sb.Append(string.Join(",", entityColumnSplit.OutputColumns.Select(CsvEscape)));
+        else
+            sb.Append(CsvEscape(entityColumnName));
+        if (includeDescription)
+        {
+            sb.Append(',');
+            sb.Append(CsvEscape("description"));
+        }
+        sb.Append(',');
+        sb.Append(CsvEscape(valueColumnName));
+        return sb.ToString();
+    }
+
+    // Walk the keyColumns JSON array, accepting either string items (source-only, no rename)
+    // or object items { source, output? }. Returns null + an error message if any item is
+    // malformed; returns an empty list if keyColumns is missing.
+    private static List<KeyColumnSpec>? ReadKeyColumnSpecs(JsonElement args, out string? error)
+    {
+        error = null;
+        if (!args.TryGetProperty("keyColumns", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return new List<KeyColumnSpec>();
+        var list = new List<KeyColumnSpec>();
+        int idx = 0;
+        foreach (var item in arr.EnumerateArray())
+        {
+            switch (item.ValueKind)
+            {
+                case JsonValueKind.String:
+                {
+                    var s = item.GetString();
+                    if (string.IsNullOrWhiteSpace(s))
+                    {
+                        error = $"keyColumns[{idx}] is an empty string. Provide a non-empty source column name.";
+                        return null;
+                    }
+                    list.Add(new KeyColumnSpec(s.Trim(), null));
+                    break;
+                }
+                case JsonValueKind.Object:
+                {
+                    string? source = null;
+                    string? output = null;
+                    if (item.TryGetProperty("source", out var sv) && sv.ValueKind == JsonValueKind.String)
+                        source = sv.GetString();
+                    if (item.TryGetProperty("output", out var ov) && ov.ValueKind == JsonValueKind.String)
+                        output = ov.GetString();
+                    if (string.IsNullOrWhiteSpace(source))
+                    {
+                        error = $"keyColumns[{idx}] is an object but `source` is missing or empty. Provide {{ \"source\": \"<name>\", \"output\": \"<header>\" }}.";
+                        return null;
+                    }
+                    if (output is not null && string.IsNullOrWhiteSpace(output))
+                    {
+                        error = $"keyColumns[{idx}].output is empty. Either omit `output` or set it to a non-empty header name.";
+                        return null;
+                    }
+                    list.Add(new KeyColumnSpec(source.Trim(), output?.Trim()));
+                    break;
+                }
+                default:
+                    error = $"keyColumns[{idx}] must be a string or an object {{ source, output? }} — got {item.ValueKind}.";
+                    return null;
+            }
+            idx++;
+        }
+        return list;
+    }
+
+    // A parsed entityColumnSplit instruction. The compiled regex carries one named group
+    // per outputColumn — we run it once per source header (precomputed) to derive the
+    // CSV-escaped per-column values that get repeated on every output row.
+    private sealed record EntityColumnSplit(
+        string Template,
+        IReadOnlyList<string> OutputColumns,
+        Regex CompiledRegex);
+
+    private static readonly Regex s_entitySplitPlaceholderRegex = new(@"\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}", RegexOptions.Compiled);
+
+    // Parse the agent-supplied { template, outputColumns } into a compiled regex.
+    // The template uses {name} placeholders; everything else is literal text. Each
+    // placeholder must appear in outputColumns and vice versa. Names must be valid
+    // identifier-ish (the regex engine uses them as group names). Failures bubble up
+    // as ConfirmGate.Rejected so the agent sees what to fix at proposal time, BEFORE
+    // we touch the source file.
+    private static EntityColumnSplit? BuildEntityColumnSplit(JsonElement args, out string? error)
+    {
+        error = null;
+        if (!args.TryGetProperty("entityColumnSplit", out var el) || el.ValueKind != JsonValueKind.Object) return null;
+
+        string? template = null;
+        if (el.TryGetProperty("template", out var tv) && tv.ValueKind == JsonValueKind.String)
+            template = tv.GetString();
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            error = "entityColumnSplit.template is required and must be a non-empty string.";
+            return null;
+        }
+
+        var outputColumns = new List<string>();
+        if (el.TryGetProperty("outputColumns", out var ov) && ov.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in ov.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { } s && !string.IsNullOrWhiteSpace(s))
+                    outputColumns.Add(s.Trim());
+        }
+        if (outputColumns.Count == 0)
+        {
+            error = "entityColumnSplit.outputColumns is required and must contain at least one non-empty name.";
+            return null;
+        }
+
+        // Validate names — they're used as regex group names, so they must be identifier-ish
+        // and unique. Reject up front rather than letting the regex engine throw something cryptic.
+        var seenNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in outputColumns)
+        {
+            if (!Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*$"))
+            {
+                error = $"entityColumnSplit.outputColumns entry '{name}' is not a valid identifier (use letters, digits, and underscores; must not start with a digit).";
+                return null;
+            }
+            if (!seenNames.Add(name))
+            {
+                error = $"entityColumnSplit.outputColumns contains '{name}' more than once. Each output column name must be unique.";
+                return null;
+            }
+        }
+
+        // Walk the template, replacing {name} placeholders with named regex groups and
+        // regex-escaping everything else. Collect the placeholder names we see so we can
+        // cross-check against outputColumns.
+        var sb = new StringBuilder();
+        sb.Append('^');
+        var seenPlaceholders = new HashSet<string>(StringComparer.Ordinal);
+        int last = 0;
+        foreach (Match m in s_entitySplitPlaceholderRegex.Matches(template))
+        {
+            if (m.Index > last) sb.Append(Regex.Escape(template.Substring(last, m.Index - last)));
+            var name = m.Groups["name"].Value;
+            if (!seenNames.Contains(name))
+            {
+                error = $"entityColumnSplit.template references '{{{name}}}' but '{name}' is not in outputColumns ({string.Join(", ", outputColumns)}).";
+                return null;
+            }
+            if (!seenPlaceholders.Add(name))
+            {
+                error = $"entityColumnSplit.template references '{{{name}}}' more than once. Each placeholder must appear exactly once.";
+                return null;
+            }
+            sb.Append("(?<").Append(name).Append(">.+?)");
+            last = m.Index + m.Length;
+        }
+        if (last < template.Length) sb.Append(Regex.Escape(template.Substring(last)));
+        sb.Append('$');
+
+        var missingFromTemplate = outputColumns.Where(n => !seenPlaceholders.Contains(n)).ToList();
+        if (missingFromTemplate.Count > 0)
+        {
+            error = $"entityColumnSplit.outputColumns includes [{string.Join(", ", missingFromTemplate)}] but the template doesn't reference {{{missingFromTemplate[0]}}}. Every outputColumn must appear as a placeholder.";
+            return null;
+        }
+
+        Regex compiled;
+        try
+        {
+            compiled = new Regex(sb.ToString(), RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        }
+        catch (ArgumentException ex)
+        {
+            error = $"entityColumnSplit produced an invalid regex from the template: {ex.Message}";
+            return null;
+        }
+
+        return new EntityColumnSplit(template, outputColumns, compiled);
+    }
+
+    // No-split path: one CSV cell per source column, optionally renamed.
+    private static string?[] BuildSimpleEntityFragments(
+        IReadOnlyList<string> headers,
+        HashSet<int> keyIndexSet,
+        HashSet<int> skipIndexSet,
+        IReadOnlyDictionary<string, string>? entityValueRenames)
+    {
+        var fragments = new string?[headers.Count];
+        for (int c = 0; c < headers.Count; c++)
+            if (!keyIndexSet.Contains(c) && !skipIndexSet.Contains(c))
+                fragments[c] = CsvEscape(ResolveEntityValue(headers[c], entityValueRenames));
+        return fragments;
+    }
+
+    // For each non-key, non-ignored source header, run the split regex and pre-build the
+    // CSV-escaped, comma-joined fragment that will be written into every output row for
+    // that source column. Throws ArgumentException listing the first few headers that
+    // don't match — the agent sees this on commit and can adjust the template.
+    private static string?[] PrecomputeSplitEntityFragments(
+        IReadOnlyList<string> headers,
+        HashSet<int> keyIndexSet,
+        HashSet<int> skipIndexSet,
+        EntityColumnSplit split)
+    {
+        var fragments = new string?[headers.Count];
+        var unmatched = new List<string>();
+        for (int c = 0; c < headers.Count; c++)
+        {
+            if (keyIndexSet.Contains(c) || skipIndexSet.Contains(c)) continue;
+            var m = split.CompiledRegex.Match(headers[c]);
+            if (!m.Success)
+            {
+                if (unmatched.Count < 5) unmatched.Add(headers[c]);
+                continue;
+            }
+            var parts = new string[split.OutputColumns.Count];
+            for (int i = 0; i < split.OutputColumns.Count; i++)
+                parts[i] = CsvEscape(m.Groups[split.OutputColumns[i]].Value);
+            fragments[c] = string.Join(",", parts);
+        }
+        if (unmatched.Count > 0)
+            throw new ArgumentException(
+                $"entityColumnSplit.template did not match {unmatched.Count} source header(s) — first failures: " +
+                string.Join("; ", unmatched.Select(h => $"'{h}'")) +
+                $". Adjust the template so it matches every non-key, non-ignored source column, or add the failing columns to `ignoreColumns`.");
+        return fragments;
+    }
+
+    // Resolve the user-supplied ignoreColumns (header names, case-insensitive) into
+    // a set of zero-based column indices. Reject names that don't match any source
+    // header — silent no-op would mask a typo and leave junk columns in the output.
+    private static HashSet<int> ResolveIgnoreIndices(
+        IReadOnlyList<string> ignoreColumns,
+        IReadOnlyList<string> headers,
+        IReadOnlyDictionary<string, int> headerLookup,
+        HashSet<int> keyIndexSet)
+    {
+        var skip = new HashSet<int>();
+        if (ignoreColumns.Count == 0) return skip;
+        foreach (var name in ignoreColumns)
+        {
+            if (!headerLookup.TryGetValue(name, out var idx))
+                throw new ArgumentException(
+                    $"ignoreColumn '{name}' not found in source headers. " +
+                    $"Available non-key headers: {string.Join(", ", headers.Where((_, i) => !keyIndexSet.Contains(i)).Select(h => $"'{h}'"))}.");
+            skip.Add(idx);
+        }
+        return skip;
+    }
+
+    // Sample up to 12 non-key, non-ignored columns. For each, compare the cell type at
+    // dataStartRow to the cell types at dataStartRow + 1..3. If most sampled columns show
+    // "text at dataStartRow, number/datetime just below," dataStartRow almost certainly
+    // points at a secondary header row (think 'Afghanistan-Farah' / 'Date string') rather
+    // than data. The threshold is intentionally conservative (>= 70% of useful samples)
+    // so a sheet that's legitimately all-text doesn't trip the check — those sheets won't
+    // have a type shift between dataStartRow and the rows below it.
+    private static void DetectSecondaryHeaderRow(
+        IXLWorksheet sheet,
+        IReadOnlyList<string> headers,
+        HashSet<int> keyIndexSet,
+        HashSet<int> skipIndexSet,
+        int dataStartRow,
+        int lastRow,
+        int lastCol)
+    {
+        if (dataStartRow >= lastRow) return; // Nothing below — can't detect.
+
+        var sampleCols = new List<int>(12);
+        for (int c = 0; c < lastCol && sampleCols.Count < 12; c++)
+        {
+            if (keyIndexSet.Contains(c) || skipIndexSet.Contains(c)) continue;
+            if (string.IsNullOrWhiteSpace(headers[c])) continue;
+            sampleCols.Add(c);
+        }
+        if (sampleCols.Count < 4) return; // Too narrow to draw a confident conclusion.
+
+        int useful = 0;
+        int flagged = 0;
+        int probeRows = Math.Min(3, lastRow - dataStartRow);
+        foreach (var c in sampleCols)
+        {
+            var startVal = sheet.Cell(dataStartRow, c + 1).Value;
+            if (!startVal.IsText) continue; // Only flag when the supposed first data row is text.
+            var startText = startVal.GetText();
+            if (string.IsNullOrWhiteSpace(startText)) continue;
+            if (double.TryParse(startText, NumberStyles.Any, CultureInfo.InvariantCulture, out _)) continue; // Numeric-as-text — leave alone.
+
+            bool laterIsTyped = false;
+            for (int delta = 1; delta <= probeRows; delta++)
+            {
+                var laterVal = sheet.Cell(dataStartRow + delta, c + 1).Value;
+                if (laterVal.IsNumber || laterVal.IsDateTime || laterVal.IsBoolean)
+                {
+                    laterIsTyped = true;
+                    break;
+                }
+            }
+            useful++;
+            if (laterIsTyped) flagged++;
+        }
+
+        if (useful < 4) return;
+        // 70%+ of useful samples flip from text → number/date one row down. Almost
+        // certainly a secondary header that should be skipped.
+        if (flagged * 10 >= useful * 7)
+        {
+            throw new ArgumentException(
+                $"Row {dataStartRow} looks like a secondary header row — {flagged} of {useful} sampled non-key columns hold text values there but switch to numbers or dates within the {probeRows} rows below. " +
+                $"This usually means the XLSX has more than one header / metadata row (e.g. row 1 = long descriptions like 'Average temperature in Farah ... - Daily', row 2 = short codes like 'Afghanistan-Farah', row 3+ = data). " +
+                $"Re-run with `dataStartRow: {dataStartRow + 1}` (or wherever the real data actually begins), and consider setting `descriptionRow` to carry the extra metadata row into the output if useful.");
+        }
+    }
+
+    // Reject any entityValueRenames key that doesn't match a real non-key, non-ignored
+    // source header, so a typo doesn't silently no-op the way it would with a permissive map.
+    private static void ValidateEntityValueRenames(
+        IReadOnlyDictionary<string, string>? renames,
+        IReadOnlyList<string> headers,
+        HashSet<int> keyIndexSet,
+        HashSet<int> skipIndexSet)
+    {
+        if (renames is null || renames.Count == 0) return;
+        var entityHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < headers.Count; i++)
+            if (!keyIndexSet.Contains(i) && !skipIndexSet.Contains(i)) entityHeaders.Add(headers[i]);
+        foreach (var rename in renames)
+        {
+            if (!entityHeaders.Contains(rename.Key))
+                throw new ArgumentException(
+                    $"entityValueRenames key '{rename.Key}' does not match any source column that will be unpivoted. " +
+                    "It must be the name of a source column that is NOT in keyColumns and NOT in ignoreColumns.");
+        }
+    }
 
     private static async Task<JsonElement> InvokeIngestCsvToSqlTableAsync(JsonElement args, AgentToolContext ctx, CancellationToken ct)
     {
@@ -1270,6 +1799,15 @@ public sealed class ManageDataStoresSkill : IAgentSkill
         foreach (var el in v.EnumerateArray())
             if (el.ValueKind == JsonValueKind.String && el.GetString() is { } s) list.Add(s);
         return list.Count > 0 ? list : null;
+    }
+
+    private static Dictionary<string, string>? ReadStringMap(JsonElement args, string name)
+    {
+        if (!args.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Object) return null;
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in v.EnumerateObject())
+            if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is { } s) map[p.Name] = s;
+        return map.Count > 0 ? map : null;
     }
 
     private static int? ReadInt(JsonElement args, string name) =>

@@ -83,7 +83,7 @@ public sealed class ManageDashboardsSkill : IAgentSkill
                 Description:
                     "Add a widget to an owned dashboard. `widgetType` matches a SPA registry key (see lookup-dashboards.list_widget_types). " +
                     "`config` is the widget's full Zod-validated body; defaults are applied client-side if omitted entirely. " +
-                    "**The config blob is validated server-side BEFORE the proposal**: when dataSource.type is 'adHocAql' or 'savedQuery' the AQL gets parsed + type-checked and every column-mapping field (savedQueryLabelColumn, savedQueryValueColumn, bucketColumn, xAxisColumn, etc.) is checked to exist in the result schema. Validation failures return a ConfirmGate.Failed envelope with `parserErrors` (for grammar issues) or `availableColumns` (for unknown column names) — fix and re-issue. " +
+                    "**The config blob is validated server-side BEFORE the proposal**: when dataSource.type is 'adHocAql' or 'savedQuery' the AQL gets parsed + type-checked, every column-mapping field (savedQueryLabelColumn, savedQueryValueColumn, bucketColumn, xAxisColumn, etc.) is checked to exist in the result schema, AND the query is probe-executed with hardCap=1 to confirm it actually runs (catches broken dataset sources, missing tables, permission errors). Validation failures return a ConfirmGate.Failed envelope with `parserErrors` (grammar), `availableColumns` (unknown column name), or `executionError` (runtime failure — usually means the dataset is misconfigured upstream) — fix and re-issue. " +
                     "On success the proposal includes `validatedSchema` so the user can see what data the chart will plot before approving. " +
                     "Grid coords default to (0,0,4,3) if not set. Confirm-gated.",
                 JsonSchema: ParseSchema("""
@@ -325,7 +325,8 @@ public sealed class ManageDashboardsSkill : IAgentSkill
         WidgetConfigValidator.Result? validation = null;
         if (configEl.HasValue)
         {
-            validation = await WidgetConfigValidator.ValidateAsync(widgetType, configEl.Value, ctx, ct);
+            validation = await WidgetConfigValidator.ValidateAsync(
+                widgetType, configEl.Value, ctx, ct, executeProbe: true);
             if (!validation.Ok)
                 return BuildValidationFailedEnvelope("dashboard_widget_add_failed", action, validation);
         }
@@ -399,7 +400,8 @@ public sealed class ManageDashboardsSkill : IAgentSkill
         WidgetConfigValidator.Result? validation = null;
         if (configEl.HasValue)
         {
-            validation = await WidgetConfigValidator.ValidateAsync(existingWidget.WidgetType, configEl.Value, ctx, ct);
+            validation = await WidgetConfigValidator.ValidateAsync(
+                existingWidget.WidgetType, configEl.Value, ctx, ct, executeProbe: true);
             if (!validation.Ok)
                 return BuildValidationFailedEnvelope("dashboard_widget_update_failed", action, validation);
         }
@@ -537,6 +539,16 @@ public sealed class ManageDashboardsSkill : IAgentSkill
                 queryText = r.QueryText,
                 parserErrors = r.ParserErrors,
                 grammarHint = WidgetConfigValidator.GrammarHint
+            };
+        }
+        else if (r.ExecutionError is not null)
+        {
+            details = new
+            {
+                sourceField = r.SourceField,
+                queryText = r.QueryText,
+                executionError = r.ExecutionError,
+                schemaSource = r.SchemaSource
             };
         }
         else

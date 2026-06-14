@@ -39,6 +39,7 @@ import {
   renameOrMoveDataStoreFolder,
   uploadDataStoreFile
 } from "@/api/datastores";
+import CreateSqlDataStoreFromCsvModal from "./CreateSqlDataStoreFromCsvModal";
 
 // SVAR uses path-strings as ids. Root is "/"; nested ids are "/a/b/c". The
 // AutoNate backend already speaks the same dialect for folder paths, so we
@@ -240,6 +241,13 @@ export default function DataStoreFileManager({
     setUploadTarget(null);
     setUploadFiles([]);
   }, []);
+
+  // CSV → SQL DataStore conversion modal target. Carries the in-source file
+  // identity so the modal can fetch the bytes; the modal owns the rest of
+  // the pipeline (create new SqlType store, preview, ingest, navigate).
+  const [csvImportTarget, setCsvImportTarget] = useState<
+    { fileId: string; filename: string } | null
+  >(null);
 
   // The active panel's current path. Used when right-clicking dead space
   // (the "body" context menu has no entity to anchor onto).
@@ -573,6 +581,27 @@ export default function DataStoreFileManager({
           }
         ];
       }
+      // File right-click — only CSVs get the "Create SQL DataStore..." extra,
+      // since that's the only file type the SQL ingest pipeline understands.
+      // _fileId is carried on the IEntity from listingToEntities and lets the
+      // modal fetch the bytes via the regular file download endpoint.
+      if (mode === "file" && item) {
+        const filename = nameOfPath(item.id);
+        if (!filename.toLowerCase().endsWith(".csv")) return defaults;
+        const api = apiRef.current;
+        const entity = api?.getFile(item.id);
+        const fileId = (entity as { _fileId?: string } | null)?._fileId;
+        if (!fileId) return defaults;
+        return [
+          ...defaults,
+          {
+            id: "create-sql-datastore",
+            icon: "fa fa-database",
+            text: "Create SQL DataStore...",
+            handler: () => setCsvImportTarget({ fileId, filename })
+          }
+        ];
+      }
       return defaults;
     },
     [getCurrentPath]
@@ -841,6 +870,15 @@ export default function DataStoreFileManager({
             : null}
         </Box>
       </Theme>
+      {csvImportTarget ? (
+        <CreateSqlDataStoreFromCsvModal
+          opened
+          onClose={() => setCsvImportTarget(null)}
+          sourceStoreId={storeId}
+          fileId={csvImportTarget.fileId}
+          filename={csvImportTarget.filename}
+        />
+      ) : null}
       <Modal
         opened={uploadTarget !== null}
         onClose={() => {

@@ -205,6 +205,23 @@ export function dataStoreFileDownloadUrl(id: string, fileId: string): string {
   return `${BASE}/${id}/files/${fileId}`;
 }
 
+// In-memory download for code paths that need the bytes (not a browser
+// download) — e.g. piping a file in one datastore into a CSV-ingest call on
+// another. Wraps the response in a `File` so callers can hand it to the
+// multipart-form ingest helpers below without an extra Blob→File hop.
+export async function downloadDataStoreFileAsFile(
+  id: string,
+  fileId: string,
+  filename: string
+): Promise<File> {
+  const res = await api.get<Blob>(`${BASE}/${id}/files/${fileId}`, {
+    responseType: "blob"
+  });
+  return new File([res.data], filename, {
+    type: res.data.type || "application/octet-stream"
+  });
+}
+
 export async function createDataStoreFolder(id: string, folderPath: string): Promise<void> {
   await api.post(`${BASE}/${id}/folders`, { folderPath });
 }

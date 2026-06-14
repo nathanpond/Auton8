@@ -1,9 +1,13 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
+using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Agent.Skills.Internal;
+using AutoNate.Web.Services.DataStores;
+using AutoNate.Web.Services.DataStores.Sql;
 using AutoNate.Web.Services.Datasets;
 using AutoNate.Web.Services.Datasets.Cached;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AutoNate.Web.Services.Agent.Skills;
@@ -114,7 +118,9 @@ public sealed class ManageDatasetsSkill : IAgentSkill
     }
 
     public string? SystemPromptFragment(AgentSessionContext context) =>
-        "Datasets are addressed in AQL by name (`FROM Dataset(\"foo\")`). Source bindings are locked at creation — update_dataset only touches name/description/refreshCron. Refresh applies to Cached datasets only.";
+        "Datasets are addressed in AQL by name (`FROM Dataset(\"foo\")`). Source bindings are locked at creation — update_dataset only touches name/description/refreshCron. Refresh applies to Cached datasets only. " +
+        "BEFORE create_dataset: call lookup-datasets.list_datasets first. If a dataset already covers the user's data (same source datastore/table or a name they referenced), reuse it — dataset names are uniquely indexed and create_dataset on an existing name returns a hard failure, not an upsert. Only create a new dataset when the user explicitly asks for one or no existing dataset fits. " +
+        "When you do create one: NEVER fabricate sourceId, sourceTableName, or column names. Always look them up first — sourceId via lookup-datastores.list_datastores, the table + actual column list via lookup-datastores.list_data_store_tables(dataStoreId=...). The skill now rejects the proposal if sourceId, sourceTableName, or any declared column name doesn't exist in the underlying datastore.";
 
     private static async Task<JsonElement> InvokeCreateAsync(JsonElement args, AgentToolContext ctx, CancellationToken ct)
     {
@@ -155,6 +161,21 @@ public sealed class ManageDatasetsSkill : IAgentSkill
             ctx.Session.User, Actions.Create, new EntityRef(EntityKinds.Dataset, string.Empty), ct);
         if (!decision.IsAllowed)
             return ConfirmGate.Rejected(action, "Dataset:Create permission required.");
+
+        // Validate the source resolves to a real datastore + table + column set
+        // BEFORE proposing. Without this an LLM is free to fabricate sourceId,
+        // sourceTableName, and column names — the row writes, the dataset
+        // appears to exist, and every downstream AQL query fails opaquely
+        // (which is exactly what happened with the first Weather Temperatures
+        // dataset). dataconnector sources are validated elsewhere; only
+        // 'datastore' source_kind is checked here.
+        if (string.Equals(sourceKind, "datastore", StringComparison.OrdinalIgnoreCase))
+        {
+            var validationError = await ValidateDataStoreSourceAsync(
+                ctx, sourceId, sourceTableName!, columns, ct);
+            if (validationError is not null)
+                return ConfirmGate.Rejected(action, validationError);
+        }
 
         var preview = new
         {
@@ -319,6 +340,70 @@ public sealed class ManageDatasetsSkill : IAgentSkill
         {
             return ConfirmGate.Failed("dataset_refresh_failed", action, ex.Message);
         }
+    }
+
+    // Returns null when the source resolves cleanly; otherwise a user-facing
+    // error string suitable for ConfirmGate.Rejected. Checks (in order):
+    //   1. the referenced datastore exists,
+    //   2. for SqlType datastores the table is registered in DataStoreTables,
+    //   3. every declared column name appears in the table's column schema
+    //      (case-insensitive). The cache materializer SELECTs by column name
+    //      so any unknown column would blow up at refresh — surfacing it here
+    //      means the agent sees the misnamed column at proposal time.
+    // FileType datastores skip steps 2-3 because there's no row-shaped table
+    // registered; the dataset executor handles them through its own path.
+    private static async Task<string?> ValidateDataStoreSourceAsync(
+        AgentToolContext ctx,
+        Guid sourceId,
+        string sourceTableName,
+        IReadOnlyList<DatasetColumn> declaredColumns,
+        CancellationToken ct)
+    {
+        var dataStoreStore = ctx.Services.GetRequiredService<IDataStoreStore>();
+        var dataStore = await dataStoreStore.GetAsync(sourceId, ct);
+        if (dataStore is null)
+            return $"sourceId {sourceId} does not match any datastore. Call lookup-datastores.list_datastores to find the real id.";
+
+        if (dataStore.Kind != (short)DataStoreKind.SqlType)
+            return null;
+
+        var dbFactory = ctx.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var table = await db.DataStoreTables
+            .AsNoTracking()
+            .Where(t => t.DataStoreId == sourceId
+                && EF.Functions.ILike(t.TableName, sourceTableName))
+            .SingleOrDefaultAsync(ct);
+        if (table is null)
+            return $"Table '{sourceTableName}' was not found in datastore '{dataStore.Name}'. Call lookup-datastores.list_data_store_tables with dataStoreId={sourceId} to see the real table names.";
+
+        HashSet<string> actualColumnNames;
+        try
+        {
+            var schema = JsonSerializer.Deserialize<List<CsvColumn>>(
+                table.ColumnSchemaJson, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?? new List<CsvColumn>();
+            actualColumnNames = schema
+                .Select(c => c.Name ?? string.Empty)
+                .Where(n => n.Length > 0)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            // Malformed table schema row — let creation proceed and surface at
+            // refresh/query time rather than block on a corrupt registry row.
+            return null;
+        }
+
+        var missing = declaredColumns
+            .Where(c => !string.IsNullOrWhiteSpace(c.Name)
+                && !actualColumnNames.Contains(c.Name))
+            .Select(c => c.Name)
+            .ToList();
+        if (missing.Count > 0)
+            return $"Declared columns [{string.Join(", ", missing)}] are not in table '{sourceTableName}'. Actual columns: [{string.Join(", ", actualColumnNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}].";
+
+        return null;
     }
 
     private static bool TryReadGuid(JsonElement args, string name, out Guid id)

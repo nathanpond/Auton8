@@ -62,13 +62,14 @@ public sealed class LookupAqlSkill : IAgentSkill
 
             new AgentTool(
                 Name: "describe_aql_entity",
-                Description: "Describe one queryable entity: columns (static + dynamic for Records), allowed where functions, row functions. For the Records entity pass recordType to merge in custom fields for that type.",
+                Description: "Describe one queryable entity: columns (static + dynamic for Records/Dataset), allowed where functions, row functions. For Records pass recordType to merge in custom fields. For parametric entities (where requiresEntityArgument=true, e.g. Dataset) pass entityArgument with the dataset name to get the dataset's actual columns — otherwise the response has an empty `columns` array.",
                 JsonSchema: ParseSchema("""
                     {
                       "type": "object",
                       "properties": {
-                        "name": { "type": "string", "description": "Entity name (case-insensitive), e.g. Records, Flows, Notes." },
-                        "recordType": { "type": ["string", "null"], "description": "Optional RecordType name; only meaningful when name='Records'." }
+                        "name": { "type": "string", "description": "Entity name (case-insensitive), e.g. Records, Flows, Notes, Dataset." },
+                        "recordType": { "type": ["string", "null"], "description": "Optional RecordType name; only meaningful when name='Records'." },
+                        "entityArgument": { "type": ["string", "null"], "description": "Argument for parametric entities. Required when the entity has requiresEntityArgument=true. For Dataset, pass the dataset name (the same string that goes inside `FROM Dataset(\"...\")`)." }
                       },
                       "required": ["name"],
                       "additionalProperties": false
@@ -85,7 +86,11 @@ public sealed class LookupAqlSkill : IAgentSkill
         "value enums, and worked `examples` array. Pattern-match your draft against the " +
         "entity's examples — they are the canonical idioms. Never improvise function names, " +
         "column names, or date syntax from memory. Use list_saved_queries to find an existing " +
-        "query the user has previously saved.";
+        "query the user has previously saved. " +
+        "PARAMETRIC ENTITIES: when describe_aql_entity returns requiresEntityArgument=true " +
+        "(Dataset today), call it AGAIN with entityArgument set — the dataset name string that " +
+        "goes inside `FROM Dataset(\"...\")`. Only the second call returns the dataset's actual " +
+        "columns; without it the columns array is empty and you will guess column names wrong.";
 
     private static async Task<JsonElement> InvokeListSavedQueriesAsync(
         JsonElement args, AgentToolContext context, CancellationToken ct)
@@ -241,6 +246,9 @@ public sealed class LookupAqlSkill : IAgentSkill
         string? recordType = args.TryGetProperty("recordType", out var rt) && rt.ValueKind == JsonValueKind.String
             ? rt.GetString()
             : null;
+        string? entityArgument = args.TryGetProperty("entityArgument", out var ea) && ea.ValueKind == JsonValueKind.String
+            ? ea.GetString()
+            : null;
 
         var registry = context.Services.GetRequiredService<IQueryEntityRegistry>();
         if (!registry.TryGet(name, out var entity))
@@ -249,6 +257,10 @@ public sealed class LookupAqlSkill : IAgentSkill
         }
 
         IReadOnlyList<QueryColumn> columns;
+        // Records resolves columns from the optional RecordType filter; parametric
+        // entities (Dataset today) need their argument threaded through PrepareAsync
+        // to surface per-instance columns. Without this the model has no way to
+        // discover columns short of validate_aql trial-and-error.
         if (string.Equals(entity.Name, "Records", StringComparison.OrdinalIgnoreCase))
         {
             AqlWhere? where = string.IsNullOrEmpty(recordType)
@@ -263,6 +275,26 @@ public sealed class LookupAqlSkill : IAgentSkill
                 Limit: null);
             var prepared = await entity.PrepareAsync(syntheticQuery, ct);
             columns = prepared.Schema;
+        }
+        else if (entity.AcceptsEntityArgument && !string.IsNullOrWhiteSpace(entityArgument))
+        {
+            try
+            {
+                var syntheticQuery = new AqlQuery(
+                    Entity: entity.Name,
+                    EntityArgument: entityArgument,
+                    Where: null,
+                    OrderBy: Array.Empty<AqlOrderItem>(),
+                    Columns: null,
+                    Group: null,
+                    Limit: null);
+                var prepared = await entity.PrepareAsync(syntheticQuery, ct);
+                columns = prepared.Schema;
+            }
+            catch (AqlValidationException ex)
+            {
+                return Error("describe_aql_entity", ex.Message);
+            }
         }
         else
         {

@@ -5,10 +5,12 @@ public sealed class AgentOptions
     public const string SectionName = "Agent";
 
     // How many provider calls a single SendMessage turn can make before the
-    // loop emits a synthetic stop. Tool-using turns typically need 2-4 calls
-    // (initial -> tools -> final answer); 10 leaves headroom for chained
-    // diagnostics without runaway recursion.
-    public int MaxIterations { get; set; } = 10;
+    // loop emits a synthetic stop. Composite tasks like "build a dashboard
+    // with N widgets" need a confirm-gated proposal + commit pair per mutation
+    // tool, so a 4-widget build is already ~14 calls before any discovery.
+    // 25 absorbs that plus normal grammar/schema lookups without inviting
+    // runaway recursion.
+    public int MaxIterations { get; set; } = 25;
 
     // Per-tool timeout in seconds. Skill invocations exceeding this raise an
     // OperationCanceledException, which the loop converts into a tool_result
