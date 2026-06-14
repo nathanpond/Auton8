@@ -102,6 +102,16 @@ public interface IQueryEntity
     // through the schema endpoint and the chatbot's describe_aql_entity tool.
     string? EntityArgumentHint => null;
 
+    // Whether ORDER BY may reference a column alias introduced by COLUMNS(...
+    // AS name). Standard SQL allows this (ORDER BY logically runs after the
+    // projection) and Postgres handles it natively, so SQL-pushdown entities
+    // like Dataset opt in. LINQ/in-memory entities (Records, Flows, Notes,
+    // Workflow*) leave this false because their ORDER BY emitters compile a
+    // key function against the source schema and would silently drop or
+    // misresolve alias references. Validator gates on this; when false, the
+    // existing "Unknown field" error path stands.
+    bool SupportsAliasOrderBy => false;
+
     // Resolve the full schema (static + dynamic), resolve literal references
     // (e.g. RecordType names), and return a prepared query the validator can
     // run generic checks against and the executor can fire.

@@ -97,6 +97,23 @@ public sealed class DatasetSqlBuilderTests
     }
 
     [Fact]
+    public void OrderBy_References_Columns_Alias_Emits_Alias_Identifier()
+    {
+        // Postgres resolves `ORDER BY "alias"` against the SELECT list's AS
+        // clause natively. The builder should emit the alias as a quoted
+        // identifier rather than dropping the entry or trying to resolve it
+        // against the source schema.
+        var query = AqlParser.Parse(
+            "FROM DataSet(\"AIRisk\") ORDER BY avg_sev DESC " +
+            "COLUMNS(category, AVG(severity) AS avg_sev) GROUP(category)");
+
+        var built = DatasetSqlBuilder.Build("ds_aiRisk", "rows", AiRiskSchema, query, hardCap: null);
+
+        Assert.Contains("ORDER BY \"avg_sev\" DESC", built.Command.CommandText);
+        Assert.Contains("AVG(\"severity\") AS \"avg_sev\"", built.Command.CommandText);
+    }
+
+    [Fact]
     public void Where_With_Group_Composes_Where_Before_GroupBy()
     {
         var query = AqlParser.Parse(

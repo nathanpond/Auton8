@@ -64,7 +64,7 @@ public sealed class RecordsQueryEntity : IQueryEntity
             "FROM Records WHERE CONTAINS(Name, \"acme\")"),
         new QueryExample(
             "Counts grouped by RecordType",
-            "FROM Records COLUMNS(RecordType, COUNT() AS Total) GROUP(RecordType) ORDER BY Total DESC")
+            "FROM Records ORDER BY Total DESC COLUMNS(RecordType, COUNT() AS Total) GROUP(RecordType)")
     };
 
     // Dynamic enum source for the autocomplete UI: the live list of RecordType

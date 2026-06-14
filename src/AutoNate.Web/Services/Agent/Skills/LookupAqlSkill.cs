@@ -211,7 +211,7 @@ public sealed class LookupAqlSkill : IAgentSkill
         new { intent = "Top N by a numeric column",
               query = "FROM Flows WHERE Status = \"Completed\" ORDER BY DurationMs DESC LIMIT 10" },
         new { intent = "Counts grouped by a column",
-              query = "FROM Flows COLUMNS(Status, COUNT() AS Total) GROUP(Status) ORDER BY Total DESC" }
+              query = "FROM Flows ORDER BY Total DESC COLUMNS(Status, COUNT() AS Total) GROUP(Status)" }
     };
 
     private static readonly object[] DoNotPatterns = new object[]

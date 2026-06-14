@@ -39,6 +39,12 @@ public sealed class DatasetQueryEntity(
 
     public string? EntityArgumentHint => "dataset name";
 
+    // Dataset queries compile to Postgres via DatasetSqlBuilder, which emits
+    // `ORDER BY "<alias>"` against the projection's AS clause — Postgres
+    // resolves the alias natively. Enabling this lets the validator accept
+    // `ORDER BY avg_temp ... COLUMNS(AVG(temp) AS avg_temp)` without rewrite.
+    public bool SupportsAliasOrderBy => true;
+
     public async Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)
     {
         var datasetName = query.EntityArgument

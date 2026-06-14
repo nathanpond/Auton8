@@ -65,7 +65,7 @@ public sealed class WorkflowModelsQueryEntity : IQueryEntity
     {
         new QueryExample(
             "Published workflows with most-recent execution time",
-            "FROM Workflows WHERE Published = true COLUMNS(ModelName, Version, LASTEXECUTED() AS LastRun) ORDER BY LASTEXECUTED() DESC"),
+            "FROM Workflows WHERE Published = true ORDER BY LASTEXECUTED() DESC COLUMNS(ModelName, Version, LASTEXECUTED() AS LastRun)"),
         new QueryExample(
             "Workflows updated in the last month",
             "FROM Workflows WHERE CreatedDate >= -1m ORDER BY CreatedDate DESC"),
@@ -74,7 +74,7 @@ public sealed class WorkflowModelsQueryEntity : IQueryEntity
             "FROM Workflows WHERE USESNODE(\"userTask\") ORDER BY ModelName"),
         new QueryExample(
             "Workflows ranked by execution count",
-            "FROM Workflows COLUMNS(ModelName, NUMEXECUTIONS() AS Runs) ORDER BY NUMEXECUTIONS() DESC LIMIT 10")
+            "FROM Workflows ORDER BY NUMEXECUTIONS() DESC COLUMNS(ModelName, NUMEXECUTIONS() AS Runs) LIMIT 10")
     };
 
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)

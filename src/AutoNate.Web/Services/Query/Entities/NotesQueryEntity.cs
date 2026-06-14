@@ -90,7 +90,7 @@ public sealed class NotesQueryEntity : IQueryEntity
             "FROM Notes WHERE Type = \"Cabinet\" AND COUNTCHILDREN() = 0"),
         new QueryExample(
             "Counts grouped by Type",
-            "FROM Notes COLUMNS(Type, COUNT() AS Total) GROUP(Type) ORDER BY Total DESC")
+            "FROM Notes ORDER BY Total DESC COLUMNS(Type, COUNT() AS Total) GROUP(Type)")
     };
 
     public Task<IPreparedQuery> PrepareAsync(AqlQuery query, CancellationToken cancellationToken)

@@ -87,7 +87,7 @@ export function useMyPagePageContext(args: { /* live state */ }): void {
 }
 ```
 
-Then call it once from the page component, near the top with the other hooks. Form-fill works without registering at all — only register when you need page-specific data, custom actions, or to opt fields out of form-fill.
+Then call it once from the page component, **above every conditional early return**. `useXyzPageContext` is itself a hook that triggers ~11 nested hooks (`useRef`, `useCallback`, `useMemo`, `useRegisterPageContext`'s own `useSyncExternalStore`, etc.), so if it sits below an `if (query.isLoading) return <Loader/>` on the first render those hooks are skipped, and on the second render when the query resolves they appear out of nowhere — React tears the component down with *"rendered more hooks than during the previous render"* and the page goes white. Inline any values it needs straight from the queries (`query.data ?? []`) rather than from `const`s declared below the early returns. Form-fill works without registering at all — only register when you need page-specific data, custom actions, or to opt fields out of form-fill.
 
 ### 3. Design the snapshot shape (`data`)
 
@@ -219,6 +219,7 @@ There is no automated SPA test for this — run it manually:
 
 ## Common slip-ups
 
+- **Calling the hook below an early `return`.** This is the most common way to break the dashboard / detail-page wirings. `useXyzPageContext` triggers ~11 inner hooks; if it sits below `if (query.isLoading) return <Loader/>`, on first render none of those hooks run, and on the second render — when the query resolves — they all appear out of nowhere. React aborts with *"rendered more hooks than during the previous render"* and the page goes white. Always call `useXyzPageContext` at the top of the component, next to your other hooks, before any conditional `return`. Inline the values it needs straight from the queries (`query.data ?? []`) rather than from `const`s declared after the early returns — those would be in TDZ at the hook position. Action-callback closures that reference handlers declared further down work fine, because closures resolve their references at *call* time, not creation time.
 - **Unstable hook references.** If `getSnapshot` or `onPageQuery` are rebuilt on every render (no `useCallback`, or deps that change too often), `useRegisterPageContext` will unregister/re-register on every render. The framework still works (last-mounted wins) but the active-summary subscription churns. Always memoize.
 - **Async work in `getSnapshot`.** It must be synchronous — it runs at the moment the user clicks send. If you need to compute something async, do it on a timer in a `useEffect` and stash the result in a ref that `getSnapshot` reads. Never `await` inside `getSnapshot`.
 - **Reading state directly instead of via refs.** Closures captured by `useCallback` see state at the moment the callback was created, not at the moment it's called. Always read mutable state through `argsRef.current` (or similar) so the snapshot reflects the latest values.
