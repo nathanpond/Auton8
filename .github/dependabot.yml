@@ -25,6 +25,11 @@ updates:
   - package-ecosystem: npm
     directory: /                      # root package.json: bpmn-js vendoring scripts
     schedule: { interval: monthly }
+  - package-ecosystem: maven
+    directory: /flowable-extension    # Spring Boot Flowable extension (JVM side of the workflow-behavior callbacks)
+    schedule: { interval: weekly, day: monday }
+    groups:
+      maven-minor-patch: { update-types: [minor, patch] }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
