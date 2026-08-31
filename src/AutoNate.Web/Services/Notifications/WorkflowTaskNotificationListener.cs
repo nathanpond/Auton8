@@ -46,7 +46,7 @@ public sealed class WorkflowTaskNotificationListener(
         return Task.CompletedTask;
     }
 
-    private async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
+    private async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message, CancellationToken cancellationToken = default)
     {
         if (!string.Equals(message.Topic, BusWatcherStreamService.TopicName, StringComparison.Ordinal))
         {

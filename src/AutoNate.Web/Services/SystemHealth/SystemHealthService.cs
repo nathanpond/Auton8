@@ -719,6 +719,8 @@ public sealed class SystemHealthService(
         }
         catch (JsonException)
         {
+            // Body was not the JSON error envelope we hoped for; fall through
+            // to the plain status-code message below.
         }
         return $"Dapr returned HTTP {(int)statusCode}";
     }

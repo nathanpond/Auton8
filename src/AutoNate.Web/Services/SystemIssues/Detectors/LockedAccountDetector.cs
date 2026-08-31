@@ -68,7 +68,7 @@ public sealed class LockedAccountDetector(
                     username = user.Username,
                     lockedAtUtc = user.LockedAtUtc,
                     failedLoginAttempts = user.FailedLoginAttempts
-                })));
+                })), cancellationToken);
         }
 
         // Auto-resolve via DB query so an issue stranded by an app restart

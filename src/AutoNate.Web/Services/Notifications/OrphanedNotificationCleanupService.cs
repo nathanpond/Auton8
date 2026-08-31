@@ -43,7 +43,7 @@ public sealed class OrphanedNotificationCleanupService(
         if (_runner is not null)
         {
             try { await _runner.WaitAsync(cancellationToken); }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* host stopping; exit the loop cleanly */ }
         }
     }
 
