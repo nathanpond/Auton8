@@ -3,6 +3,10 @@ import type { Extension } from "@hocuspocus/server";
 import type { AutoNateUser } from "./auth.js";
 import { selectMaterializer } from "./materializers.js";
 
+// Cross-service calls to the .NET host get an explicit budget; undici's
+// default is 300 s, which is indistinguishable from a hang (#75).
+const AUTONATE_FETCH_TIMEOUT_MS = 5_000;
+
 export interface WebhookConfig {
   autonateBaseUrl: string;
   sharedSecret: string;
@@ -33,6 +37,9 @@ export function createWebhookExtension(config: WebhookConfig): Extension {
       .digest("hex");
     const response = await fetch(`${config.autonateBaseUrl}/internal/yjs-webhook`, {
       method: "POST",
+      // Same budget as the auth hook — a wedged host must not pin this
+      // request for undici's 300 s default (#75).
+      signal: AbortSignal.timeout(AUTONATE_FETCH_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",
         "X-AutoNate-Internal-Token": config.sharedSecret,

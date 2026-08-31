@@ -16,6 +16,16 @@ export function createPostgresPersistence(config: pg.PoolConfig): Extension & {
 } {
   const pool = new pg.Pool(config);
 
+  // node-postgres emits 'error' on the Pool when a backend error or a network
+  // partition kills an *idle* client. An EventEmitter 'error' with no listener
+  // is rethrown as an uncaughtException, which index.ts survives but only by
+  // abandoning whatever hook was mid-flight — and it repeats on every idle
+  // client death. Logging it keeps the pool's own reconnect behaviour and
+  // turns a process-level event into a line in the log (#74).
+  pool.on("error", (err) => {
+    console.error("[persistence] idle client error:", err);
+  });
+
   // Smoke-test the connection up front so a misconfigured POSTGRES_*
   // shows in the boot log instead of silently failing on first write.
   pool.query("SELECT 1").catch((err) => {
