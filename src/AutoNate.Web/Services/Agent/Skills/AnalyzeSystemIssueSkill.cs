@@ -1,4 +1,6 @@
 using System.Text.Json;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Services.SystemIssues;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -7,6 +9,13 @@ namespace AutoNate.Web.Services.Agent.Skills;
 // Read-only system-issue diagnostics. The detector/remediator pipeline
 // already populates system_issues with structured FactsJson; this skill just
 // surfaces those rows so the model can explain them in plain English.
+//
+// Every system issue is administrative (see CoreEntityTypes) and FactsJson
+// carries verbatim exception text from UnhandledExceptionRecorder, so both
+// tools take the same kind-level gate the REST surface uses —
+// RequireKindPermission(SystemIssue, View) on SystemIssueEndpoints. Without
+// it a non-admin read production stack traces and failing ids through chat
+// while GET /api/system-issues answered them 403 (#20).
 public sealed class AnalyzeSystemIssueSkill : IAgentSkill
 {
     public string Name => "analyze-system-issue";
@@ -70,6 +79,11 @@ public sealed class AnalyzeSystemIssueSkill : IAgentSkill
             ? Math.Clamp(t.GetInt32(), 1, 100)
             : 25;
 
+        if (!await CanViewAsync(context, ct))
+        {
+            return Error("list_system_issues", "SystemIssue:view permission required.");
+        }
+
         var store = context.Services.GetRequiredService<ISystemIssueStore>();
         var rows = await store.ListAsync(new SystemIssueListQuery(state, severity, Category: null, Skip: 0, Take: take), ct);
         return JsonSerializer.SerializeToElement(new
@@ -108,16 +122,16 @@ public sealed class AnalyzeSystemIssueSkill : IAgentSkill
             });
         }
 
+        if (!await CanViewAsync(context, ct))
+        {
+            return Error("get_system_issue", "SystemIssue:view permission required.");
+        }
+
         var store = context.Services.GetRequiredService<ISystemIssueStore>();
         var issue = await store.GetAsync(id, ct);
         if (issue is null)
         {
-            return JsonSerializer.SerializeToElement(new
-            {
-                kind = "error",
-                source = "get_system_issue",
-                data = new { message = $"No system issue with id {id}." }
-            });
+            return Error("get_system_issue", $"No system issue with id {id}.");
         }
 
         // Parse FactsJson back into a JsonElement so the model can read the
@@ -158,6 +172,25 @@ public sealed class AnalyzeSystemIssueSkill : IAgentSkill
             }
         });
     }
+
+    // SystemIssue is administrative in its entirety — there is no per-instance
+    // grant model for it — so this is the kind-level check, matching
+    // SystemIssueEndpoints' RequireKindPermission.
+    private static async Task<bool> CanViewAsync(AgentToolContext ctx, CancellationToken ct)
+    {
+        var authorizer = ctx.Services.GetRequiredService<IAuthorizer>();
+        var decision = await authorizer.AuthorizeAsync(
+            ctx.Session.User, Actions.View, new EntityRef(EntityKinds.SystemIssue, string.Empty), ct);
+        return decision.IsAllowed;
+    }
+
+    private static JsonElement Error(string source, string message) =>
+        JsonSerializer.SerializeToElement(new
+        {
+            kind = "error",
+            source,
+            data = new { message }
+        });
 
     private static JsonElement ParseSchema(string raw)
     {
