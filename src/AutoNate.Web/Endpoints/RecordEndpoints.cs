@@ -241,11 +241,33 @@ public static class RecordEndpoints
             JsonElement body,
             HttpContext http,
             IRecordStore store,
+            IAuthorizer authorizer,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var input = ParseUpdateInput(body);
+
+                // This route accepts assigneeIds, and it is the one the SPA
+                // actually uses to change them — PUT /{id}/assignees, the route
+                // that carries RequirePermission(Record, Assign), has no caller
+                // outside its own test. So Record:Assign was grantable and
+                // deniable with no observable effect: assignees changed through
+                // Edit like any other field (#45). Charge Assign whenever the
+                // body actually carries assignees, so the permission means the
+                // same thing however the change arrives.
+                if (TryGetCaseInsensitive(body, "assigneeIds", out var assigneeProbe)
+                    && assigneeProbe.ValueKind == JsonValueKind.Array)
+                {
+                    var decision = await authorizer.AuthorizeAsync(
+                        http.User, Actions.Assign,
+                        new EntityRef(EntityKinds.Record, id.ToString()), cancellationToken);
+                    if (!decision.IsAllowed)
+                    {
+                        return Results.StatusCode(StatusCodes.Status403Forbidden);
+                    }
+                }
+
                 var updated = await store.UpdateAsync(id, input, http.GetActorId(), cancellationToken);
                 return Results.Ok(ToDto(updated));
             }
@@ -258,7 +280,10 @@ public static class RecordEndpoints
                 return Results.BadRequest(new { message = ex.Message, errors = ex.Errors });
             }
         }).DisableAntiforgery()
-          .RequirePermission(EntityKinds.Record, Actions.Edit);
+          .RequirePermission(EntityKinds.Record, Actions.Edit)
+          .AuthorizedInHandler(
+              "Record:Edit via the filter above; a body that carries assigneeIds " +
+              "additionally requires Record:Assign on the same record (#45).");
 
         group.MapDelete("/{id:guid}", async (
             Guid id,

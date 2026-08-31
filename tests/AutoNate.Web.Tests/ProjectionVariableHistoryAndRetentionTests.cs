@@ -15,7 +15,7 @@ using Xunit;
 namespace AutoNate.Web.Tests;
 
 [Trait("Category", "Integration")]
-public sealed class ProjectionFrameworkPhase2Tests
+public sealed class ProjectionVariableHistoryAndRetentionTests
 {
     [Fact]
     public async Task Variable_projection_writes_snapshot_and_replaces_on_re_emit()

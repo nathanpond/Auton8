@@ -3,6 +3,7 @@ import tseslint from "typescript-eslint";
 import reactPlugin from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import jsxA11y from "eslint-plugin-jsx-a11y";
+import eslintComments from "@eslint-community/eslint-plugin-eslint-comments";
 import globals from "globals";
 
 // Initial ESLint config — primarily wired up for accessibility (jsx-a11y)
@@ -38,7 +39,8 @@ export default [
     plugins: {
       react: reactPlugin,
       "react-hooks": reactHooks,
-      "jsx-a11y": jsxA11y
+      "jsx-a11y": jsxA11y,
+      "eslint-comments": eslintComments
     },
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
@@ -101,7 +103,16 @@ export default [
       // patterns that we don't want a lint pass to block on day one.
       "no-useless-escape": "warn",
       "no-extra-boolean-cast": "warn",
-      "no-empty": ["warn", { allowEmptyCatch: true }]
+      "no-empty": ["warn", { allowEmptyCatch: true }],
+
+      // ── Suppressions must say why ───────────────────────────────────────
+      // A bare `eslint-disable-next-line react-hooks/exhaustive-deps` is
+      // indistinguishable from a stale-closure bug someone silenced (#32), and
+      // the whole point of a suppression is that a human decided it was safe —
+      // so the decision has to be written down. Error, not warn: this is
+      // cheap to satisfy at the moment you add the directive, and the repo is
+      // currently at zero.
+      "eslint-comments/require-description": ["error", { ignore: [] }]
     }
   }
 ];

@@ -144,7 +144,7 @@ export function QuadrantChartConfigForm({
       xAxisColumn: aqlNumericOptions[0].value,
       yAxisColumn: aqlNumericOptions[1].value
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- including `value` would loop on every keystroke; the early return makes this seed axes once
   }, [isAqlSource, aqlNumericOptions]);
 
   // Render the selected value for a Select that uses our "none" sentinel

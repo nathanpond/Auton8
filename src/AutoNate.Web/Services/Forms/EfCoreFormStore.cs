@@ -217,14 +217,6 @@ public sealed class EfCoreFormStore(IDbContextFactory<AutoNateDbContext> dbConte
         return rows.Select(ToVersionModel).ToList();
     }
 
-    public async Task<FormVersion?> GetVersionAsync(Guid formId, int versionNumber, CancellationToken cancellationToken = default)
-    {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.FormVersions
-            .AsNoTracking()
-            .SingleOrDefaultAsync(v => v.FormId == formId && v.VersionNumber == versionNumber, cancellationToken);
-        return entity is null ? null : ToVersionModel(entity);
-    }
 
     public async Task<Form?> RestoreAsync(Guid id, int versionNumber, Guid actorId, CancellationToken cancellationToken = default)
     {

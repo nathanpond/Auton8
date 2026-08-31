@@ -246,8 +246,7 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
         if (ra !== rb) return ra - rb;
         return principalDisplay(a).localeCompare(principalDisplay(b));
       });
-    // principalDisplay only depends on `usersByUserId`, captured here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- principalDisplay closes over usersByUserId, which is already a dep
   }, [members, usersByUserId]);
 
   const derivedRows = useMemo(() => {
@@ -266,7 +265,7 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
         if (actionCmp !== 0) return actionCmp;
         return (a.grantId ?? "").localeCompare(b.grantId ?? "");
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- same closure as the direct rows above: principalDisplay depends only on usersByUserId
   }, [members, usersByUserId]);
 
   if (!project) {
