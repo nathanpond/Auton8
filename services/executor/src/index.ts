@@ -1,6 +1,6 @@
 import { connect, NatsConnection, StringCodec } from "nats";
 import { runJs } from "./jsRunner.js";
-import { runPython } from "./pythonRunner.js";
+import { prewarmPython, runPython, shutdownPython } from "./pythonRunner.js";
 import { CodeNodeReply, CodeNodeRequest } from "./wire.js";
 
 // Entry point for the AutoNate executor sidecar. Connects to NATS,
@@ -24,8 +24,20 @@ const STARTED_AT = Date.now();
 const codec = StringCodec();
 
 async function main(): Promise<void> {
+  // Start loading a warm Pyodide interpreter now so the first Python
+  // request does not pay the ~0.8 s cold start (#58).
+  prewarmPython();
+
   const nc: NatsConnection = await connect({ servers: NATS_URL });
   console.log(`[executor] Connected to NATS at ${NATS_URL}, subscribing to ${SUBJECT}.`);
+
+  const stop = async () => {
+    await nc.drain().catch(() => undefined);
+    await shutdownPython();
+    process.exit(0);
+  };
+  process.once("SIGTERM", () => void stop());
+  process.once("SIGINT", () => void stop());
 
   const health = nc.subscribe(HEALTH_SUBJECT);
   void (async () => {
