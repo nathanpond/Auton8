@@ -647,6 +647,16 @@ builder.Services.AddScoped<IAgentSkill, ManageRecordTypesSkill>();
 // the per-turn ChatRequest when chatbot.internetAccessEnabled is off.
 builder.Services.AddScoped<IAgentSkill, WebFetchSkill>();
 builder.Services.AddSingleton<IDnsResolver, SystemDnsResolver>();
+// Outbound-URL guards for user-supplied destinations (#60, #61). The DNS/
+// private-address guard is for open-ended destinations (the REST data
+// connector); the base-URL policy is the allowlist used wherever a stored
+// provider credential is about to be sent somewhere.
+builder.Services.AddSingleton<AutoNate.Web.Services.Http.IOutboundUrlGuard,
+    AutoNate.Web.Services.Http.OutboundUrlGuard>();
+builder.Services.AddOptions<AutoNate.Web.Services.ExternalConnections.ExternalConnectionUrlOptions>()
+    .BindConfiguration(AutoNate.Web.Services.ExternalConnections.ExternalConnectionUrlOptions.SectionName);
+builder.Services.AddSingleton<AutoNate.Web.Services.ExternalConnections.IProviderBaseUrlPolicy,
+    AutoNate.Web.Services.ExternalConnections.ProviderBaseUrlPolicy>();
 // Dedicated HttpClient — short timeout, no cookies, capped redirects, fixed
 // User-Agent. The fetch tool can never accidentally reuse cookies from any
 // other named client (notifications etc.) because UseCookies is off.

@@ -27,11 +27,16 @@ public sealed class ConnectionModelLister : IConnectionModelLister
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IAgentModelCatalog _catalog;
+    private readonly IProviderBaseUrlPolicy _baseUrlPolicy;
 
-    public ConnectionModelLister(IHttpClientFactory httpClientFactory, IAgentModelCatalog catalog)
+    public ConnectionModelLister(
+        IHttpClientFactory httpClientFactory,
+        IAgentModelCatalog catalog,
+        IProviderBaseUrlPolicy baseUrlPolicy)
     {
         _httpClientFactory = httpClientFactory;
         _catalog = catalog;
+        _baseUrlPolicy = baseUrlPolicy;
     }
 
     public async Task<ListModelsResult> ListModelsAsync(ListModelsInput input, CancellationToken cancellationToken = default)
@@ -54,7 +59,8 @@ public sealed class ConnectionModelLister : IConnectionModelLister
     private async Task<ListModelsResult> ListAnthropicAsync(ListModelsInput input, CancellationToken cancellationToken)
     {
         var http = _httpClientFactory.CreateClient("agent.anthropic");
-        var baseUrl = new Uri(string.IsNullOrWhiteSpace(input.BaseUrl) ? "https://api.anthropic.com" : input.BaseUrl);
+        // Allowlisted before the key is attached (#61).
+        var baseUrl = _baseUrlPolicy.Resolve(input.Kind, input.BaseUrl, "https://api.anthropic.com");
 
         // Anthropic paginates with `after_id`; max page size 1000. A single
         // page is enough in practice (today's catalog is well under 100), but
@@ -103,7 +109,8 @@ public sealed class ConnectionModelLister : IConnectionModelLister
     private async Task<ListModelsResult> ListOpenAIAsync(ListModelsInput input, CancellationToken cancellationToken)
     {
         var http = _httpClientFactory.CreateClient("agent.openai");
-        var baseUrl = new Uri(string.IsNullOrWhiteSpace(input.BaseUrl) ? "https://api.openai.com" : input.BaseUrl);
+        // Allowlisted before the key is attached (#61).
+        var baseUrl = _baseUrlPolicy.Resolve(input.Kind, input.BaseUrl, "https://api.openai.com");
 
         using var req = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUrl, "/v1/models"));
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", input.Secret);
