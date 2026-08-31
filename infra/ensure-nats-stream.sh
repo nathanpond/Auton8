@@ -11,7 +11,13 @@ COMPOSE=(docker compose -f "$COMPOSE_FILE")
 # start. AutoNate.Web's NatsStreamProvisioner ensures the rest of the streams
 # (autonate-records, etc.) at app startup.
 STREAM_NAME="workflow-execution"
-SUBJECT="workflow.execution.>"
+# Subjects for the CREATE case only. AutoNate.Web's NatsStreamProvisioner owns
+# the authoritative set (it covers more prefixes than this: notification, auth,
+# iam, site, system, agent, query, dashboards, datastore, …) and widens the
+# stream at app startup. This list only has to be wide enough for whatever
+# publishes before the app boots — the Flowable extension plus the topics the
+# bootstrap script already documented (#113).
+SUBJECTS="workflow.execution.> record.> application.> content.>"
 NATS_CONTAINER="autonate-nats"
 
 log() {
@@ -25,12 +31,18 @@ container_running() {
 }
 
 bootstrap_stream() {
+  # Create-if-absent only. The previous version ran `stream edit --subjects`
+  # on every invocation, which narrowed an already-provisioned stream back to
+  # workflow.execution.> and dropped record/application/content publishes until
+  # the next app boot re-widened it — reintroducing, on every `make
+  # infra-ensure`, the exact "no response from stream" regression that
+  # infra/scripts/bootstrap-jetstream.sh exists to prevent (#113).
   docker run --rm --network "container:${NATS_CONTAINER}" natsio/nats-box:0.16.0 \
     /bin/sh -lc "
       if nats --server nats://127.0.0.1:4222 stream info ${STREAM_NAME} >/dev/null 2>&1; then
-        nats --server nats://127.0.0.1:4222 stream edit ${STREAM_NAME} --subjects '${SUBJECT}' --force >/dev/null
+        echo 'exists'
       else
-        nats --server nats://127.0.0.1:4222 stream add ${STREAM_NAME} --subjects '${SUBJECT}' --retention limits --defaults >/dev/null
+        nats --server nats://127.0.0.1:4222 stream add ${STREAM_NAME} --subjects '${SUBJECTS}' --retention limits --defaults >/dev/null
       fi
     "
 }

@@ -250,9 +250,39 @@ public sealed class DaprStreamingSubscriber(
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
 
-            await process.WaitForExitAsync(timeoutCts.Token);
-            var stdout = await process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-            var stderr = await process.StandardError.ReadToEndAsync(CancellationToken.None);
+            // Start draining both pipes before waiting: a child that writes
+            // more than the ~64 KB pipe buffer blocks on write while we block
+            // on exit, and neither side moves again (#73).
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
+
+            try
+            {
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The 45 s budget elapsed. Disposing `process` only releases
+                // our wrapper — the script and anything it spawned keep
+                // running, and RestartCooldown re-fires every two minutes, so
+                // without this the watchdog accumulates orphaned bash/daprd
+                // children indefinitely while pub/sub stays broken (#73).
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (Exception killEx)
+                {
+                    _logger.LogError(killEx, "Failed to kill the timed-out sidecar restart process tree.");
+                }
+                _logger.LogError(
+                    "Sidecar restart timed out after 45s and was killed (process tree). Script: {ScriptPath}.",
+                    scriptPath);
+                return false;
+            }
+
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
             if (process.ExitCode == 0)
             {
                 _logger.LogInformation(

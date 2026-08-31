@@ -752,9 +752,26 @@ public sealed class FlowableClient(
         const int pageSize = 200;
         var deleted = 0;
 
+        // Every pass re-requests page 0, so progress depends on rows actually
+        // disappearing. If a historic instance cannot be removed, the old
+        // `while (true)` refetched the same page forever — an unbounded HTTP
+        // hammer on Flowable from inside a live admin request. Stop when a
+        // pass deletes nothing, and cap the whole operation either way (#77).
+        var budget = TimeSpan.FromMinutes(5);
+        var startedAt = DateTimeOffset.UtcNow;
+
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (DateTimeOffset.UtcNow - startedAt > budget)
+            {
+                throw new InvalidOperationException(
+                    $"Flowable could not delete all workflow executions within {budget.TotalMinutes:0} minutes; " +
+                    $"{deleted} removed so far. Re-run to continue.");
+            }
+
+            var deletedBeforePass = deleted;
 
             using var pageResponse = await _httpClient.GetAsync(
                 $"service/history/historic-process-instances?size={pageSize}",
@@ -778,6 +795,16 @@ public sealed class FlowableClient(
 
                 await DeleteWorkflowExecutionAsync(instance.Id, cancellationToken);
                 deleted++;
+            }
+
+            if (deleted == deletedBeforePass)
+            {
+                // The page was non-empty but nothing could be removed (blank
+                // ids, or deletes that report success without taking effect).
+                // Another identical pass would loop forever.
+                throw new InvalidOperationException(
+                    $"Flowable returned {page.Data.Count} historic process instance(s) that could not be deleted; " +
+                    $"{deleted} removed before stopping.");
             }
         }
     }
