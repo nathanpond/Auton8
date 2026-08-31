@@ -1,6 +1,6 @@
 # Workflow Script Task Error Capture & Display
 
-**Status:** Implemented on 2026-05-05. See `docs/superpowers/plans/2026-05-05-workflow-script-error-capture.md` for the implementation plan.
+**Status:** Implemented on 2026-05-05. The implementation plan file (formerly under `docs/superpowers/plans/`) was removed along with the superpowers workflow.
 
 ## Goal
 
