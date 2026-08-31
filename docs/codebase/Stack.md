@@ -12,8 +12,8 @@ AutoNate is a net10.0 ASP.NET Core minimal-API host (`src/AutoNate.Web`) serving
 | SPA | `src/AutoNate.Spa/` | TypeScript 6 / Node 24 | React 19.2, Vite 8, Mantine 9.1 | `http://localhost:5173` (`vite.config.ts` `strictPort: true`) |
 | Plugin SDK | `src/AutoNate.Plugin.Abstractions/` | C# / net10.0 | classlib; Dapper 2.1.66 + Npgsql 9.0.3 | n/a |
 | Sample plugins | `plugins/HelloPlugin`, `plugins/Auditor` | C# / net10.0 | classlib → `dist/<Name>.zip` | n/a |
-| Yjs sync sidecar | `services/hocuspocus/` | TypeScript 5.6 / Node 24-alpine | `@hocuspocus/server` ^4, `pg` ^8.20, `@blocknote/server-util` ^0.51 | `ws://localhost:1234` |
-| Code executor sidecar | `services/executor/` | TypeScript 5.6 / Node 24-alpine | `nats` ^2.29, `isolated-vm` ^7, `pyodide` ^0.26 | none (NATS subscriber) |
+| Yjs sync sidecar | `services/hocuspocus/` | TypeScript 7 / Node 24-alpine | `@hocuspocus/server` ^4.6, `pg` ^8.23, `@blocknote/server-util` ^0.54 | `ws://localhost:1234` |
+| Code executor sidecar | `services/executor/` | TypeScript 7 / Node 24-alpine | `nats` ^2.29, `isolated-vm` ^7, `pyodide` ^314 (CPython-versioned; Python 3.14) | none (NATS subscriber) |
 | Flowable extension | `flowable-extension/` | Java 21 / Maven | Spring Boot 4.0.2, Spring 7.0.3, Flowable 8.0.0, GraalJS 24.1.2, JUnit 5.13.4 | baked into `flowable/flowable-rest:latest` image on `:8080` |
 | Unit/integration tests | `tests/AutoNate.Web.Tests/` | C# xunit 2.9.0 | `Microsoft.AspNetCore.Mvc.Testing` 10.0.7, coverlet 6.0.2 | needs Postgres `:5432` |
 | Test plugin | `tests/AutoNate.Web.Tests.SamplePlugin/` | C# | staged to `bin/.../test-plugins/SamplePlugin/` by `AutoNate.Web.Tests.csproj` `StageSamplePluginForTests` | n/a |
