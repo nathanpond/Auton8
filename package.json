@@ -6,7 +6,7 @@
     "regen:fa-icons": "node scripts/regen-fa-icons.mjs"
   },
   "dependencies": {
-    "bpmn-js": "^18.15.0",
+    "bpmn-js": "^18.25.1",
     "bpmn-js-create-append-anything": "^1.2.0"
   },
   "devDependencies": {
