@@ -1,4 +1,6 @@
 using System.Text.Json;
+using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Services.Workflow;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -9,6 +11,14 @@ namespace AutoNate.Web.Services.Agent.Skills;
 // the flow. We deliberately don't pre-summarise the BPMN here — Claude and
 // GPT-4-class models read BPMN cleanly, and a structured walker is its own
 // project.
+//
+// IWorkflowModelStore does not gate by actor, so both tools authorize
+// explicitly and mirror the HTTP routes over the same store exactly (#19):
+// GET /api/workflows/ is RequireKindPermission(WorkflowModel, View), and
+// GET /api/workflows/{id} is RequirePermission(WorkflowModel, View, "id").
+// Without this, asking the chatbot to explain a workflow returned the full
+// BPMN — service-task endpoints and behaviour keys included — to a user whom
+// the REST API answers with 403.
 public sealed class ExplainWorkflowSkill : IAgentSkill
 {
     public string Name => "explain-workflow";
@@ -64,6 +74,11 @@ public sealed class ExplainWorkflowSkill : IAgentSkill
             ? q.GetString() ?? string.Empty
             : string.Empty;
 
+        if (!await CanViewAnyAsync(context, ct))
+        {
+            return Error("find_workflow", "WorkflowModel:view permission required.");
+        }
+
         var store = context.Services.GetRequiredService<IWorkflowModelStore>();
         var all = await store.ListAsync(ct);
         var filtered = string.IsNullOrWhiteSpace(query)
@@ -106,16 +121,18 @@ public sealed class ExplainWorkflowSkill : IAgentSkill
             });
         }
 
+        // Authorize before the read, and answer a denial and a miss the same
+        // way, so the tool cannot be used to probe which workflow ids exist.
+        if (!await CanViewAsync(context, workflowId, ct))
+        {
+            return Error("explain_workflow", $"No workflow with id {workflowId} is visible.");
+        }
+
         var store = context.Services.GetRequiredService<IWorkflowModelStore>();
         var model = await store.GetAsync(workflowId, ct);
         if (model is null)
         {
-            return JsonSerializer.SerializeToElement(new
-            {
-                kind = "error",
-                source = "explain_workflow",
-                data = new { message = $"No workflow with id {workflowId} is visible." }
-            });
+            return Error("explain_workflow", $"No workflow with id {workflowId} is visible.");
         }
 
         return JsonSerializer.SerializeToElement(new
@@ -133,6 +150,33 @@ public sealed class ExplainWorkflowSkill : IAgentSkill
             }
         });
     }
+
+    // Kind-level: "may this actor see workflow models at all", the same gate
+    // GET /api/workflows/ applies.
+    private static async Task<bool> CanViewAnyAsync(AgentToolContext ctx, CancellationToken ct)
+    {
+        var authorizer = ctx.Services.GetRequiredService<IAuthorizer>();
+        var decision = await authorizer.AuthorizeAsync(
+            ctx.Session.User, Actions.View, new EntityRef(EntityKinds.WorkflowModel, string.Empty), ct);
+        return decision.IsAllowed;
+    }
+
+    private static async Task<bool> CanViewAsync(AgentToolContext ctx, Guid workflowId, CancellationToken ct)
+    {
+        var authorizer = ctx.Services.GetRequiredService<IAuthorizer>();
+        var decision = await authorizer.AuthorizeAsync(
+            ctx.Session.User, Actions.View,
+            new EntityRef(EntityKinds.WorkflowModel, workflowId.ToString()), ct);
+        return decision.IsAllowed;
+    }
+
+    private static JsonElement Error(string source, string message) =>
+        JsonSerializer.SerializeToElement(new
+        {
+            kind = "error",
+            source,
+            data = new { message }
+        });
 
     private static JsonElement ParseSchema(string raw)
     {
