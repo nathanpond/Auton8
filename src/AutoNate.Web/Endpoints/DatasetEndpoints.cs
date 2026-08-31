@@ -1,7 +1,12 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Persistence;
+using AutoNate.Web.Services.DataStores;
+using AutoNate.Web.Services.DataStores.File;
 using AutoNate.Web.Services.Datasets;
 using AutoNate.Web.Services.Datasets.Cached;
+using AutoNate.Web.Services.Datasets.Files;
+using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Endpoints;
 
@@ -54,7 +59,11 @@ public static class DatasetEndpoints
                         request.SourceKind,
                         request.SourceId,
                         request.SourceTableName,
-                        request.RefreshCron),
+                        request.RefreshCron,
+                        request.FileScopeKind,
+                        request.FileScopePath,
+                        request.ParserKind,
+                        request.ParserOptionsJson),
                     actorId, ct);
                 return Results.Created($"/api/datasets/{row.Id}", row);
             }
@@ -127,7 +136,112 @@ public static class DatasetEndpoints
             }
         }).RequirePermission(EntityKinds.Dataset, Actions.Refresh);
 
+        // Files-datastore preview. Hands the parser the same bytes the
+        // executor would read at query time so the SPA can populate the
+        // new dataset's locked column schema before the create call. For
+        // folder scopes, previews against the first non-".keep" file —
+        // the dataset's column schema is enforced strictly across every
+        // file in the folder at execute time, so previewing one is
+        // representative.
+        group.MapPost("/preview-file-source", async (
+            PreviewFileSourceRequest request,
+            IDbContextFactory<AutoNateDbContext> dbContextFactory,
+            IFileDataStoreService fileService,
+            DatasetFileParserRegistry parserRegistry,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            if (string.IsNullOrWhiteSpace(request.ParserKind))
+                return Results.BadRequest(new { reason = "parserKind is required." });
+            if (string.IsNullOrWhiteSpace(request.ScopeKind))
+                return Results.BadRequest(new { reason = "scopeKind is required." });
+            if (string.IsNullOrWhiteSpace(request.ScopePath))
+                return Results.BadRequest(new { reason = "scopePath is required." });
+
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            var datastoreKind = await db.DataStores.AsNoTracking()
+                .Where(d => d.Id == request.DataStoreId)
+                .Select(d => (short?)d.Kind)
+                .SingleOrDefaultAsync(ct);
+            if (datastoreKind is null)
+                return Results.BadRequest(new { reason = $"Data store '{request.DataStoreId}' not found." });
+            if ((DataStoreKind)datastoreKind.Value != DataStoreKind.FileType)
+                return Results.BadRequest(new { reason = "Data store is not a Files-type store." });
+
+            Guid? fileId;
+            if (string.Equals(request.ScopeKind, DatasetFileScopeReader.ScopeFile, StringComparison.OrdinalIgnoreCase))
+            {
+                var (folder, filename) = SplitFilePath(request.ScopePath);
+#pragma warning disable CA1304, CA1311
+                fileId = await db.DataStoreFiles.AsNoTracking()
+                    .Where(f => f.DataStoreId == request.DataStoreId
+                                && f.FolderPath == folder
+                                && f.Filename.ToLower() == filename.ToLower())
+                    .Select(f => (Guid?)f.Id)
+                    .SingleOrDefaultAsync(ct);
+#pragma warning restore CA1304, CA1311
+                if (fileId is null)
+                    return Results.NotFound(new { reason = $"File '{request.ScopePath}' not found." });
+            }
+            else if (string.Equals(request.ScopeKind, DatasetFileScopeReader.ScopeFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                var folder = NormalizeFolder(request.ScopePath);
+                fileId = await db.DataStoreFiles.AsNoTracking()
+                    .Where(f => f.DataStoreId == request.DataStoreId
+                                && f.FolderPath == folder
+                                && f.Filename != ".keep")
+                    .OrderBy(f => f.Filename)
+                    .Select(f => (Guid?)f.Id)
+                    .FirstOrDefaultAsync(ct);
+                if (fileId is null)
+                    return Results.NotFound(new { reason = $"Folder '{request.ScopePath}' has no files to sample." });
+            }
+            else
+            {
+                return Results.BadRequest(new { reason = $"Unknown scopeKind '{request.ScopeKind}'." });
+            }
+
+            IDatasetFileParser parser;
+            try { parser = parserRegistry.Get(request.ParserKind); }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+
+            try
+            {
+                var (_, stream) = await fileService.DownloadAsync(request.DataStoreId, fileId.Value, ct);
+                await using (stream)
+                {
+                    var columns = await parser.PreviewAsync(stream, request.ParserOptions, ct);
+                    return Results.Ok(new PreviewFileSourceResponse(columns));
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { reason = ex.Message });
+            }
+        }).RequireKindPermission(EntityKinds.Dataset, Actions.Create)
+          .DisableAntiforgery();
+
         return app;
+    }
+
+    private static (string Folder, string Filename) SplitFilePath(string path)
+    {
+        var normalized = path.StartsWith('/') ? path : "/" + path;
+        var lastSlash = normalized.LastIndexOf('/');
+        var folder = lastSlash == 0 ? "/" : normalized[..lastSlash];
+        var filename = normalized[(lastSlash + 1)..];
+        return (folder, filename);
+    }
+
+    private static string NormalizeFolder(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return "/";
+        var v = folder.StartsWith('/') ? folder : "/" + folder;
+        if (v.Length > 1 && v.EndsWith('/')) v = v[..^1];
+        return v;
     }
 }
 
@@ -139,9 +253,23 @@ public sealed record class CreateDatasetRequest(
     string SourceKind,
     Guid SourceId,
     string? SourceTableName,
-    string? RefreshCron);
+    string? RefreshCron,
+    string? FileScopeKind = null,
+    string? FileScopePath = null,
+    string? ParserKind = null,
+    string? ParserOptionsJson = null);
 
 public sealed record class UpdateDatasetRequest(
     string? Name,
     string? Description,
     string? RefreshCron);
+
+public sealed record class PreviewFileSourceRequest(
+    Guid DataStoreId,
+    string ScopeKind,
+    string ScopePath,
+    string ParserKind,
+    Dictionary<string, string>? ParserOptions);
+
+public sealed record class PreviewFileSourceResponse(
+    IReadOnlyList<DatasetColumn> Columns);

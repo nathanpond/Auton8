@@ -259,6 +259,12 @@ public partial class AutoNateDbContext
             entity.Property(e => e.SourceKind).HasColumnName("source_kind");
             entity.Property(e => e.SourceId).HasColumnName("source_id");
             entity.Property(e => e.SourceTableName).HasColumnName("source_table_name");
+            entity.Property(e => e.FileScopeKind).HasColumnName("file_scope_kind");
+            entity.Property(e => e.FileScopePath).HasColumnName("file_scope_path");
+            entity.Property(e => e.ParserKind).HasColumnName("parser_kind");
+            entity.Property(e => e.ParserOptionsJson)
+                .HasColumnName("parser_options")
+                .HasColumnType("jsonb");
             entity.Property(e => e.OwnerUserId).HasColumnName("owner_user_id");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");

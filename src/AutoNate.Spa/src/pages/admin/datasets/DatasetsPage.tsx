@@ -30,11 +30,13 @@ import {
   deleteDataset,
   listDatasets,
   modeLabel,
+  previewFileSource,
   refreshDataset,
   updateDataset
 } from "@/api/datasets";
 import {
   kindLabel as dataStoreKindLabel,
+  listDataStoreFiles,
   listDataStoreTables,
   listDataStores
 } from "@/api/datastores";
@@ -56,6 +58,18 @@ export default function DatasetsPage() {
   const [sourceKind, setSourceKind] = useState("datastore");
   const [sourceId, setSourceId] = useState("");
   const [sourceTableName, setSourceTableName] = useState("");
+  // Files-datastore scope. When the picked datastore is FileType, the form
+  // hides the SQL-table picker and shows a folder browser + parser config
+  // instead. The browser is a flat "current folder" view; navigating into
+  // a subfolder bumps browseFolder. fileScopePath is derived from
+  // (browseFolder, scopeFile) at submit time.
+  const [browseFolder, setBrowseFolder] = useState("/");
+  const [scopeKind, setScopeKind] = useState<"file" | "folder">("file");
+  const [scopeFile, setScopeFile] = useState("");
+  const [parserKind, setParserKind] = useState<"csv" | "raw">("csv");
+  const [parserDelimiter, setParserDelimiter] = useState(",");
+  const [parserHasHeader, setParserHasHeader] = useState(true);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [refreshCron, setRefreshCron] = useState("*/5 * * * *");
   const DEFAULT_COLUMNS_JSON = useMemo(
     () =>
@@ -96,6 +110,8 @@ export default function DatasetsPage() {
   );
   const isSqlDataStore =
     selectedDataStore !== null && dataStoreKindLabel(selectedDataStore.kind) === "SqlType";
+  const isFileDataStore =
+    selectedDataStore !== null && dataStoreKindLabel(selectedDataStore.kind) === "FileType";
 
   // Only hit /tables when the user has actually picked a SQL DataStore.
   // FileType stores and DataConnectors don't have tables to enumerate.
@@ -103,6 +119,15 @@ export default function DatasetsPage() {
     queryKey: ["datastores", "tables", sourceId],
     queryFn: ({ signal }) => listDataStoreTables(sourceId, signal),
     enabled: createOpen && sourceKind === "datastore" && !!sourceId && isSqlDataStore
+  });
+
+  // One-folder-deep view of the FileType datastore. Re-queries on every
+  // navigation (per-folder so the picker reflects later uploads without
+  // a hard refresh); list is small.
+  const filesQuery = useQuery({
+    queryKey: ["datastores", "files", sourceId, browseFolder],
+    queryFn: ({ signal }) => listDataStoreFiles(sourceId, browseFolder, signal),
+    enabled: createOpen && sourceKind === "datastore" && !!sourceId && isFileDataStore
   });
 
   // Switching sourceKind invalidates the previously picked sourceId/table:
@@ -115,8 +140,13 @@ export default function DatasetsPage() {
 
   // Switching source store within `datastore` kind: clear the table pick,
   // since the previous store's table names are meaningless for the new one.
+  // Likewise reset the File-scope picker so a stale browseFolder / scopeFile
+  // from a different datastore can't leak into the submit payload.
   useEffect(() => {
     setSourceTableName("");
+    setBrowseFolder("/");
+    setScopeFile("");
+    setPreviewError(null);
   }, [sourceId]);
 
   // "Import columns from selected table" replaces the textarea contents
@@ -130,6 +160,59 @@ export default function DatasetsPage() {
     }
     setColumnsJson(JSON.stringify(table.columns, null, 2));
     setSubmitError(null);
+  }
+
+  // Derived: full POSIX path the dataset will store. For folder scope the
+  // current browse folder IS the scope; for file scope it's browseFolder +
+  // "/" + the picked filename (root case collapses the leading slashes).
+  const derivedFileScopePath = useMemo(() => {
+    if (!isFileDataStore) return "";
+    if (scopeKind === "folder") return browseFolder;
+    if (!scopeFile) return "";
+    return browseFolder === "/" ? "/" + scopeFile : browseFolder + "/" + scopeFile;
+  }, [isFileDataStore, scopeKind, browseFolder, scopeFile]);
+
+  const previewMutation = useMutation({
+    mutationFn: (req: Parameters<typeof previewFileSource>[0]) => previewFileSource(req),
+    onSuccess: (data) => {
+      setColumnsJson(JSON.stringify(data.columns, null, 2));
+      setPreviewError(null);
+      notifications.show({
+        message: `Inferred ${data.columns.length} column${data.columns.length === 1 ? "" : "s"}.`,
+        color: "green"
+      });
+    },
+    onError: (err: unknown) => {
+      const message =
+        (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
+        (err instanceof Error ? err.message : "Preview failed.");
+      setPreviewError(message);
+    }
+  });
+
+  function previewSchema() {
+    if (!isFileDataStore) return;
+    if (!derivedFileScopePath) {
+      setPreviewError("Pick a file or folder before previewing the schema.");
+      return;
+    }
+    setPreviewError(null);
+    previewMutation.mutate({
+      dataStoreId: sourceId,
+      scopeKind,
+      scopePath: derivedFileScopePath,
+      parserKind,
+      // Raw ignores parserOptions; sending only the CSV bag keeps the
+      // payload tight and the backend's option-decoder doesn't have to
+      // special-case empty.
+      parserOptions:
+        parserKind === "csv"
+          ? {
+              delimiter: parserDelimiter,
+              hasHeader: parserHasHeader ? "true" : "false"
+            }
+          : undefined
+    });
   }
 
   const createMutation = useMutation({
@@ -220,6 +303,13 @@ export default function DatasetsPage() {
     setSourceKind("datastore");
     setSourceId("");
     setSourceTableName("");
+    setBrowseFolder("/");
+    setScopeKind("file");
+    setScopeFile("");
+    setParserKind("csv");
+    setParserDelimiter(",");
+    setParserHasHeader(true);
+    setPreviewError(null);
     setRefreshCron("*/5 * * * *");
     setColumnsJson(DEFAULT_COLUMNS_JSON);
     setSubmitError(null);
@@ -256,6 +346,20 @@ export default function DatasetsPage() {
         return;
       }
     }
+    // FileType datastore submits use the file-scope payload instead of
+    // sourceTableName; the backend validator rejects either field set
+    // against the wrong kind, but catching it here gives the user a clean
+    // error instead of a round-trip.
+    if (sourceKind === "datastore" && isFileDataStore) {
+      if (!derivedFileScopePath) {
+        setSubmitError(
+          scopeKind === "file"
+            ? "Pick a file before saving."
+            : "Pick a folder before saving."
+        );
+        return;
+      }
+    }
     createMutation.mutate({
       name: name.trim(),
       description: description.trim() || null,
@@ -263,10 +367,37 @@ export default function DatasetsPage() {
       columns: parsedColumns,
       sourceKind,
       sourceId: sourceId.trim(),
-      sourceTableName: sourceTableName.trim() || null,
-      refreshCron: mode === "Cached" ? refreshCron.trim() || null : null
+      sourceTableName: isFileDataStore ? null : sourceTableName.trim() || null,
+      refreshCron: mode === "Cached" ? refreshCron.trim() || null : null,
+      fileScopeKind: isFileDataStore ? scopeKind : null,
+      fileScopePath: isFileDataStore ? derivedFileScopePath : null,
+      parserKind: isFileDataStore ? parserKind : null,
+      parserOptionsJson: isFileDataStore
+        ? parserKind === "csv"
+          ? JSON.stringify({
+              delimiter: parserDelimiter,
+              hasHeader: parserHasHeader ? "true" : "false"
+            })
+          : null
+        : null
     });
-  }, [name, description, mode, sourceKind, sourceId, sourceTableName, refreshCron, columnsJson, createMutation]);
+  }, [
+    name,
+    description,
+    mode,
+    sourceKind,
+    sourceId,
+    sourceTableName,
+    refreshCron,
+    columnsJson,
+    createMutation,
+    isFileDataStore,
+    scopeKind,
+    derivedFileScopePath,
+    parserKind,
+    parserDelimiter,
+    parserHasHeader
+  ]);
 
   // Parallel useQuery so the page-context provider has a live datasets list
   // to expose to the chatbot. react-query dedupes the request with the
@@ -559,6 +690,122 @@ export default function DatasetsPage() {
                 onChange={(e) => setSourceId(e.currentTarget.value)}
               />
             )}
+            {sourceKind === "datastore" && isFileDataStore ? (
+              <Stack gap="xs">
+                <NativeSelect
+                  label="Scope"
+                  description={
+                    scopeKind === "folder"
+                      ? "Every file in the chosen folder is unioned at query time (immediate children only). All files must share the dataset's locked column schema."
+                      : "Just the single picked file backs this dataset."
+                  }
+                  data={[
+                    { value: "file", label: "Single file" },
+                    { value: "folder", label: "Whole folder (union of every file)" }
+                  ]}
+                  value={scopeKind}
+                  onChange={(e) => {
+                    setScopeKind(e.currentTarget.value as "file" | "folder");
+                    setScopeFile("");
+                  }}
+                />
+                <Group gap="xs" align="flex-end">
+                  <NativeSelect
+                    label="Browse folder"
+                    description={`Current: ${browseFolder}`}
+                    style={{ flex: 1 }}
+                    data={[
+                      { value: browseFolder, label: browseFolder },
+                      ...(browseFolder !== "/" ? [{
+                        value: parentFolder(browseFolder),
+                        label: `↑ ${parentFolder(browseFolder)}`
+                      }] : []),
+                      ...(filesQuery.data?.folders ?? []).map((f) => ({
+                        value: f.folderPath,
+                        label: `↳ ${displayChild(f.folderPath, browseFolder)}`
+                      }))
+                    ]}
+                    value={browseFolder}
+                    onChange={(e) => {
+                      setBrowseFolder(e.currentTarget.value);
+                      setScopeFile("");
+                    }}
+                  />
+                </Group>
+                {scopeKind === "file" ? (
+                  <NativeSelect
+                    label="File"
+                    description={
+                      filesQuery.isLoading
+                        ? "Loading…"
+                        : (filesQuery.data?.files?.length ?? 0) === 0
+                        ? "No files in this folder. Navigate above or upload one to the data store first."
+                        : "Pick the CSV (or other supported file) that backs this dataset."
+                    }
+                    data={[
+                      { value: "", label: "Select a file…" },
+                      ...(filesQuery.data?.files ?? [])
+                        .filter((f) => f.filename !== ".keep")
+                        .map((f) => ({ value: f.filename, label: f.filename }))
+                    ]}
+                    value={scopeFile}
+                    onChange={(e) => setScopeFile(e.currentTarget.value)}
+                  />
+                ) : null}
+                <Text size="xs" c="dimmed">
+                  Selected path: <Code>{derivedFileScopePath || "(none)"}</Code>
+                </Text>
+                <NativeSelect
+                  label="Parser"
+                  description={
+                    parserKind === "raw"
+                      ? "Raw: yields one row per file with a single `content` column holding the file's UTF-8 text. Downstream pipeline transformers handle the file format."
+                      : "CSV: parses each file into typed columns; folder scopes union the rows across files."
+                  }
+                  data={[
+                    { value: "csv", label: "CSV — tabular, schema inferred from header" },
+                    { value: "raw", label: "Raw — pass file contents through as one row" }
+                  ]}
+                  value={parserKind}
+                  onChange={(e) => setParserKind(e.currentTarget.value as "csv" | "raw")}
+                />
+                {parserKind === "csv" ? (
+                  <Group grow>
+                    <TextInput
+                      label="Delimiter"
+                      description="Single character. Default: comma."
+                      value={parserDelimiter}
+                      onChange={(e) => setParserDelimiter(e.currentTarget.value)}
+                    />
+                    <NativeSelect
+                      label="Header row"
+                      data={[
+                        { value: "true", label: "First row is the header" },
+                        { value: "false", label: "No header (columns will be col_1, col_2…)" }
+                      ]}
+                      value={parserHasHeader ? "true" : "false"}
+                      onChange={(e) => setParserHasHeader(e.currentTarget.value === "true")}
+                    />
+                  </Group>
+                ) : null}
+                <Group justify="space-between" align="center">
+                  <Text size="xs" c="dimmed">
+                    Click <strong>Preview schema</strong> to infer the column list from the picked file (or the first file in the folder) and load it into the column editor below.
+                  </Text>
+                  <Button
+                    variant="default"
+                    size="compact-sm"
+                    leftSection={<i className="fa fa-wand-magic-sparkles" />}
+                    disabled={!derivedFileScopePath}
+                    loading={previewMutation.isPending}
+                    onClick={previewSchema}
+                  >
+                    Preview schema
+                  </Button>
+                </Group>
+                {previewError ? <Alert color="red">{previewError}</Alert> : null}
+              </Stack>
+            ) : null}
             {sourceKind === "datastore" && isSqlDataStore ? (
               <NativeSelect
                 label="Source table"
@@ -682,4 +929,23 @@ export default function DatasetsPage() {
       </Modal>
     </Stack>
   );
+}
+
+// Folder paths are POSIX-style with a leading "/" and no trailing "/"
+// (root = "/"). Walking up one level from "/a/b/c" yields "/a/b", from
+// "/a" yields "/".
+function parentFolder(path: string): string {
+  if (!path || path === "/") return "/";
+  const idx = path.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return path.slice(0, idx);
+}
+
+// Render a subfolder relative to its parent so the dropdown labels stay
+// short. For browseFolder "/a" and child "/a/b" → "b/"; for root "/" and
+// child "/a" → "a/".
+function displayChild(child: string, current: string): string {
+  const prefix = current === "/" ? "/" : current + "/";
+  const tail = child.startsWith(prefix) ? child.slice(prefix.length) : child;
+  return tail + "/";
 }

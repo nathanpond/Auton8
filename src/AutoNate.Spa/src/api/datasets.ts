@@ -18,6 +18,11 @@ export type Dataset = {
   sourceKind: string; // "datastore" | "dataconnector"
   sourceId: string;
   sourceTableName: string | null;
+  // Files-datastore scope. Null for SQL / connector sources.
+  fileScopeKind: "file" | "folder" | null;
+  fileScopePath: string | null;
+  parserKind: "csv" | "raw" | null;
+  parserOptionsJson: string | null;
   ownerUserId: string;
   createdAtUtc: string;
   updatedAtUtc: string;
@@ -34,6 +39,24 @@ export type CreateDatasetRequest = {
   sourceId: string;
   sourceTableName?: string | null;
   refreshCron?: string | null;
+  // Files-datastore scope. Required when sourceKind="datastore" and the
+  // datastore is FileType; null otherwise.
+  fileScopeKind?: "file" | "folder" | null;
+  fileScopePath?: string | null;
+  parserKind?: "csv" | "raw" | null;
+  parserOptionsJson?: string | null;
+};
+
+export type PreviewFileSourceRequest = {
+  dataStoreId: string;
+  scopeKind: "file" | "folder";
+  scopePath: string;
+  parserKind: "csv" | "raw";
+  parserOptions?: Record<string, string>;
+};
+
+export type PreviewFileSourceResponse = {
+  columns: DatasetColumn[];
 };
 
 export type UpdateDatasetRequest = {
@@ -74,4 +97,16 @@ export async function deleteDataset(id: string): Promise<void> {
 
 export async function refreshDataset(id: string): Promise<void> {
   await api.post(`${BASE}/${id}/refresh`);
+}
+
+export async function previewFileSource(
+  request: PreviewFileSourceRequest,
+  signal?: AbortSignal
+): Promise<PreviewFileSourceResponse> {
+  const { data } = await api.post<PreviewFileSourceResponse>(
+    `${BASE}/preview-file-source`,
+    request,
+    { signal }
+  );
+  return data;
 }

@@ -4,6 +4,7 @@ using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.DataConnectors;
 using AutoNate.Web.Services.DataStores;
 using AutoNate.Web.Services.DataStores.Sql;
+using AutoNate.Web.Services.Datasets.Files;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -18,6 +19,7 @@ public sealed class CachedDatasetMaterializer(
     IDatastoresConnectionFactory connectionFactory,
     IDataConnectorHandlerRegistry handlerRegistry,
     IDatasetStore datasetStore,
+    DatasetFileScopeReader fileScopeReader,
     ILogger<CachedDatasetMaterializer> log) : ICachedDatasetMaterializer
 {
     public async Task RefreshAsync(Guid datasetId, CancellationToken cancellationToken = default)
@@ -61,7 +63,7 @@ public sealed class CachedDatasetMaterializer(
             }
             else if (datastoreKind == DataStoreKind.FileType)
             {
-                rowCount = await CopyFromFileSourceAsync(dataset, schema, db, cancellationToken);
+                rowCount = await CopyFromFileSourceAsync(dataset, schema, cancellationToken);
             }
             else
             {
@@ -130,21 +132,19 @@ public sealed class CachedDatasetMaterializer(
     private async Task<long> CopyFromFileSourceAsync(
         Dataset dataset,
         IReadOnlyList<DatasetColumn> schema,
-        AutoNateDbContext db,
         CancellationToken ct)
     {
-        var files = await db.DataStoreFiles.AsNoTracking()
-            .Where(f => f.DataStoreId == dataset.SourceId && f.Filename != ".keep")
-            .ToListAsync(ct);
-        var rows = files.Select(f => new Dictionary<string, object?>(StringComparer.Ordinal)
+        // DatasetFileScopeReader resolves the scope (single file or every
+        // immediate-child file of a folder), opens each file's stream, and
+        // streams parsed rows. v1 materializes into a list before COPY so
+        // the BulkInsertAsync surface is shared with the connector path;
+        // folder scopes that don't fit in memory are a Phase 2.1 follow-
+        // up (true streaming COPY off the parser's IAsyncEnumerable).
+        var rows = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var row in fileScopeReader.ReadRowsAsync(dataset, ct))
         {
-            ["Id"] = f.Id,
-            ["FolderPath"] = f.FolderPath,
-            ["Filename"] = f.Filename,
-            ["SizeBytes"] = f.SizeBytes,
-            ["ContentType"] = f.ContentType,
-            ["UploadedAtUtc"] = f.UploadedAtUtc,
-        }).Cast<IReadOnlyDictionary<string, object?>>().ToList();
+            rows.Add(row);
+        }
         return await BulkInsertAsync(dataset.Id, schema, rows, ct);
     }
 
