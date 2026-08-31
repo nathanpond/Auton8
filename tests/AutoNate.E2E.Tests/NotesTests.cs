@@ -279,6 +279,35 @@ public sealed class NotesTests : E2ETestBase
         await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
     }
 
+    // Coverage for the Excalidraw bundle. The drawing note is the only surface
+    // that loads @excalidraw/excalidraw and its mermaid/nanoid chain, and it
+    // had no test at all — which mattered when #37 forced patched nanoid
+    // versions underneath it. ConsoleErrorGuard makes this a real check: a
+    // module that fails to initialise shows up as a page error.
+    [Fact]
+    public async Task NotesPage_CreateDrawingNote_MountsExcalidrawCanvas()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await CreateHierarchyAsync(page);
+        var noteName = TestNames.Prefixed("sketch");
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "New Note", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Napkin" }).ClickAsync();
+
+        var noteNameInput = page.GetByPlaceholder("Untitled sketch");
+        await Assertions.Expect(noteNameInput).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await noteNameInput.FillAsync(noteName);
+        await noteNameInput.PressAsync("Enter");
+
+        // Excalidraw is React.lazy'd, so allow for the chunk fetch.
+        await Assertions.Expect(page.Locator(".excalidraw").First)
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Assertions.Expect(page.Locator(".excalidraw canvas").First)
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
+    }
+
     private static async Task<NotesHierarchy> CreateHierarchyAsync(IPage page)
     {
         var projectName = TestNames.Prefixed("notes-project");
