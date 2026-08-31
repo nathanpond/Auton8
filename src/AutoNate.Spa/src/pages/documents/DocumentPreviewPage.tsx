@@ -60,7 +60,7 @@ export default function DocumentPreviewPage() {
       <Stack p="md">
         <Title order={2}>Document not found</Title>
         <Text c="dimmed">
-          The document either doesn't exist or you don't have permission to view it.
+          The document either doesn&apos;t exist or you don&apos;t have permission to view it.
         </Text>
         <Anchor component={Link} to="/documents">
           Back to Documents

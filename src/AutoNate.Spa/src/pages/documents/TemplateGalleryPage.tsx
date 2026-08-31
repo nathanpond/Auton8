@@ -103,7 +103,7 @@ export default function TemplateGalleryPage() {
           <Stack gap={6} align="center">
             <Text c="dimmed">No templates yet.</Text>
             <Text c="dimmed" size="sm">
-              Create one with "New template" — its body and bindings become the
+              Create one with &quot;New template&quot; — its body and bindings become the
               starting point for documents cloned from it.
             </Text>
           </Stack>
@@ -343,7 +343,7 @@ function CreateTemplateModal({
         />
         <Text size="xs" c="dimmed">
           Templates do not appear in regular folder views. They are only
-          visible from this gallery and from the "Use template" flow.
+          visible from this gallery and from the &quot;Use template&quot; flow.
         </Text>
         <Group justify="flex-end">
           <Button variant="default" onClick={close}>
@@ -449,7 +449,7 @@ function UseTemplateModal({
           required
         />
         <Text size="xs" c="dimmed">
-          The new document lands at the destination project's root. Live data
+          The new document lands at the destination project&apos;s root. Live data
           bindings copy over with no resolved values — refresh from the
           bindings panel after the document opens.
         </Text>

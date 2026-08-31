@@ -303,13 +303,13 @@ export default function DocumentChatPanel({ documentId, onClose }: Props) {
         ) : messages.length === 0 && !streamState.streaming ? (
           <Stack gap={6} mt="sm">
             <Text size="sm" c="dimmed">
-              Ask the assistant about this document. It sees the document's
+              Ask the assistant about this document. It sees the document&apos;s
               title, body, and live data bindings.
             </Text>
             <Text size="xs" c="dimmed">
-              Examples: "summarize the introduction", "what record fields
-              does this template reference?", "rewrite the second paragraph
-              in a more formal tone".
+              Examples: &quot;summarize the introduction&quot;, &quot;what record fields
+              does this template reference?&quot;, &quot;rewrite the second paragraph
+              in a more formal tone&quot;.
             </Text>
           </Stack>
         ) : (
@@ -327,9 +327,9 @@ export default function DocumentChatPanel({ documentId, onClose }: Props) {
           isContextOverflowError(streamState.error) ? (
             <Alert color="yellow" mt="sm" variant="light" title="Thread is full">
               <Text size="sm" mb={6}>
-                This conversation has hit the model's context limit. Each
+                This conversation has hit the model&apos;s context limit. Each
                 document mutation keeps a full copy of the inserted markdown in
-                the thread's history; after enough turns there's no room left
+                the thread&apos;s history; after enough turns there&apos;s no room left
                 for a new request.
               </Text>
               <Button

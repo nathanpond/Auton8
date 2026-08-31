@@ -50,7 +50,7 @@ export default function AqlHelpModal({ opened, onClose }: AqlHelpModalProps) {
         )}
         {schemaQuery.isError && (
           <Alert color="red" variant="light">
-            Couldn't load the schema reference. The grammar and examples above
+            Couldn&apos;t load the schema reference. The grammar and examples above
             are still accurate; the entity list will appear once the network
             request succeeds.
           </Alert>
@@ -88,7 +88,7 @@ function GrammarSection() {
       </Code>
       <Text size="sm" c="dimmed">
         Keywords are case-insensitive. Strings use double or single quotes
-        with <Code>\n</Code>, <Code>\t</Code>, <Code>\"</Code>, <Code>\'</Code>{" "}
+        with <Code>\n</Code>, <Code>\t</Code>, <Code>\&quot;</Code>, <Code>\&apos;</Code>{" "}
         escapes. Relative dates use <Code>-2w</Code>, <Code>+1d</Code>,{" "}
         <Code>-3m</Code> with units <Code>h</Code>/<Code>d</Code>/<Code>w</Code>
         /<Code>m</Code>/<Code>y</Code>. Boolean values are <Code>True</Code>{" "}
@@ -144,7 +144,7 @@ function OperatorsSection({ schema }: { schema: AqlSchema }) {
     <Stack gap="xs">
       <Title order={4}>Operators</Title>
       <Text size="sm" c="dimmed">
-        Allowed comparison operators depend on the column's data type.
+        Allowed comparison operators depend on the column&apos;s data type.
       </Text>
       <Table withTableBorder withColumnBorders>
         <Table.Thead>
@@ -310,7 +310,7 @@ function EntityDetail({ entity }: { entity: AqlEntityMeta }) {
           <Divider />
           <Text size="sm" c="dimmed">
             Add <Code>RecordType = &quot;Type&quot;</Code> in WHERE to expose
-            that type's fields in COLUMNS and ORDER&nbsp;BY.
+            that type&apos;s fields in COLUMNS and ORDER&nbsp;BY.
           </Text>
         </Stack>
       )}

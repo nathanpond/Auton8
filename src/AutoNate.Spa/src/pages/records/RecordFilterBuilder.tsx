@@ -73,7 +73,7 @@ export default function RecordFilterBuilder({ fields, initialFilters, onApply, o
     <Stack gap="xs">
       {drafts.length === 0 && (
         <Text c="dimmed" size="sm">
-          No filters. Click "Add filter" to narrow the list.
+          No filters. Click &quot;Add filter&quot; to narrow the list.
         </Text>
       )}
       {drafts.map((clause, i) => {

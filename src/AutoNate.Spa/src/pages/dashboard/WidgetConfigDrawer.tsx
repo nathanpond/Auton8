@@ -96,7 +96,7 @@ export function WidgetConfigDrawer({ opened, widget, onClose, onSave }: Props) {
           />
         ) : isAutoForm && schema ? (
           <AutoConfigForm
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             schema={schema as any}
             value={value}
             onChange={setValue}

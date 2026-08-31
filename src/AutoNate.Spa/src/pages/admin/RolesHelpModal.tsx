@@ -47,7 +47,7 @@ export default function RolesHelpModal({ onClose }: Props) {
           <li>Names are unique system-wide. Re-using a name returns a 400.</li>
           <li>
             Built-in <strong>system roles</strong> (currently just <Code>SuperAdmin</Code>)
-            can't be renamed or deleted. The Delete button is hidden for them.
+            can&apos;t be renamed or deleted. The Delete button is hidden for them.
           </li>
           <li>
             Deleting a normal role <strong>cascades</strong>: all permission grants attached
@@ -60,13 +60,13 @@ export default function RolesHelpModal({ onClose }: Props) {
 
         <Title order={6}>3. Assignments</Title>
         <Text>
-          Click a role on the left to open its Assignments panel. Each row says "this role
-          applies to that principal."
+          Click a role on the left to open its Assignments panel. Each row says &quot;this role
+          applies to that principal.&quot;
         </Text>
         <ul>
           <li>
             <strong>Principal kind</strong>: <Code>user</Code> or <Code>group</Code>. (You
-            can't assign a role to another role — permissions on roles flow through the
+            can&apos;t assign a role to another role — permissions on roles flow through the
             unified grants table.)
           </li>
           <li>
@@ -74,7 +74,7 @@ export default function RolesHelpModal({ onClose }: Props) {
           </li>
           <li>
             <strong>Scope</strong> (optional): a selector that further restricts where this
-            assignment applies. The grant graph stores it today, but the evaluator doesn't
+            assignment applies. The grant graph stores it today, but the evaluator doesn&apos;t
             yet narrow grants by per-assignment scope — treat this field as <em>reserved for
             future use</em>. Leave it blank for normal assignments.
           </li>
@@ -86,7 +86,7 @@ export default function RolesHelpModal({ onClose }: Props) {
 
         <Divider my="md" />
 
-        <Title order={6}>4. How a user's effective permissions are computed</Title>
+        <Title order={6}>4. How a user&apos;s effective permissions are computed</Title>
         <Text>
           When a user makes a request, the evaluator unions every grant that reaches them
           through any of these chains:
@@ -97,10 +97,10 @@ export default function RolesHelpModal({ onClose }: Props) {
             = user).
           </li>
           <li>
-            <Code>permission_grants</Code> attached to a <em>group</em> they're a member of.
+            <Code>permission_grants</Code> attached to a <em>group</em> they&apos;re a member of.
           </li>
           <li>
-            <Code>permission_grants</Code> attached to a <em>role</em> they're assigned —
+            <Code>permission_grants</Code> attached to a <em>role</em> they&apos;re assigned —
             directly here, or indirectly via a group.
           </li>
         </ul>
@@ -120,7 +120,7 @@ export default function RolesHelpModal({ onClose }: Props) {
         <Title order={6}>5. SuperAdmin</Title>
         <ul>
           <li>
-            Built-in. Members bypass <em>every</em> authorization check; their grants don't
+            Built-in. Members bypass <em>every</em> authorization check; their grants don&apos;t
             matter.
           </li>
           <li>
@@ -177,7 +177,7 @@ export default function RolesHelpModal({ onClose }: Props) {
           </li>
           <li>
             <strong>Cache invalidation is automatic.</strong> Assigning or revoking bumps the
-            auth cache version; the change is visible on the caller's next request.
+            auth cache version; the change is visible on the caller&apos;s next request.
           </li>
           <li>
             <strong>Closed by default.</strong> A user with no assigned roles and no
@@ -185,7 +185,7 @@ export default function RolesHelpModal({ onClose }: Props) {
             rules exist.
           </li>
           <li>
-            <strong>Roles can't nest.</strong> A role isn't a member of another role. Compose
+            <strong>Roles can&apos;t nest.</strong> A role isn&apos;t a member of another role. Compose
             access via groups + multiple role assignments instead.
           </li>
         </ul>

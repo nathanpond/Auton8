@@ -890,7 +890,7 @@ export function ExecutionContent({
                 Every currently active step on this run will be cancelled and
                 a fresh execution token will start at the selected node. Process
                 variables are preserved, but the new step may depend on values
-                that aren't set yet — review variables after moving and adjust
+                that aren&apos;t set yet — review variables after moving and adjust
                 them as needed before this run continues.
               </p>
             </>

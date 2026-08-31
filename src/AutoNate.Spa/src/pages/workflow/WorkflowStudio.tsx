@@ -2986,7 +2986,7 @@ function TimerIntermediateCatchEventModal({
                 />
                 <p className="workflow-modal-note">
                   ISO 8601 date or date/time — <code>YYYY-MM-DD</code> or{" "}
-                  <code>YYYY-MM-DDTHH:mm:ss</code>. Times use the Flowable engine's timezone (UTC by
+                  <code>YYYY-MM-DDTHH:mm:ss</code>. Times use the Flowable engine&apos;s timezone (UTC by
                   default).
                 </p>
               </>
@@ -3115,7 +3115,7 @@ function ServiceTaskModal({
             {!selected && editor.behaviorKey && (
               <p className="workflow-modal-note text-warning">
                 The selected behavior key is not registered on this server. Saving will keep the
-                key, but the workflow can't run until a matching behavior is registered.
+                key, but the workflow can&apos;t run until a matching behavior is registered.
               </p>
             )}
           </label>
@@ -3610,7 +3610,7 @@ function UserTaskModal({
           <legend>Behaviour</legend>
           <p className="workflow-modal-note mb-2">
             <strong>Default Behavior</strong> shows a built-in modal — a single
-            "Complete Task" button when this task flows into a normal node, or one
+            &quot;Complete Task&quot; button when this task flows into a normal node, or one
             button per outgoing path when it flows directly into an exclusive
             gateway. <strong>Form</strong> renders a custom form instead.
           </p>
@@ -3685,7 +3685,7 @@ function UserTaskModal({
               </select>
               {userFormError && <div className="invalid-feedback">{userFormError}</div>}
               <p className="workflow-modal-note mt-1">
-                The form's process variables are passed in as <code>data</code>; submitting calls{" "}
+                The form&apos;s process variables are passed in as <code>data</code>; submitting calls{" "}
                 <code>POST /api/tasks/&lt;taskId&gt;/complete</code> with the payload as Flowable
                 variables.
               </p>

@@ -12,7 +12,7 @@ export function DeleteDashboardConfirm({ opened, name, onConfirm, onCancel }: Pr
     <Modal opened={opened} onClose={onCancel} title="Delete dashboard?" zIndex={1075}>
       <Stack>
         <Text>
-          Delete <strong>{name}</strong> and all its widgets? This can't be undone.
+          Delete <strong>{name}</strong> and all its widgets? This can&apos;t be undone.
         </Text>
         <Group justify="flex-end">
           <Button variant="default" onClick={onCancel}>Cancel</Button>

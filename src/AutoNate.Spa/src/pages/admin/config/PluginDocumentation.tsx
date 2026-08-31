@@ -59,7 +59,7 @@ export default function PluginDocumentation() {
             schema that only that plugin can write to, and
           </li>
           <li>
-            <strong>Adding menu items</strong> to the host's sidebar — including
+            <strong>Adding menu items</strong> to the host&apos;s sidebar — including
             full pages rendered as JSX or HTML.
           </li>
         </ul>
@@ -131,7 +131,7 @@ export default function PluginDocumentation() {
           <li>The zip is validated (size cap, no path traversal, manifest parses).</li>
           <li>Files are extracted to <code>plugins/&lt;PluginId&gt;/</code> on the host.</li>
           <li>
-            <strong>The host generates the plugin's 8-character code</strong>{" "}
+            <strong>The host generates the plugin&apos;s 8-character code</strong>{" "}
             (lowercase, e.g. <code>a1b2c3d4</code>), creates a per-plugin
             Postgres LOGIN role <code>plg_&lt;code&gt;</code> with a random
             password, and creates a schema <code>plg_&lt;code&gt;</code> that
@@ -146,16 +146,16 @@ export default function PluginDocumentation() {
         <h5 style={{ marginTop: 16 }}>Enable</h5>
         <ol>
           <li>
-            Any pending migration files in the plugin's{" "}
-            <code>migrations/</code> folder are applied as the plugin's role,
+            Any pending migration files in the plugin&apos;s{" "}
+            <code>migrations/</code> folder are applied as the plugin&apos;s role,
             tracked in <code>plg_&lt;code&gt;.__plugin_migrations</code>. A
-            failure aborts enable; the plugin row's <code>last_error</code> is
+            failure aborts enable; the plugin row&apos;s <code>last_error</code> is
             populated and status reverts to Disabled.
           </li>
           <li>
             <strong>Any menu items the plugin previously registered are
             cleared</strong> so <code>Configure()</code> starts from a clean
-            slate. The plugin's source code is the source of truth for which
+            slate. The plugin&apos;s source code is the source of truth for which
             menu items it owns.
           </li>
           <li>
@@ -173,9 +173,9 @@ export default function PluginDocumentation() {
         <h5 style={{ marginTop: 16 }}>Disable</h5>
         <p>
           The host revokes every hook the plugin registered, disposes the
-          plugin's pooled <code>NpgsqlDataSource</code>, and{" "}
+          plugin&apos;s pooled <code>NpgsqlDataSource</code>, and{" "}
           <strong>removes every menu item the plugin registered</strong> (rows
-          tagged with the plugin's id via <code>created_by_plugin_id</code>).
+          tagged with the plugin&apos;s id via <code>created_by_plugin_id</code>).
           The ALC stays loaded (assemblies cannot be unloaded mid-process safely
           on every platform), but the plugin is inert until the next process
           restart. <strong>Plugin data is preserved</strong> — the schema and
@@ -183,7 +183,7 @@ export default function PluginDocumentation() {
         </p>
         <h5 style={{ marginTop: 16 }}>Delete</h5>
         <p>
-          Disable runs first, then the host invokes the plugin's{" "}
+          Disable runs first, then the host invokes the plugin&apos;s{" "}
           <code>Cleanup(IPluginContext)</code> callback (loading the assembly
           into a fresh ALC if the plugin was disabled at the time of delete —
           see <a href="#cleanup">Cleanup routines</a>). Then the host drops
@@ -193,7 +193,7 @@ export default function PluginDocumentation() {
           delete (only) is retried at the next startup. The schema and role
           are <em>always</em> dropped immediately on the first delete attempt.
           Any menu items and plugin-owned page templates still tagged with the
-          plugin's id are cleaned up by the FK{" "}
+          plugin&apos;s id are cleaned up by the FK{" "}
           <code>ON DELETE CASCADE</code>.
         </p>
       </Section>
@@ -217,7 +217,7 @@ export default function PluginDocumentation() {
         </pre>
         <p>
           <code>Configure</code> is called <em>once</em> per enable. Use it to
-          register hooks and menu items. Don't perform long-running work or
+          register hooks and menu items. Don&apos;t perform long-running work or
           blocking I/O here — registration only. The host has already cleared
           any prior menu items this plugin owned, so plain{" "}
           <code>AddXxx()</code> calls are correct on every enable.
@@ -226,7 +226,7 @@ export default function PluginDocumentation() {
           <code>Cleanup</code> is called <em>once</em> when the host is about
           to delete the plugin, before its schema, role, files, and row are
           torn down. The default implementation does nothing — only override
-          it when the plugin created artifacts the host doesn't sweep
+          it when the plugin created artifacts the host doesn&apos;t sweep
           automatically. See <a href="#cleanup">Cleanup routines</a>.
         </p>
         <p>
@@ -252,7 +252,7 @@ export default function PluginDocumentation() {
           </li>
           <li>
             <strong><code>Data</code></strong> — read/write surface for the
-            plugin's own schema and read-only surface for everything else;
+            plugin&apos;s own schema and read-only surface for everything else;
             see Plugin-owned data below.
           </li>
           <li>
@@ -261,7 +261,7 @@ export default function PluginDocumentation() {
           </li>
           <li>
             <strong><code>HostServices</code></strong> — for cross-cutting
-            services (e.g. <code>ILoggerFactory</code>). Don't use this for
+            services (e.g. <code>ILoggerFactory</code>). Don&apos;t use this for
             data access; use <code>Data</code>.
           </li>
         </ul>
@@ -269,7 +269,7 @@ export default function PluginDocumentation() {
 
       <Section id="hooks" title="Hooks: actions and filters">
         <p>
-          Hooks are the plugin's entry into the host's behaviour. There are two
+          Hooks are the plugin&apos;s entry into the host&apos;s behaviour. There are two
           kinds, both registered through <code>IHookRegistrar</code>:
         </p>
         <h5 style={{ marginTop: 16 }}>Actions — fire-and-forget callbacks</h5>
@@ -315,8 +315,8 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
         <h5 style={{ marginTop: 16 }}>Priority</h5>
         <p>
           Hooks fire in ascending <code>priority</code> order. Lower numbers run
-          first; same number, undefined order — don't rely on it. Use a number
-          relative to the host hook's documented anchor (every hook point comments
+          first; same number, undefined order — don&apos;t rely on it. Use a number
+          relative to the host hook&apos;s documented anchor (every hook point comments
           its anchor in <code>HookPoints</code>).
         </p>
         <p>
@@ -345,7 +345,7 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
           <li>
             A <strong>per-plugin LOGIN role</strong>{" "}
             <code>plg_&lt;code&gt;</code> with a random password. The role
-            <em>owns</em> the schema; it's the only role that can write to it.
+            <em>owns</em> the schema; it&apos;s the only role that can write to it.
           </li>
           <li>
             A grant of the shared{" "}
@@ -353,22 +353,22 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
             role. <code>plg_readers</code> has <code>USAGE</code> on{" "}
             <code>public</code> and <code>SELECT</code> on every current and
             future table/sequence the host creates, plus <code>USAGE</code> +
-            <code>SELECT</code> defaults on every other plugin's schema.
+            <code>SELECT</code> defaults on every other plugin&apos;s schema.
           </li>
         </ul>
         <p>
-          The plugin's <code>NpgsqlDataSource</code> connects as the per-plugin
+          The plugin&apos;s <code>NpgsqlDataSource</code> connects as the per-plugin
           role with <code>search_path = plg_&lt;code&gt;,public</code>. The
           consequences are:
         </p>
         <ul>
           <li>
             Unqualified <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code>{" "}
-            and <code>CREATE</code>/<code>ALTER</code> hit the plugin's own
+            and <code>CREATE</code>/<code>ALTER</code> hit the plugin&apos;s own
             schema and succeed.
           </li>
           <li>
-            Unqualified <code>SELECT</code> resolves against the plugin's schema
+            Unqualified <code>SELECT</code> resolves against the plugin&apos;s schema
             first, falling back to <code>public</code> for app tables. App reads
             succeed; app writes are rejected by Postgres with{" "}
             <code>SQLSTATE 42501</code> (insufficient privilege).
@@ -403,7 +403,7 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
         </pre>
         <p>
           Filenames are sorted by ordinal string compare; the recommended
-          pattern is a zero-padded numeric prefix. Use plain DDL — there's no
+          pattern is a zero-padded numeric prefix. Use plain DDL — there&apos;s no
           DSL or templating layer.
         </p>
         <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
@@ -427,13 +427,13 @@ CREATE TABLE IF NOT EXISTS widgets (
             reports the offending filename. Fix the file, re-enable.
           </li>
           <li>
-            <strong>Don't reach outside your own schema.</strong> The plugin
-            role can't write to <code>public</code>; attempting to{" "}
+            <strong>Don&apos;t reach outside your own schema.</strong> The plugin
+            role can&apos;t write to <code>public</code>; attempting to{" "}
             <code>INSERT INTO public.x</code> from a migration will fail.
           </li>
           <li>
             <strong>Use <code>IF NOT EXISTS</code> for safety</strong> — even
-            though tracked migrations don't re-run, defensive DDL is cheap and
+            though tracked migrations don&apos;t re-run, defensive DDL is cheap and
             keeps a manually-recovered environment idempotent.
           </li>
         </ul>
@@ -448,9 +448,9 @@ CREATE TABLE IF NOT EXISTS widgets (
 
       <Section id="data-access" title="IPluginDataAccess">
         <p>
-          <code>context.Data</code> is the plugin's data API. It wraps the
+          <code>context.Data</code> is the plugin&apos;s data API. It wraps the
           per-plugin <code>NpgsqlDataSource</code> and exposes Dapper-style
-          helpers — your plugin doesn't need to take a Dapper dependency itself,
+          helpers — your plugin doesn&apos;t need to take a Dapper dependency itself,
           the abstractions assembly already does.
         </p>
         <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
@@ -497,7 +497,7 @@ await using var conn = await context.Data.OpenConnectionAsync(ct);
 
       <Section id="cross-plugin" title="Cross-plugin reads">
         <p>
-          Plugin B can SELECT from plugin A's schema using the qualified name:
+          Plugin B can SELECT from plugin A&apos;s schema using the qualified name:
         </p>
         <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
 {`var labels = await context.Data.QueryAsync<string>(
@@ -505,7 +505,7 @@ await using var conn = await context.Data.OpenConnectionAsync(ct);
     ct: ct);`}
         </pre>
         <p>
-          Hard-coding another plugin's code is brittle. Resolve it at runtime by
+          Hard-coding another plugin&apos;s code is brittle. Resolve it at runtime by
           name from the <code>plugins</code> table:
         </p>
         <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
@@ -536,7 +536,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
 
       <Section id="menus" title="Menu helpers">
         <p>
-          A plugin can add items to any of the host's menus through{" "}
+          A plugin can add items to any of the host&apos;s menus through{" "}
           <code>context.Menus</code>. There are three add helpers (specialised
           to common cases) and one introspection helper:
         </p>
@@ -586,7 +586,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
         <h5 style={{ marginTop: 16 }}>Item types &amp; config shapes</h5>
         <p>
           The <code>ItemType</code> string drives how the menu item renders.
-          The host's config table:
+          The host&apos;s config table:
         </p>
         <table className="table table-sm">
           <thead>
@@ -598,12 +598,12 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           </thead>
           <tbody>
             <tr>
-              <td><code>"template"</code></td>
+              <td><code>&quot;template&quot;</code></td>
               <td><code>{"{ templateKey, path }"}</code></td>
               <td>Bind to a built-in React component shipped by the host.</td>
             </tr>
             <tr>
-              <td><code>"page"</code></td>
+              <td><code>&quot;page&quot;</code></td>
               <td>
                 <code>{"{ path, content, contentType: \"html\"|\"jsx\" }"}</code>
               </td>
@@ -612,22 +612,22 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
               </td>
             </tr>
             <tr>
-              <td><code>"link"</code></td>
+              <td><code>&quot;link&quot;</code></td>
               <td><code>{"{ href }"}</code></td>
               <td>External URL.</td>
             </tr>
             <tr>
-              <td><code>"action"</code></td>
+              <td><code>&quot;action&quot;</code></td>
               <td><code>{"{ action }"}</code></td>
-              <td>Predefined client action (e.g. <code>"logout"</code>).</td>
+              <td>Predefined client action (e.g. <code>&quot;logout&quot;</code>).</td>
             </tr>
             <tr>
-              <td><code>"separator"</code></td>
+              <td><code>&quot;separator&quot;</code></td>
               <td><code>{`{}`}</code></td>
               <td>Visual divider in a dropdown / submenu.</td>
             </tr>
             <tr>
-              <td><code>"group"</code></td>
+              <td><code>&quot;group&quot;</code></td>
               <td>
                 <code>{"{ startsExpanded?, dynamicChildren? }"}</code>
               </td>
@@ -639,7 +639,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
         <h5 style={{ marginTop: 16 }}>JSX content (recommended for plugin pages)</h5>
         <p>
           For a page that needs interactivity, use{" "}
-          <code>contentType: "jsx"</code> and ship JSX source code. The host
+          <code>contentType: &quot;jsx&quot;</code> and ship JSX source code. The host
           compiles it at runtime via Sucrase. The contract is{" "}
           <strong>define a function called <code>Page</code></strong>:
         </p>
@@ -672,13 +672,13 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           <code>useCallback</code>, <code>useRef</code>,{" "}
           <code>navigate</code> (react-router), <code>Link</code>,{" "}
           <code>NavLink</code>, <code>api</code> (typed JSON HTTP client to the
-          host's REST API), and <code>logout</code>. TypeScript is also
+          host&apos;s REST API), and <code>logout</code>. TypeScript is also
           accepted — Sucrase strips the type annotations.
         </p>
 
         <h5 style={{ marginTop: 16 }}>HTML content</h5>
         <p>
-          For plain pages, <code>contentType: "html"</code> renders the{" "}
+          For plain pages, <code>contentType: &quot;html&quot;</code> renders the{" "}
           <code>content</code> string with{" "}
           <code>dangerouslySetInnerHTML</code>. Embedded{" "}
           <code>&lt;script&gt;</code> tags are re-injected so they actually
@@ -698,7 +698,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
           <li>
             Convention:{" "}
             <code>{"/admin/config/plugins/{context.Code}/{key}"}</code> — the
-            plugin's 8-char code keeps your paths globally unique even if
+            plugin&apos;s 8-char code keeps your paths globally unique even if
             another plugin picks the same key.
           </li>
         </ul>
@@ -706,20 +706,20 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
         <h5 style={{ marginTop: 16 }}>Lifecycle &amp; ownership</h5>
         <p>
           Every row inserted by these helpers has{" "}
-          <code>menu_items.created_by_plugin_id</code> set to the plugin's id.
+          <code>menu_items.created_by_plugin_id</code> set to the plugin&apos;s id.
           The host enforces three lifecycle rules off that column:
         </p>
         <ul>
           <li>
             <strong>Before each enable</strong>: the host{" "}
-            <code>DELETE</code>s every menu item tagged with the plugin's id,
+            <code>DELETE</code>s every menu item tagged with the plugin&apos;s id,
             so <code>Configure()</code> always runs against a clean slate. You
-            don't need to check whether a menu item already exists; just call{" "}
+            don&apos;t need to check whether a menu item already exists; just call{" "}
             <code>AddXxx()</code> unconditionally.
           </li>
           <li>
             <strong>On disable</strong>: the host runs the same{" "}
-            <code>DELETE</code>, removing the plugin's items from the sidebar.
+            <code>DELETE</code>, removing the plugin&apos;s items from the sidebar.
             They re-appear on next enable.
           </li>
           <li>
@@ -770,13 +770,13 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
 
       <Section id="page-templates" title="Page templates">
         <p>
-          Plugins can ship reusable page templates that augment the host's
+          Plugins can ship reusable page templates that augment the host&apos;s
           built-in template set. They appear in the <em>Pages / Menus</em>{" "}
           template-picker dropdown alongside <code>home</code>,{" "}
           <code>busWatcher</code>, etc., so an admin can mount any of them in
           any menu without the plugin having to register a menu item itself.
           Use them when the page is reusable; use a plain{" "}
-          <code>item_type = "page"</code> menu item when the page is a
+          <code>item_type = &quot;page&quot;</code> menu item when the page is a
           one-off settings screen tied to a specific sidebar entry.
         </p>
 
@@ -802,13 +802,13 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
           <li>
             <strong>The filename stem becomes the template{" "}
             <code>key</code></strong>. <code>AuditLog.template</code> →{" "}
-            <code>key = "AuditLog"</code>. The key is unique across the
+            <code>key = &quot;AuditLog&quot;</code>. The key is unique across the
             install (host built-ins included), so namespace yours to avoid
-            collisions — the host won't clobber a key it doesn't own.
+            collisions — the host won&apos;t clobber a key it doesn&apos;t own.
           </li>
           <li>
             <strong>The contents are JSX</strong>, exactly the same shape as
-            the JSX page strings in <code>contentType: "jsx"</code> menu
+            the JSX page strings in <code>contentType: &quot;jsx&quot;</code> menu
             items. Define a top-level <code>function Page()</code> and you
             have access to <code>useState</code>, <code>useEffect</code>,{" "}
             <code>navigate</code>, <code>api</code>, and the rest of the
@@ -818,29 +818,29 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
 
         <h5 style={{ marginTop: 16 }}>Auto-registration on enable</h5>
         <p>
-          On every enable, the host's <code>PluginRuntime</code> walks{" "}
+          On every enable, the host&apos;s <code>PluginRuntime</code> walks{" "}
           <code>PageTemplates/*.template</code> and{" "}
           <strong>UPSERTs each row by key</strong> into{" "}
           <code>public.page_templates</code> with{" "}
           <code>created_by_plugin_id = &lt;your-plugin-id&gt;</code> and{" "}
-          <code>content_type = "jsx"</code>. Templates the plugin
+          <code>content_type = &quot;jsx&quot;</code>. Templates the plugin
           registered on a previous enable but no longer ships are deleted —
           file presence is the source of truth.
         </p>
         <p>
-          Three things happen automatically and you don't have to manage them:
+          Three things happen automatically and you don&apos;t have to manage them:
         </p>
         <ul>
           <li>
             <strong>Default path</strong> is set to{" "}
             <code>/plugins/&lt;code&gt;/&lt;key-lowercased&gt;</code> so two
-            plugins can't collide on the unique <code>default_path</code>{" "}
+            plugins can&apos;t collide on the unique <code>default_path</code>{" "}
             constraint.
           </li>
           <li>
             <strong>Placeholder substitution</strong> happens before the JSX
             is persisted. <code>&#123;&#123;pluginCode&#125;&#125;</code> is
-            replaced with the plugin's 8-char code and{" "}
+            replaced with the plugin&apos;s 8-char code and{" "}
             <code>&#123;&#123;pluginId&#125;&#125;</code> with its UUID. Use
             them to address your own per-plugin endpoints (the data hook
             below) without knowing the code at build time.
@@ -849,14 +849,14 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
             <strong>Conflict guard</strong>: if a row with the same key is
             owned by the host or another plugin, registration is skipped
             with a warning rather than overwriting it. Pick a key with the
-            plugin's name as a prefix.
+            plugin&apos;s name as a prefix.
           </li>
         </ul>
 
         <h5 style={{ marginTop: 16 }}>Mounting a template in a menu</h5>
         <p>
           Once registered, a template is identified by its key wherever a
-          menu item uses <code>item_type = "template"</code>. The plugin can
+          menu item uses <code>item_type = &quot;template&quot;</code>. The plugin can
           mount its own template:
         </p>
         <pre style={{ background: "var(--mantine-color-default-hover)", padding: "1rem", fontSize: 13, whiteSpace: "pre-wrap", borderRadius: "var(--mantine-radius-default)", margin: 0 }}>
@@ -871,13 +871,13 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
         </pre>
         <p>
           The same template is also available in the admin{" "}
-          <em>Pages / Menus</em> editor's template picker, so a non-coding
+          <em>Pages / Menus</em> editor&apos;s template picker, so a non-coding
           admin can mount it under any group without touching the plugin.
         </p>
 
         <h5 style={{ marginTop: 16 }}>Fetching plugin data from a template</h5>
         <p>
-          A template that needs to read plugin data hits the host's per-plugin
+          A template that needs to read plugin data hits the host&apos;s per-plugin
           data endpoint. The host fires{" "}
           <code>HookPoints.PluginDataHookFor(code)</code>, the plugin
           subscribes in <code>Configure()</code> and returns a JSON payload:
@@ -911,9 +911,9 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
             stale rows whose source files were removed.
           </li>
           <li>
-            <strong>Disable</strong>: rows stay (they're reference data; the
+            <strong>Disable</strong>: rows stay (they&apos;re reference data; the
             menu items that point at them are removed instead). On the next
-            enable they're refreshed in place.
+            enable they&apos;re refreshed in place.
           </li>
           <li>
             <strong>Delete</strong>: FK <code>ON DELETE CASCADE</code> on{" "}
@@ -927,11 +927,11 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
         <p>
           When the host is about to delete a plugin, it calls{" "}
           <code>IAutoNatePlugin.Cleanup(IPluginContext)</code>{" "}
-          <strong>before</strong> tearing down the plugin's schema, role,
-          on-disk files, and database row. This is the plugin's last chance
-          to remove anything <em>outside</em> the host's automatic teardown.
+          <strong>before</strong> tearing down the plugin&apos;s schema, role,
+          on-disk files, and database row. This is the plugin&apos;s last chance
+          to remove anything <em>outside</em> the host&apos;s automatic teardown.
           The default implementation is a no-op; only override it when your
-          plugin actually owns artifacts beyond what's listed below.
+          plugin actually owns artifacts beyond what&apos;s listed below.
         </p>
 
         <h5 style={{ marginTop: 16 }}>When it runs</h5>
@@ -955,7 +955,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           <li>
             <strong>Errors are logged and swallowed</strong>. A throw inside
             Cleanup never blocks the delete. Log loudly so operators see the
-            breakage; don't rely on cleanup-must-succeed semantics.
+            breakage; don&apos;t rely on cleanup-must-succeed semantics.
           </li>
         </ul>
 
@@ -967,12 +967,12 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
         </p>
         <ul>
           <li>
-            <strong>The plugin's per-plugin schema</strong> (
+            <strong>The plugin&apos;s per-plugin schema</strong> (
             <code>plg_&lt;code&gt;</code>) and every table in it via{" "}
             <code>DROP SCHEMA … CASCADE</code>.
           </li>
           <li>
-            <strong>The plugin's per-plugin Postgres role</strong> (
+            <strong>The plugin&apos;s per-plugin Postgres role</strong> (
             <code>plg_&lt;code&gt;</code>).
           </li>
           <li>
@@ -981,7 +981,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
             <code>created_by_plugin_id → plugins(id)</code>.
           </li>
           <li>
-            <strong>The plugin's on-disk folder</strong> under{" "}
+            <strong>The plugin&apos;s on-disk folder</strong> under{" "}
             <code>plugins/&lt;PluginId&gt;/</code>.
           </li>
           <li>
@@ -1003,12 +1003,12 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
             <code>context.Menus.RemoveMenuItem(id)</code> when the plugin
             wants to be surgical (e.g. remove an item but leave a separator
             another plugin owns). Both helpers are ownership-checked: a
-            plugin cannot remove items it didn't create.
+            plugin cannot remove items it didn&apos;t create.
           </li>
           <li>
             <strong>Application-data records the plugin created via host
             hooks</strong> (record types, role grants, workflow definitions,
-            etc.). The host doesn't track these as "owned by this plugin",
+            etc.). The host doesn&apos;t track these as &quot;owned by this plugin&quot;,
             so they outlive the delete unless Cleanup removes them through
             the same hooks.
           </li>
@@ -1057,17 +1057,17 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
         <h5 style={{ marginTop: 16 }}>What you should NOT do in Cleanup</h5>
         <ul>
           <li>
-            Don't try to mutate <code>public.*</code> tables directly. The
-            plugin role still can't write to them; use a host hook or skip
+            Don&apos;t try to mutate <code>public.*</code> tables directly. The
+            plugin role still can&apos;t write to them; use a host hook or skip
             the cleanup if no hook exists.
           </li>
           <li>
-            Don't register hooks. The host wraps Cleanup's hook registrar in
+            Don&apos;t register hooks. The host wraps Cleanup&apos;s hook registrar in
             a scope and discards everything it added the moment Cleanup
             returns.
           </li>
           <li>
-            Don't depend on long-running side effects. The transient ALC is
+            Don&apos;t depend on long-running side effects. The transient ALC is
             unloaded right after Cleanup, so any background <code>Task</code>{" "}
             you start may be cut short.
           </li>
@@ -1080,15 +1080,15 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           A plugin cannot UPDATE a record in <code>public</code>. To change app
           state, register a filter on the relevant hook point and return a
           modified context, or invoke a host-exposed action that performs the
-          mutation on the plugin's behalf. <em>Adding</em> a hook point when one
-          you need doesn't exist is a host-side change, not a plugin-side
+          mutation on the plugin&apos;s behalf. <em>Adding</em> a hook point when one
+          you need doesn&apos;t exist is a host-side change, not a plugin-side
           workaround.
         </p>
         <h5 style={{ marginTop: 16 }}>Configure() does registration only</h5>
         <p>
           Heavy work — schema bootstrap, network calls, background loops —
           belongs inside hook handlers (so it runs on the relevant request) or
-          in a long-lived service the plugin owns. Don't block enable.
+          in a long-lived service the plugin owns. Don&apos;t block enable.
         </p>
         <h5 style={{ marginTop: 16 }}>Idempotent hook handlers</h5>
         <p>
@@ -1097,22 +1097,22 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
           (<code>ON CONFLICT DO NOTHING</code>, <code>WHERE NOT EXISTS</code>)
           so a duplicate fire is a no-op rather than a duplicate row.
         </p>
-        <h5 style={{ marginTop: 16 }}>Don't capture <code>IPluginContext</code> long-term</h5>
+        <h5 style={{ marginTop: 16 }}>Don&apos;t capture <code>IPluginContext</code> long-term</h5>
         <p>
           Stash the bits you need (<code>context.Data</code>, the logger
           factory) in your own fields. The context object itself is fine to
-          capture, but don't expose it as a public surface — your plugin's
-          internals shouldn't leak across an ABI boundary.
+          capture, but don&apos;t expose it as a public surface — your plugin&apos;s
+          internals shouldn&apos;t leak across an ABI boundary.
         </p>
         <h5 style={{ marginTop: 16 }}>Logging</h5>
         <p>
           Resolve <code>ILoggerFactory</code> from{" "}
           <code>context.HostServices</code> and create one logger per plugin
-          subsystem. Logs flow into the same sinks the host uses; your plugin's
+          subsystem. Logs flow into the same sinks the host uses; your plugin&apos;s
           messages appear under whatever category name you pass to{" "}
           <code>CreateLogger</code>.
         </p>
-        <h5 style={{ marginTop: 16 }}>Don't ship host-shared assemblies</h5>
+        <h5 style={{ marginTop: 16 }}>Don&apos;t ship host-shared assemblies</h5>
         <p>
           Five DLLs are loaded by the host and shared into every plugin ALC for
           type identity:
@@ -1133,7 +1133,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
         </p>
         <h5 style={{ marginTop: 16 }}>Versioning</h5>
         <p>
-          Bump <code>plugin.json</code>'s <code>version</code> when shipping a
+          Bump <code>plugin.json</code>&apos;s <code>version</code> when shipping a
           new build; the admin Manage Plugins page shows the version, and{" "}
           <code>plugin.disabled</code> / <code>plugin.deleted</code> events
           carry it for audit consumers.
@@ -1142,7 +1142,7 @@ api.get("/api/admin/plugins/by-code/{{pluginCode}}/data/audit-log",
 
       <Section id="packaging" title="Building & packaging">
         <p>
-          Each plugin's csproj inherits from{" "}
+          Each plugin&apos;s csproj inherits from{" "}
           <code>plugins/Directory.Build.props</code> and{" "}
           <code>plugins/Directory.Build.targets</code>. After every successful
           build, the targets file zips the bin output (minus host-shared DLLs
@@ -1159,7 +1159,7 @@ dotnet build plugins/HelloPlugin/HelloPlugin.csproj
           A minimal plugin csproj is empty — Directory.Build supplies the
           settings. If your plugin needs extra packages, add them to the csproj
           as normal <code>PackageReference</code> items; transitively-referenced
-          assemblies that aren't in the host-shared list are bundled into the
+          assemblies that aren&apos;t in the host-shared list are bundled into the
           zip.
         </p>
         <h5 style={{ marginTop: 16 }}>Reload semantics</h5>
@@ -1173,7 +1173,7 @@ dotnet build plugins/HelloPlugin/HelloPlugin.csproj
 
       <Section id="hello" title="Worked example: HelloPlugin">
         <p>
-          The repository's reference plugin lives at{" "}
+          The repository&apos;s reference plugin lives at{" "}
           <code>plugins/HelloPlugin/</code>. It exercises every plugin
           extension point: a hook, a per-plugin schema with a migration, and a
           JSX settings page added to the sidebar.
@@ -1258,7 +1258,7 @@ CREATE TABLE IF NOT EXISTS greetings (
         <p>After upload-enable:</p>
         <ul>
           <li>
-            "HelloPlugin Settings" appears under{" "}
+            &quot;HelloPlugin Settings&quot; appears under{" "}
             <em>Site Configuration → Plugins</em>; clicking it renders the JSX
             inside the config sidebar shell at{" "}
             <code>/admin/config/plugins/&lt;code&gt;/hello-config</code>.
@@ -1281,18 +1281,18 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
         <dl>
           <dt><code>SQLSTATE 42501</code> on an INSERT/UPDATE</dt>
           <dd>
-            The plugin tried to write to a table it doesn't own. Either the
+            The plugin tried to write to a table it doesn&apos;t own. Either the
             target is a public app table (intentional — write through a hook),
-            or the target is missing from this plugin's schema (check the
+            or the target is missing from this plugin&apos;s schema (check the
             migration ran).
           </dd>
           <dt className="mt-2">Plugin enables but the hook never fires</dt>
           <dd>
             Verify the hook name matches a constant in <code>HookPoints</code>;
-            string typos won't error, they just never match. Also confirm
-            another plugin earlier in priority isn't short-circuiting the chain.
+            string typos won&apos;t error, they just never match. Also confirm
+            another plugin earlier in priority isn&apos;t short-circuiting the chain.
           </dd>
-          <dt className="mt-2">"Plugin row is missing code or role password"</dt>
+          <dt className="mt-2">&quot;Plugin row is missing code or role password&quot;</dt>
           <dd>
             The plugin row predates the data-isolation feature (uploaded before
             this version). Re-upload to provision the schema.
@@ -1304,20 +1304,20 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
             new plugin install (or for in-flight dev: edit the file in the
             staged plugin folder and re-enable).
           </dd>
-          <dt className="mt-2">"Plugin folder still locked" at delete</dt>
+          <dt className="mt-2">&quot;Plugin folder still locked&quot; at delete</dt>
           <dd>
             Windows-only. The schema and role were already dropped; only files
             remain. Status is <code>DeletedPending</code>; the next host
             startup retries the file delete.
           </dd>
-          <dt className="mt-2">Plugin's menu item doesn't appear in the sidebar</dt>
+          <dt className="mt-2">Plugin&apos;s menu item doesn&apos;t appear in the sidebar</dt>
           <dd>
             Check that <code>Configure()</code> actually called{" "}
             <code>context.Menus.AddXxx()</code> (no early return / try-swallow).
             If <code>AddPluginMenuItem</code> is used, the host bootstrap must
-            have created the "Plugins" group in <code>site-config</code> — it
+            have created the &quot;Plugins&quot; group in <code>site-config</code> — it
             does, but a hand-edited menu may have removed it. Falling back to{" "}
-            <code>AddMenuItem("site-config", parentId, item)</code> with an
+            <code>AddMenuItem(&quot;site-config&quot;, parentId, item)</code> with an
             explicit parent always works. The sidebar caches the menu in the
             SPA; a hard refresh after enable shows the new items.
           </dd>
@@ -1328,9 +1328,9 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
             <code>{"/admin/config/plugins/{context.Code}/{key}"}</code>) so it
             mounts inside <code>ConfigLayout</code>.
           </dd>
-          <dt className="mt-2">JSX page shows "Define a function Page()…"</dt>
+          <dt className="mt-2">JSX page shows &quot;Define a function Page()…&quot;</dt>
           <dd>
-            The compiled source didn't expose a top-level{" "}
+            The compiled source didn&apos;t expose a top-level{" "}
             <code>function Page()</code>. Make sure the function is declared
             with that exact name and not nested inside another function or
             conditional. The error surfaces verbatim from{" "}
@@ -1339,8 +1339,8 @@ WHERE  created_by_plugin_id = '<plugin-uuid>';`}
           <dt className="mt-2">Cast fails inside Configure</dt>
           <dd>
             Almost always a type-identity issue from shipping a host-shared
-            assembly inside the zip. Re-check the build's exclusion list and
-            confirm the zip doesn't contain <code>AutoNate.Plugin.Abstractions.dll</code>,{" "}
+            assembly inside the zip. Re-check the build&apos;s exclusion list and
+            confirm the zip doesn&apos;t contain <code>AutoNate.Plugin.Abstractions.dll</code>,{" "}
             <code>Npgsql.dll</code>, or <code>Dapper.dll</code>.
           </dd>
         </dl>

@@ -258,7 +258,7 @@ export function ChatPaletteModal({ open, initialQuery, onClose, onPick }: Props)
           </span>
           <span className="chat-palette__foot-grow" />
           <span style={{ color: "var(--mantine-color-dimmed)" }}>
-            Loading a chat doesn't change which page owns it.
+            Loading a chat doesn&apos;t change which page owns it.
           </span>
         </div>
       </div>
