@@ -191,6 +191,37 @@ services:
       # on macOS / Docker Desktop where the entry is provided by default.
       - "host.docker.internal:host-gateway"
 
+  executor:
+    # Code-transformer / analyzer sandbox (isolated-vm for JS, Pyodide for
+    # Python). Pure NATS worker: no ports. The .NET host publishes
+    # CodeNodeRequests on `pipeline-code-run.<runId>.<nodeId>`
+    # (Services/Pipelines/Execution/JetStreamCodeNodeRunner.cs) and this
+    # container answers on the reply subject. Without it every code node in a
+    # pipeline times out after 30 s (#114).
+    build:
+      context: ../services/executor
+      dockerfile: Dockerfile
+    container_name: autonate-executor
+    # Same rationale as hocuspocus: process supervision only. The sidecar
+    # exits on NATS reconnect exhaustion (#69) and should simply come back.
+    restart: unless-stopped
+    depends_on:
+      nats:
+        condition: service_healthy
+      nats-init:
+        condition: service_completed_successfully
+    environment:
+      NATS_URL: nats://nats:4222
+      NODE_ENV: production
+    healthcheck:
+      # Asks the running process over NATS (its only interface) whether it is
+      # connected and serving — see services/executor/src/healthcheck.ts.
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   dapr-dashboard:
     image: daprio/dashboard:0.15.0
     container_name: autonate-dapr-dashboard

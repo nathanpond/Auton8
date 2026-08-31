@@ -16,6 +16,7 @@ COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.yml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE" -p infra)
 FLOWABLE_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/flowable/.build-input-hash"
 HOCUSPOCUS_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/hocuspocus/.build-input-hash"
+EXECUTOR_BUILD_STAMP_FILE="$REPO_ROOT/infra/mounts/executor/.build-input-hash"
 
 POSTGRES_PORT="${AUTONATE_POSTGRES_PORT:-5432}"
 FLOWABLE_PORT="${AUTONATE_FLOWABLE_PORT:-8080}"
@@ -37,6 +38,7 @@ REQUIRED_SERVICES=(
   dapr-placement
   dapr-scheduler
   hocuspocus
+  executor
 )
 
 log() {
@@ -146,6 +148,46 @@ record_hocuspocus_build_hash() {
   printf '%s\n' "$1" > "$HOCUSPOCUS_BUILD_STAMP_FILE"
 }
 
+# Same stamp scheme for the executor sidecar (services/executor/*).
+compute_executor_build_hash() {
+  local path
+  local hash_input=()
+  hash_input+=("$REPO_ROOT/services/executor/Dockerfile")
+  hash_input+=("$REPO_ROOT/services/executor/package.json")
+  if [[ -f "$REPO_ROOT/services/executor/package-lock.json" ]]; then
+    hash_input+=("$REPO_ROOT/services/executor/package-lock.json")
+  fi
+  hash_input+=("$REPO_ROOT/services/executor/tsconfig.json")
+  while IFS= read -r path; do
+    hash_input+=("$path")
+  done < <(find "$REPO_ROOT/services/executor/src" -type f | LC_ALL=C sort)
+  for path in "${hash_input[@]}"; do
+    printf '%s\n' "$path"
+    shasum "$path"
+  done | shasum | awk '{print $1}'
+}
+
+current_executor_build_hash() {
+  if [[ -f "$EXECUTOR_BUILD_STAMP_FILE" ]]; then
+    cat "$EXECUTOR_BUILD_STAMP_FILE"
+    return 0
+  fi
+  return 1
+}
+
+executor_build_required() {
+  local desired_hash="$1"
+  local current_hash
+  if ! current_hash="$(current_executor_build_hash)"; then
+    return 0
+  fi
+  [[ "$current_hash" != "$desired_hash" ]]
+}
+
+record_executor_build_hash() {
+  printf '%s\n' "$1" > "$EXECUTOR_BUILD_STAMP_FILE"
+}
+
 compose_service_container_id() {
   "${COMPOSE[@]}" ps -a -q "$1"
 }
@@ -206,6 +248,12 @@ service_ready() {
       # WebSocket port is the cheapest "actually accepting connections"
       # signal we have.
       tcp_reachable "$HOCUSPOCUS_PORT"
+      ;;
+    executor)
+      # No ports; the compose healthcheck asks the process over NATS
+      # (services/executor/src/healthcheck.ts), so container health is the
+      # real "connected and serving" signal.
+      [[ "$(container_health_or_status "$container_id")" == "healthy" ]]
       ;;
     *)
       [[ "$(container_health_or_status "$container_id")" == "running" ]]
@@ -288,6 +336,9 @@ print_status_snapshot() {
           log "$service: container present, port ${HOCUSPOCUS_PORT} not ready"
         fi
         ;;
+      executor)
+        log "$service: $(container_health_or_status "$container_id") (NATS health probe)"
+        ;;
     esac
   done
 }
@@ -314,6 +365,7 @@ main() {
     "$REPO_ROOT/infra/mounts/flowable-dapr/components" \
     "$REPO_ROOT/infra/mounts/flowable" \
     "$REPO_ROOT/infra/mounts/hocuspocus" \
+    "$REPO_ROOT/infra/mounts/executor" \
     "$REPO_ROOT/infra/mounts/dapr-placement"
 
   cp "$REPO_ROOT"/infra/dapr/components/*.yaml "$REPO_ROOT/infra/mounts/dapr-dashboard/components/"
@@ -343,8 +395,19 @@ main() {
     record_hocuspocus_build_hash "$desired_hocuspocus_hash"
   fi
 
+  local desired_executor_hash
+  desired_executor_hash="$(compute_executor_build_hash)"
+  local should_rebuild_executor=0
+  if executor_build_required "$desired_executor_hash"; then
+    should_rebuild_executor=1
+    log "Executor build inputs changed. Rebuilding the executor image."
+    "${COMPOSE[@]}" build executor
+    record_executor_build_hash "$desired_executor_hash"
+  fi
+
   if (( should_rebuild_flowable == 0 )) \
      && (( should_rebuild_hocuspocus == 0 )) \
+     && (( should_rebuild_executor == 0 )) \
      && all_services_ready; then
     log "Required infrastructure is already running and ready."
     exit 0
@@ -358,6 +421,10 @@ main() {
     if (( should_rebuild_hocuspocus == 1 )); then
       log "Recreating Hocuspocus to apply the rebuilt image."
       "${COMPOSE[@]}" up -d --no-deps --force-recreate hocuspocus
+    fi
+    if (( should_rebuild_executor == 1 )); then
+      log "Recreating the executor to apply the rebuilt image."
+      "${COMPOSE[@]}" up -d --no-deps --force-recreate executor
     fi
     # Always ask compose to bring up every required service — `bootstrapped`
     # only checks that containers EXIST, not that they're running. After a
