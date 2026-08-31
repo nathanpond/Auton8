@@ -93,11 +93,21 @@ public sealed class RestDataConnectorHandler(
         return new ConnectorRefreshState(fetchedAt, null);
     }
 
+    // The SPA writes and documents this config in camelCase
+    // ({"url": "", "authMode": "none"} — DataConnectorsPage.tsx), while
+    // System.Text.Json binds case-sensitively by default. Without this every
+    // UI-authored REST connector deserialized to an empty Url and failed with
+    // "config is missing Url", which reads as operator error (#165).
+    private static readonly JsonSerializerOptions ConfigJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private static RestConnectorConfig ParseConfig(DataConnector connector)
     {
         try
         {
-            return JsonSerializer.Deserialize<RestConnectorConfig>(connector.ConfigJson)
+            return JsonSerializer.Deserialize<RestConnectorConfig>(connector.ConfigJson, ConfigJsonOptions)
                 ?? throw new InvalidOperationException("REST config is empty.");
         }
         catch (JsonException ex)

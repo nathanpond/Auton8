@@ -2185,9 +2185,14 @@ function SignalStartEventModal({
   // so the user can pick anything the system knows about, plus type free-form.
   const knownEvents = useMemo(() => {
     const entries = new Map<string, { topic: string; eventType: string; description?: string }>();
+    // Composite key is topic + eventType joined by U+0000, which cannot occur
+    // in either value — a plain concatenation would collide ("ab"+"c" vs
+    // "a"+"bc"). It was previously a *literal* NUL byte in this file, which
+    // made grep classify all 3,900 lines as binary and skip them (#116); the
+    // escape keeps the exact same runtime key without that.
     for (const category of catalog?.categories ?? []) {
       for (const evt of category.events) {
-        entries.set(`${evt.topic} ${evt.eventType}`, {
+        entries.set(`${evt.topic}\u0000${evt.eventType}`, {
           topic: evt.topic,
           eventType: evt.eventType,
           description: evt.summary
@@ -2195,7 +2200,7 @@ function SignalStartEventModal({
       }
     }
     for (const reg of catalog?.workflowRegistrations ?? []) {
-      const key = `${reg.topic} ${reg.eventType}`;
+      const key = `${reg.topic}\u0000${reg.eventType}`;
       if (!entries.has(key)) {
         entries.set(key, { topic: reg.topic, eventType: reg.eventType });
       }

@@ -98,6 +98,37 @@ public sealed class RestDataConnectorSsrfTests
         Assert.Equal("alpha", sink.Rows[0]["name"]);
     }
 
+    // #165: the handler bound ConfigJson case-sensitively while the SPA writes
+    // and documents camelCase, so every UI-authored REST connector resolved to
+    // an empty Url and failed with "config is missing Url" — the built-in
+    // connector could not be configured through its own admin page.
+    [Theory]
+    [InlineData("""{"url":"https://api.example.com/rows","authMode":"none"}""")]
+    [InlineData("""{"Url":"https://api.example.com/rows","AuthMode":"none"}""")]
+    public async Task Config_binds_in_either_casing(string configJson)
+    {
+        var http = new CountingHandler("""[{"id":1,"name":"alpha"}]""");
+        var factory = new SingleClientFactory(new HttpClient(http));
+        var guard = new OutboundUrlGuard(OutboundUrlGuardTests.FakeDns.Of("api.example.com", "93.184.216.34"));
+        var handler = new RestDataConnectorHandler(
+            factory, guard, new StubEnvironment("Development"),
+            NullLogger<RestDataConnectorHandler>.Instance);
+
+        var connector = new DataConnector
+        {
+            Id = Guid.NewGuid(),
+            Name = "probe",
+            Kind = DataConnectorKinds.Rest,
+            ConfigJson = configJson,
+        };
+
+        var sink = new CollectingSink();
+        await handler.FetchAsync(connector, new ConnectorRefreshState(null, null), sink);
+
+        Assert.Equal(1, http.Calls);
+        Assert.Single(sink.Rows);
+    }
+
     private static RestDataConnectorHandler CreateHandler(
         string url,
         out CountingHandler http,
@@ -114,16 +145,16 @@ public sealed class RestDataConnectorSsrfTests
             NullLogger<RestDataConnectorHandler>.Instance);
     }
 
-    // PascalCase on purpose: ParseConfig binds case-sensitively, so the
-    // camelCase shape the SPA actually writes never populates Url (#165).
-    // These tests exercise the guard, so they use the shape that binds today
-    // and will keep passing once #165 makes camelCase bind too.
+    // camelCase, i.e. exactly what the SPA writes
+    // ({"url": "", "authMode": "none"} — DataConnectorsPage.tsx). It only
+    // binds since #165; before that these tests had to use PascalCase, which
+    // meant they never exercised a config shape any real connector had.
     private static DataConnector Connector(string url) => new()
     {
         Id = Guid.NewGuid(),
         Name = "probe",
         Kind = DataConnectorKinds.Rest,
-        ConfigJson = JsonSerializer.Serialize(new { Url = url, AuthMode = "none" }),
+        ConfigJson = JsonSerializer.Serialize(new { url, authMode = "none" }),
     };
 
     private sealed class CountingHandler : HttpMessageHandler

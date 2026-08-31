@@ -293,8 +293,20 @@ public sealed class SubscriptionManagerTests
 
     // ---------- helpers ----------
 
-    private static CancellationTokenSource TestTimeout() =>
-        new(TimeSpan.FromSeconds(5));
+    // Budget for a WebSocket receive. This is a hang guard, not a latency
+    // assertion: the tests assert on what arrives, never on how fast. At the
+    // old fixed 5 s it failed on most *full-suite* runs — the subscribe ack
+    // simply did not land inside the budget while ~1,450 tests contended for
+    // the machine — while passing every time in isolation, which is the worst
+    // possible signal (#163). 30 s is still far below any real hang, and
+    // AUTONATE_TEST_WS_TIMEOUT_SECONDS lets a slower CI box raise it without
+    // touching code.
+    private static CancellationTokenSource TestTimeout()
+    {
+        var configured = Environment.GetEnvironmentVariable("AUTONATE_TEST_WS_TIMEOUT_SECONDS");
+        var seconds = int.TryParse(configured, out var parsed) && parsed > 0 ? parsed : 30;
+        return new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+    }
 
     private static async Task<WebSocket> ConnectAsync(AutoNateWebApplicationFactory factory)
     {
