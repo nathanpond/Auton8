@@ -91,6 +91,17 @@ make infra-reset
 
 `make infra-reset` now clears the bind-mounted data directories under `infra/mounts/` and recreates the expected folder structure. It no longer relies on Docker named volumes.
 
+## Build and test
+
+```bash
+dotnet build AutoNate.sln                      # analyzers run on every build (see Directory.Build.props / .editorconfig)
+cd src/AutoNate.Spa && npm ci && npm run lint && npm run build
+cd infra && docker compose -p infra up -d postgres nats nats-init redis   # test suite needs these three
+dotnet test AutoNate.sln                       # ~8 min; integration tests hit the compose services
+```
+
+Planning and issue workflow are managed with n8SDLC — GitHub Issues and milestones are the plan, `.n8/` holds config, the decision log and harvested audit checklists.
+
 ## Local configuration
 
 `src/AutoNate.Web/appsettings.Development.json` defines the stable local endpoints for:

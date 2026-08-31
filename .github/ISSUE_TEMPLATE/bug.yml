@@ -1,0 +1,51 @@
+name: Bug
+description: Something isn't working.
+labels: [bug, needs-triage]
+body:
+  - type: textarea
+    id: broken
+    attributes:
+      label: What's broken
+      description: In your own words.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options: [production, preview/stage, local dev]
+    validations:
+      required: true
+  - type: input
+    id: path
+    attributes:
+      label: Path / command that hits it
+      placeholder: "GET /api/records?… or `make app` then open /records"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      placeholder: "<expected> / <actual>"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Console output, failing request, stack trace, screenshot.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Apply the matching `area:*` label after filing.
+      options: [api, spa, plugins, services, flowable, infra, ci, docs, tests]
+    validations:
+      required: true
