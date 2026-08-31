@@ -14,8 +14,8 @@
     "dev": "tsc --watch & node --watch dist/index.js"
   },
   "dependencies": {
-    "@blocknote/core": "^0.51.0",
-    "@blocknote/server-util": "^0.51.0",
+    "@blocknote/core": "^0.54.0",
+    "@blocknote/server-util": "^0.54.0",
     "@hocuspocus/server": "^4.0.0",
     "pg": "^8.20.0",
     "react": "^19.2.5",
