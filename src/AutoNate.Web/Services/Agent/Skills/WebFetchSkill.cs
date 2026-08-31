@@ -228,36 +228,11 @@ public sealed class WebFetchSkill : IAgentSkill
         return false;
     }
 
-    public static bool IsBlockedAddress(IPAddress address)
-    {
-        // Unwrap IPv4-mapped IPv6 (::ffff:a.b.c.d) so v4 ranges still match.
-        var ip = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
-
-        if (IPAddress.IsLoopback(ip)) return true; // 127.0.0.0/8 + ::1
-
-        if (ip.AddressFamily == AddressFamily.InterNetwork)
-        {
-            var b = ip.GetAddressBytes();
-            if (b[0] == 0) return true;                                            // 0.0.0.0/8 "this network"
-            if (b[0] == 10) return true;                                           // 10.0.0.0/8
-            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;              // 172.16.0.0/12
-            if (b[0] == 192 && b[1] == 168) return true;                           // 192.168.0.0/16
-            if (b[0] == 169 && b[1] == 254) return true;                           // 169.254.0.0/16 link-local + cloud metadata
-            if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return true;             // 100.64.0.0/10 carrier-grade NAT
-            if (b[0] >= 224) return true;                                          // multicast + reserved
-        }
-        else if (ip.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            if (ip.IsIPv6LinkLocal) return true;
-            if (ip.IsIPv6SiteLocal) return true;
-            if (ip.IsIPv6Multicast) return true;
-            var b = ip.GetAddressBytes();
-            if ((b[0] & 0xFE) == 0xFC) return true;                                // fc00::/7 ULA
-            if (ip.Equals(IPAddress.IPv6Any)) return true;
-        }
-
-        return false;
-    }
+    // Kept as the skill's public surface (its tests pin this name), but the
+    // rules live in one place now — OutboundAddressRules — so the REST data
+    // connector's guard and this one cannot drift apart (#60).
+    public static bool IsBlockedAddress(IPAddress address) =>
+        AutoNate.Web.Services.Http.OutboundAddressRules.IsBlocked(address);
 
     private static JsonElement Error(string message) =>
         JsonSerializer.SerializeToElement(new

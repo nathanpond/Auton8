@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using AutoNate.Web.Persistence.Scaffolded;
+using AutoNate.Web.Services.Http;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace AutoNate.Web.Services.DataConnectors.Builtin;
@@ -13,6 +15,8 @@ namespace AutoNate.Web.Services.DataConnectors.Builtin;
 // `RowsPath` ($.data / $.items / null) selects the array to stream.
 public sealed class RestDataConnectorHandler(
     IHttpClientFactory httpClientFactory,
+    IOutboundUrlGuard urlGuard,
+    IHostEnvironment environment,
     ILogger<RestDataConnectorHandler> log) : IDataConnectorHandler
 {
     public string Kind => DataConnectorKinds.Rest;
@@ -24,8 +28,9 @@ public sealed class RestDataConnectorHandler(
         try
         {
             var config = ParseConfig(connector);
+            var uri = await ResolveAndGuardAsync(config, lastFetchedAtUtc: null, cancellationToken);
             using var client = httpClientFactory.CreateClient("data-connector");
-            using var request = BuildRequest(config, lastFetchedAtUtc: null);
+            using var request = BuildRequest(config, uri);
             using var response = await client.SendAsync(
                 request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             sw.Stop();
@@ -62,8 +67,9 @@ public sealed class RestDataConnectorHandler(
         ArgumentNullException.ThrowIfNull(sink);
 
         var config = ParseConfig(connector);
+        var uri = await ResolveAndGuardAsync(config, state.LastFetchedAtUtc, cancellationToken);
         using var client = httpClientFactory.CreateClient("data-connector");
-        using var request = BuildRequest(config, state.LastFetchedAtUtc);
+        using var request = BuildRequest(config, uri);
         using var response = await client.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -100,7 +106,14 @@ public sealed class RestDataConnectorHandler(
         }
     }
 
-    private static HttpRequestMessage BuildRequest(RestConnectorConfig config, DateTimeOffset? lastFetchedAtUtc)
+    // The connector URL is user-supplied config, and the reply body is parsed
+    // into rows the caller sees, so an unguarded fetch reads cloud-metadata
+    // credentials and internal-only APIs straight out through the app (#60).
+    // The set of legitimate destinations is open-ended here — calling
+    // third-party APIs is the whole feature — so this is the private-address
+    // guard rather than an allowlist. Runs before any socket opens.
+    private async Task<Uri> ResolveAndGuardAsync(
+        RestConnectorConfig config, DateTimeOffset? lastFetchedAtUtc, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(config.Url))
             throw new InvalidOperationException("REST connector config is missing Url.");
@@ -109,7 +122,18 @@ public sealed class RestDataConnectorHandler(
                     ?? string.Empty;
         var resolvedUrl = config.Url.Replace("{lastFetchDate}", token, StringComparison.Ordinal);
 
-        var request = new HttpRequestMessage(HttpMethod.Get, resolvedUrl);
+        var check = await urlGuard.CheckAsync(
+            resolvedUrl, OutboundUrlPolicies.ForEnvironment(environment), cancellationToken);
+        if (!check.Allowed)
+        {
+            throw new InvalidOperationException($"REST connector URL rejected: {check.Error}");
+        }
+        return check.Uri!;
+    }
+
+    private static HttpRequestMessage BuildRequest(RestConnectorConfig config, Uri url)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         switch (config.AuthMode?.ToLowerInvariant())
