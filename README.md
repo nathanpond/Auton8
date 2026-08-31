@@ -9,6 +9,8 @@ AutoNate now treats infrastructure as session-scoped and the web app as restarta
 - `redis` on `localhost:6379` for local Dapr state and pub/sub, with data in `infra/mounts/redis/data`
 - `dapr-placement` on `localhost:50006`
 - `dapr-scheduler` on `localhost:50007` with persisted data in `infra/mounts/dapr-scheduler/data`
+- `hocuspocus` on `ws://localhost:1234` — Yjs collaboration sidecar (`services/hocuspocus`)
+- `executor` — code-transformer / analyzer sandbox (`services/executor`); no ports, it serves `pipeline-code-run.>` over NATS and reports health via a NATS probe
 - `dapr-dashboard` on `http://localhost:8081` when you start the `dashboard` profile, reading components from `infra/mounts/dapr-dashboard/components`
 
 ## First-time setup
