@@ -1,4 +1,5 @@
 using AutoNate.E2E.Tests.Support;
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using Xunit;
 
@@ -93,68 +94,75 @@ public sealed class DataStoresAdminTests : E2ETestBase
     [Fact]
     public async Task DataStores_FileStoreDetail_UploadAppearsInList()
     {
-        // Proves the full create → detail → upload journey works through the
-        // SPA. Phase 0's commit message claimed this but no UI shipped — the
-        // DataStoreDetailPage that backs this test was the fix-list item #1
-        // from the data-feature UI gap audit.
+        // Full create → detail → upload journey through the SPA. The detail
+        // page is DataStoreFileManager (SVAR file manager); the toolbar's
+        // "Upload to current folder" opens a Mantine Modal titled
+        // "Upload to <path>" whose Dropzone wraps a hidden file input we drive
+        // directly with SetInputFilesAsync (fires onDrop without drag events).
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-        await page.GotoAsync("/datastores");
+        var storeName = await CreateFileStoreAndOpenDetailAsync(page);
 
-        // Create a fresh file-type store through the same modal flow the
-        // other tests exercise — keeps the test independent of any seeded
-        // state and gives us a unique store id to navigate into.
-        var storeName = TestNames.Prefixed("ds");
-        await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
-        var createModal = page.GetByRole(AriaRole.Dialog);
-        await Assertions.Expect(createModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
-        await createModal.GetByLabel("Name").FillAsync(storeName);
-        await createModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
-        await Assertions.Expect(createModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
-
-        // The name cell is now a <Link>; clicking it navigates to
-        // /datastores/{id}. DataStoreDetailPage renders the store name
-        // inside a PageHeader h1 along with the kind badge.
-        await page.GetByText(storeName).First.ClickAsync();
-        await page.WaitForURLAsync("**/datastores/*", new() { Timeout = 15_000 });
-        await Assertions.Expect(
-            page.GetByRole(AriaRole.Heading, new() { Name = storeName }))
-            .ToBeVisibleAsync(new() { Timeout = 15_000 });
-
-        // Open the upload modal. The dropzone wraps a hidden file input
-        // we can drive directly via SetInputFilesAsync (same approach the
-        // plugin-upload test uses); this bypasses the drag-drop event and
-        // fires the Dropzone's onDrop with the provided payload.
-        await page.GetByRole(AriaRole.Button, new() { Name = "Upload file" }).ClickAsync();
-        var uploadModal = page.GetByRole(AriaRole.Dialog, new() { Name = "Upload file" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Upload to current folder" }).ClickAsync();
+        var uploadModal = page.GetByRole(AriaRole.Dialog, new() { Name = "Upload to /" });
         await Assertions.Expect(uploadModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
 
-        var fileName = $"hello-{Guid.NewGuid():N}.txt";
+        var stem = $"hello-{Guid.NewGuid():N}";
         await uploadModal.Locator("input[type=file]").SetInputFilesAsync(new FilePayload
         {
-            Name = fileName,
+            Name = $"{stem}.txt",
             MimeType = "text/plain",
             Buffer = System.Text.Encoding.UTF8.GetBytes("hello from the e2e suite\n")
         });
-        await uploadModal.GetByRole(AriaRole.Button, new() { Name = "Upload" }).ClickAsync();
+        await Assertions.Expect(uploadModal.GetByText("Queued (1):")).ToBeVisibleAsync(new() { Timeout = 5_000 });
+        // The button label is "Upload <count>".
+        await uploadModal.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Upload") }).ClickAsync();
         await Assertions.Expect(uploadModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // The file row appears in the folder listing. The page renders the
-        // filename inside a <Text fw={500}> beside a folder icon — a text
-        // match on the unique-per-test name is enough.
-        await Assertions.Expect(page.GetByText(fileName).First)
+        // SVAR renders file names as separate name/extension spans, so match
+        // the unique stem rather than the full "<stem>.txt".
+        await Assertions.Expect(page.GetByText(stem).First)
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        _ = storeName;
     }
 
     [Fact]
     public async Task DataStores_FileStoreDetail_NewFolderAppearsInList()
     {
-        // Companion to the upload test: proves the folder-CRUD wrappers
-        // landed and the breadcrumb-driven navigation works end-to-end.
+        // Companion to the upload test: folder creation goes through SVAR's
+        // "Add New" menu → "Add new folder" → its own name prompt (.wx-modal,
+        // no dialog role), which the DataStoreFileManager create-file
+        // interceptor turns into POST /api/datastores/{id}/folders.
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-        await page.GotoAsync("/datastores");
+        await CreateFileStoreAndOpenDetailAsync(page);
 
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add New" }).ClickAsync();
+        // The menu renders in a portal outside <main>; its items are plain
+        // divs, so target by exact text.
+        await page.GetByText("Add new folder", new() { Exact = true }).ClickAsync();
+
+        var prompt = page.Locator(".wx-modal");
+        await Assertions.Expect(prompt).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(prompt.GetByText("Enter folder name")).ToBeVisibleAsync();
+        var folderName = $"docs-{Guid.NewGuid():N}".Substring(0, 12);
+        await prompt.GetByRole(AriaRole.Textbox).FillAsync(folderName);
+        await prompt.GetByRole(AriaRole.Button, new() { Name = "OK" }).ClickAsync();
+        await Assertions.Expect(prompt).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // The folder tree on the left lists the name whole (the main pane
+        // splits it into name/extension spans).
+        await Assertions.Expect(page.GetByText(folderName, new() { Exact = true }).First)
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+    }
+
+    /// <summary>
+    /// Creates a FileType data store through the New-data-store modal and
+    /// navigates into its detail page. Returns the store name.
+    /// </summary>
+    private static async Task<string> CreateFileStoreAndOpenDetailAsync(IPage page)
+    {
+        await page.GotoAsync("/datastores");
         var storeName = TestNames.Prefixed("ds");
         await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
         var createModal = page.GetByRole(AriaRole.Dialog);
@@ -163,21 +171,81 @@ public sealed class DataStoresAdminTests : E2ETestBase
         await createModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
         await Assertions.Expect(createModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
 
-        await page.GetByText(storeName).First.ClickAsync();
+        // The name cell is a <Link> to /datastores/{id}.
+        await page.GetByRole(AriaRole.Link, new() { Name = storeName }).ClickAsync();
         await page.WaitForURLAsync("**/datastores/*", new() { Timeout = 15_000 });
-
-        await page.GetByRole(AriaRole.Button, new() { Name = "New folder" }).ClickAsync();
-        var folderModal = page.GetByRole(AriaRole.Dialog, new() { Name = "New folder" });
-        await Assertions.Expect(folderModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
-
-        var folderName = $"docs-{Guid.NewGuid():N}".Substring(0, 12);
-        await folderModal.GetByLabel("Folder name").FillAsync(folderName);
-        await folderModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
-        await Assertions.Expect(folderModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
-
-        // The new folder appears in the listing as an anchor with its name.
-        await Assertions.Expect(page.GetByText(folderName).First)
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = storeName }))
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        // The file manager is mounted once the root listing has loaded.
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Upload to current folder" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        return storeName;
+    }
+
+    /// <summary>
+    /// Creates a FileType store via the UI, seeds one CSV into it over the
+    /// API (POST /api/datastores/{id}/files, multipart "folder" + "file" —
+    /// the same call the SPA makes), and returns (storeName, csvFileName).
+    /// File-backed datasets refuse to save without a picked file, so every
+    /// dataset spec over a file store needs this.
+    /// </summary>
+    private static async Task<(string StoreName, string FileName)> CreateFileStoreWithCsvAsync(IPage page)
+    {
+        await page.GotoAsync("/datastores");
+        var storeName = TestNames.Prefixed("dsForDataset");
+        await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
+        var storeModal = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(storeModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await storeModal.GetByLabel("Name").FillAsync(storeName);
+        await storeModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
+        await Assertions.Expect(storeModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        var link = page.GetByRole(AriaRole.Link, new() { Name = storeName });
+        await Assertions.Expect(link).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        var href = await link.GetAttributeAsync("href") ?? string.Empty;
+        var storeId = href[(href.LastIndexOf('/') + 1)..];
+        Assert.False(string.IsNullOrWhiteSpace(storeId), $"could not read store id from href '{href}'");
+
+        var fileName = $"rows-{Guid.NewGuid():N}.csv";
+        var form = page.APIRequest.CreateFormData();
+        form.Set("folder", "/");
+        form.Set("file", new FilePayload
+        {
+            Name = fileName,
+            MimeType = "text/csv",
+            // Matches the modal's default column schema (Id, Name — text).
+            Buffer = System.Text.Encoding.UTF8.GetBytes("Id,Name\n1,alpha\n2,beta\n")
+        });
+        var upload = await page.APIRequest.PostAsync($"/api/datastores/{storeId}/files", new() { Multipart = form });
+        Assert.True(upload.Ok, $"seed upload failed: {upload.Status} {await upload.TextAsync()}");
+        return (storeName, fileName);
+    }
+
+    /// <summary>
+    /// In the New/Edit dataset modal: picks the given FileType store in
+    /// "Source DataStore" and the seeded CSV in "File" (single-file scope).
+    /// </summary>
+    private static async Task PickFileStoreAndFileAsync(ILocator modal, string storeName, string fileName)
+    {
+        var dataStoreSelect = modal.GetByLabel("Source DataStore");
+        await Assertions.Expect(
+            dataStoreSelect.Locator("option").Filter(new() { HasText = storeName }))
+            .ToBeAttachedAsync(new() { Timeout = 15_000 });
+        var storeOptionValue = await dataStoreSelect
+            .Locator("option")
+            .Filter(new() { HasText = storeName })
+            .GetAttributeAsync("value");
+        Assert.False(string.IsNullOrEmpty(storeOptionValue));
+        await dataStoreSelect.SelectOptionAsync(storeOptionValue!);
+
+        // FileType stores have no tables → no Source table picker; instead a
+        // Scope / Browse folder / File group appears once the listing loads.
+        await Assertions.Expect(modal.GetByLabel("Source table")).Not.ToBeVisibleAsync();
+        var fileSelect = modal.GetByLabel("File", new() { Exact = true });
+        await Assertions.Expect(fileSelect.Locator("option").Filter(new() { HasText = fileName }))
+            .ToBeAttachedAsync(new() { Timeout = 15_000 });
+        await fileSelect.SelectOptionAsync(fileName);
+        await Assertions.Expect(modal.GetByText($"/{fileName}")).ToBeVisibleAsync();
     }
 
     [Fact]
@@ -455,89 +523,37 @@ public sealed class DataStoresAdminTests : E2ETestBase
     [Fact]
     public async Task Datasets_CreateOverFileStore_PicksFromDropdownAndPersists()
     {
-        // Audit fix #4 happy path — proves the DataStore dropdown is
-        // populated from listDataStores() and the picker round-trips end
-        // to end. Seeding a SqlType store + ingesting a CSV (which would
-        // exercise the "Source table" + "Import columns" controls too)
-        // isn't viable in the E2E fixture because ConnectionStrings__
-        // Datastores is unset there; SQL-store creation returns 503.
-        // FileType stores don't surface a Source table dropdown, which
-        // is correct behavior — the picker is rendered conditionally on
-        // `dataStoreKindLabel(...) === "SqlType"`.
+        // SqlType stores need ConnectionStrings__Datastores, which the E2E
+        // fixture leaves unset (creation returns 503), so this exercises a
+        // FileType store. File-backed datasets must point at a file, so one
+        // CSV is seeded over the API first.
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
+        var (storeName, fileName) = await CreateFileStoreWithCsvAsync(page);
 
-        // Seed a FileType DataStore through the same UI flow the existing
-        // DataStores tests exercise.
-        await page.GotoAsync("/datastores");
-        var storeName = TestNames.Prefixed("dsForDataset");
-        await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
-        var storeModal = page.GetByRole(AriaRole.Dialog);
-        await Assertions.Expect(storeModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
-        await storeModal.GetByLabel("Name").FillAsync(storeName);
-        await storeModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
-        await Assertions.Expect(storeModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
-
-        // Open the Datasets create modal; the DataStore dropdown should
-        // include the freshly-seeded store among its options.
         await page.GotoAsync("/datasets");
         var datasetName = TestNames.Prefixed("dset");
         await page.GetByRole(AriaRole.Button, new() { Name = "New dataset" }).ClickAsync();
         var modal = page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(modal).ToBeVisibleAsync(new() { Timeout = 10_000 });
         await modal.GetByLabel("Name").FillAsync(datasetName);
+        await PickFileStoreAndFileAsync(modal, storeName, fileName);
 
-        // The dropdown's <option> labels are `${name} (FileType)`. Picking
-        // by HasText keeps the assertion stable against any prefix the
-        // helper adds. SelectOptionAsync needs the value (the store id) so
-        // we resolve the option's value attribute first.
-        var dataStoreSelect = modal.GetByLabel("Source DataStore");
-        await Assertions.Expect(
-            dataStoreSelect.Locator("option").Filter(new() { HasText = storeName }))
-            .ToBeAttachedAsync(new() { Timeout = 15_000 });
-        var storeOptionValue = await dataStoreSelect
-            .Locator("option")
-            .Filter(new() { HasText = storeName })
-            .GetAttributeAsync("value");
-        Assert.False(string.IsNullOrEmpty(storeOptionValue));
-        await dataStoreSelect.SelectOptionAsync(storeOptionValue!);
-
-        // FileType stores have no tables, so the Source table picker
-        // doesn't render. The default column-schema JSON the modal seeds
-        // is valid for a happy-path Create.
-        await Assertions.Expect(modal.GetByLabel("Source table")).Not.ToBeVisibleAsync();
         await modal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
         await Assertions.Expect(modal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // The new dataset appears in the list; the Source column renders
-        // the kind in a Code element, so a substring match on the unique
-        // dataset name is the cleanest signal.
-        await Assertions.Expect(page.GetByText(datasetName).First)
-            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        // The new dataset appears in the list with its file-backed source.
+        var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = datasetName });
+        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Assertions.Expect(row.GetByText("datastore")).ToBeVisibleAsync();
     }
 
     [Fact]
     public async Task Datasets_EditExisting_PersistsRenamedRow()
     {
-        // Audit fix #13 — updateDataset was a dead wrapper. Renaming
-        // required delete-and-recreate, which would also drop any
-        // cached rows on Cached datasets. The dedicated Edit modal only
-        // surfaces what the backend's UpdateDatasetRequest accepts
-        // (Name / Description / RefreshCron); mode / source / columns
-        // are locked once the underlying schema exists.
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-
-        // Seed a FileType store (datasets need a source row to point at;
-        // SqlType isn't viable in the E2E fixture).
-        await page.GotoAsync("/datastores");
-        var storeName = TestNames.Prefixed("dsForEdit");
-        await page.GetByRole(AriaRole.Button, new() { Name = "New data store" }).ClickAsync();
-        var storeModal = page.GetByRole(AriaRole.Dialog);
-        await Assertions.Expect(storeModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
-        await storeModal.GetByLabel("Name").FillAsync(storeName);
-        await storeModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
-        await Assertions.Expect(storeModal).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        var (storeName, fileName) = await CreateFileStoreWithCsvAsync(page);
 
         await page.GotoAsync("/datasets");
         var datasetName = TestNames.Prefixed("dset");
@@ -545,39 +561,30 @@ public sealed class DataStoresAdminTests : E2ETestBase
         var createModal = page.GetByRole(AriaRole.Dialog);
         await Assertions.Expect(createModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
         await createModal.GetByLabel("Name").FillAsync(datasetName);
-
-        // Pick the seeded store from the DataStore dropdown.
-        var dataStoreSelect = createModal.GetByLabel("Source DataStore");
-        await Assertions.Expect(
-            dataStoreSelect.Locator("option").Filter(new() { HasText = storeName }))
-            .ToBeAttachedAsync(new() { Timeout = 15_000 });
-        var storeOptionValue = await dataStoreSelect
-            .Locator("option")
-            .Filter(new() { HasText = storeName })
-            .GetAttributeAsync("value");
-        Assert.False(string.IsNullOrEmpty(storeOptionValue));
-        await dataStoreSelect.SelectOptionAsync(storeOptionValue!);
+        await PickFileStoreAndFileAsync(createModal, storeName, fileName);
         await createModal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
         await Assertions.Expect(createModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // Open the Edit modal via the row's pen ActionIcon.
         var row = page.GetByRole(AriaRole.Row).Filter(new() { HasText = datasetName });
         await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = 15_000 });
         await row.GetByRole(AriaRole.Button, new() { Name = $"Edit {datasetName}" }).ClickAsync();
         var editModal = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit dataset" });
         await Assertions.Expect(editModal).ToBeVisibleAsync(new() { Timeout = 10_000 });
-
-        // Pre-fill: Name shows the original; Virtual datasets get the
-        // dimmed "no refresh cron" note instead of a cron input.
         await Assertions.Expect(editModal.GetByLabel("Name")).ToHaveValueAsync(datasetName);
         await Assertions.Expect(editModal.GetByText("Virtual datasets have no refresh cron"))
             .ToBeVisibleAsync();
+        // The edit form only exposes name / description / refresh cron; the
+        // persisted file scope is left untouched by the update (asserted via
+        // the Source column after saving).
 
         var renamed = $"{datasetName}-renamed";
         await editModal.GetByLabel("Name").FillAsync(renamed);
         await editModal.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
         await Assertions.Expect(editModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
-
-        await Assertions.Expect(page.GetByText(renamed).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        var renamedRow = page.GetByRole(AriaRole.Row).Filter(new() { HasText = renamed });
+        await Assertions.Expect(renamedRow).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        // Still file-backed after the rename.
+        await Assertions.Expect(renamedRow.GetByText("datastore")).ToBeVisibleAsync();
     }
+
 }
