@@ -128,6 +128,7 @@ public static class DataConnectorEndpoints
             PreviewDataConnectorRequest? request,
             IDataConnectorStore store,
             IDataConnectorHandlerRegistry registry,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var row = await store.GetAsync(id, ct);
@@ -150,12 +151,21 @@ public static class DataConnectorEndpoints
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Fold any handler-side error into the structured response
-                // so the editor renders the message inline rather than
-                // bubbling a 5xx.
+                // Fold any handler-side error into the structured response so
+                // the editor renders it inline rather than bubbling a 5xx —
+                // but the raw text carries internal hostnames, connection-
+                // string fragments and driver detail, which is reconnaissance
+                // for anyone holding DataConnector:Connect. Log the detail
+                // against a correlation id and hand back only the id (#68).
+                var errorId = Guid.NewGuid().ToString("N")[..12];
+                loggerFactory
+                    .CreateLogger("AutoNate.Web.Endpoints.DataConnectorEndpoints")
+                    .LogWarning(ex,
+                        "Data connector preview failed for {ConnectorId} (kind {Kind}). ErrorId {ErrorId}.",
+                        row.Id, row.Kind, errorId);
                 return Results.Ok(new DataConnectorPreviewResult(
                     Success: false,
-                    ErrorMessage: ex.Message,
+                    ErrorMessage: $"Preview failed. Reference {errorId} in the server log for details.",
                     Columns: Array.Empty<string>(),
                     Rows: Array.Empty<IReadOnlyDictionary<string, object?>>()));
             }

@@ -10,6 +10,10 @@ namespace AutoNate.Web.Services.Transformers.Builtin;
 //   hasHeader     = true | false                          (default true)
 public sealed class XlsxToCsvTransformer : ITransformer
 {
+    // 64 MB encoded — comfortably above any real spreadsheet, well below the
+    // point where ClosedXML's in-memory model threatens the process.
+    private const int MaxWorkbookBytes = 64 * 1024 * 1024;
+
     public string Key => "xlsx-to-csv";
     public string DisplayName => "XLSX → rows";
 
@@ -29,6 +33,17 @@ public sealed class XlsxToCsvTransformer : ITransformer
         var raw = DataFrameOps.RowValue(input.Rows[0], contentColumn);
         var bytes = ResolveBytes(raw);
         if (bytes is null) return Task.FromResult(DataFrame.Empty);
+
+        // A workbook materialises to several times its encoded size in managed
+        // memory, on the request or worker thread, so a bloated XLSX submitted
+        // through a pipeline is an OOM lever for any pipeline author. Refuse
+        // oversized input cleanly instead of discovering it as an
+        // OutOfMemoryException mid-run (#67).
+        if (bytes.Length > MaxWorkbookBytes)
+        {
+            throw new InvalidOperationException(
+                $"XLSX input is {bytes.Length} bytes, above the {MaxWorkbookBytes}-byte limit for this transformer.");
+        }
 
         using var stream = new MemoryStream(bytes);
         using var workbook = new XLWorkbook(stream);
