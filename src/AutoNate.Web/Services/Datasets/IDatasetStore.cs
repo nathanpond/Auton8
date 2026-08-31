@@ -10,7 +10,17 @@ public sealed record class CreateDatasetInput(
     string SourceKind,
     Guid SourceId,
     string? SourceTableName,
-    string? RefreshCron);
+    string? RefreshCron,
+    // Files-datastore scope. SourceTableName stays null for these; the
+    // FileScopeKind ("file" | "folder") + FileScopePath pair selects the
+    // single file or single folder backing the dataset. ParserKind +
+    // ParserOptionsJson are required alongside the scope so the executor
+    // and materializer can parse file contents into the locked column
+    // schema. All four stay null for SQL-datastore / connector sources.
+    string? FileScopeKind = null,
+    string? FileScopePath = null,
+    string? ParserKind = null,
+    string? ParserOptionsJson = null);
 
 public sealed record class UpdateDatasetInput(
     string? Name,

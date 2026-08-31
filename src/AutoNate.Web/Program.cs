@@ -565,6 +565,16 @@ builder.Services.AddScoped<AutoNate.Web.Services.Datasets.IDatasetStore,
     AutoNate.Web.Services.Datasets.EfCoreDatasetStore>();
 builder.Services.AddScoped<AutoNate.Web.Services.Datasets.IDatasetExecutor,
     AutoNate.Web.Services.Datasets.DatasetExecutor>();
+// File parser registry — looked up by dataset.parser_kind at execute /
+// materialize time so a Files-backed dataset can stream rows out of its
+// scoped file(s). Add a new IDatasetFileParser registration to support a
+// new format (json, xlsx, etc.); no other code in the pipeline cares.
+builder.Services.AddSingleton<AutoNate.Web.Services.Datasets.Files.IDatasetFileParser,
+    AutoNate.Web.Services.Datasets.Files.CsvFileParser>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Datasets.Files.IDatasetFileParser,
+    AutoNate.Web.Services.Datasets.Files.RawFileParser>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Datasets.Files.DatasetFileParserRegistry>();
+builder.Services.AddScoped<AutoNate.Web.Services.Datasets.Files.DatasetFileScopeReader>();
 builder.Services.AddScoped<AutoNate.Web.Services.Datasets.Cached.ICachedDatasetMaterializer,
     AutoNate.Web.Services.Datasets.Cached.CachedDatasetMaterializer>();
 // One-minute polling scheduler that drives cron-based cached-dataset

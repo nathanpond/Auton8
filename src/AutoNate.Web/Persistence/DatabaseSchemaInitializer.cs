@@ -1363,7 +1363,13 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configChatbotSettings', 'Chatbot Settings (Site Config)', 'Configure agent capabilities; applies to the next message.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configChatbotModels', 'Chatbot Models (Site Config)', 'LLM model catalogue used by external connections and the agent loop.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'dashboard', 'Dashboard', 'User-customizable dashboard with draggable, resizable widgets (data tables and charts).', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'query', 'Query', 'Run AQL queries against records, workflows, and other entities.', TRUE, NOW(), NOW())
+              (gen_random_uuid(), 'query', 'Query', 'Run AQL queries against records, workflows, and other entities.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'dataStores', 'Data Stores', 'SQL and File-type data stores: schemas, ingested tables, file uploads.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'dataConnectors', 'Data Connectors', 'REST / SMB connectors that fetch external rows for Cached datasets.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'datasets', 'Datasets', 'Queryable surfaces over data stores and connectors, referenced from AQL as FROM Dataset("name").', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'pipelines', 'Pipelines', 'DAG-style data pipelines wiring dataset sources, transformers, analyzers, and sinks.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'codeTransformers', 'Code Transformers', 'User-authored JS / Python transformers and analyzers executed in the executor sidecar.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configProjections', 'Projections (Site Config)', 'Projection-framework cache admin: pause, resume, rebuild, retention.', TRUE, NOW(), NOW())
             ON CONFLICT (key) DO NOTHING;
 
             INSERT INTO menus (id, key, name, description, is_system,
@@ -3568,12 +3574,25 @@ internal static class DatabaseSchemaInitializer
             source_kind TEXT NOT NULL,
             source_id UUID NOT NULL,
             source_table_name TEXT NULL,
+            file_scope_kind TEXT NULL,
+            file_scope_path TEXT NULL,
+            parser_kind TEXT NULL,
+            parser_options JSONB NULL,
             owner_user_id UUID NOT NULL,
             created_at_utc TIMESTAMPTZ NOT NULL,
             updated_at_utc TIMESTAMPTZ NOT NULL,
             created_by UUID NOT NULL,
             updated_by UUID NOT NULL
         );
+
+        ALTER TABLE datasets
+            ADD COLUMN IF NOT EXISTS file_scope_kind TEXT NULL;
+        ALTER TABLE datasets
+            ADD COLUMN IF NOT EXISTS file_scope_path TEXT NULL;
+        ALTER TABLE datasets
+            ADD COLUMN IF NOT EXISTS parser_kind TEXT NULL;
+        ALTER TABLE datasets
+            ADD COLUMN IF NOT EXISTS parser_options JSONB NULL;
 
         CREATE UNIQUE INDEX IF NOT EXISTS uq_datasets_name
             ON datasets (LOWER(name));

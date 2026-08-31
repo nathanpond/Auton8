@@ -3,6 +3,7 @@ using System.Security.Claims;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.DataStores.Sql;
+using AutoNate.Web.Services.Datasets.Files;
 using AutoNate.Web.Services.Query;
 using AutoNate.Web.Services.Query.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -13,11 +14,14 @@ namespace AutoNate.Web.Services.Datasets;
 // Unified executor (docs/plans/2026-05-30-data-stores-implementation.md
 // Phase 2). The same SQL builder + reader handles Virtual + datastore(SQL)
 // and Cached + any source; the difference is only which (schema, table)
-// pair the query targets. Virtual + File reads from datastore_files metadata
-// in-process; Virtual + Connector is rejected (REST/SMB use Cached only).
+// pair the query targets. Virtual + File streams rows out of the dataset's
+// scoped file or folder via DatasetFileScopeReader and applies WHERE /
+// LIMIT in process; Virtual + Connector is rejected (REST/SMB use Cached
+// only).
 public sealed class DatasetExecutor(
     IDatastoresConnectionFactory connectionFactory,
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
+    DatasetFileScopeReader fileScopeReader,
     ILogger<DatasetExecutor> log) : IDatasetExecutor
 {
     public async Task<QueryResult> ExecuteAsync(
@@ -57,7 +61,7 @@ public sealed class DatasetExecutor(
             }
             if (datastoreKind == DataStores.DataStoreKind.FileType)
             {
-                return await ExecuteFileMetadataAsync(
+                return await ExecuteFileContentAsync(
                     dataset, query, schema, hardCap, sw, cancellationToken);
             }
             throw new DatasetExecutionException(
@@ -115,7 +119,7 @@ public sealed class DatasetExecutor(
         return new QueryResult(columns, rows, rows.Count, false, sw.ElapsedMilliseconds);
     }
 
-    private async Task<QueryResult> ExecuteFileMetadataAsync(
+    private async Task<QueryResult> ExecuteFileContentAsync(
         Dataset dataset,
         AqlQuery query,
         IReadOnlyList<QueryColumn> schema,
@@ -123,32 +127,30 @@ public sealed class DatasetExecutor(
         Stopwatch sw,
         CancellationToken cancellationToken)
     {
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var files = await db.DataStoreFiles.AsNoTracking()
-            .Where(f => f.DataStoreId == dataset.SourceId && f.Filename != ".keep")
-            .ToListAsync(cancellationToken);
-
-        IEnumerable<IReadOnlyDictionary<string, object?>> rows = files
-            .Select(f => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["Id"] = f.Id,
-                ["FolderPath"] = f.FolderPath,
-                ["Filename"] = f.Filename,
-                ["SizeBytes"] = f.SizeBytes,
-                ["ContentType"] = f.ContentType,
-                ["UploadedAtUtc"] = f.UploadedAtUtc,
-            });
-        if (query.Where is not null)
-        {
-            rows = rows.Where(r => InMemoryWhere.Match(r, query.Where));
-        }
-        var materialized = rows.ToList();
+        // DatasetFileScopeReader yields one row dict per parsed CSV row
+        // across the dataset's scoped file (or every file in its scoped
+        // folder, in folder order). We apply WHERE / LIMIT in-process here
+        // — pushing a predicate into the parser would force CSV-shaped
+        // SQL semantics on the parser registry, and the cost is bounded by
+        // the dataset's locked schema anyway.
         var limit = query.Limit ?? hardCap;
-        if (limit is { } l && materialized.Count > l)
+        var materialized = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var row in fileScopeReader.ReadRowsAsync(dataset, cancellationToken))
         {
-            materialized = materialized.Take(l).ToList();
+            if (query.Where is not null && !InMemoryWhere.Match(row, query.Where))
+            {
+                continue;
+            }
+            materialized.Add(row);
+            if (limit is { } l && materialized.Count >= l)
+            {
+                break;
+            }
         }
         var columns = schema.Select(c => new QueryColumnMeta(c.Name, c.DataType)).ToList();
+        log.LogDebug(
+            "Dataset file content query for {Dataset} returned {Count} rows in {Elapsed}ms.",
+            dataset.Name, materialized.Count, sw.ElapsedMilliseconds);
         return new QueryResult(columns, materialized, materialized.Count, false, sw.ElapsedMilliseconds);
     }
 

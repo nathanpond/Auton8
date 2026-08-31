@@ -31,7 +31,7 @@ public sealed class ManageDatasetsSkill : IAgentSkill
         {
             new AgentTool(
                 Name: "create_dataset",
-                Description: "Create a new dataset. `mode` is 'Virtual' (passthrough query) or 'Cached' (materialized). `sourceKind` is 'datastore' or 'dataconnector'; `sourceId` is the source's GUID; `sourceTableName` is required for datastore sources. `columns` is the locked schema: [{name, postgresType}]. `refreshCron` is optional (5-field cron, Cached only). Confirm-gated.",
+                Description: "Create a new dataset. `mode` is 'Virtual' (passthrough query) or 'Cached' (materialized). `sourceKind` is 'datastore' or 'dataconnector'; `sourceId` is the source's GUID. For SqlType datastores, `sourceTableName` is required. For FileType datastores, set `fileScopeKind` ('file' or 'folder') + `fileScopePath` (POSIX-style path) + `parserKind` ('csv' for tabular CSV, 'raw' to expose each file's UTF-8 text as a single `content` column row) instead, and optionally `parserOptions` (CSV: {\"delimiter\":\",\",\"hasHeader\":\"true\"}; raw takes no options). `columns` is the locked schema: [{name, postgresType}]. `refreshCron` is optional (5-field cron, Cached only). Confirm-gated.",
                 JsonSchema: ParseSchema("""
                     {
                       "type": "object",
@@ -42,6 +42,13 @@ public sealed class ManageDatasetsSkill : IAgentSkill
                         "sourceKind": { "type": "string", "enum": ["datastore", "dataconnector"] },
                         "sourceId": { "type": "string" },
                         "sourceTableName": { "type": ["string", "null"] },
+                        "fileScopeKind": { "type": ["string", "null"], "enum": ["file", "folder", null] },
+                        "fileScopePath": { "type": ["string", "null"], "description": "POSIX-style path. For fileScopeKind=file, full path including filename (e.g. /raw/data.csv). For folder, leading-slash folder path (e.g. /raw)." },
+                        "parserKind": { "type": ["string", "null"], "enum": ["csv", "raw", null] },
+                        "parserOptions": {
+                          "type": ["object", "null"],
+                          "additionalProperties": { "type": "string" }
+                        },
                         "refreshCron": { "type": ["string", "null"] },
                         "columns": {
                           "type": "array",
@@ -135,9 +142,15 @@ public sealed class ManageDatasetsSkill : IAgentSkill
         if (!TryReadGuid(args, "sourceId", out var sourceId))
             return ConfirmGate.Rejected(action, "sourceId is required and must be a GUID.");
         var sourceTableName = ReadString(args, "sourceTableName");
-        if (string.Equals(sourceKind, "datastore", StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrWhiteSpace(sourceTableName))
-            return ConfirmGate.Rejected(action, "sourceTableName is required for datastore sources.");
+        var fileScopeKind = ReadString(args, "fileScopeKind");
+        var fileScopePath = ReadString(args, "fileScopePath");
+        var parserKind = ReadString(args, "parserKind");
+        string? parserOptionsJson = null;
+        if (args.TryGetProperty("parserOptions", out var parserOptionsEl)
+            && parserOptionsEl.ValueKind == JsonValueKind.Object)
+        {
+            parserOptionsJson = parserOptionsEl.GetRawText();
+        }
         var refreshCron = ReadString(args, "refreshCron");
         var description = ReadString(args, "description");
 
@@ -162,17 +175,23 @@ public sealed class ManageDatasetsSkill : IAgentSkill
         if (!decision.IsAllowed)
             return ConfirmGate.Rejected(action, "Dataset:Create permission required.");
 
-        // Validate the source resolves to a real datastore + table + column set
-        // BEFORE proposing. Without this an LLM is free to fabricate sourceId,
-        // sourceTableName, and column names — the row writes, the dataset
-        // appears to exist, and every downstream AQL query fails opaquely
-        // (which is exactly what happened with the first Weather Temperatures
-        // dataset). dataconnector sources are validated elsewhere; only
-        // 'datastore' source_kind is checked here.
+        // Validate the source resolves to a real datastore + table/file +
+        // column set BEFORE proposing. Without this an LLM is free to
+        // fabricate sourceId / sourceTableName / file scope / column names —
+        // the row writes, the dataset appears to exist, and every downstream
+        // AQL query fails opaquely. dataconnector sources are validated
+        // elsewhere; only 'datastore' source_kind is checked here.
         if (string.Equals(sourceKind, "datastore", StringComparison.OrdinalIgnoreCase))
         {
             var validationError = await ValidateDataStoreSourceAsync(
-                ctx, sourceId, sourceTableName!, columns, ct);
+                ctx,
+                sourceId,
+                sourceTableName,
+                fileScopeKind,
+                fileScopePath,
+                parserKind,
+                columns,
+                ct);
             if (validationError is not null)
                 return ConfirmGate.Rejected(action, validationError);
         }
@@ -185,6 +204,9 @@ public sealed class ManageDatasetsSkill : IAgentSkill
             sourceKind,
             sourceId,
             sourceTableName,
+            fileScopeKind,
+            fileScopePath,
+            parserKind,
             refreshCron,
             columnCount = columns.Count,
             columns
@@ -198,7 +220,8 @@ public sealed class ManageDatasetsSkill : IAgentSkill
             var row = await store.CreateAsync(
                 new CreateDatasetInput(
                     name.Trim(), description?.Trim(), mode, columns,
-                    sourceKind, sourceId, sourceTableName, refreshCron),
+                    sourceKind, sourceId, sourceTableName, refreshCron,
+                    fileScopeKind, fileScopePath, parserKind, parserOptionsJson),
                 ctx.Session.UserId, ct);
             return ConfirmGate.Committed("dataset_create_committed", action, new
             {
@@ -350,12 +373,16 @@ public sealed class ManageDatasetsSkill : IAgentSkill
     //      (case-insensitive). The cache materializer SELECTs by column name
     //      so any unknown column would blow up at refresh — surfacing it here
     //      means the agent sees the misnamed column at proposal time.
-    // FileType datastores skip steps 2-3 because there's no row-shaped table
-    // registered; the dataset executor handles them through its own path.
+    // FileType datastores require a file scope (single file or single
+    // folder) plus a parser kind, and the file/folder must already exist
+    // in the underlying datastore_files index.
     private static async Task<string?> ValidateDataStoreSourceAsync(
         AgentToolContext ctx,
         Guid sourceId,
-        string sourceTableName,
+        string? sourceTableName,
+        string? fileScopeKind,
+        string? fileScopePath,
+        string? parserKind,
         IReadOnlyList<DatasetColumn> declaredColumns,
         CancellationToken ct)
     {
@@ -364,8 +391,18 @@ public sealed class ManageDatasetsSkill : IAgentSkill
         if (dataStore is null)
             return $"sourceId {sourceId} does not match any datastore. Call lookup-datastores.list_datastores to find the real id.";
 
+        if (dataStore.Kind == (short)DataStoreKind.FileType)
+        {
+            return await ValidateFileScopeAsync(
+                ctx, sourceId, dataStore.Name,
+                fileScopeKind, fileScopePath, parserKind, ct);
+        }
+
         if (dataStore.Kind != (short)DataStoreKind.SqlType)
             return null;
+
+        if (string.IsNullOrWhiteSpace(sourceTableName))
+            return "sourceTableName is required for SqlType datastore sources.";
 
         var dbFactory = ctx.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -404,6 +441,79 @@ public sealed class ManageDatasetsSkill : IAgentSkill
             return $"Declared columns [{string.Join(", ", missing)}] are not in table '{sourceTableName}'. Actual columns: [{string.Join(", ", actualColumnNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}].";
 
         return null;
+    }
+
+    // Validates a FileType-backed dataset's scope. Mirrors the SqlType
+    // validator's purpose — reject anything that would only fail at
+    // refresh / query time, so the LLM sees the misnamed path or wrong
+    // parser at proposal time instead of after the dataset row exists.
+    private static async Task<string?> ValidateFileScopeAsync(
+        AgentToolContext ctx,
+        Guid datastoreId,
+        string datastoreName,
+        string? fileScopeKind,
+        string? fileScopePath,
+        string? parserKind,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(parserKind))
+            return "parserKind is required for FileType datastore sources (e.g. 'csv').";
+        var registry = ctx.Services.GetRequiredService<Datasets.Files.DatasetFileParserRegistry>();
+        try { _ = registry.Get(parserKind); }
+        catch (InvalidOperationException ex) { return ex.Message; }
+
+        if (string.IsNullOrWhiteSpace(fileScopeKind))
+            return "fileScopeKind is required for FileType datastore sources ('file' or 'folder').";
+        if (string.IsNullOrWhiteSpace(fileScopePath))
+            return "fileScopePath is required for FileType datastore sources.";
+
+        var dbFactory = ctx.Services.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+
+        if (string.Equals(fileScopeKind, "file", StringComparison.OrdinalIgnoreCase))
+        {
+            var (folder, filename) = SplitFilePath(fileScopePath!);
+#pragma warning disable CA1304, CA1311
+            var fileExists = await db.DataStoreFiles.AsNoTracking().AnyAsync(
+                f => f.DataStoreId == datastoreId
+                     && f.FolderPath == folder
+                     && f.Filename.ToLower() == filename.ToLower(),
+                ct);
+#pragma warning restore CA1304, CA1311
+            if (!fileExists)
+                return $"File '{fileScopePath}' was not found in datastore '{datastoreName}'.";
+            return null;
+        }
+        if (string.Equals(fileScopeKind, "folder", StringComparison.OrdinalIgnoreCase))
+        {
+            var folder = NormalizeFolder(fileScopePath!);
+            var anyFiles = await db.DataStoreFiles.AsNoTracking().AnyAsync(
+                f => f.DataStoreId == datastoreId
+                     && f.FolderPath == folder
+                     && f.Filename != ".keep",
+                ct);
+            if (!anyFiles)
+                return $"Folder '{fileScopePath}' in datastore '{datastoreName}' is empty or does not exist.";
+            return null;
+        }
+        return $"fileScopeKind '{fileScopeKind}' is not recognized; expected 'file' or 'folder'.";
+    }
+
+    private static (string Folder, string Filename) SplitFilePath(string path)
+    {
+        var normalized = path.StartsWith('/') ? path : "/" + path;
+        var lastSlash = normalized.LastIndexOf('/');
+        var folder = lastSlash == 0 ? "/" : normalized[..lastSlash];
+        var filename = normalized[(lastSlash + 1)..];
+        return (folder, filename);
+    }
+
+    private static string NormalizeFolder(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return "/";
+        var v = folder.StartsWith('/') ? folder : "/" + folder;
+        if (v.Length > 1 && v.EndsWith('/')) v = v[..^1];
+        return v;
     }
 
     private static bool TryReadGuid(JsonElement args, string name, out Guid id)

@@ -27,12 +27,14 @@ import {
   NativeSelect,
   NumberInput,
   Paper,
+  Select,
   Stack,
   Switch,
   Text,
   Textarea,
   TextInput,
-  Title
+  Title,
+  Tooltip
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
@@ -51,6 +53,7 @@ import {
 } from "@/api/transformers";
 import { getAnalyzerSchema, listAnalyzers } from "@/api/analyzers";
 import { listCodeTransformers } from "@/api/codeTransformers";
+import { listDatasets } from "@/api/datasets";
 import CronExpressionBuilder from "@/components/CronExpressionBuilder";
 
 // Per-node form data shape stored in `node.data`. The graph round-trip
@@ -296,6 +299,17 @@ function PipelineEditorInner() {
     queryFn: ({ signal }) => listCodeTransformers(signal)
   });
 
+  // Populates the dataset-source / dataset-sink Autocomplete. Both runners
+  // resolve `node.key` via IDatasetStore.GetByNameAsync — typos surface as
+  // a run-time "dataset X does not exist" instead of a save-time error, so
+  // the dropdown is the only place the author gets an authoritative list.
+  // Sink is filtered to Cached datasets (mode === 2) because DatasetSinkRunner
+  // rejects Virtual targets at run time.
+  const datasetsQuery = useQuery({
+    queryKey: ["datasets", "list"],
+    queryFn: ({ signal }) => listDatasets(signal)
+  });
+
   const [nodes, setNodes, onNodesChange] = useNodesState<PipelineFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -424,6 +438,42 @@ function PipelineEditorInner() {
     staleTime: 5 * 60 * 1000
   });
 
+  // Save-time dataset reference validation. PipelineGraphValidator on the
+  // server only checks structure (cycles, dangling edges, unknown kinds);
+  // missing/invalid dataset names blow up at run time inside
+  // DatasetSourceRunner / DatasetSinkRunner. Catch them here so the author
+  // can't save a graph that's guaranteed to fail. While the dataset list
+  // is loading we skip validation (treat as "pending") rather than blocking
+  // save on a transient null.
+  const datasetErrors = useMemo(() => {
+    if (!datasetsQuery.isSuccess) return [] as { nodeId: string; message: string }[];
+    const sourceNames = new Set(datasetsQuery.data.map((d) => d.name));
+    const sinkNames = new Set(
+      datasetsQuery.data.filter((d) => d.mode === 2).map((d) => d.name)
+    );
+    const errs: { nodeId: string; message: string }[] = [];
+    for (const n of nodes) {
+      if (n.data.kind === "dataset-source") {
+        if (n.data.key === "")
+          errs.push({ nodeId: n.id, message: `Node ${n.id}: dataset source has no dataset selected.` });
+        else if (!sourceNames.has(n.data.key))
+          errs.push({
+            nodeId: n.id,
+            message: `Node ${n.id}: dataset "${n.data.key}" does not exist.`
+          });
+      } else if (n.data.kind === "dataset-sink") {
+        if (n.data.key === "")
+          errs.push({ nodeId: n.id, message: `Node ${n.id}: dataset sink has no dataset selected.` });
+        else if (!sinkNames.has(n.data.key))
+          errs.push({
+            nodeId: n.id,
+            message: `Node ${n.id}: "${n.data.key}" is not an existing Cached dataset.`
+          });
+      }
+    }
+    return errs;
+  }, [nodes, datasetsQuery.isSuccess, datasetsQuery.data]);
+
   function updateSelectedNode(updater: (data: PipelineNodeData) => PipelineNodeData) {
     if (!selectedNodeId) return;
     setNodes((ns) =>
@@ -474,21 +524,39 @@ function PipelineEditorInner() {
           >
             Run history
           </Button>
-          <Button
-            variant="default"
-            loading={updateMutation.isPending}
-            onClick={() => updateMutation.mutate()}
+          <Tooltip
+            label={datasetErrors.map((e) => e.message).join("\n")}
+            multiline
+            w={320}
+            disabled={datasetErrors.length === 0}
+            withinPortal
           >
-            Save
-          </Button>
-          <Button
-            color="green"
-            leftSection={<i className="fa fa-play" />}
-            loading={runMutation.isPending}
-            onClick={() => runMutation.mutate()}
+            <Button
+              variant="default"
+              loading={updateMutation.isPending}
+              onClick={() => updateMutation.mutate()}
+              disabled={datasetErrors.length > 0}
+            >
+              Save
+            </Button>
+          </Tooltip>
+          <Tooltip
+            label={datasetErrors.map((e) => e.message).join("\n")}
+            multiline
+            w={320}
+            disabled={datasetErrors.length === 0}
+            withinPortal
           >
-            Run
-          </Button>
+            <Button
+              color="green"
+              leftSection={<i className="fa fa-play" />}
+              loading={runMutation.isPending}
+              onClick={() => runMutation.mutate()}
+              disabled={datasetErrors.length > 0}
+            >
+              Run
+            </Button>
+          </Tooltip>
         </Group>
       </Group>
 
@@ -614,9 +682,10 @@ function PipelineEditorInner() {
                       }))
                   ]}
                   value={selectedNode.data.key}
-                  onChange={(e) =>
-                    updateSelectedNode((d) => ({ ...d, key: e.currentTarget.value, label: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                    const v = e.currentTarget.value;
+                    updateSelectedNode((d) => ({ ...d, key: v, label: v }));
+                  }}
                 />
               ) : selectedNode.data.kind === "analyzer" ? (
                 <NativeSelect
@@ -635,18 +704,64 @@ function PipelineEditorInner() {
                       }))
                   ]}
                   value={selectedNode.data.key}
-                  onChange={(e) =>
-                    updateSelectedNode((d) => ({ ...d, key: e.currentTarget.value, label: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                    const v = e.currentTarget.value;
+                    updateSelectedNode((d) => ({ ...d, key: v, label: v }));
+                  }}
                 />
               ) : (
-                <TextInput
-                  label="Dataset name"
-                  value={selectedNode.data.key}
-                  onChange={(e) =>
-                    updateSelectedNode((d) => ({ ...d, key: e.currentTarget.value, label: e.currentTarget.value }))
-                  }
-                />
+                (() => {
+                  // dataset-sink rejects Virtual targets at run time (sink
+                  // truncate-and-reload only works on Cached). Filter the
+                  // sink dropdown so the author can't pick something the
+                  // runner will reject; for dataset-source any dataset is
+                  // valid.
+                  const isSink = selectedNode.data.kind === "dataset-sink";
+                  const validNames = (datasetsQuery.data ?? [])
+                    .filter((ds) => (isSink ? ds.mode === 2 : true))
+                    .map((ds) => ds.name);
+                  const currentKey = selectedNode.data.key;
+                  // If the pipeline was authored before this dataset got
+                  // deleted (or before the sink-must-be-Cached rule applied),
+                  // the saved key won't be in the option list. Include it
+                  // anyway so the user can SEE what's stored and flag it as
+                  // invalid via the error slot — silently blanking would
+                  // hide the breakage.
+                  const staleKey =
+                    datasetsQuery.isSuccess &&
+                    currentKey !== "" &&
+                    !validNames.includes(currentKey);
+                  const data = staleKey ? [...validNames, currentKey] : validNames;
+                  return (
+                    <Select
+                      label="Dataset"
+                      description={
+                        isSink
+                          ? "Sink target — must be an existing Cached dataset."
+                          : "Source — must reference an existing dataset."
+                      }
+                      placeholder="Type to search…"
+                      searchable
+                      nothingFoundMessage="No matching dataset"
+                      data={data}
+                      value={currentKey === "" ? null : currentKey}
+                      onChange={(v) =>
+                        updateSelectedNode((d) => ({
+                          ...d,
+                          key: v ?? "",
+                          label: v ?? ""
+                        }))
+                      }
+                      error={
+                        staleKey
+                          ? isSink
+                            ? `"${currentKey}" is not an existing Cached dataset.`
+                            : `Dataset "${currentKey}" does not exist.`
+                          : null
+                      }
+                    />
+                  );
+                })()
               )}
               {/*
                 Audit fix #7 — kind-specific form when /api/transformers/

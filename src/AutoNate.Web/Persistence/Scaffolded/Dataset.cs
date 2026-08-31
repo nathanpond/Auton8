@@ -38,8 +38,28 @@ public partial class Dataset
     public Guid SourceId { get; set; }
 
     // For datastore sources, names the table within the per-datastore schema
-    // (`ds_<datastoreid>.<TableName>`). NULL for connector sources.
+    // (`ds_<datastoreid>.<TableName>`). NULL for connector sources and for
+    // FileType datastores (file scope is carried by the file_scope_* /
+    // parser_* columns below).
     public string? SourceTableName { get; set; }
+
+    // Files-datastore scope. Required when SourceKind="datastore" and the
+    // datastore's Kind is FileType; NULL otherwise. "file" → FileScopePath
+    // is the full file path (folder + filename); "folder" → FileScopePath
+    // is a folder path and every immediate-child file participates as one
+    // row stream (strict schema match, .keep excluded).
+    public string? FileScopeKind { get; set; }
+
+    public string? FileScopePath { get; set; }
+
+    // Content parser. "csv" today; registry-based so other formats can be
+    // added without changing the executor.
+    public string? ParserKind { get; set; }
+
+    // Flat string→string options consumed by the parser (CSV: delimiter,
+    // encoding, hasHeader). JSON-encoded so a parser can grow its option
+    // surface without a schema migration.
+    public string? ParserOptionsJson { get; set; }
 
     public Guid OwnerUserId { get; set; }
 
