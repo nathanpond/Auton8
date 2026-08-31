@@ -128,6 +128,14 @@ public sealed class PluginRuntime
 
             PluginAssemblyLoadContext alc = new(entryFull);
             ScopedHookRegistrar? scoped = null;
+            // The ALC is collectible and pins the plugin assembly (and keeps the
+            // .dll memory-mapped) until it is unloaded. Only the success path
+            // hands it to LoadedPlugin; every early return and the catch used to
+            // drop the reference without unloading, so each failed Enable — and
+            // PluginEnableFailureDetector actively prompts the admin to retry —
+            // leaked one for the process lifetime and blocked re-uploading a
+            // fixed build over the same folder (#70).
+            var retained = false;
             try
             {
                 var assembly = alc.LoadFromAssemblyPath(entryFull);
@@ -250,6 +258,7 @@ public sealed class PluginRuntime
 
                 var loaded = new LoadedPlugin(row.Id, instance.Name, instance.Version, alc, scoped, instance);
                 _loaded[row.Id] = loaded;
+                retained = true;
 
                 _log.LogInformation("Loaded plugin {Id} ({Name} v{Version}).", row.Id, instance.Name, instance.Version);
                 return new(true, null);
@@ -259,6 +268,24 @@ public sealed class PluginRuntime
                 scoped?.RemoveAllForPlugin();
                 _log.LogError(ex, "Failed to enable plugin {Id} ({EntryAssembly}).", row.Id, row.EntryAssembly);
                 return new(false, ex.Message);
+            }
+            finally
+            {
+                if (!retained)
+                {
+                    try
+                    {
+                        alc.Unload();
+                    }
+                    catch (Exception unloadEx)
+                    {
+                        // Never mask the original failure with a teardown one —
+                        // the caller is already being told why Enable failed.
+                        _log.LogWarning(unloadEx,
+                            "Failed to unload the assembly load context for plugin {Id} after a failed enable.",
+                            row.Id);
+                    }
+                }
             }
         }
         finally

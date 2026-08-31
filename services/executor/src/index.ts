@@ -28,8 +28,30 @@ async function main(): Promise<void> {
   // request does not pay the ~0.8 s cold start (#58).
   prewarmPython();
 
-  const nc: NatsConnection = await connect({ servers: NATS_URL });
+  // nats.js defaults to maxReconnectAttempts: 10, so a NATS restart that takes
+  // longer than ~10x2s closes the connection for good: the subscription
+  // iterator completes normally, main() resolves, and the process either exits
+  // 0 or idles with an empty loop while every code-node pipeline fails with the
+  // generic 30 s timeout. -1 means keep trying, which is the right posture for
+  // a sidecar whose only job is to serve that subject (#69).
+  const nc: NatsConnection = await connect({
+    servers: NATS_URL,
+    maxReconnectAttempts: -1,
+    reconnectTimeWait: 2_000,
+  });
   console.log(`[executor] Connected to NATS at ${NATS_URL}, subscribing to ${SUBJECT}.`);
+
+  // If the connection does close despite that, say so and exit non-zero so the
+  // compose restart policy brings us back, rather than lingering as a healthy
+  // looking process with no subscription.
+  void nc.closed().then((err) => {
+    if (err) {
+      console.error("[executor] NATS connection closed with error:", err);
+    } else {
+      console.error("[executor] NATS connection closed unexpectedly.");
+    }
+    process.exit(1);
+  });
 
   const stop = async () => {
     await nc.drain().catch(() => undefined);
@@ -94,7 +116,27 @@ function fail(message: string): CodeNodeReply {
   return { success: false, errorMessage: message, output: null };
 }
 
-main().catch((err) => {
-  console.error("[executor] Fatal:", err);
+// A rejected promise nobody awaited used to take the default action for the
+// Node version rather than being reported; the same for a synchronous throw
+// off the event loop. Both mean this sidecar is no longer serving, so make
+// them loud and let the restart policy handle it (#69).
+process.on("unhandledRejection", (reason) => {
+  console.error("[executor] Unhandled rejection:", reason);
   process.exit(1);
 });
+process.on("uncaughtException", (err) => {
+  console.error("[executor] Uncaught exception:", err);
+  process.exit(1);
+});
+
+main()
+  .then(() => {
+    // main() resolving means the subscription iterator ended — there is no
+    // healthy path where that happens while the process should keep running.
+    console.error("[executor] Subscription loop ended; exiting so the supervisor restarts us.");
+    process.exit(1);
+  })
+  .catch((err) => {
+    console.error("[executor] Fatal:", err);
+    process.exit(1);
+  });
