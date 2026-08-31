@@ -176,7 +176,6 @@ Options classes bind via `builder.Services.AddOptions<T>().BindConfiguration(T.S
 | `Agent:MaxIterations` 25 / `ToolTimeoutSeconds` 30 / `DefaultMaxTokens` 4096 | chatbot loop bounds | `Services/Agent/Loop/AgentOptions.cs` |
 | `SystemIssues:DetectorsEnabled` / `RemediationEnabled` / `Remediation*` and `SystemIssues:Detectors:<Name>:*` | self-healing platform | `Services/SystemIssues/SystemIssueOptions.cs`, `Detectors/*.cs` |
 | `ContentVersioning:SessionGapMinutes` 30 | version coalescing | `Services/Content/ContentVersioningOptions.cs` |
-| `Features:ScopedSubscriptions:Enabled` | declared in `Services/BusWatcher/Subscriptions/ScopedSubscriptionsOptions.cs` but not read anywhere else — `/ws/bus-watcher` always dispatches to `SubscriptionManager` (`Program.cs:1253`) | dead flag |
 | `Logging:LogLevel:*` | dev demotes `DaprAuditEventPublisher`, `BusWatcher`, `DaprStreamingSubscriber`, EF command/connection, `System.Net.Http.HttpClient` to Warning; dev console formatter is multi-line | `appsettings*.json` |
 
 ## 11. Environment variables
