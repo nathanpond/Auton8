@@ -359,28 +359,9 @@ public static class PageAttachmentEndpoints
     // Content-Disposition: attachment when embedded via <iframe>, <object>,
     // <embed>, or <img> (SVG). On download these are forced to
     // application/octet-stream.
-    private static readonly HashSet<string> DangerousResponseContentTypes =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "text/html",
-            "application/xhtml+xml",
-            "image/svg+xml",
-            "application/javascript",
-            "text/javascript",
-            "application/ecmascript",
-            "text/ecmascript",
-            "application/xml",
-            "text/xml"
-        };
-
-    private static string SanitizeResponseContentType(string? contentType)
-    {
-        if (string.IsNullOrWhiteSpace(contentType)) return "application/octet-stream";
-        var trimmed = contentType.Trim();
-        return DangerousResponseContentTypes.Contains(trimmed)
-            ? "application/octet-stream"
-            : trimmed;
-    }
+    // Shared with the datastore download so the two cannot drift (#65).
+    private static string SanitizeResponseContentType(string? contentType) =>
+        ResponseContentTypes.Sanitize(contentType);
 
     private static string SanitizeFileName(string raw)
     {

@@ -432,9 +432,13 @@ public sealed class DataStoresAdminTests : E2ETestBase
         // path is wired and the failure UX renders. Empty rows would
         // also be acceptable (yellow Alert with "0 rows"), so we match
         // any of the three completion states.
+        // .First because the error state now matches twice: the alert title
+        // ("Connector returned an error") and the body, which since #68 reads
+        // "Preview failed. Reference <id>…" instead of echoing the raw
+        // exception text. Any one of them showing is the assertion.
         await Assertions.Expect(
             previewModal.GetByText(new System.Text.RegularExpressions.Regex(
-                "Connector returned an error|Preview failed|0 rows")))
+                "Connector returned an error|Preview failed|0 rows")).First)
             .ToBeVisibleAsync(new() { Timeout = 30_000 });
     }
 

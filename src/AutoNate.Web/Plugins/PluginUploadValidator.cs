@@ -34,6 +34,12 @@ public static class PluginUploadValidator
                         $"Zip entry '{entry.FullName}' has an unsafe path.");
                 }
 
+                // entry.Length is the central-directory size field, which the
+                // uploader controls independently of the deflate stream — a
+                // crafted archive can declare tiny entries and still expand to
+                // gigabytes. So this is only a cheap early rejection of the
+                // honest oversize case; the real cap is enforced on the bytes
+                // actually written, by PluginZipExtractor (#63).
                 total += entry.Length;
                 if (total > maxUncompressedBytes)
                 {

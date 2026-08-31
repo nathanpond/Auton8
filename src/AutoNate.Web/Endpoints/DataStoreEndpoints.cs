@@ -268,11 +268,16 @@ public static class DataStoreEndpoints
                 return Results.BadRequest(new { reason = ex.Message });
             }
         }).RequirePermission(EntityKinds.DataStore, Actions.Edit)
+          // Datastore files are the one surface that legitimately accepts a
+          // very large body, so the raised ceiling lives here rather than
+          // globally (#67). Program.cs keeps the global limit modest.
+          .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(1_073_741_824))
           .DisableAntiforgery();
 
         group.MapGet("/{id:guid}/files/{fileId:guid}", async (
             Guid id,
             Guid fileId,
+            HttpContext http,
             IFileDataStoreService files,
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
@@ -301,9 +306,16 @@ public static class DataStoreEndpoints
                         contentType = metadata.ContentType
                     },
                     ct);
+                // The stored ContentType is whatever the uploader put in the
+                // multipart header. Content-Disposition: attachment stops
+                // inline rendering today, but same-origin text/html or
+                // image/svg+xml bytes are one refactor away from stored XSS,
+                // so downgrade the executable types and tell the browser not
+                // to sniff — the same treatment page attachments get (#65).
+                http.Response.Headers["X-Content-Type-Options"] = "nosniff";
                 return Results.File(
                     content,
-                    contentType: metadata.ContentType ?? "application/octet-stream",
+                    contentType: ResponseContentTypes.Sanitize(metadata.ContentType),
                     fileDownloadName: metadata.Filename);
             }
             catch (FileDataStoreFileNotFoundException)
@@ -758,13 +770,17 @@ public static class DataStoreEndpoints
             }
             catch (PostgresException ex)
             {
+                // ex.MessageText is Postgres' own error detail — table and
+                // column names, constraint text, sometimes values. Keep it in
+                // the log and give the caller a correlation id instead (#68).
+                var errorId = Guid.NewGuid().ToString("N")[..12];
                 var logger = loggerFactory.CreateLogger("AutoNate.Web.Endpoints.DataStoreEndpoints");
                 logger.LogWarning(ex,
-                    "Datastore table preview failed for {Schema}.{Table} (SqlState {SqlState}).",
-                    row.SchemaName, row.TableName, ex.SqlState);
+                    "Datastore table preview failed for {Schema}.{Table} (SqlState {SqlState}). ErrorId {ErrorId}.",
+                    row.SchemaName, row.TableName, ex.SqlState, errorId);
                 return Results.Problem(
                     title: "Preview failed",
-                    detail: $"Postgres {ex.SqlState}: {ex.MessageText}",
+                    detail: $"Preview failed. Reference {errorId} in the server log for details.",
                     statusCode: StatusCodes.Status502BadGateway);
             }
         }).RequirePermission(EntityKinds.DataStore, Actions.View);

@@ -938,12 +938,19 @@ builder.Services.AddScoped<IPluginManagementService, PluginManagementService>();
 builder.Services.AddHostedService<PluginHostedService>();
 builder.Services.AddHostedService<AutoNate.Web.Plugins.PluginScheduledJobsHostedService>();
 builder.Services.AddHttpClient(); // DaprApplicationEventPublisher needs IHttpClientFactory
+// Global request-body ceiling. This is deliberately modest: JSON routes need
+// kilobytes and the plugin upload route caps itself at Plugins:MaxUploadBytes
+// (50 MB by default), so a 1 GiB global limit removed the cheapest defence
+// against a body that expands in managed memory downstream (#67). Routes that
+// genuinely accept large uploads — datastore files — raise it per route with
+// RequestSizeLimit / IHttpMaxRequestBodySizeFeature.
+const long GlobalMaxRequestBodyBytes = 64L * 1024 * 1024;
 builder.Services.Configure<FormOptions>(o =>
 {
     // Kestrel's MaxRequestBodySize is the outer gate; keep multipart in sync.
-    o.MultipartBodyLengthLimit = 1_073_741_824;
+    o.MultipartBodyLengthLimit = GlobalMaxRequestBodyBytes;
 });
-builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 1_073_741_824);
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = GlobalMaxRequestBodyBytes);
 builder.Services.AddScoped<IRecordTypeStore, EfCoreRecordTypeStore>();
 builder.Services.AddScoped<IRecordStore, EfCoreRecordStore>();
 builder.Services.AddScoped<IRecordHistoryStore, EfCoreRecordHistoryStore>();

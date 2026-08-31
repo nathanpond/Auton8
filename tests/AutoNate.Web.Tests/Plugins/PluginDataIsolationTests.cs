@@ -49,22 +49,41 @@ public sealed class PluginDataIsolationTests
                 Assert.Equal(1, count);
             }
 
-            // Plugin A reads public successfully (plg_readers grants SELECT on
-            // every public table; the plugins table itself is a useful probe).
+            // Plugin A reads public successfully. This used to probe
+            // public.plugins, which is now revoked from plg_readers because it
+            // holds every plugin's role_password_encrypted (#62) — so the probe
+            // moved to an ordinary app table.
             await using (var conn = dataA.CreateConnection())
             {
                 await conn.OpenAsync();
-                _ = await ScalarAsync<long>(conn, "SELECT COUNT(*) FROM public.plugins;");
+                _ = await ScalarAsync<long>(conn, "SELECT COUNT(*) FROM public.pages;");
             }
 
-            // Plugin A cannot write to public — no INSERT grant.
+            // ...but not the tables holding credentials. A plugin that could
+            // read these could lift password hashes, provider secrets, or the
+            // role password of every other plugin (#62).
+            foreach (var forbidden in new[]
+                     { "local_users", "plugins", "saved_query_share_tokens" })
+            {
+                await using var conn = dataA.CreateConnection();
+                await conn.OpenAsync();
+                var ex = await Assert.ThrowsAsync<PostgresException>(async () =>
+                    await ScalarAsync<long>(conn, $"SELECT COUNT(*) FROM public.{forbidden};"));
+                Assert.Equal("42501", ex.SqlState); // insufficient_privilege
+            }
+
+            // Plugin A cannot write to public — no INSERT grant. Probes a
+            // table it can still read, so the failure is specifically about
+            // writing rather than about the #62 revokes.
             await using (var conn = dataA.CreateConnection())
             {
                 await conn.OpenAsync();
                 var ex = await Assert.ThrowsAsync<PostgresException>(async () =>
                     await ExecAsync(conn,
-                        "INSERT INTO public.plugins (id, name, version, entry_assembly, status, uploaded_at, uploaded_by) " +
-                        "VALUES (gen_random_uuid(), 'x', '1', 'x.dll', 0, NOW(), gen_random_uuid());"));
+                        "INSERT INTO public.pages (id, notebook_id, title, body_jsonb, current_version_number, " +
+                        "sort_order, is_archived, created_at_utc, updated_at_utc, created_by, updated_by) " +
+                        "VALUES (gen_random_uuid(), gen_random_uuid(), 'x', '{}', 1, 0, FALSE, NOW(), NOW(), " +
+                        "gen_random_uuid(), gen_random_uuid());"));
                 Assert.Equal("42501", ex.SqlState); // insufficient_privilege
             }
 
