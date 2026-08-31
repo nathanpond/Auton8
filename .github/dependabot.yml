@@ -33,9 +33,17 @@ updates:
   - package-ecosystem: docker
     directory: /services/hocuspocus      # node:<major>-alpine base image (Node LTS policy: see .nvmrc)
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # Node majors are taken deliberately when the next line enters LTS
+      # (24 now; 26 in Oct 2026) — see .n8/decisions.md 2026-08-31.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directory: /services/executor
     schedule: { interval: weekly, day: monday }
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
