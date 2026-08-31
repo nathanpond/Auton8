@@ -90,19 +90,11 @@ public sealed class NatsStreamProvisioner(
         {
             MaxAge = StreamMaxAge
         },
-        // Phase 6 of the Data Stores plan — user-authored transformer /
-        // analyzer code-node execution. The host's JetStreamCodeNodeRunner
-        // publishes one message per node invocation on
-        // `pipeline-code-run.<runId>.<nodeId>`; the `services/executor/`
-        // sidecar subscribes via a durable consumer named `executor` and
-        // replies via NATS reply subject. Ephemeral: 24h retention.
-        new StreamConfig(name: "pipeline-code-runs", subjects: new[]
-        {
-            "pipeline-code-run.>"
-        })
-        {
-            MaxAge = TimeSpan.FromHours(24)
-        }
+        // NOTE: `pipeline-code-run.>` (code-node execution) is deliberately NOT
+        // a stream. It is core request/reply between JetStreamCodeNodeRunner and
+        // the services/executor queue subscriber; capturing it in a stream made
+        // JetStream answer every request with a PubAck before the sidecar could
+        // reply (#141). See LegacyStreamsToRemove.
     ];
 
     // Streams that previous versions of the app provisioned but no longer
@@ -112,7 +104,9 @@ public sealed class NatsStreamProvisioner(
     // an entry here for one release.
     private static readonly string[] LegacyStreamsToRemove =
     [
-        "autonate-records"
+        "autonate-records",
+        // Captured `pipeline-code-run.>` and shadowed executor replies (#141).
+        "pipeline-code-runs"
     ];
 
     public async Task EnsureStreamsAsync(CancellationToken cancellationToken = default)
