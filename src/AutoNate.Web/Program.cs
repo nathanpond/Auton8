@@ -1569,6 +1569,13 @@ if (Directory.Exists(app.Environment.WebRootPath))
     // case above. GET (the only verb a browser will cache) is the one that
     // matters here.
     app.MapFallbackToFile("{*path:nonfile:regex(^(?!api(/|$)))}", "index.html");
+    // The catch-all above never matches the site root: for "/" the `path`
+    // parameter is absent, and RegexRouteConstraint (like most constraints)
+    // returns false for a missing value. Without this explicit root fallback
+    // GET / is a bare 404 while /home and every deep link serve the shell —
+    // which is exactly how the E2E suite broke (SignInAsync starts at "/").
+    // Regression guard: SpaRootFallbackTests. Refs #132.
+    app.MapFallbackToFile("/", "index.html");
 }
 
 app.Run();

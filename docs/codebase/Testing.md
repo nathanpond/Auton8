@@ -74,9 +74,13 @@ Environment overrides:
 ```bash
 make e2e                                  # infra-ensure + build + Playwright chromium install + dotnet test --no-build
 # or
-make infra-ensure && dotnet build tests/AutoNate.E2E.Tests && dotnet test tests/AutoNate.E2E.Tests
+make infra-ensure && make e2e-install && dotnet build tests/AutoNate.E2E.Tests && dotnet test tests/AutoNate.E2E.Tests
 PWDEBUG=1 dotnet test tests/AutoNate.E2E.Tests   # headed browser
 ```
+
+Always run `make e2e-install` (or `pwsh tests/AutoNate.E2E.Tests/bin/Debug/net10.0/playwright.ps1 install chromium`) before a bare `dotnet test`: `Microsoft.Playwright` pins an exact browser build (1.50.0 → `chromium_headless_shell-1155`), and a cache populated by `@playwright/mcp` or `playwright-cli` has newer builds only — the symptom is every test failing instantly with `Executable doesn't exist at …/chromium_headless_shell-1155/…`.
+
+The fixture (`AutoNateE2EFixture.StartAppAsync`) probes `GET /` after `Now listening` and throws with the app's stdout/stderr tail if the SPA shell (`<div id="root">`) isn't served — so a host-side regression surfaces as one clear fixture error, not N identical 30 s sign-in timeouts (#132). The host-side guard for the same thing is `tests/AutoNate.Web.Tests/SpaRootFallbackTests.cs`.
 
 (`Makefile:91-100`, `tests/AutoNate.E2E.Tests/README.md` "Running".) First run rebuilds the SPA into `wwwroot/` (30–60 s). Do not run two E2E invocations concurrently — both target the `AutoNate_E2E` database.
 
