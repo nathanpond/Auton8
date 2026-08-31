@@ -45,9 +45,8 @@ public sealed class NotificationsTests : E2ETestBase
             Assert.True(shareResponse.Ok, await shareResponse.TextAsync());
         }
 
-        await using var limitedContext = await Fixture.NewContextAsync();
-        var page = await limitedContext.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, user.Username, "Password123!");
+        await using var session = await NewSignedInAsAsync(user.Username, "Password123!");
+        var page = session.Page;
         await page.GotoAsync("/notifications");
         await Assertions.Expect(page.GetByText(pageTitle).First)
             .ToBeVisibleAsync(new() { Timeout = 15_000 });

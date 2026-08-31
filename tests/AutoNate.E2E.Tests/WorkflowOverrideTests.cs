@@ -1,3 +1,4 @@
+using AutoNate.E2E.Tests.Support;
 using Microsoft.Playwright;
 using Xunit;
 
@@ -11,22 +12,17 @@ namespace AutoNate.E2E.Tests;
 /// and doesn't crash on the override-aware refactor.
 /// </summary>
 [Collection(AutoNateE2ECollection.Name)]
-public sealed class WorkflowOverrideTests
+public sealed class WorkflowOverrideTests : E2ETestBase
 {
-    private readonly AutoNateE2EFixture _fixture;
-
-    public WorkflowOverrideTests(AutoNateE2EFixture fixture)
+    public WorkflowOverrideTests(AutoNateE2EFixture fixture) : base(fixture)
     {
-        _fixture = fixture;
     }
 
     [Fact]
     public async Task WorkflowExecutionsPage_RendersForSeededAdmin()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-
-        await AutoNateE2EFixture.SignInAsAdminAsync(page);
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
         await page.GotoAsync("/workflow-executions");
 
         await Assertions
@@ -58,10 +54,8 @@ public sealed class WorkflowOverrideTests
     [Fact]
     public async Task ExecutionDeepLink_RendersWithMissingId_ShowsClearError()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-
-        await AutoNateE2EFixture.SignInAsAdminAsync(page);
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
 
         // /executions/:id with a fake id: the route should resolve (proving
         // the route registration works) and ExecutionContent should render a

@@ -1,23 +1,21 @@
+using AutoNate.E2E.Tests.Support;
 using Microsoft.Playwright;
 using Xunit;
 
 namespace AutoNate.E2E.Tests;
 
 [Collection(AutoNateE2ECollection.Name)]
-public sealed class LoginTests
+public sealed class LoginTests : E2ETestBase
 {
-    private readonly AutoNateE2EFixture _fixture;
-
-    public LoginTests(AutoNateE2EFixture fixture)
+    public LoginTests(AutoNateE2EFixture fixture) : base(fixture)
     {
-        _fixture = fixture;
     }
 
     [Fact]
     public async Task SeededAdmin_CanSignIn_AndLandsOnHome()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
+        await using var session = await NewAnonymousSessionAsync();
+        var page = session.Page;
 
         await AutoNateE2EFixture.SignInAsAdminAsync(page);
 
@@ -39,8 +37,8 @@ public sealed class LoginTests
     [Fact]
     public async Task BadPassword_RedirectsToLogin_WithInlineError()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
+        await using var session = await NewAnonymousSessionAsync();
+        var page = session.Page;
 
         await AutoNateE2EFixture.SignInAsync(page, "admin", "definitely-not-the-password");
 
