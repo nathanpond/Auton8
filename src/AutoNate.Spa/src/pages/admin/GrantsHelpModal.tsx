@@ -24,7 +24,7 @@ export default function GrantsHelpModal({ onClose }: Props) {
         <Divider my="md" />
 
         <Title order={6}>1. Principal — who the grant applies to</Title>
-        <Text>The "Principal kind" + "Principal" pair is the <em>who</em>. You have three options:</Text>
+        <Text>The &quot;Principal kind&quot; + &quot;Principal&quot; pair is the <em>who</em>. You have three options:</Text>
         <ul>
           <li><strong>user</strong> — applies only to that one person.</li>
           <li>
@@ -38,8 +38,8 @@ export default function GrantsHelpModal({ onClose }: Props) {
           </li>
         </ul>
         <Text>
-          A user's effective grants are the union of everything attached to them directly, to
-          any group they belong to, and to any role they're assigned — directly or via a
+          A user&apos;s effective grants are the union of everything attached to them directly, to
+          any group they belong to, and to any role they&apos;re assigned — directly or via a
           group.
         </Text>
 
@@ -48,7 +48,7 @@ export default function GrantsHelpModal({ onClose }: Props) {
         <Title order={6}>2. Action — what they can do</Title>
         <Text>
           A free-form lowercase verb that the endpoint will compare against. Use <Code>*</Code>{" "}
-          for "any action." The vocabulary is per-entity-kind; here's what each kind currently
+          for &quot;any action.&quot; The vocabulary is per-entity-kind; here&apos;s what each kind currently
           understands:
         </Text>
         <Table withTableBorder withColumnBorders striped mt="xs">
@@ -73,7 +73,7 @@ export default function GrantsHelpModal({ onClose }: Props) {
         <Title order={6}>3. Selector — which things the action applies to</Title>
         <Text>
           A small path-like grammar that picks a set of entities. The visual builder handles
-          the common cases; you can flip to "edit raw" for anything advanced.
+          the common cases; you can flip to &quot;edit raw&quot; for anything advanced.
         </Text>
 
         <Text mb={4}><strong>Shape:</strong></Text>
@@ -91,7 +91,7 @@ export default function GrantsHelpModal({ onClose }: Props) {
         <ul>
           <li>
             <Code>[recordtype=lead]</Code> — literal value, matched by short_code or the
-            kind's defined tag column.
+            kind&apos;s defined tag column.
           </li>
           <li>
             <Code>[assignee=user]</Code> — the bare word <Code>user</Code> resolves to the
@@ -128,8 +128,8 @@ export default function GrantsHelpModal({ onClose }: Props) {
         <Text>
           Tag values that resolve to a user can be followed by another bracketed predicate to
           walk one more edge through the user-to-user graph. The outer <Code>=user</Code>{" "}
-          stops meaning "the actor" — instead it's "some user, constrained by the inner
-          predicate." The inner predicate then walks an edge from the actor to that user.
+          stops meaning &quot;the actor&quot; — instead it&apos;s &quot;some user, constrained by the inner
+          predicate.&quot; The inner predicate then walks an edge from the actor to that user.
         </Text>
         <Text mb={4}>
           Concrete example: every supervisor sees records and workflow executions attributed
@@ -155,7 +155,7 @@ export default function GrantsHelpModal({ onClose }: Props) {
             <strong>The data the inner predicate walks.</strong> For <Code>records</Code>{" "}
             (SQL-backed) the engine walks the <Code>entity_edges</Code> table directly. For{" "}
             <Code>workflowexecution</Code> and <Code>workflowtask</Code> (Flowable-backed,
-            evaluated in memory) the engine pre-loads the actor's outbound user→user edges
+            evaluated in memory) the engine pre-loads the actor&apos;s outbound user→user edges
             per request, so each new login picks up hierarchy changes immediately.
           </li>
         </ul>
@@ -167,7 +167,7 @@ export default function GrantsHelpModal({ onClose }: Props) {
             Other shapes are rejected with a clear error.
           </li>
           <li>
-            Multi-level transitive supervision (your supervisee's supervisee) isn't included
+            Multi-level transitive supervision (your supervisee&apos;s supervisee) isn&apos;t included
             — only the direct relationship counts.
           </li>
         </ul>
@@ -195,8 +195,8 @@ export default function GrantsHelpModal({ onClose }: Props) {
 
         <Title order={6}>5. Priority</Title>
         <Text>
-          An integer field that's currently informational only — the engine resolves
-          conflicts purely via the deny-wins rule above. It's stored so future tooling
+          An integer field that&apos;s currently informational only — the engine resolves
+          conflicts purely via the deny-wins rule above. It&apos;s stored so future tooling
           (sorting, override-precedence schemes) can use it without a schema change.
         </Text>
 
@@ -241,7 +241,7 @@ Effect:         deny`}</Code>
           On a record, <Code>archive</Code> hides the row from default reads but the data
           (and history, comments, edges) stays intact and can be restored.{" "}
           <Code>delete</Code> permanently removes the record and cascade-clears its
-          comments, history, edges, and watches — there's no undo. Treat them as separate
+          comments, history, edges, and watches — there&apos;s no undo. Treat them as separate
           permissions and reserve <Code>delete</Code> for trusted roles.
         </Text>
         <Code block mb="sm">{`# Editors can archive
@@ -275,8 +275,8 @@ Effect:         allow`}</Code>
           On a workflow execution, <Code>cancel</Code> halts a running process and marks it
           cancelled (history kept), while <Code>delete</Code> wipes the execution from
           Flowable entirely — both runtime and history. <Code>deleteall</Code> is the
-          bulk-wipe action behind the "Delete All Executions" button on the Workflow
-          Executions page; it isn't tied to a specific instance, so the selector must use{" "}
+          bulk-wipe action behind the &quot;Delete All Executions&quot; button on the Workflow
+          Executions page; it isn&apos;t tied to a specific instance, so the selector must use{" "}
           <Code>/workflowexecution/*</Code>. Treat them as separate permissions.
         </Text>
         <Code block mb="sm">{`# Operators can cancel any execution
@@ -302,7 +302,7 @@ Effect:         allow`}</Code>
 
         <Text mb={4}>
           <strong>Admins can move a running execution to a different BPMN step.</strong>{" "}
-          The <Code>movestate</Code> action gates the "Move Execution Here" right-click option
+          The <Code>movestate</Code> action gates the &quot;Move Execution Here&quot; right-click option
           on the workflow executions diagram. It cancels every active token on the run and
           starts a fresh token at the chosen node — process variables persist, but pending
           user/service tasks at the cancelled nodes are discarded. Keep this separate from{" "}
@@ -355,7 +355,7 @@ Effect:         allow`}</Code>
         <ul>
           <li>
             <strong>SuperAdmin bypasses everything.</strong> Members of the built-in
-            SuperAdmin role pass every check; their grants don't matter.
+            SuperAdmin role pass every check; their grants don&apos;t matter.
           </li>
           <li>
             <strong>Authorization must be enabled to enforce.</strong> When the feature flag
@@ -364,7 +364,7 @@ Effect:         allow`}</Code>
           </li>
           <li>
             <strong>Cache invalidation is automatic.</strong> Adding or revoking a grant
-            bumps the auth cache version, so the change is visible on the caller's next
+            bumps the auth cache version, so the change is visible on the caller&apos;s next
             request.
           </li>
           <li>
@@ -375,8 +375,8 @@ Effect:         allow`}</Code>
           <li>
             <strong>Debug a real decision.</strong> The <Code>Effective Permissions</Code>{" "}
             page replays the evaluator for any user, action, and target — it shows the final
-            allow/deny and which grants matched (or didn't), so you can answer "why does
-            Alice get a 403?" without guessing.
+            allow/deny and which grants matched (or didn&apos;t), so you can answer &quot;why does
+            Alice get a 403?&quot; without guessing.
           </li>
         </ul>
       </Box>

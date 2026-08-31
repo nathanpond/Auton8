@@ -23,17 +23,34 @@ internal sealed class NatsConnectionProvider(IOptions<NatsOptions> options) : IN
 
     public async Task<INatsConnection> GetAsync(CancellationToken cancellationToken = default)
     {
-        if (_connection is not null) return _connection;
+        // Volatile so the fast path can't observe a partially-published
+        // NatsConnection written by another thread inside the gate (#78);
+        // AgentModelCatalog.GetOrLoad uses the same shape.
+        var existing = Volatile.Read(ref _connection);
+        if (IsUsable(existing)) return existing!;
+
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            if (_connection is null)
+            existing = Volatile.Read(ref _connection);
+            if (IsUsable(existing)) return existing!;
+
+            // A connection that has terminally closed is worse than none: it
+            // is reused for every subsequent code-node run until the process
+            // restarts. Drop it and reconnect instead.
+            if (existing is not null)
             {
-                var conn = new NatsConnection(new NatsOpts { Url = _options.Url ?? string.Empty });
-                await conn.ConnectAsync();
-                _connection = conn;
+                try { await existing.DisposeAsync(); } catch { /* already broken */ }
+                Volatile.Write(ref _connection, null);
             }
-            return _connection;
+
+            var conn = new NatsConnection(new NatsOpts { Url = _options.Url ?? string.Empty });
+            // NatsConnection.ConnectAsync takes no CancellationToken in this
+            // NATS.Net version, so honour the caller's token around it rather
+            // than letting a hung connect ignore it entirely (#78).
+            await conn.ConnectAsync().AsTask().WaitAsync(cancellationToken);
+            Volatile.Write(ref _connection, conn);
+            return conn;
         }
         finally
         {
@@ -41,12 +58,16 @@ internal sealed class NatsConnectionProvider(IOptions<NatsOptions> options) : IN
         }
     }
 
+    private static bool IsUsable(NatsConnection? connection) =>
+        connection is not null && connection.ConnectionState != NatsConnectionState.Closed;
+
     public async ValueTask DisposeAsync()
     {
-        if (_connection is not null)
+        var connection = Volatile.Read(ref _connection);
+        if (connection is not null)
         {
-            await _connection.DisposeAsync();
-            _connection = null;
+            await connection.DisposeAsync();
+            Volatile.Write(ref _connection, null);
         }
         _gate.Dispose();
     }

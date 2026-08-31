@@ -278,9 +278,12 @@ public sealed class SubscriptionManager
         }
         catch (OperationCanceledException)
         {
+            // Shutdown or client disconnect — the finally block below does the
+            // deregistration, so there is nothing to handle here.
         }
         catch (WebSocketException)
         {
+            // The peer vanished mid-frame. Same teardown path as a clean close.
         }
         finally
         {

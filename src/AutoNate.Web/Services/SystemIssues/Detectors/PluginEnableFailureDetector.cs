@@ -49,7 +49,7 @@ public sealed class PluginEnableFailureDetector(
 
     // Public so tests can drive a single message without spinning up the
     // subscription. Mirrors RunOnceAsync on the periodic detectors.
-    public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
+    public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message, CancellationToken cancellationToken = default)
     {
         if (!string.Equals(message.Topic, DaprApplicationEventPublisher.TopicName, StringComparison.Ordinal))
         {
@@ -95,7 +95,7 @@ public sealed class PluginEnableFailureDetector(
                     pluginId,
                     pluginName,
                     errorMessage
-                })));
+                })), cancellationToken);
         }
         catch (JsonException ex)
         {

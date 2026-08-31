@@ -117,7 +117,7 @@ public sealed class StuckWorkflowExecutionDetector(
                     lastActivityAtUtc = execution.LastActivityAtUtc,
                     currentStep = execution.CurrentStep,
                     staleAfterMinutes = (int)_stuckOptions.StaleAfter.TotalMinutes
-                })));
+                })), cancellationToken);
         }
 
         // Auto-resolve: query the DB for every issue we currently own

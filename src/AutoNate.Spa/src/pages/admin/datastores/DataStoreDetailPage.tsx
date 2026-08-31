@@ -299,7 +299,7 @@ function SqlPanel({ storeId }: { storeId: string }) {
             <Text fw={500}>CSV ingest</Text>
             <Text size="sm" c="dimmed">
               Drop a CSV; AutoNate infers a Postgres column schema from a sample of rows,
-              you confirm the table name and types, and the rows land in this datastore's
+              you confirm the table name and types, and the rows land in this datastore&apos;s
               per-store schema in <code>autonate_datastores</code>.
             </Text>
           </Box>
@@ -751,7 +751,7 @@ function ConflictView({
               {willBreakBindings ? (
                 <Text size="xs" c="red">
                   Schema change + bound datasets → AQL queries against these datasets may fail
-                  or return unexpected results until each dataset's column list is updated.
+                  or return unexpected results until each dataset&apos;s column list is updated.
                 </Text>
               ) : (
                 <Text size="xs" c="dimmed">

@@ -245,7 +245,7 @@ export function ShareModal({ pageId, pageTitle, onClose }: Props) {
 
         {!isOwner && deniedCount > 0 && (
           <Alert color="yellow" variant="light">
-            {deniedCount === 1 ? "1 user" : `${deniedCount} users`} can't view
+            {deniedCount === 1 ? "1 user" : `${deniedCount} users`} can&apos;t view
             this page yet. Only a project owner can grant access — they will
             not receive a share notification.
           </Alert>

@@ -60,7 +60,7 @@ public sealed class SubscriptionConnection : IAsyncDisposable
     {
         if (!_shutdown.IsCancellationRequested)
         {
-            try { _shutdown.Cancel(); } catch (ObjectDisposedException) { }
+            try { _shutdown.Cancel(); } catch (ObjectDisposedException) { /* already disposed by a concurrent teardown */ }
         }
         _outbound.Writer.TryComplete();
     }
@@ -90,9 +90,11 @@ public sealed class SubscriptionConnection : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // Shutdown or client disconnect; finally does the teardown.
         }
         catch (WebSocketException)
         {
+            // Peer vanished mid-frame; same teardown path.
         }
         finally
         {
@@ -117,9 +119,11 @@ public sealed class SubscriptionConnection : IAsyncDisposable
             }
             catch (WebSocketException)
             {
+                // Socket already gone — nothing left to send on.
             }
             catch (OperationCanceledException)
             {
+                // Shutdown raced the send; dropping the frame is correct.
             }
         }
 

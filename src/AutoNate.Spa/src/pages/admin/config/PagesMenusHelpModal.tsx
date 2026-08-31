@@ -42,7 +42,7 @@ export default function PagesMenusHelpModal({ onClose }: Props) {
             Each top-level item is an icon; <Code>group</Code> items open a dropdown.
           </li>
           <li>
-            <strong>User Menu</strong> — the dropdown that opens beside the signed-in user's
+            <strong>User Menu</strong> — the dropdown that opens beside the signed-in user&apos;s
             name.
           </li>
           <li>
@@ -56,7 +56,7 @@ export default function PagesMenusHelpModal({ onClose }: Props) {
           </li>
         </ul>
         <Text>
-          The five system menus can't be deleted (the lock icon on their tab marks them), but
+          The five system menus can&apos;t be deleted (the lock icon on their tab marks them), but
           their <em>contents</em> are fully editable — you can add, remove, reorder, and
           retype anything inside.
         </Text>
@@ -114,8 +114,8 @@ export default function PagesMenusHelpModal({ onClose }: Props) {
         <Text>
           Each item has an optional <Code>permission_required</Code> in <Code>kind.action</Code>{" "}
           form (e.g. <Code>siteconfig.edit</Code>). When set, the item is hidden from any
-          user who doesn't have that permission. The check is performed by the backend when
-          serving the menu tree — so an admin removing a user's access can hide entire
+          user who doesn&apos;t have that permission. The check is performed by the backend when
+          serving the menu tree — so an admin removing a user&apos;s access can hide entire
           sections of the nav for that user without touching this page.
         </Text>
 
@@ -215,7 +215,7 @@ export default function PagesMenusHelpModal({ onClose }: Props) {
           </li>
           <li>
             <strong>Hidden items</strong> (the eye/visibility flag) stay in the tree but
-            don't render for users — handy for prepping a menu before going live with it.
+            don&apos;t render for users — handy for prepping a menu before going live with it.
           </li>
         </ul>
       </Box>

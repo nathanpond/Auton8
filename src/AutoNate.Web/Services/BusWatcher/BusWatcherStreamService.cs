@@ -20,20 +20,28 @@ public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> log
     public const string TopicName = "workflow.execution.events";
 
     private readonly ILogger<BusWatcherStreamService> _logger = logger;
-    private readonly ConcurrentDictionary<Guid, Func<BusWatcherMessage, Task>> _messageSubscribers = new();
+    // The token is part of the delegate so PublishAsync can forward it. Before
+    // #76 the signature had nowhere to put it, so a subscriber could not be
+    // cancelled even though Dapr's MessageHandlingPolicy gives the whole
+    // dispatch a 30 s budget and redelivers past it.
+    private readonly ConcurrentDictionary<Guid, Func<BusWatcherMessage, CancellationToken, Task>> _messageSubscribers = new();
 
     public async Task PublishAsync(BusWatcherMessage message, CancellationToken cancellationToken)
     {
-        _logger.LogInformation(
+        // Debug, not Information: this is per-message on a hot path (#76).
+        _logger.LogDebug(
             "BusWatcher publishing message for topic {Topic} to {SubscriberCount} in-process subscribers.",
             message.Topic,
             _messageSubscribers.Count);
 
+        // Still serial. Subscribers were written against serial delivery, so
+        // making the fan-out concurrent is a behaviour change rather than a
+        // fix; forwarding the token at least lets a slow one be cut off.
         foreach (var subscriber in _messageSubscribers.Values)
         {
             try
             {
-                await subscriber(message);
+                await subscriber(message, cancellationToken);
             }
             catch (Exception exception)
             {
@@ -42,7 +50,7 @@ public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> log
         }
     }
 
-    public IDisposable Subscribe(Func<BusWatcherMessage, Task> handler)
+    public IDisposable Subscribe(Func<BusWatcherMessage, CancellationToken, Task> handler)
     {
         var subscriptionId = Guid.NewGuid();
         _messageSubscribers[subscriptionId] = handler;
@@ -84,7 +92,7 @@ public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> log
         string Payload);
 
     private sealed class BusWatcherSubscription(
-        ConcurrentDictionary<Guid, Func<BusWatcherMessage, Task>> subscribers,
+        ConcurrentDictionary<Guid, Func<BusWatcherMessage, CancellationToken, Task>> subscribers,
         Guid subscriptionId,
         ILogger<BusWatcherStreamService> logger) : IDisposable
     {

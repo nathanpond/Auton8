@@ -47,7 +47,7 @@ public sealed class AuthChangeListener : IDisposable
         _subscription = bus.Subscribe(HandleAsync);
     }
 
-    private async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
+    private async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message, CancellationToken cancellationToken = default)
     {
         if (!IsAuthMutation(message)) return;
         try

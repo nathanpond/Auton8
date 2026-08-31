@@ -7,10 +7,15 @@ import { AgentSidebarProvider } from "@/agent/AgentSidebarContext";
 import { PageContextRegistryProvider } from "@/agent/pageContext/PageContextRegistry";
 import { UserPreferencesProvider } from "@/preferences/UserPreferencesContext";
 import PreferencesModal from "@/preferences/PreferencesModal";
+import { useSiteAppearance } from "@/providers/SiteAppearanceProvider";
+import { useRouteDocumentTitle } from "@/hooks/useRouteDocumentTitle";
 import "./shell.css";
 
 export default function AppShell() {
   const isScrollable = usePageIsScrollable();
+  // One place that keeps document.title in step with the route (#18).
+  const { effectiveAppearance } = useSiteAppearance();
+  useRouteDocumentTitle(effectiveAppearance.siteName);
   return (
     <UserPreferencesProvider>
       <PageContextRegistryProvider>
