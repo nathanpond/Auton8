@@ -10,6 +10,6 @@
     "bpmn-js-create-append-anything": "^1.2.0"
   },
   "devDependencies": {
-    "esbuild": "^0.28.0"
+    "esbuild": "^0.28.2"
   }
 }
