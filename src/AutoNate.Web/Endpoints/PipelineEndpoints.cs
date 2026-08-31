@@ -164,7 +164,13 @@ public static class PipelineEndpoints
                     new { reason = $"Run is already {run.Status}; nothing to cancel." }),
                 _ => Results.NoContent(),
             };
-        }).RequirePermission(EntityKinds.Pipeline, Actions.Run)
+        // Cancel, not Run: an admin granting pipeline:cancel to an on-call
+        // operator expects them to be able to stop a run without also being
+        // able to start one. This was gated on Run, so the advertised grant
+        // 403'd and the only way to cancel was the grant that also starts
+        // runs (#24). Deployments that relied on run-implies-cancel need the
+        // cancel grant added.
+        }).RequirePermission(EntityKinds.Pipeline, Actions.Cancel)
           .DisableAntiforgery();
 
         // Audit fix #10 — retry a Failed or Cancelled run. Enqueues a new

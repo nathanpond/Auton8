@@ -339,9 +339,6 @@ builder.Services.AddSingleton<ISelectorCompiler>(_ =>
 builder.Services.AddSingleton<ISelectorCompiler>(_ =>
     new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.Pipeline>(
         EntityKinds.Pipeline, p => p.Id));
-builder.Services.AddSingleton<ISelectorCompiler>(_ =>
-    new PathOnlySelectorCompiler<AutoNate.Web.Persistence.Scaffolded.PipelineRun>(
-        EntityKinds.PipelineRun, r => r.Id));
 builder.Services.AddSingleton<ISelectorCompilerRegistry, SelectorCompilerRegistry>();
 
 builder.Services.AddScoped<IInstanceAuthorizer, RecordInstanceAuthorizer>();

@@ -108,7 +108,7 @@ public sealed class AdminOperationsTests : E2ETestBase
         await Assertions.Expect(row).Not.ToBeVisibleAsync(new() { Timeout = 20_000 });
     }
 
-    [Fact(Skip = "Blocked: appearance Save changes accepts edits, but reloading restores the default Site name instead of the saved value.")]
+    [Fact(Skip = "Blocked by #172: appearance Save accepts edits, but reloading restores the default Site name instead of the saved value. This spec is that issue's acceptance test — un-skip it when #172 is fixed.")]
     public async Task Appearance_SiteNamePersistsAcrossReload()
     {
         await using var session = await NewSignedInAsAdminAsync();
