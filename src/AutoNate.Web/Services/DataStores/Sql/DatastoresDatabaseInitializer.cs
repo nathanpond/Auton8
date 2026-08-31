@@ -99,10 +99,19 @@ public sealed class DatastoresDatabaseInitializer(
         // existing role gets its password kept in sync with what AutoNate
         // expects (otherwise a rotated config would leave the SqlDataStore
         // provisioner unable to GRANT into schemas it owns).
+        //
+        // Roles are cluster-wide, so two hosts starting at once (the test
+        // suite boots many in parallel against one Postgres) both hit the
+        // same pg_authid tuple and the loser dies with "XX000: tuple
+        // concurrently updated". Serialize on a transaction-scoped advisory
+        // lock keyed by the role name; it releases with the commit, and
+        // hosts on other databases in the same cluster share the lock
+        // space, which is exactly what we want here.
         var quotedRole = QuoteIdentifier(role);
         var literalPassword = QuoteLiteral(password);
         var sql =
             $$"""
+            SELECT pg_advisory_xact_lock(hashtext('autonate:writer-role'), hashtext({{QuoteLiteral(role)}}));
             DO $$
             BEGIN
                 CREATE ROLE {{quotedRole}} LOGIN PASSWORD {{literalPassword}};
@@ -110,8 +119,12 @@ public sealed class DatastoresDatabaseInitializer(
                 ALTER ROLE {{quotedRole}} WITH LOGIN PASSWORD {{literalPassword}};
             END $$;
             """;
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+        await using var tx = await conn.BeginTransactionAsync(cancellationToken);
+        await using (var cmd = new NpgsqlCommand(sql, conn, tx))
+        {
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await tx.CommitAsync(cancellationToken);
         log.LogDebug("Ensured datastores writer role '{Role}'.", role);
     }
 

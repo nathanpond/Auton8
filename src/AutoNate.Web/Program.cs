@@ -1532,19 +1532,43 @@ if (Directory.Exists(app.Environment.WebRootPath))
     // attaches ETag/Last-Modified — lets the browser heuristically cache
     // the HTML body against that exact (path,query) pair. Subsequent
     // requests then keep returning the cached HTML even after the real
-    // endpoint ships. Register a more-specific fallback for /api/{**rest}
-    // first; ASP.NET Core resolves the most-specific fallback template,
-    // so the catch-all SPA fallback below only runs for non-/api paths.
-    app.MapFallback("/api/{**rest}", (HttpContext http) =>
+    // endpoint ships.
+    //
+    // Two pieces, deliberately NOT a MapFallback("/api/{**rest}") route:
+    //   1. The SPA catch-all below carries a regex constraint that refuses
+    //      any path starting with "api/", so an unknown /api path matches
+    //      no endpoint at all.
+    //   2. This middleware turns "no endpoint under /api" into an
+    //      uncacheable 404.
+    // A route endpoint would instead become a *candidate* in endpoint
+    // selection, and AcceptsMatcherPolicy then prefers it over a real
+    // endpoint whose JSON body contract the request doesn't satisfy — a
+    // body-less POST to /api/system-issues/{id}/resolve (a legal call) got
+    // 404 instead of reaching its handler. It would also need an
+    // auth-decision marker to pass AuthorizationGatePresenceTests.
+    app.Use(async (http, next) =>
     {
-        http.Response.Headers.CacheControl = "no-store";
-        return Results.NotFound();
-    }).ExcludeFromDescription();
+        if (http.Request.Path.StartsWithSegments("/api") && http.GetEndpoint() is null)
+        {
+            http.Response.Headers.CacheControl = "no-store";
+            http.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+        await next(http);
+    });
 
     // React SPA is the only UI now and is mounted at the site root. Any URL that isn't a
-    // physical file or an explicitly-mapped endpoint falls back to the SPA index so
-    // react-router can pick it up client-side.
-    app.MapFallbackToFile("{*path:nonfile}", "index.html");
+    // physical file, an explicitly-mapped endpoint, or under /api falls back to the SPA
+    // index so react-router can pick it up client-side.
+    //
+    // Known wrinkle: MapFallbackToFile is GET/HEAD-only, and HTTP-method
+    // matching is decided in the routing DFA *before* route constraints
+    // run, so a non-GET to an unknown /api path answers 405 rather than
+    // 404. Don't "fix" that by making the fallback verb-agnostic — then it
+    // becomes a body-less-POST candidate again and re-breaks the resolve
+    // case above. GET (the only verb a browser will cache) is the one that
+    // matters here.
+    app.MapFallbackToFile("{*path:nonfile:regex(^(?!api(/|$)))}", "index.html");
 }
 
 app.Run();
