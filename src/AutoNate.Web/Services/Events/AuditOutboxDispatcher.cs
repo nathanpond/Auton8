@@ -44,6 +44,10 @@ public sealed class AuditOutboxDispatcher(
     IOptions<AuditOutboxOptions> outboxOptions,
     ILogger<AuditOutboxDispatcher> logger) : BackgroundService
 {
+    // Named so the timeout below is attached to *this* caller rather than to
+    // the shared unnamed client every other consumer also resolves (#71).
+    public const string HttpClientName = "audit-outbox";
+
     private readonly DaprOptions _daprOptions = daprOptions.Value;
     private readonly AuditOutboxOptions _outboxOptions = outboxOptions.Value;
 
@@ -167,7 +171,7 @@ public sealed class AuditOutboxDispatcher(
         {
             using var content = new ByteArrayContent(Encoding.UTF8.GetBytes(payloadJson));
             content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            var httpClient = httpClientFactory.CreateClient();
+            var httpClient = httpClientFactory.CreateClient(HttpClientName);
             using var response = await httpClient.PostAsync(publishUri, content, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
