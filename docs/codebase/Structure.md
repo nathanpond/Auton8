@@ -141,7 +141,7 @@ Config at project root: `vite.config.ts` (`@` → `src/`, dev proxy for `/api /a
 | Path | Contents | Rule |
 |---|---|---|
 | `services/hocuspocus/` | `src/{index,auth,persistence,webhook,materializers,noteEmbedStub}.ts`, `Dockerfile`, `README.md`; env `HOCUSPOCUS_PORT=1234`, `YJS_INTERNAL_SHARED_SECRET`, `AUTONATE_WEB_URL`, Postgres | New collaborative doc prefix → `materializers.ts:283-305` switch + host `YjsEndpoints.cs` ticket mapping; fragment name must match the SPA hook. |
-| `services/executor/` | `src/{index,jsRunner,pythonRunner,wire}.ts`; NATS `pipeline-code-run.>` core queue subscriber (queue group `executor`) `executor`; `isolated-vm` (js) / `pyodide` (python) | Wire format is `Pipelines/Execution/CodeNodeWireFormat.cs` on the host — change both. |
+| `services/executor/` | `src/{index,jsRunner,pythonRunner,pythonWorker,pythonProtocol,wire}.ts` + `test/*.test.mjs` (`npm test`); NATS `pipeline-code-run.>` core queue subscriber (queue group `executor`) `executor`; `isolated-vm` (js) / `pyodide` (python) | Wire format is `Pipelines/Execution/CodeNodeWireFormat.cs` on the host — change both. |
 
 ---
 
