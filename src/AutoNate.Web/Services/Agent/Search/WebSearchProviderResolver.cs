@@ -13,13 +13,16 @@ public sealed class WebSearchProviderResolver : IWebSearchProviderResolver
 
     private readonly IExternalConnectionStore _store;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly AutoNate.Web.Services.ExternalConnections.IProviderBaseUrlPolicy _baseUrlPolicy;
 
     public WebSearchProviderResolver(
         IExternalConnectionStore store,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        AutoNate.Web.Services.ExternalConnections.IProviderBaseUrlPolicy baseUrlPolicy)
     {
         _store = store;
         _httpClientFactory = httpClientFactory;
+        _baseUrlPolicy = baseUrlPolicy;
     }
 
     public async Task<IWebSearchProvider?> ResolveAsync(Guid connectionId, CancellationToken cancellationToken = default)
@@ -45,13 +48,17 @@ public sealed class WebSearchProviderResolver : IWebSearchProviderResolver
     {
         if (!revealed.Kind.StartsWith(KindPrefix, StringComparison.Ordinal)) return null;
 
+        // Allowlisted at the boundary: the Tavily key rides on every search
+        // request built from this base URL (#61).
         var baseUrl = TryReadString(revealed.Metadata, "baseUrl");
 
         return revealed.Kind switch
         {
             KindTavily => new TavilyWebSearchProvider(
                 _httpClientFactory.CreateClient("agent.websearch"),
-                new TavilyProviderOptions(revealed.Secret, baseUrl)),
+                new TavilyProviderOptions(
+                    revealed.Secret,
+                    _baseUrlPolicy.Resolve(revealed.Kind, baseUrl, "https://api.tavily.com").ToString())),
             _ => null
         };
     }
