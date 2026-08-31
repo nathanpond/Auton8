@@ -18,7 +18,7 @@ export function useRouteDocumentTitle(siteName: string): void {
   const { pathname } = useLocation();
 
   useEffect(() => {
-    const title = findRouteTitle(pathname);
+    const title = findRouteTitle(pathname) ?? titleFromPath(pathname);
     document.title = title ? `${title} · ${siteName}` : siteName;
   }, [pathname, siteName]);
 }
@@ -42,4 +42,34 @@ function findRouteTitle(pathname: string): string | null {
 function flatten(routes: AppRoute[]): AppRoute[] {
   return routes.flatMap((route) =>
     route.children ? [route, ...flatten(route.children)] : [route]);
+}
+
+// Most of the app is served by DynamicPageRoute from the page registry, and
+// PageRegistryEntry carries only { id, path, contentType } — no title. Rather
+// than leave every one of those reading the bare site name (the whole point of
+// #18), derive a title from the last meaningful path segment.
+//
+// The menu item for the path would give a nicer, operator-authored label, but
+// the menu is not loaded in the shell and threading it here would couple title
+// rendering to menu fetch state. Deriving from the URL is deterministic and
+// never blank; a page that wants better can call useDocumentTitle.
+function titleFromPath(pathname: string): string | null {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 0) return null;
+
+  // Trailing ids/guids/numbers say nothing to a reader — back up to the last
+  // word-ish segment (…/records/42 reads better as "Records").
+  const meaningful = [...segments].reverse().find((segment) => /[a-z]/i.test(segment) && !isIdLike(segment));
+  if (!meaningful) return null;
+
+  return meaningful
+    .split("-")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function isIdLike(segment: string): boolean {
+  return /^[0-9]+$/.test(segment)
+    || /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(segment);
 }
