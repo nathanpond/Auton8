@@ -935,6 +935,16 @@ builder.Services.AddScoped<IPluginManagementService, PluginManagementService>();
 builder.Services.AddHostedService<PluginHostedService>();
 builder.Services.AddHostedService<AutoNate.Web.Plugins.PluginScheduledJobsHostedService>();
 builder.Services.AddHttpClient(); // DaprApplicationEventPublisher needs IHttpClientFactory
+// The audit outbox publishes to the Dapr sidecar from inside an open Postgres
+// transaction holding FOR UPDATE locks on the batch. On the unnamed client's
+// 100 s default, a sidecar that accepts TCP but stalls could hold that
+// transaction open for hours across a 100-row batch — idle in transaction,
+// autovacuum's xmin horizon pinned database-wide (#71). Five seconds is far
+// beyond a healthy local publish and bounds the whole batch to ~8 minutes
+// worst case.
+builder.Services.AddHttpClient(
+    AutoNate.Web.Services.Events.AuditOutboxDispatcher.HttpClientName,
+    c => c.Timeout = TimeSpan.FromSeconds(5));
 // Global request-body ceiling. This is deliberately modest: JSON routes need
 // kilobytes and the plugin upload route caps itself at Plugins:MaxUploadBytes
 // (50 MB by default), so a 1 GiB global limit removed the cheapest defence
