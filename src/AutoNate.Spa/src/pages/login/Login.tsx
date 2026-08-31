@@ -109,7 +109,10 @@ export default function Login() {
             zIndex: 3
           }}
         >
-          <Alert color="red" variant="filled" radius="md">
+          {/* role="alert" so a failed sign-in is announced. Without it the
+              user is left on a form that appears to have done nothing —
+              the error renders silently (WCAG 3.3.1 / 4.1.3, #17). */}
+          <Alert color="red" variant="filled" radius="md" role="alert">
             {error === "locked"
               ? "This account is locked after too many failed sign-in attempts. Contact an administrator to unlock it."
               : "Invalid username or password."}
@@ -145,18 +148,21 @@ export default function Login() {
 
         <form onSubmit={form.onSubmit(onSubmit)}>
           <Stack gap="sm">
+            {/* No autoFocus on either field: it drops a screen-reader user
+                mid-form, past the brand and heading that say which site they
+                are signing in to, and it is the whole of jsx-a11y's
+                no-autofocus warning here. The form is two fields — Tab
+                reaches them immediately (#17). */}
             <TextInput
               label="Username"
               placeholder="Username"
               autoComplete="username"
-              autoFocus={prefilledUsername.length === 0}
               {...form.getInputProps("username")}
             />
             <PasswordInput
               label="Password"
               placeholder="Password"
               autoComplete="current-password"
-              autoFocus={prefilledUsername.length > 0}
               {...form.getInputProps("password")}
             />
             <Button

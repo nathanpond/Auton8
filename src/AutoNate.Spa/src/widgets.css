@@ -96,6 +96,10 @@
    highlight (which Mantine sets on the <tr>) still wins; cells dim their
    text but actions inside (e.g. "Restore") render in their own color. */
 .row-archived td {
+    /* Dimming alone was the only archived cue, which is colour-as-sole-meaning
+       (WCAG 1.4.1, #16). The <ArchivedBadge> in the row's primary cell carries
+       the actual meaning now — in text, so a screen reader gets it too — and
+       this stays as the supporting visual. */
     color: var(--mantine-color-dimmed);
 }
 
