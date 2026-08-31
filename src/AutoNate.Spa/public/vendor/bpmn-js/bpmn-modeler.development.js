@@ -3904,14 +3904,14 @@ var __AutoNateBpmnJS__ = (() => {
     props.defineDescriptor(ModdleElement, descriptor);
     return ModdleElement;
   };
-  var BUILTINS = {
+  var BUILTINS = assign(/* @__PURE__ */ Object.create(null), {
     String: true,
     Boolean: true,
     Integer: true,
     Real: true,
     Element: true
-  };
-  var TYPE_CONVERTERS = {
+  });
+  var TYPE_CONVERTERS = assign(/* @__PURE__ */ Object.create(null), {
     String: function(s3) {
       return s3;
     },
@@ -3924,7 +3924,7 @@ var __AutoNateBpmnJS__ = (() => {
     Real: function(s3) {
       return parseFloat(s3);
     }
-  };
+  });
   function coerceType(type, value) {
     var converter = TYPE_CONVERTERS[type];
     if (converter) {
@@ -3961,9 +3961,9 @@ var __AutoNateBpmnJS__ = (() => {
     this.ns = nameNs;
     this.name = nameNs.name;
     this.allTypes = [];
-    this.allTypesByName = {};
+    this.allTypesByName = /* @__PURE__ */ Object.create(null);
     this.properties = [];
-    this.propertiesByName = {};
+    this.propertiesByName = /* @__PURE__ */ Object.create(null);
   }
   DescriptorBuilder.prototype.build = function() {
     return pick(this, [
@@ -4112,8 +4112,8 @@ var __AutoNateBpmnJS__ = (() => {
     typesByName[typeName] = t4;
   };
   function Registry(packages2, properties) {
-    this.packageMap = {};
-    this.typeMap = {};
+    this.packageMap = /* @__PURE__ */ Object.create(null);
+    this.typeMap = /* @__PURE__ */ Object.create(null);
     this.packages = [];
     this.properties = properties;
     forEach(packages2, bind(this.registerPackage, this));
@@ -4140,9 +4140,9 @@ var __AutoNateBpmnJS__ = (() => {
       superClass: (type.superClass || []).slice(),
       extends: (type.extends || []).slice(),
       properties: (type.properties || []).slice(),
-      meta: assign(type.meta || {})
+      meta: assign({}, type.meta || {})
     });
-    var ns2 = parseName(type.name, pkg.prefix), name2 = ns2.name, propertiesByName = {};
+    var ns2 = parseName(type.name, pkg.prefix), name2 = ns2.name, propertiesByName = /* @__PURE__ */ Object.create(null);
     forEach(type.properties, bind(function(p3) {
       var propertyNs = parseName(p3.name, ns2.prefix), propertyName = propertyNs.name;
       if (!isBuiltIn(p3.type)) {
@@ -4301,7 +4301,7 @@ var __AutoNateBpmnJS__ = (() => {
     this.properties = new Properties(this);
     this.factory = new Factory(this, this.properties);
     this.registry = new Registry(packages2, this.properties);
-    this.typeCache = {};
+    this.typeCache = /* @__PURE__ */ Object.create(null);
     this.config = config;
   }
   Moddle.prototype.create = function(descriptor, attrs) {
@@ -4430,17 +4430,18 @@ var __AutoNateBpmnJS__ = (() => {
     };
   }
   function cloneNsMatrix(nsMatrix) {
-    var clone2 = {}, key;
+    var clone2 = /* @__PURE__ */ Object.create(null), key;
     for (key in nsMatrix) {
       clone2[key] = nsMatrix[key];
     }
     return clone2;
   }
+  var NAME_CACHE = /* @__PURE__ */ Symbol("nameCache");
   function uriPrefix(prefix2) {
     return prefix2 + "$uri";
   }
   function buildNsMatrix(nsUriToPrefix) {
-    var nsMatrix = {}, uri2, prefix2;
+    var nsMatrix = /* @__PURE__ */ Object.create(null), uri2, prefix2;
     for (uri2 in nsUriToPrefix) {
       prefix2 = nsUriToPrefix[uri2];
       nsMatrix[prefix2] = prefix2;
@@ -4461,10 +4462,14 @@ var __AutoNateBpmnJS__ = (() => {
     var proxy = options && options["proxy"];
     var onText, onOpenTag, onCloseTag, onCDATA, onError = throwFunc, onWarning, onComment, onQuestion, onAttention;
     var getContext = noopGetContext;
+    var streaming = false;
+    var rootTagFound = false;
+    var leftoverXml = "";
     var maybeNS = false;
     var isNamespace = false;
     var returnError = null;
     var parseStop = false;
+    var nsMatrixStack, nsMatrix, nodeStack;
     var nsUriToPrefix;
     function handleError(err) {
       if (!(err instanceof Error)) {
@@ -4528,7 +4533,7 @@ var __AutoNateBpmnJS__ = (() => {
       if (typeof nsMap !== "object") {
         throw error("required args <nsMap={}>");
       }
-      var _nsUriToPrefix = {}, k3;
+      var _nsUriToPrefix = /* @__PURE__ */ Object.create(null), k3;
       for (k3 in nsMap) {
         _nsUriToPrefix[k3] = nsMap[k3];
       }
@@ -4536,12 +4541,51 @@ var __AutoNateBpmnJS__ = (() => {
       nsUriToPrefix = _nsUriToPrefix;
       return this;
     };
+    function resetState() {
+      nsMatrixStack = isNamespace ? [] : null;
+      nsMatrix = isNamespace ? buildNsMatrix(nsUriToPrefix) : null;
+      nodeStack = [];
+      getContext = noopGetContext;
+      parseStop = false;
+      returnError = null;
+      rootTagFound = false;
+      leftoverXml = "";
+    }
     this["parse"] = function(xml2) {
       if (typeof xml2 !== "string") {
         throw error("required args <xml=string>");
       }
-      returnError = null;
+      if (streaming) {
+        throw error("parse during stream; call end() first");
+      }
+      resetState();
       parse2(xml2);
+      getContext = noopGetContext;
+      parseStop = false;
+      return returnError;
+    };
+    this["write"] = function(xml2) {
+      if (typeof xml2 !== "string") {
+        throw error("required args <xml=string>");
+      }
+      if (!streaming) {
+        resetState();
+        streaming = true;
+      }
+      if (!returnError) {
+        leftoverXml = parse2(leftoverXml + xml2, true) || "";
+      }
+      return this;
+    };
+    this["end"] = function() {
+      if (!streaming) {
+        resetState();
+      }
+      streaming = false;
+      if (!returnError) {
+        parse2(leftoverXml);
+      }
+      leftoverXml = "";
       getContext = noopGetContext;
       parseStop = false;
       return returnError;
@@ -4549,14 +4593,27 @@ var __AutoNateBpmnJS__ = (() => {
     this["stop"] = function() {
       parseStop = true;
     };
-    function parse2(xml2) {
-      var nsMatrixStack = isNamespace ? [] : null, nsMatrix = isNamespace ? buildNsMatrix(nsUriToPrefix) : null, _nsMatrix, nodeStack = [], anonymousNsCount = 0, tagStart = false, tagEnd = false, i3 = 0, j3 = 0, x3, y3, q3, w3, v3, xmlns, elementName, _elementName, elementProxy;
+    function parse2(xml2, streaming2 = false) {
+      var elNameCache = null, elNameCacheMatrix = null;
+      var _nsMatrix, anonymousNsCount = 0, tagStart = false, tagEnd = false, i3 = 0, j3 = 0, x3, y3, q3, w3, v3, xmlns, elementName, _elementName, elementProxy;
       var attrsString = "", attrsStart = 0, cachedAttrs;
+      function normalizeAttrName(name2, defaultAlias) {
+        var w4 = name2.indexOf(":");
+        if (w4 === -1) {
+          return name2;
+        }
+        var nsName2 = nsMatrix[name2.substring(0, w4)];
+        if (!nsName2) {
+          handleWarning(missingNamespaceForPrefix(name2.substring(0, w4)));
+          return null;
+        }
+        return defaultAlias === nsName2 ? name2.substr(w4 + 1) : nsName2 + name2.substr(w4);
+      }
       function getAttrs() {
         if (cachedAttrs !== null) {
           return cachedAttrs;
         }
-        var nsUri, nsUriPrefix, nsName2, defaultAlias = isNamespace && nsMatrix["xmlns"], attrList = isNamespace && maybeNS ? [] : null, i4 = attrsStart, s3 = attrsString, l3 = s3.length, hasNewMatrix, newalias, value, alias, name2, attrs = {}, seenAttrs = {}, skipAttr, w4, j4;
+        var nsUri, nsUriPrefix, defaultAlias = isNamespace && nsMatrix["xmlns"], attrList = isNamespace && maybeNS ? [] : null, i4 = attrsStart, s3 = attrsString, l3 = s3.length, hasNewMatrix, newalias, value, alias, name2, attrs = {}, seenAttrs = /* @__PURE__ */ new Set(), skipAttr, w4, j4;
         parseAttr:
           for (; i4 < l3; i4++) {
             skipAttr = false;
@@ -4645,11 +4702,11 @@ var __AutoNateBpmnJS__ = (() => {
             if (skipAttr) {
               continue parseAttr;
             }
-            if (name2 in seenAttrs) {
+            if (seenAttrs.has(name2)) {
               handleWarning("attribute <" + name2 + "> already defined");
               continue;
             }
-            seenAttrs[name2] = true;
+            seenAttrs.add(name2);
             if (!isNamespace) {
               attrs[name2] = value;
               continue;
@@ -4688,29 +4745,18 @@ var __AutoNateBpmnJS__ = (() => {
               attrList.push(name2, value);
               continue;
             }
-            w4 = name2.indexOf(":");
-            if (w4 === -1) {
-              attrs[name2] = value;
+            name2 = normalizeAttrName(name2, defaultAlias);
+            if (name2 === null) {
               continue;
             }
-            if (!(nsName2 = nsMatrix[name2.substring(0, w4)])) {
-              handleWarning(missingNamespaceForPrefix(name2.substring(0, w4)));
-              continue;
-            }
-            name2 = defaultAlias === nsName2 ? name2.substr(w4 + 1) : nsName2 + name2.substr(w4);
             attrs[name2] = value;
           }
         if (maybeNS) {
           for (i4 = 0, l3 = attrList.length; i4 < l3; i4++) {
-            name2 = attrList[i4++];
+            name2 = normalizeAttrName(attrList[i4++], defaultAlias);
             value = attrList[i4];
-            w4 = name2.indexOf(":");
-            if (w4 !== -1) {
-              if (!(nsName2 = nsMatrix[name2.substring(0, w4)])) {
-                handleWarning(missingNamespaceForPrefix(name2.substring(0, w4)));
-                continue;
-              }
-              name2 = defaultAlias === nsName2 ? name2.substr(w4 + 1) : nsName2 + name2.substr(w4);
+            if (name2 === null) {
+              continue;
             }
             attrs[name2] = value;
           }
@@ -4774,10 +4820,13 @@ var __AutoNateBpmnJS__ = (() => {
           i3 = xml2.indexOf("<", j3);
         }
         if (i3 === -1) {
+          if (streaming2) {
+            return xml2.substring(j3);
+          }
           if (nodeStack.length) {
             return handleError("unexpected end of file");
           }
-          if (j3 === 0) {
+          if (!rootTagFound) {
             return handleError("missing start tag");
           }
           if (j3 < xml2.length) {
@@ -4786,6 +4835,9 @@ var __AutoNateBpmnJS__ = (() => {
             }
           }
           return;
+        }
+        if (!rootTagFound) {
+          rootTagFound = true;
         }
         if (j3 !== i3) {
           if (nodeStack.length) {
@@ -4810,6 +4862,9 @@ var __AutoNateBpmnJS__ = (() => {
           if (q3 === 91 && xml2.substr(i3 + 3, 6) === "CDATA[") {
             j3 = xml2.indexOf("]]>", i3);
             if (j3 === -1) {
+              if (streaming2) {
+                return xml2.substring(i3);
+              }
               return handleError("unclosed cdata");
             }
             if (onCDATA) {
@@ -4824,6 +4879,9 @@ var __AutoNateBpmnJS__ = (() => {
           if (q3 === 45 && xml2.charCodeAt(i3 + 3) === 45) {
             j3 = xml2.indexOf("-->", i3);
             if (j3 === -1) {
+              if (streaming2) {
+                return xml2.substring(i3);
+              }
               return handleError("unclosed comment");
             }
             if (onComment) {
@@ -4839,6 +4897,9 @@ var __AutoNateBpmnJS__ = (() => {
         if (w3 === 63) {
           j3 = xml2.indexOf("?>", i3);
           if (j3 === -1) {
+            if (streaming2) {
+              return xml2.substring(i3);
+            }
             return handleError("unclosed question");
           }
           if (onQuestion) {
@@ -4853,6 +4914,9 @@ var __AutoNateBpmnJS__ = (() => {
         for (x3 = i3 + 1; ; x3++) {
           v3 = xml2.charCodeAt(x3);
           if (isNaN(v3)) {
+            if (streaming2) {
+              return xml2.substring(i3);
+            }
             j3 = -1;
             return handleError("unclosed tag");
           }
@@ -4941,18 +5005,31 @@ var __AutoNateBpmnJS__ = (() => {
             }
           }
           _elementName = elementName;
-          w3 = elementName.indexOf(":");
-          if (w3 !== -1) {
-            xmlns = nsMatrix[elementName.substring(0, w3)];
-            if (!xmlns) {
-              return handleError("missing namespace on <" + _elementName + ">");
+          if (elNameCacheMatrix !== nsMatrix) {
+            elNameCache = nsMatrix[NAME_CACHE];
+            if (elNameCache === void 0) {
+              elNameCache = nsMatrix[NAME_CACHE] = /* @__PURE__ */ Object.create(null);
             }
-            elementName = elementName.substr(w3 + 1);
-          } else {
-            xmlns = nsMatrix["xmlns"];
+            elNameCacheMatrix = nsMatrix;
           }
-          if (xmlns) {
-            elementName = xmlns + ":" + elementName;
+          var _cachedName = elNameCache[elementName];
+          if (_cachedName !== void 0) {
+            elementName = _cachedName;
+          } else {
+            w3 = elementName.indexOf(":");
+            if (w3 !== -1) {
+              xmlns = nsMatrix[elementName.substring(0, w3)];
+              if (!xmlns) {
+                return handleError("missing namespace on <" + _elementName + ">");
+              }
+              elementName = elementName.substr(w3 + 1);
+            } else {
+              xmlns = nsMatrix["xmlns"];
+            }
+            if (xmlns) {
+              elementName = xmlns + ":" + elementName;
+            }
+            elNameCache[_elementName] = elementName;
           }
         }
         if (tagStart) {
@@ -5525,8 +5602,27 @@ var __AutoNateBpmnJS__ = (() => {
   Namespaces.prototype.defaultUriByPrefix = function(prefix2) {
     return this.defaultPrefixMap[prefix2];
   };
+  Namespaces.prototype.resolve = function(fn) {
+    var scope = this;
+    while (scope) {
+      var resolved = fn(scope);
+      if (resolved) {
+        return resolved;
+      }
+      scope = scope.parent;
+    }
+  };
+  Namespaces.prototype.eachScope = function(fn) {
+    var scope = this;
+    while (scope) {
+      fn(scope);
+      scope = scope.parent;
+    }
+  };
   Namespaces.prototype.byUri = function(uri2) {
-    return this.uriMap[uri2] || this.parent && this.parent.byUri(uri2);
+    return this.resolve(function(scope) {
+      return scope.uriMap[uri2];
+    });
   };
   Namespaces.prototype.add = function(ns2, isWellknown) {
     this.uriMap[ns2.uri] = ns2;
@@ -5538,7 +5634,10 @@ var __AutoNateBpmnJS__ = (() => {
     this.mapPrefix(ns2.prefix, ns2.uri);
   };
   Namespaces.prototype.uriByPrefix = function(prefix2) {
-    return this.prefixMap[prefix2 || "xmlns"] || this.parent && this.parent.uriByPrefix(prefix2);
+    var key = prefix2 || "xmlns";
+    return this.resolve(function(scope) {
+      return scope.prefixMap[key];
+    });
   };
   Namespaces.prototype.mapPrefix = function(prefix2, uri2) {
     this.prefixMap[prefix2 || "xmlns"] = uri2;
@@ -5549,10 +5648,9 @@ var __AutoNateBpmnJS__ = (() => {
   Namespaces.prototype.logUsed = function(ns2) {
     var uri2 = ns2.uri;
     var nsKey = this.getNSKey(ns2);
-    this.used[nsKey] = this.byUri(uri2);
-    if (this.parent) {
-      this.parent.logUsed(ns2);
-    }
+    this.eachScope(function(scope) {
+      scope.used[nsKey] = scope.byUri(uri2);
+    });
   };
   Namespaces.prototype.getUsed = function(ns2) {
     var allNs = [].concat(this.wellknown, this.custom);
@@ -5703,14 +5801,17 @@ var __AutoNateBpmnJS__ = (() => {
     this.propertyDescriptor = propertyDescriptor;
   }
   ElementSerializer.prototype.build = function(element) {
+    buildTree(this, element);
+    return this;
+  };
+  ElementSerializer.prototype.enter = function(element) {
     this.element = element;
     var elementDescriptor = element.$descriptor, propertyDescriptor = this.propertyDescriptor;
-    var otherAttrs, properties;
     var isGeneric = elementDescriptor.isGeneric;
     if (isGeneric) {
-      otherAttrs = this.parseGenericNsAttributes(element);
+      this.otherAttrs = this.parseGenericNsAttributes(element);
     } else {
-      otherAttrs = this.parseNsAttributes(element);
+      this.otherAttrs = this.parseNsAttributes(element);
     }
     if (propertyDescriptor) {
       this.ns = this.nsPropertyTagName(propertyDescriptor);
@@ -5719,14 +5820,14 @@ var __AutoNateBpmnJS__ = (() => {
     }
     this.tagName = this.addTagName(this.ns);
     if (isGeneric) {
-      this.parseGenericContainments(element);
-    } else {
-      properties = getSerializableProperties(element);
-      this.parseAttributes(filterAttributes(properties));
-      this.parseContainments(filterContained(properties));
+      return this.collectGenericContainments(element);
     }
-    this.parseGenericAttributes(element, otherAttrs);
-    return this;
+    var properties = getSerializableProperties(element);
+    this.parseAttributes(filterAttributes(properties));
+    return this.collectContainments(filterContained(properties));
+  };
+  ElementSerializer.prototype.exit = function() {
+    this.parseGenericAttributes(this.element, this.otherAttrs);
   };
   ElementSerializer.prototype.nsTagName = function(descriptor) {
     var effectiveNs = this.logNamespaceUsed(descriptor.ns);
@@ -5764,17 +5865,28 @@ var __AutoNateBpmnJS__ = (() => {
       ([key, value]) => ({ name: key, value })
     );
   };
-  ElementSerializer.prototype.parseGenericContainments = function(element) {
-    var body = element.$body;
-    if (body) {
-      this.body.push(new BodySerializer().build({ type: "String" }, body));
-    }
-    var children = element.$children;
-    if (children) {
-      forEach(children, (child) => {
-        this.body.push(new ElementSerializer(this).build(child));
+  ElementSerializer.prototype.collectGenericContainments = function(element) {
+    var self2 = this, children = [];
+    var bodyText = element.$body;
+    if (bodyText) {
+      children.push({
+        create: function() {
+          return new BodySerializer().build({ type: "String" }, bodyText);
+        }
       });
     }
+    var genericChildren = element.$children;
+    if (genericChildren) {
+      forEach(genericChildren, function(child) {
+        children.push({
+          create: function() {
+            return new ElementSerializer(self2);
+          },
+          element: child
+        });
+      });
+    }
+    return children;
   };
   ElementSerializer.prototype.parseNsAttribute = function(element, name2, value) {
     var model = element.$model;
@@ -5825,45 +5937,59 @@ var __AutoNateBpmnJS__ = (() => {
       }
     });
   };
-  ElementSerializer.prototype.parseContainments = function(properties) {
-    var self2 = this, body = this.body, element = this.element;
+  ElementSerializer.prototype.collectContainments = function(properties) {
+    var self2 = this, element = this.element, children = [];
     forEach(properties, function(p3) {
       var value = element.get(p3.name), isReference = p3.isReference, isMany = p3.isMany;
       if (!isMany) {
         value = [value];
       }
       if (p3.isBody) {
-        body.push(new BodySerializer().build(p3, value[0]));
+        children.push({
+          create: function() {
+            return new BodySerializer().build(p3, value[0]);
+          }
+        });
       } else if (isSimple(p3.type)) {
         forEach(value, function(v3) {
-          body.push(new ValueSerializer(self2.addTagName(self2.nsPropertyTagName(p3))).build(p3, v3));
+          children.push({
+            create: function() {
+              return new ValueSerializer(self2.addTagName(self2.nsPropertyTagName(p3))).build(p3, v3);
+            }
+          });
         });
       } else if (isReference) {
         forEach(value, function(v3) {
-          body.push(new ReferenceSerializer(self2.addTagName(self2.nsPropertyTagName(p3))).build(v3));
+          children.push({
+            create: function() {
+              return new ReferenceSerializer(self2.addTagName(self2.nsPropertyTagName(p3))).build(v3);
+            }
+          });
         });
       } else {
         var serialization = getSerialization(p3);
         forEach(value, function(v3) {
-          var serializer;
-          if (serialization) {
-            if (serialization === SERIALIZE_PROPERTY) {
-              serializer = new ElementSerializer(self2, p3);
-            } else {
-              serializer = new TypeSerializer(self2, p3, serialization);
-            }
-          } else {
-            serializer = new ElementSerializer(self2);
-          }
-          body.push(serializer.build(v3));
+          children.push({
+            create: function() {
+              if (serialization) {
+                if (serialization === SERIALIZE_PROPERTY) {
+                  return new ElementSerializer(self2, p3);
+                }
+                return new TypeSerializer(self2, p3, serialization);
+              }
+              return new ElementSerializer(self2);
+            },
+            element: v3
+          });
         });
       }
     });
+    return children;
   };
   ElementSerializer.prototype.getNamespaces = function(local) {
-    var namespaces = this.namespaces, parent = this.parent, parentNamespaces;
+    var namespaces = this.namespaces;
     if (!namespaces) {
-      parentNamespaces = parent && parent.getNamespaces();
+      var parentNamespaces = this.getParentNamespaces();
       if (local || !parentNamespaces) {
         this.namespaces = namespaces = new Namespaces(parentNamespaces);
       } else {
@@ -5871,6 +5997,24 @@ var __AutoNateBpmnJS__ = (() => {
       }
     }
     return namespaces;
+  };
+  ElementSerializer.prototype.getParentNamespaces = function() {
+    if (this.parentNamespaces !== void 0) {
+      return this.parentNamespaces;
+    }
+    var scope = null, ancestor = this.parent;
+    while (ancestor) {
+      if (ancestor.namespaces) {
+        scope = ancestor.namespaces;
+        break;
+      }
+      if (ancestor.parentNamespaces !== void 0) {
+        scope = ancestor.parentNamespaces;
+        break;
+      }
+      ancestor = ancestor.parent;
+    }
+    return this.parentNamespaces = scope;
   };
   ElementSerializer.prototype.logNamespace = function(ns2, wellknown, local) {
     var namespaces = this.getNamespaces(local);
@@ -5958,24 +6102,44 @@ var __AutoNateBpmnJS__ = (() => {
     });
   };
   ElementSerializer.prototype.serializeTo = function(writer) {
-    var firstBody = this.body[0], indent = firstBody && firstBody.constructor !== BodySerializer;
-    writer.appendIndent().append("<" + this.tagName);
-    this.serializeAttributes(writer);
-    writer.append(firstBody ? ">" : " />");
-    if (firstBody) {
-      if (indent) {
-        writer.appendNewLine().indent();
+    serializeTree(this, writer);
+  };
+  function serializeTree(root, writer) {
+    var stack = [{ serializer: root, index: 0, opened: false, indent: false }];
+    while (stack.length) {
+      var frame = stack[stack.length - 1], serializer = frame.serializer;
+      if (!frame.opened) {
+        var firstBody = serializer.body[0];
+        frame.indent = firstBody && firstBody.constructor !== BodySerializer;
+        writer.appendIndent().append("<" + serializer.tagName);
+        serializer.serializeAttributes(writer);
+        writer.append(firstBody ? ">" : " />");
+        frame.opened = true;
+        if (!firstBody) {
+          writer.appendNewLine();
+          stack.pop();
+          continue;
+        }
+        if (frame.indent) {
+          writer.appendNewLine().indent();
+        }
       }
-      forEach(this.body, function(b3) {
-        b3.serializeTo(writer);
-      });
-      if (indent) {
+      if (frame.index < serializer.body.length) {
+        var child = serializer.body[frame.index++];
+        if (child instanceof ElementSerializer) {
+          stack.push({ serializer: child, index: 0, opened: false, indent: false });
+        } else {
+          child.serializeTo(writer);
+        }
+        continue;
+      }
+      if (frame.indent) {
         writer.unindent().appendIndent();
       }
-      writer.append("</" + this.tagName + ">");
+      writer.append("</" + serializer.tagName + ">").appendNewLine();
+      stack.pop();
     }
-    writer.appendNewLine();
-  };
+  }
   function TypeSerializer(parent, propertyDescriptor, serialization) {
     ElementSerializer.call(this, parent, propertyDescriptor);
     this.serialization = serialization;
@@ -6053,6 +6217,31 @@ var __AutoNateBpmnJS__ = (() => {
     return {
       toXML
     };
+  }
+  function buildTree(rootSerializer, rootElement) {
+    var stack = [{
+      serializer: rootSerializer,
+      children: rootSerializer.enter(rootElement),
+      index: 0
+    }];
+    while (stack.length) {
+      var frame = stack[stack.length - 1];
+      if (frame.index >= frame.children.length) {
+        frame.serializer.exit();
+        stack.pop();
+        continue;
+      }
+      var child = frame.children[frame.index++];
+      var childSerializer = child.create();
+      frame.serializer.body.push(childSerializer);
+      if (child.element) {
+        stack.push({
+          serializer: childSerializer,
+          children: childSerializer.enter(child.element),
+          index: 0
+        });
+      }
+    }
   }
   function getDefaultPrefixMappings(model) {
     const nsMap = model.config && model.config.nsMap || {};
@@ -19225,6 +19414,7 @@ var __AutoNateBpmnJS__ = (() => {
     attr2(visual, {
       x: -width / 2,
       y: -height / 2,
+      rx: 3,
       width,
       height
     });
@@ -35496,6 +35686,7 @@ var __AutoNateBpmnJS__ = (() => {
     attr2(visual, {
       x: -HANDLE_SIZE / 2 + offset.x,
       y: -HANDLE_SIZE / 2 + offset.y,
+      rx: 2,
       width: HANDLE_SIZE,
       height: HANDLE_SIZE
     });
