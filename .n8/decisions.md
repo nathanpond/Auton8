@@ -53,3 +53,11 @@ Ad-hoc entries (changes that deviate from what planned issues assume — differe
   **Why:** They are the agent's own notes, not source; filing them as project issues would be noise.
 - **Decision:** Labels used: `sev:*` + closest baseline (`security` / `performance` / `bug` / `documentation`) + one `area:*`; audit area travels in the fingerprint rule-id (`<!-- fingerprint: rule|path|symbol -->`), so re-runs dedupe three-way.
 - **Decision:** Added `.n8/memory/hot-paths.md` (performance inventory) and the `maven` ecosystem to `dependabot.yml` (flowable-extension was unscanned).
+
+## /n8-map — 2026-08-31
+
+- **Decision:** Map written to `docs/codebase/` (wiki opted out): Stack, Integrations, Architecture, Structure, Conventions, Testing, Concerns — each stamped `Generated from commit 01f0f174`. Freshness check: `git log 01f0f174..HEAD --stat`.
+- **Decision:** Filed all 15 concerns the owner approved (#112–#126): 4 bugs, 4 cleanup/perf, 4 doc/config drift, 3 design spikes (`spike` + `needs-triage`, no `sev:`). Each was re-verified by the orchestrator before the question was put (the rebuild-400 claim by the mapper's own throw-away xunit probe; NUL bytes by `perl`; the rest by targeted greps and reading the cited lines).
+  **Why:** The user chose to file every candidate, including design spikes, so `/n8-roadmap` sees existing debt alongside features.
+- **Decision:** Rejected the mapper's "audit outbox bypassed by default" claim (`AuditOutboxOptions.Enabled` defaults to `true`) and left two architecture-mapper observations unfiled as unverified: "EntityTypeDefinition.Actions is advisory at grant-creation time" and "add-page-context-provider's pageKey-mismatch 400 no longer exists" (`AgentSession.cs:880` still handles a page-key mismatch).
+- **Note:** Enabling Dependabot security updates + version updates produced 22 PRs (#5, #6, #94–#111) within a day, several of them majors (TypeScript 5→7, mantine-datatable 8→9) and one implausible version (`pyodide 0.26.4 → 314.0.6`) that must be checked against the npm registry before anyone merges it. Consider tightening `dependabot.yml` (ignore majors, `open-pull-requests-limit`) in M0.
