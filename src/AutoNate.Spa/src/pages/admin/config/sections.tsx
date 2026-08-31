@@ -78,15 +78,6 @@ export function SitewideChatbotSettings() {
   );
 }
 
-export function SitewideAppearance() {
-  return (
-    <Stub
-      title="Appearance"
-      blurb="Customize the look and feel: theme, branding, colors, and logos."
-    />
-  );
-}
-
 export { ExternalConnectionsPage as SitewideExternalConnections } from "./external-connections/ExternalConnectionsPage";
 
 export function SecurityManageUsers() {
