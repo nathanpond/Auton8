@@ -61,3 +61,9 @@ Ad-hoc entries (changes that deviate from what planned issues assume — differe
   **Why:** The user chose to file every candidate, including design spikes, so `/n8-roadmap` sees existing debt alongside features.
 - **Decision:** Rejected the mapper's "audit outbox bypassed by default" claim (`AuditOutboxOptions.Enabled` defaults to `true`) and left two architecture-mapper observations unfiled as unverified: "EntityTypeDefinition.Actions is advisory at grant-creation time" and "add-page-context-provider's pageKey-mismatch 400 no longer exists" (`AgentSession.cs:880` still handles a page-key mismatch).
 - **Note:** Enabling Dependabot security updates + version updates produced 22 PRs (#5, #6, #94–#111) within a day, several of them majors (TypeScript 5→7, mantine-datatable 8→9) and one implausible version (`pyodide 0.26.4 → 314.0.6`) that must be checked against the npm registry before anyone merges it. Consider tightening `dependabot.yml` (ignore majors, `open-pull-requests-limit`) in M0.
+
+## Ad-hoc — 2026-08-31
+
+- **Change:** Node.js runtime standardised on 24 (Active LTS) — `.nvmrc`, `engines.node` in all four `package.json`s, both sidecar images on `node:24-alpine`; `isolated-vm` 5 → 7 in the executor (5 cannot compile against Node 24's C++20 V8 headers), install-script approval (`allowScripts`) added for npm ≥ 11.19, executor lockfile added.
+  **Why:** Nothing pinned Node; images were on 22 (Maintenance) while dev ran 24. Node 26 stays Current until October 2026 — revisit then (Dependabot now tracks the base images).
+  **Affects:** #102 superseded, #105/#101 closed as types-track-runtime, #39 (executor lockfile) resolved, #114 (executor not in compose) still open. Issue #139.
