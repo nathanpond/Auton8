@@ -9,6 +9,7 @@ import { UserPreferencesProvider } from "@/preferences/UserPreferencesContext";
 import PreferencesModal from "@/preferences/PreferencesModal";
 import { useSiteAppearance } from "@/providers/SiteAppearanceProvider";
 import { useRouteDocumentTitle } from "@/hooks/useRouteDocumentTitle";
+import { useRouteFocus } from "@/hooks/useRouteFocus";
 import "./shell.css";
 
 export default function AppShell() {
@@ -16,6 +17,9 @@ export default function AppShell() {
   // One place that keeps document.title in step with the route (#18).
   const { effectiveAppearance } = useSiteAppearance();
   useRouteDocumentTitle(effectiveAppearance.siteName);
+  // Focus the main region on navigation so a screen reader announces the new
+  // page and Tab resumes inside it rather than back in the header (#15).
+  useRouteFocus();
   return (
     <UserPreferencesProvider>
       <PageContextRegistryProvider>

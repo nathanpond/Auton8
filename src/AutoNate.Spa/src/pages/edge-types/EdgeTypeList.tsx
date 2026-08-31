@@ -23,6 +23,7 @@ import { useCreateEdgeType, useRestoreEdgeType } from "@/hooks/useRecordEdges";
 import { listEdgeTypes } from "@/api/recordEdges";
 import { CreateEdgeTypeRequest, EdgeType } from "@/types/records";
 import { DataTable } from "@/components/data-table/DataTable";
+import { ArchivedBadge } from "@/components/ArchivedBadge";
 
 const COLUMN_WIDTHS = ["12%", "40%", "14%", "18%", "16%"];
 
@@ -64,6 +65,7 @@ export default function EdgeTypeList() {
                 / {row.original.inverseName}
               </Text>
             )}
+            {row.original.isArchived && <ArchivedBadge />}
           </>
         )
       },

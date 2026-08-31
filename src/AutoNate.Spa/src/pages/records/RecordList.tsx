@@ -45,6 +45,7 @@ import {
   DataTable,
   DataTablePageRequest
 } from "@/components/data-table/DataTable";
+import { ArchivedBadge } from "@/components/ArchivedBadge";
 
 // Cap on the client-mode preload — must match the auto-mode threshold below
 // so that totalCount ≤ CLIENT_PRELOAD means "we have the entire result set
@@ -247,7 +248,13 @@ export default function RecordList() {
       {
         id: "name",
         accessorKey: "name",
-        header: "Name"
+        header: "Name",
+        cell: ({ row }) => (
+          <>
+            {row.original.name}
+            {row.original.isArchived && <ArchivedBadge />}
+          </>
+        )
       },
       {
         id: "status",
