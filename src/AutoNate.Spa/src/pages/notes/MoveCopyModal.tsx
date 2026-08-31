@@ -217,7 +217,7 @@ export function MoveCopyModal({
           )}
           {treeQuery.isError && (
             <div style={{ padding: 12, fontSize: 11.5, color: notesTheme.danger }}>
-              Couldn't load the project tree.
+              Couldn&apos;t load the project tree.
             </div>
           )}
           {treeQuery.data && (
@@ -387,7 +387,7 @@ function TreePicker({
       ))}
       {tree.cabinets.length === 0 && (
         <div style={{ padding: 16, fontSize: 11.5, color: notesTheme.muted }}>
-          You don't have access to any destinations in this project.
+          You don&apos;t have access to any destinations in this project.
         </div>
       )}
     </div>

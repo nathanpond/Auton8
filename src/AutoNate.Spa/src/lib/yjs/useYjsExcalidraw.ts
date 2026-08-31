@@ -98,7 +98,7 @@ export function useYjsExcalidraw(args: {
   // Captured at first hook-render. We deliberately do NOT recompute when
   // elementsArray/appStateMap change — Excalidraw only reads `initialData`
   // at mount time. Post-mount updates flow through the observer below.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   const initialData = useMemo<ExcalidrawInitialDataState>(() => {
     const elements = elementsArray.toArray().map(yMapToPojo);
     const appState = yMapToPojo(appStateMap);

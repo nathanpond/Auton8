@@ -18,7 +18,7 @@ async function postCommentEvent(body: CommentEventBody): Promise<void> {
   try {
     await api.post("/api/yjs/comment-event", body);
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn(
       `[yjs] comment-event ${body.eventType} for ${body.documentName}/${body.threadId} failed:`,
       err

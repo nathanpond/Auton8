@@ -73,7 +73,7 @@ export default function Home() {
             Track the newest runs, inspect their current step, and drill into full diagram state.
           </QuickLink>
           <QuickLink to="/bus-watcher" icon="fa-tower-broadcast" iconColor="orange" title="Monitor Bus Traffic">
-            Watch the app's workflow event stream and validate published payloads as they arrive.
+            Watch the app&apos;s workflow event stream and validate published payloads as they arrive.
           </QuickLink>
         </SimpleGrid>
 

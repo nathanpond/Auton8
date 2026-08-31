@@ -1,5 +1,9 @@
 import type { onAuthenticatePayload } from "@hocuspocus/server";
 
+// Cross-service calls to the .NET host get an explicit budget; undici's
+// default is 300 s, which is indistinguishable from a hang (#75).
+const AUTONATE_FETCH_TIMEOUT_MS = 5_000;
+
 export interface AuthConfig {
   autonateBaseUrl: string;
   sharedSecret: string;
@@ -24,6 +28,12 @@ export function createAuthHook(config: AuthConfig) {
   ): Promise<{ user: AutoNateUser }> {
     const response = await fetch(`${config.autonateBaseUrl}/internal/yjs-auth`, {
       method: "POST",
+      // Without a budget this inherits undici's 300 s default: if the .NET
+      // host is up but wedged, every new document connection sits here for
+      // five minutes holding an open WebSocket and a pending fetch, and a
+      // refresh storm accumulates hundreds of them. The .NET side sets
+      // explicit per-dependency budgets the same way (#75).
+      signal: AbortSignal.timeout(AUTONATE_FETCH_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",
         "X-AutoNate-Internal-Token": config.sharedSecret

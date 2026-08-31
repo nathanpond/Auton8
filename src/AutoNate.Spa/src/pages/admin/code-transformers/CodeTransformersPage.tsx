@@ -480,7 +480,7 @@ export default function CodeTransformersPage() {
                   styles={{ label: { fontWeight: 600 } }}
                 />
                 <Text size="xs" c="dimmed">
-                  Dispatches the editor's current code (unsaved edits included) against the
+                  Dispatches the editor&apos;s current code (unsaved edits included) against the
                   sample below via the executor sidecar. Output rows render below; sidecar
                   errors are caught and shown inline.
                 </Text>

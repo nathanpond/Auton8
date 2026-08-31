@@ -37,7 +37,7 @@ public sealed class WorkflowExecutionErrorRecorder(
         return Task.CompletedTask;
     }
 
-    public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
+    public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message, CancellationToken cancellationToken = default)
     {
         if (!string.Equals(message.Topic, BusWatcherStreamService.TopicName, StringComparison.Ordinal))
         {
@@ -67,9 +67,9 @@ public sealed class WorkflowExecutionErrorRecorder(
 
         try
         {
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             dbContext.WorkflowExecutionErrors.Add(row);
-            await dbContext.SaveChangesAsync();
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (Exception exception)
         {
