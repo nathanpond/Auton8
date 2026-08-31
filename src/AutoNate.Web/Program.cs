@@ -1338,7 +1338,7 @@ app.Map(
     var authChangeListener = app.Services.GetRequiredService<AuthChangeListener>();
     // Subscriptions returned by Subscribe are intentionally not disposed:
     // both services are singletons that live for the app lifetime.
-    _ = bus.Subscribe(message => manager.PublishAsync(message, CancellationToken.None));
+    _ = bus.Subscribe((message, ct) => manager.PublishAsync(message, ct));
     authChangeListener.Start(bus);
 }
 

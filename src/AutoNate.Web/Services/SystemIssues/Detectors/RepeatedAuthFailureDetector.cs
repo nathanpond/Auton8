@@ -73,7 +73,7 @@ public sealed class RepeatedAuthFailureDetector(
     }
 
     // Public for tests.
-    public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message)
+    public async Task HandleAsync(BusWatcherStreamService.BusWatcherMessage message, CancellationToken cancellationToken = default)
     {
         if (!string.Equals(message.Topic, AuthEventTopic.TopicName, StringComparison.Ordinal))
         {
@@ -121,7 +121,7 @@ public sealed class RepeatedAuthFailureDetector(
                     windowMinutes = (int)_authOptions.Window.TotalMinutes,
                     threshold = _authOptions.Threshold,
                     windowStart
-                })));
+                })), cancellationToken);
         }
         catch (JsonException ex)
         {

@@ -75,8 +75,8 @@ public sealed class AgentModelDefaultStreamService
                 if (result.MessageType == WebSocketMessageType.Close) break;
             }
         }
-        catch (OperationCanceledException) { }
-        catch (WebSocketException) { }
+        catch (OperationCanceledException) { /* shutdown or client disconnect; finally deregisters */ }
+        catch (WebSocketException) { /* peer vanished mid-frame; same teardown */ }
         finally
         {
             _connections.TryRemove(clientId, out _);
@@ -119,7 +119,7 @@ public sealed class AgentModelDefaultStreamService
             if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
             {
                 try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None); }
-                catch (WebSocketException) { }
+                catch (WebSocketException) { /* peer already gone; Dispose below still runs */ }
             }
             socket.Dispose();
             _sendLock.Dispose();

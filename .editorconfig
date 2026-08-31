@@ -141,12 +141,13 @@ dotnet_diagnostic.S1075.severity = none
 # is intentional but the compiler can't prove it. Test-only noise.
 dotnet_diagnostic.CS8619.severity = none
 
-# S108 (empty block of code). Every flagged site in this codebase is the
-# canonical `catch (OperationCanceledException) {}` pattern used to absorb
-# cancellation gracefully on shutdown — intentional, not a missing-handler
-# bug. If a genuinely empty block sneaks in elsewhere, code review catches
-# it more reliably than this analyzer would in a sea of cancellation absorbers.
-dotnet_diagnostic.S108.severity = none
+# S108 (empty block of code). The flagged sites are the canonical
+# `catch (OperationCanceledException) {}` shutdown absorbers, which is why this
+# was `none` — but "code review will catch the real one" is not enforcement,
+# and an empty catch that is *not* a cancellation absorber is exactly the bug
+# the stability audit had to look for across 647 catch blocks by hand (#41).
+# On as a warning; intentional absorbers carry a comment inside the block.
+dotnet_diagnostic.S108.severity = warning
 
 # S4136 (methods grouped by overloads). Cosmetic ordering preference; the
 # codebase orders methods by feature/lifecycle rather than by name, which
@@ -215,11 +216,14 @@ dotnet_diagnostic.CA1845.severity = none
 # the .NET version this targets.
 dotnet_diagnostic.CA1000.severity = none
 
-# CA2016 (forward the CancellationToken). The flagged sites are detector
-# audit-event publishes inside catch blocks during cleanup — the
-# CancellationToken.None is deliberate so the audit fires even when the
-# request that triggered the detector was cancelled.
-dotnet_diagnostic.CA2016.severity = none
+# CA2016 (forward the CancellationToken). Was `none` on the rationale that the
+# only flagged sites were deliberate CancellationToken.None audit publishes in
+# cleanup paths — but the suppression also hid BusWatcherStreamService's
+# fan-out, whose delegate had no token parameter to forward at all (#76). The
+# rule is the enforcement for a class the stability audit otherwise had to
+# check by hand, so it is on; deliberate None sites keep their rationale
+# comment and a local pragma.
+dotnet_diagnostic.CA2016.severity = warning
 
 # CA1305 remaining (locale-specific ToString). The remaining sites are
 # in EF query expressions where the IFormatProvider overload doesn't

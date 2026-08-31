@@ -92,6 +92,7 @@ public sealed class DaprStreamingSubscriber(
             }
             catch (OperationCanceledException)
             {
+                // Host stopping mid-poll; the loop condition ends the run.
             }
         }
 
