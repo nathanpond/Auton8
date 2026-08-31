@@ -1,0 +1,66 @@
+name: Story
+description: Describes WHAT to build with testable acceptance criteria and a test plan. Attach to its epic as a sub-issue.
+labels: [feature]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What to build and why — no implementation detail.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: One testable checkbox per criterion.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: musthaves
+    attributes:
+      label: Must-haves
+      description: Goal-backward — user-observable truths, the artifacts that realize them, and the key links where stubs hide.
+      value: |
+        truths:
+          - ""
+        artifacts:
+          - path: ""
+            provides: ""
+        key_links:
+          - from: ""
+            to: ""
+            via: ""
+      render: yaml
+  - type: textarea
+    id: demo
+    attributes:
+      label: Demo
+      description: User-facing stories only — a concrete ~60-second script of actions and observable outcomes. Omit for stories the agent can fully verify itself.
+  - type: textarea
+    id: testplan
+    attributes:
+      label: Test plan
+      description: Automated tests written as part of this story; they must pass before it is done.
+    validations:
+      required: true
+  - type: textarea
+    id: discretion
+    attributes:
+      label: Claude's Discretion
+      description: Decisions explicitly delegated during planning — where execution may improvise without a blocker.
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: "`Blocked by: #N` lines — used only when the native dependency API is unavailable."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Apply the matching `area:*` label after filing.
+      options: [api, spa, plugins, services, flowable, infra, ci, docs, tests]
+    validations:
+      required: true

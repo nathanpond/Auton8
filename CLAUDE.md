@@ -25,3 +25,11 @@ The SPA was migrated from ColorAdmin v5 (Bootstrap 5 admin theme, paid license) 
 ### Shell
 
 The app shell at `src/AutoNate.Spa/src/shell/AppShell.tsx` uses Mantine `<AppShell>` with `<AppShell.Header>` wrapping `NavMenu` and `<AppShell.Main>` wrapping page content. The right-side AI chatbot (`AgentSidebar`) stays `position: fixed` because its overlay/fill × over-header/under-header modes don't map cleanly onto `<AppShell.Aside>`.
+
+## n8SDLC project
+
+This project is managed by the n8SDLC workflow (GitHub Issues = the plan; `/n8-stat` shows where things stand). If a change made in this session deviates from what planned issues assume — different library, provider, architecture, dropped/added scope, or amending a declared invariant below — do two things before finishing:
+1. Append an `## Ad-hoc` entry to `.n8/decisions.md` (format documented in that file's header) naming the change, the why, and the milestones/issues likely affected.
+2. Tell the user which future milestones may now have stale plans and suggest running `/n8-replan`.
+
+Whole-codebase audits run via `/n8-audit`; the AutoNate-specific checklists (security, authorization, performance + hot-path inventory, stability, cleanup, 508) live in `.n8/memory/audit-*.md` and replace the former `/audit` project skills.

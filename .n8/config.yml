@@ -1,0 +1,19 @@
+version: 1
+stack: dotnet            # ASP.NET Core (net10.0) host + React 19/Vite/TypeScript SPA + Node sidecars
+initialized: 2026-08-30
+wiki: opted-out          # repo is private; revisit (enable in Settings → Features → Wikis) when it goes public
+repo: nathanpond/AutoNate
+visibility: private
+default_branch: master   # n8SDLC docs say `main`; this repo uses `master` — skills should target the default branch, not the literal name
+context7: installed
+security_findings: issues  # private repo → issues are already maintainer-only
+areas: [api, spa, plugins, services, flowable, infra, ci, docs, tests]
+# area:api      → src/AutoNate.Web (ASP.NET Core host: endpoints, persistence, authorization, hooks)
+# area:spa      → src/AutoNate.Spa (React 19 + Mantine v9 SPA)
+# area:plugins  → src/AutoNate.Plugin.Abstractions + plugins/
+# area:services → services/ (hocuspocus, executor Node sidecars)
+# area:flowable → flowable-extension/
+# area:infra    → infra/, Makefile, .run/ (compose stack, Dapr, local dev plumbing)
+# area:ci       → .github/workflows
+# area:docs     → docs/, README.md, CLAUDE.md
+# area:tests    → tests/ (AutoNate.Web.Tests, E2E)

@@ -1,0 +1,30 @@
+# Dependabot — version + security updates. Works on private repos (no Advanced Security needed).
+# Minor/patch bumps are grouped per ecosystem to keep PR volume sane; majors arrive individually.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /                      # AutoNate.sln + Directory.Build.props at the root cover src/, tests/, plugins/
+    schedule: { interval: weekly, day: monday }
+    groups:
+      nuget-minor-patch: { update-types: [minor, patch] }
+  - package-ecosystem: npm
+    directory: /src/AutoNate.Spa
+    schedule: { interval: weekly, day: monday }
+    groups:
+      spa-minor-patch: { update-types: [minor, patch] }
+  - package-ecosystem: npm
+    directory: /services/hocuspocus
+    schedule: { interval: weekly, day: monday }
+    groups:
+      hocuspocus-minor-patch: { update-types: [minor, patch] }
+  - package-ecosystem: npm
+    directory: /services/executor
+    schedule: { interval: weekly, day: monday }
+    groups:
+      executor-minor-patch: { update-types: [minor, patch] }
+  - package-ecosystem: npm
+    directory: /                      # root package.json: bpmn-js vendoring scripts
+    schedule: { interval: monthly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }

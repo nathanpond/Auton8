@@ -4,7 +4,6 @@
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <DefaultItemExcludes>$(DefaultItemExcludes);ColorAdmin\**</DefaultItemExcludes>
 
         <SpaRoot>..\AutoNate.Spa\</SpaRoot>
         <SpaDist>$(SpaRoot)dist\</SpaDist>

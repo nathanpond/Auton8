@@ -26,7 +26,7 @@ insert_final_newline = true
 # ---------------------------------------------------------------------------
 
 # S1135 (track-this-later comment markers). The codebase uses these
-# intentionally to flag known follow-ups; they're audited via /audit cleanup.
+# intentionally to flag known follow-ups; they're audited via /n8-audit (cleanup checklist in .n8/memory).
 dotnet_diagnostic.S1135.severity = none
 
 # S125 (commented-out code). High false-positive rate on inline comments
@@ -96,8 +96,8 @@ dotnet_diagnostic.CA1859.severity = suggestion
 
 # S1144 / S3459 (unused private member / unassigned property). Real signal
 # in app code, but the EF scaffolded models and DTO records under
-# Persistence/Scaffolded trigger many false positives. Run /audit cleanup
-# (concern A) for the verified version of this finding.
+# Persistence/Scaffolded trigger many false positives. Run /n8-audit with the cleanup checklist
+# (.n8/memory/audit-cleanup-checklist.md, concern A) for the verified version.
 dotnet_diagnostic.S1144.severity = suggestion
 dotnet_diagnostic.S3459.severity = suggestion
 
@@ -237,7 +237,7 @@ dotnet_diagnostic.S6580.severity = none
 
 # S4487 (unread private field). Often hits fields wired up by reflection
 # (DI scoping helpers, EF entity nav properties). Real cleanup signal
-# is in /audit cleanup concern A.
+# is in the /n8-audit cleanup checklist, concern A.
 dotnet_diagnostic.S4487.severity = suggestion
 
 # S3251 (partial method without implementation). Source-generator
@@ -278,7 +278,7 @@ dotnet_diagnostic.CA1001.severity = none
 
 # Long tail — small categories that are individually 2 sites each and
 # don't share a clear class. Suppress as a batch with the standing
-# instruction that /audit cleanup will surface anything here that's
+# instruction that /n8-audit (cleanup checklist) will surface anything here that's
 # actually a bug.
 dotnet_diagnostic.VSTHRD002.severity = suggestion
 dotnet_diagnostic.VSTHRD003.severity = suggestion
