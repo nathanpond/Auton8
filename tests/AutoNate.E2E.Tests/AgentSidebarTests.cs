@@ -1,3 +1,4 @@
+using AutoNate.E2E.Tests.Support;
 using Microsoft.Playwright;
 using Xunit;
 
@@ -12,22 +13,17 @@ namespace AutoNate.E2E.Tests;
 //      "New connection" affordance opens the form modal.
 // Streaming-with-real-Anthropic flow is a separate fixture concern.
 [Collection(AutoNateE2ECollection.Name)]
-public sealed class AgentSidebarTests
+public sealed class AgentSidebarTests : E2ETestBase
 {
-    private readonly AutoNateE2EFixture _fixture;
-
-    public AgentSidebarTests(AutoNateE2EFixture fixture)
+    public AgentSidebarTests(AutoNateE2EFixture fixture) : base(fixture)
     {
-        _fixture = fixture;
     }
 
     [Fact]
     public async Task Toggle_OpensTheAgentPanel()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-
-        await AutoNateE2EFixture.SignInAsAdminAsync(page);
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
 
         // The header trigger announces itself via aria-label. Previously the
         // tests grepped for a `.agent-toggle` class, which the Mantine
@@ -55,10 +51,8 @@ public sealed class AgentSidebarTests
     [Fact]
     public async Task ExternalConnectionsAdminPage_OpensNewConnectionModal()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-
-        await AutoNateE2EFixture.SignInAsAdminAsync(page);
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
         await page.GotoAsync("/admin/config/external-connections");
 
         // The "New connection" button is the tooltip-wrapped + (plus) icon
@@ -82,10 +76,8 @@ public sealed class AgentSidebarTests
     [Fact]
     public async Task OpenSidebar_RendersComposerAcceptingTypedInput()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-
-        await AutoNateE2EFixture.SignInAsAdminAsync(page);
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
         await page.GetByLabel("Open AutoNate assistant").ClickAsync();
 
         // The composer placeholder differs by conversation state
@@ -102,10 +94,8 @@ public sealed class AgentSidebarTests
     [Fact]
     public async Task OpenSidebar_RendersResizeHandle()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-
-        await AutoNateE2EFixture.SignInAsAdminAsync(page);
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
         await page.GetByLabel("Open AutoNate assistant").ClickAsync();
 
         // The resize handle (AgentSidebar.tsx:373) is a separator with
@@ -118,10 +108,8 @@ public sealed class AgentSidebarTests
     [Fact]
     public async Task CmdK_OpensChatPaletteModal_FromAnyPage()
     {
-        await using var context = await _fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-
-        await AutoNateE2EFixture.SignInAsAdminAsync(page);
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
 
         // AgentSidebar.tsx:204-205 attaches a global keydown listener that
         // accepts either Meta+K or Ctrl+K. Use Control+K — Playwright fires

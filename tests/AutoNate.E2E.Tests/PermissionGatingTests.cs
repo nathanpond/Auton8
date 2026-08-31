@@ -34,9 +34,8 @@ public sealed class PermissionGatingTests : E2ETestBase
     {
         var (_, username, password) = await MintLimitedUserAsync();
 
-        await using var context = await Fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
 
         // SignInAsync waits for the post-login URL to settle at /home or
         // /?error=. Confirm it was /home, not the error branch.
@@ -62,9 +61,8 @@ public sealed class PermissionGatingTests : E2ETestBase
 
         var (_, username, password) = await MintLimitedUserAsync();
 
-        await using var limitedContext = await Fixture.NewContextAsync();
-        var page = await limitedContext.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
 
         await page.GotoAsync("/record-types");
 
@@ -100,9 +98,8 @@ public sealed class PermissionGatingTests : E2ETestBase
             action: "view",
             selectorString: "/recordtype/*");
 
-        await using var limitedContext = await Fixture.NewContextAsync();
-        var page = await limitedContext.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
 
         await page.GotoAsync("/record-types");
 
@@ -123,9 +120,8 @@ public sealed class PermissionGatingTests : E2ETestBase
     {
         var (_, username, password) = await MintLimitedUserAsync();
 
-        await using var limitedContext = await Fixture.NewContextAsync();
-        var page = await limitedContext.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
 
         await page.GotoAsync("/workflow-executions");
 
@@ -164,9 +160,8 @@ public sealed class PermissionGatingTests : E2ETestBase
             action: "deleteall",
             selectorString: "/workflowexecution/*");
 
-        await using var limitedContext = await Fixture.NewContextAsync();
-        var page = await limitedContext.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
 
         await page.GotoAsync("/workflow-executions");
 
@@ -189,9 +184,8 @@ public sealed class PermissionGatingTests : E2ETestBase
         var document = await seeder.CreateDocumentAsync(project.Id, TestNames.Prefixed("gated-doc"));
         var (userId, username, password) = await MintLimitedUserAsync();
 
-        await using var limitedContext = await Fixture.NewContextAsync();
-        var page = await limitedContext.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
         Assert.DoesNotContain(document.Title, await ListProjectDocumentTitlesAsync(page.APIRequest, project.Id));
 
         var grant = await admin.PostAsync($"/api/content/documents/{document.Id}/permissions", new()
@@ -216,9 +210,8 @@ public sealed class PermissionGatingTests : E2ETestBase
         var project = await new ApiSeeder(admin).CreateProjectAsync(TestNames.Prefixed("member-project"));
         var (userId, username, password) = await MintLimitedUserAsync();
 
-        await using var limitedContext = await Fixture.NewContextAsync();
-        var page = await limitedContext.NewPageAsync();
-        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
         Assert.DoesNotContain(project.Name, await ListProjectNamesAsync(page.APIRequest));
 
         await PutProjectRoleAsync(admin, project.Id, userId, "viewer");
