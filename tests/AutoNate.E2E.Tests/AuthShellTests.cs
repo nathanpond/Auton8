@@ -44,8 +44,8 @@ public sealed class AuthShellTests : E2ETestBase
     {
         // Fresh context, no sign-in: hits ProtectedRoute which renders a
         // <Navigate to="/?returnUrl=…"/>.
-        await using var context = await Fixture.NewContextAsync();
-        var page = await context.NewPageAsync();
+        await using var session = await NewAnonymousSessionAsync();
+        var page = session.Page;
 
         await page.GotoAsync("/workflow-executions");
 

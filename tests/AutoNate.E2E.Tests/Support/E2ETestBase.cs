@@ -39,6 +39,39 @@ public abstract class E2ETestBase
         await AutoNateE2EFixture.SignInAsAdminAsync(page);
         return new SignedInSession(context, page, guard);
     }
+
+    /// <summary>
+    /// A guarded session signed in as someone other than the seeded admin.
+    /// </summary>
+    /// <remarks>
+    /// Specs that needed a limited user or an anonymous visitor used to build
+    /// their own context and page, which silently opted them out of
+    /// ConsoleErrorGuard — the guard is installed by NewSignedInAsAdminAsync,
+    /// so anything that could not use that helper had no guard at all (#93).
+    /// Permission-denial journeys are exactly where a silent client-side
+    /// exception is easiest to miss, because the page is *expected* to look
+    /// empty.
+    /// </remarks>
+    protected async Task<SignedInSession> NewSignedInAsAsync(string username, string password)
+    {
+        var context = await Fixture.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var guard = new ConsoleErrorGuard(page);
+        await AutoNateE2EFixture.SignInAsync(page, username, password);
+        return new SignedInSession(context, page, guard);
+    }
+
+    /// <summary>
+    /// A guarded session with no sign-in — for specs that drive the login page
+    /// itself or assert anonymous behaviour.
+    /// </summary>
+    protected async Task<SignedInSession> NewAnonymousSessionAsync()
+    {
+        var context = await Fixture.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var guard = new ConsoleErrorGuard(page);
+        return new SignedInSession(context, page, guard);
+    }
 }
 
 /// <summary>
