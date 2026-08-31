@@ -30,6 +30,12 @@ updates:
     schedule: { interval: weekly, day: monday }
     groups:
       maven-minor-patch: { update-types: [minor, patch] }
+  - package-ecosystem: docker
+    directory: /services/hocuspocus      # node:<major>-alpine base image (Node LTS policy: see .nvmrc)
+    schedule: { interval: weekly, day: monday }
+  - package-ecosystem: docker
+    directory: /services/executor
+    schedule: { interval: weekly, day: monday }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }

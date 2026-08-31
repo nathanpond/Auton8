@@ -2,6 +2,9 @@
   "name": "autonate-hocuspocus",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
   "description": "Hocuspocus sidecar for AutoNate. Hosts the Yjs sync edge; .NET owns identity, permissions, audit, and the snapshot mirror.",
   "type": "module",
   "main": "dist/index.js",
