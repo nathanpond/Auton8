@@ -17,8 +17,10 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
 
     private AutoNateWebApplicationFactory(
         PostgresTestDatabase database,
-        IReadOnlyDictionary<string, string?>? extraConfig)
+        IReadOnlyDictionary<string, string?>? extraConfig,
+        string? webRoot)
     {
+        _webRoot = webRoot;
         _database = database;
         _extraConfig = extraConfig ?? new Dictionary<string, string?>();
         // Skip the startup Dapr probe — it would block the host from starting in tests.
@@ -26,11 +28,17 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
     }
 
     public static async Task<AutoNateWebApplicationFactory> CreateAsync(
-        IReadOnlyDictionary<string, string?>? extraConfig = null)
+        IReadOnlyDictionary<string, string?>? extraConfig = null,
+        string? webRoot = null)
     {
         var database = await PostgresTestDatabase.CreateAsync();
-        return new AutoNateWebApplicationFactory(database, extraConfig);
+        return new AutoNateWebApplicationFactory(database, extraConfig, webRoot);
     }
+
+    // When set, the host boots with a real WebRootPath so Program.cs wires the
+    // static-file / SPA-fallback pipeline (it is skipped when wwwroot/ is absent,
+    // which is the normal Debug state). Used by SpaRootFallbackTests.
+    private readonly string? _webRoot;
 
     public PostgresTestDatabase Database => _database;
 
@@ -46,6 +54,10 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
     {
         // The dev auto-login middleware only activates in the Development environment.
         builder.UseEnvironment(Environments.Development);
+        if (_webRoot is not null)
+        {
+            builder.UseWebRoot(_webRoot);
+        }
 
         builder.ConfigureAppConfiguration((_, config) =>
         {

@@ -203,9 +203,10 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         _appProcess.BeginOutputReadLine();
         _appProcess.BeginErrorReadLine();
 
+        string baseUrl;
         try
         {
-            return await listeningUrlSource.Task.WaitAsync(StartupTimeout);
+            baseUrl = await listeningUrlSource.Task.WaitAsync(StartupTimeout);
         }
         catch (TimeoutException)
         {
@@ -214,6 +215,48 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
                 $"--- stdout ---\n{string.Join('\n', stdoutBuffer)}\n" +
                 $"--- stderr ---\n{string.Join('\n', stderrBuffer)}");
         }
+
+        // "Now listening" only proves Kestrel is up. Every spec starts at "/"
+        // (SignInAsync), so if the host isn't serving the SPA shell there the
+        // whole run degrades into N identical 30 s element timeouts with no
+        // clue why (that is precisely how #132 presented: a route-constraint
+        // change made "/" a bare 404 while deep links still worked). Probe it
+        // once here and fail with the app's output instead.
+        await AssertSpaShellServedAsync(baseUrl, stdoutBuffer, stderrBuffer);
+        return baseUrl;
+    }
+
+    private static async Task AssertSpaShellServedAsync(
+        string baseUrl, List<string> stdoutBuffer, List<string> stderrBuffer)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        string summary;
+        try
+        {
+            using var response = await http.GetAsync(baseUrl + "/");
+            var body = await response.Content.ReadAsStringAsync();
+            if (response.IsSuccessStatusCode && body.Contains("id=\"root\"", StringComparison.Ordinal))
+            {
+                return;
+            }
+            summary = $"GET / returned {(int)response.StatusCode} {response.StatusCode} " +
+                      $"({response.Content.Headers.ContentType?.MediaType ?? "no content-type"}, {body.Length} bytes); " +
+                      "expected 200 with the SPA shell (<div id=\"root\">).";
+        }
+        catch (Exception ex)
+        {
+            summary = $"GET / threw {ex.GetType().Name}: {ex.Message}";
+        }
+
+        static string Tail(List<string> lines) =>
+            string.Join('\n', lines.Count <= 40 ? lines : lines.GetRange(lines.Count - 40, 40));
+
+        throw new InvalidOperationException(
+            $"AutoNate.Web is listening at {baseUrl} but is not serving the SPA at the site root. {summary}\n" +
+            "Common causes: wwwroot/ missing or empty after the BuildSpa target, or the SPA fallback route " +
+            "not matching \"/\" (see Program.cs MapFallbackToFile).\n" +
+            $"--- stdout (tail) ---\n{Tail(stdoutBuffer)}\n" +
+            $"--- stderr (tail) ---\n{Tail(stderrBuffer)}");
     }
 
     /// <summary>
