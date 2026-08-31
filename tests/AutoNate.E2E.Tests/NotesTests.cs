@@ -229,6 +229,56 @@ public sealed class NotesTests : E2ETestBase
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
     }
 
+    // Regression for #151: the comment-audit proxy POSTs the Yjs document
+    // name (`note:<guid>` here), which the endpoint used to reject with 400,
+    // so no comment ever reached the content.events bus. Drives BlockNote's
+    // real "Add comment" flow on a richtext note and asserts the round-trip.
+    [Fact]
+    public async Task NotesPage_AddCommentOnRichTextNote_PostsCommentEventForNoteDocument()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await CreateHierarchyAsync(page);
+        var noteName = TestNames.Prefixed("note");
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "New Note", Exact = true }).ClickAsync();
+        var noteNameInput = page.GetByPlaceholder("Untitled note");
+        await noteNameInput.FillAsync(noteName);
+        await noteNameInput.PressAsync("Enter");
+        await Assertions.Expect(page.GetByText(noteName, new() { Exact = true }).First)
+            .ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // The note tab mounts its own BlockNote editor; the page overview
+        // beside it is read-only, so the editable root is unambiguous.
+        var editor = page.Locator(".bn-editor[contenteditable='true']");
+        await Assertions.Expect(editor).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await editor.ClickAsync();
+        await page.Keyboard.TypeAsync("Comment target text");
+        await page.Keyboard.PressAsync("Shift+Home");
+
+        // Formatting toolbar appears on selection; its comment button opens
+        // the floating composer (a nested editor) with focus.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add comment" })
+            .ClickAsync(new() { Timeout = 10_000 });
+        var composer = page.Locator(".bn-comment-editor:visible").First;
+        await Assertions.Expect(composer).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await composer.ClickAsync();
+        await page.Keyboard.TypeAsync("First thread");
+
+        var response = await page.RunAndWaitForResponseAsync(
+            () => page.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync(),
+            r => r.Url.EndsWith("/api/yjs/comment-event", StringComparison.Ordinal),
+            new() { Timeout = 15_000 });
+
+        Assert.Equal(204, response.Status);
+        var body = response.Request.PostDataJSON();
+        Assert.NotNull(body);
+        Assert.StartsWith("note:", body.Value.GetProperty("documentName").GetString());
+        Assert.Equal("created", body.Value.GetProperty("eventType").GetString());
+        Assert.False(string.IsNullOrEmpty(body.Value.GetProperty("threadId").GetString()));
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
+    }
+
     private static async Task<NotesHierarchy> CreateHierarchyAsync(IPage page)
     {
         var projectName = TestNames.Prefixed("notes-project");
