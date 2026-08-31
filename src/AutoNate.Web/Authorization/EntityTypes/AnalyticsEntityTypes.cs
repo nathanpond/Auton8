@@ -94,18 +94,32 @@ public static class AnalyticsEntityTypes
     // pipeline execution. No instance authorizer is needed today (the
     // catalog is global); a per-key gate joins later if/when transformer-
     // specific permissions become a real need.
+    // Create/Edit/Delete exist because Phase 6 added user-authored code
+    // transformers (code_transformers rows) on top of the read-only catalog.
+    // Without them the authoring endpoints had no correct token to gate on and
+    // fell back to Run — which made a grant meant to let someone *execute* a
+    // pipeline node also let them author the sandboxed code that later runs
+    // execute (#23).
     public static EntityTypeDefinition Transformer { get; } = new(
         kind: EntityKinds.Transformer,
         clrType: typeof(object),
         idClrType: typeof(string),
-        actions: new[] { Actions.List, Actions.View, Actions.Run, Actions.ExecuteUnsafe },
+        actions: new[]
+        {
+            Actions.List, Actions.View, Actions.Create, Actions.Edit, Actions.Delete,
+            Actions.Run, Actions.ExecuteUnsafe
+        },
         tags: Array.Empty<string>());
 
     public static EntityTypeDefinition Analyzer { get; } = new(
         kind: EntityKinds.Analyzer,
         clrType: typeof(object),
         idClrType: typeof(string),
-        actions: new[] { Actions.List, Actions.View, Actions.Run, Actions.ExecuteUnsafe },
+        actions: new[]
+        {
+            Actions.List, Actions.View, Actions.Create, Actions.Edit, Actions.Delete,
+            Actions.Run, Actions.ExecuteUnsafe
+        },
         tags: Array.Empty<string>());
 
     // Pipeline = the DAG definition; PipelineRun = one execution. Run is

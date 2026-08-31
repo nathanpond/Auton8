@@ -17,9 +17,12 @@ namespace AutoNate.Web.Endpoints;
 //
 // Setting `IsUnsafe=true` requires the `executeunsafe` action on the
 // matching kind so a non-trusted author can't silently flip a sandbox
-// off. Plain create/edit reuses the existing Transformer/Analyzer
-// Run/View actions for kind-level gating; row-level access falls back to
-// owner-only at the store boundary in v1.
+// off. Authoring is gated on Create/Edit/Delete and reading on View, each
+// resolved against the *requested* kind via MapKindToEntityKind — a row
+// can be an analyzer, and gating everything on Transformer meant
+// `analyzer:*` grants were never enforced while a Transformer:Run grant
+// conferred authoring rights (#23). Row-level access is still owner-only
+// at the store boundary in v1; the kind-level check runs first.
 public static class CodeTransformerEndpoints
 {
     public static IEndpointRouteBuilder MapCodeTransformerEndpoints(this IEndpointRouteBuilder app)
@@ -32,14 +35,26 @@ public static class CodeTransformerEndpoints
             return Results.Ok(rows.Select(MapDto).ToList());
         }).RequireKindPermission(EntityKinds.Transformer, Actions.List);
 
-        group.MapGet("/{id:guid}", async (Guid id, ICodeTransformerStore store, CancellationToken ct) =>
+        group.MapGet("/{id:guid}", async (
+            Guid id,
+            HttpContext http,
+            ICodeTransformerStore store,
+            IAuthorizer authorizer,
+            CancellationToken ct) =>
         {
             var row = await store.GetAsync(id, ct);
-            return row is null ? Results.NotFound() : Results.Ok(MapDto(row));
+            if (row is null) return Results.NotFound();
+            // The response carries the full Python/JS body, including for rows
+            // flagged IsUnsafe, so it needs View on the row's own kind. A
+            // denial is a NotFound so holding a GUID reveals nothing (#22).
+            if (!await CanAsync(authorizer, http, row.Kind, Actions.View, ct))
+            {
+                return Results.NotFound();
+            }
+            return Results.Ok(MapDto(row));
         }).AuthorizedInHandler(
-            "Code transformer detail (including source). Catalog visibility " +
-            "is gated by Transformer:List at the list endpoint above; the " +
-            "detail call returns the same shape plus the code body.");
+            "Code transformer detail including the source body: requires View " +
+            "on the row's kind (Transformer or Analyzer); denial is NotFound.");
 
         group.MapPost("/", async (
             CreateCodeTransformerRequest request,
@@ -51,6 +66,12 @@ public static class CodeTransformerEndpoints
             if (request is null) return Results.BadRequest();
             var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
+            // Authoring right on the kind actually being created — not
+            // Transformer:Run, which is an execution grant (#23).
+            if (!await CanAsync(authorizer, http, request.Kind, Actions.Create, ct))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
             if (request.IsUnsafe)
             {
                 var decision = await authorizer.AuthorizeAsync(
@@ -78,7 +99,10 @@ public static class CodeTransformerEndpoints
             {
                 return Results.BadRequest(new { reason = ex.Message });
             }
-        }).RequireKindPermission(EntityKinds.Transformer, Actions.Run)
+        }).AuthorizedInHandler(
+              "Create requires Create on the requested kind (Transformer or " +
+              "Analyzer); IsUnsafe=true additionally requires executeunsafe " +
+              "on that same kind.")
           .DisableAntiforgery();
 
         group.MapPut("/{id:guid}", async (
@@ -94,6 +118,10 @@ public static class CodeTransformerEndpoints
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var existing = await store.GetAsync(id, ct);
             if (existing is null) return Results.NotFound();
+            if (!await CanAsync(authorizer, http, existing.Kind, Actions.Edit, ct))
+            {
+                return Results.NotFound();
+            }
             // Owner-only edit for v1 (same convention as saved queries).
             if (existing.OwnerUserId != actorId) return Results.NotFound();
             // Toggling on IsUnsafe requires the per-kind executeunsafe gate;
@@ -128,8 +156,9 @@ public static class CodeTransformerEndpoints
             }
         }).DisableAntiforgery()
           .AuthorizedInHandler(
-              "Store-side owner-only edit; non-owners see NotFound. IsUnsafe " +
-              "toggle-on additionally requires executeunsafe on the matching kind.");
+              "Requires Edit on the row's kind, then store-side owner-only; " +
+              "either failure is NotFound. IsUnsafe toggle-on additionally " +
+              "requires executeunsafe on the matching kind.");
 
         // Synchronous "test run" — author dispatches their current editor
         // buffer (the request body's `code` overrides the stored row so
@@ -145,6 +174,7 @@ public static class CodeTransformerEndpoints
             TestCodeTransformerRequest? request,
             HttpContext http,
             ICodeTransformerStore store,
+            IAuthorizer authorizer,
             JetStreamCodeNodeRunner runner,
             CancellationToken ct) =>
         {
@@ -153,6 +183,12 @@ public static class CodeTransformerEndpoints
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var existing = await store.GetAsync(id, ct);
             if (existing is null) return Results.NotFound();
+            // This dispatches code to the executor sidecar, so it is an
+            // execution: Run on the row's kind, then owner-only.
+            if (!await CanAsync(authorizer, http, existing.Kind, Actions.Run, ct))
+            {
+                return Results.NotFound();
+            }
             if (existing.OwnerUserId != actorId) return Results.NotFound();
 
             // Layer the request body over the stored row so unsaved edits
@@ -210,24 +246,46 @@ public static class CodeTransformerEndpoints
             }
         }).DisableAntiforgery()
           .AuthorizedInHandler(
-              "Store-side owner-only: non-owners see NotFound. Re-uses " +
-              "the pipeline executor sidecar; carries the same timeout / " +
-              "memory limits as a real pipeline-node invocation.");
+              "Requires Run on the row's kind, then store-side owner-only: " +
+              "either failure is NotFound. Re-uses the pipeline executor " +
+              "sidecar; carries the same timeout / memory limits as a real " +
+              "pipeline-node invocation.");
 
         group.MapDelete("/{id:guid}", async (
-            Guid id, HttpContext http, ICodeTransformerStore store, CancellationToken ct) =>
+            Guid id,
+            HttpContext http,
+            ICodeTransformerStore store,
+            IAuthorizer authorizer,
+            CancellationToken ct) =>
         {
             var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             var existing = await store.GetAsync(id, ct);
             if (existing is null) return Results.NotFound();
+            if (!await CanAsync(authorizer, http, existing.Kind, Actions.Delete, ct))
+            {
+                return Results.NotFound();
+            }
             if (existing.OwnerUserId != actorId) return Results.NotFound();
             var deleted = await store.DeleteAsync(id, ct);
             return deleted ? Results.NoContent() : Results.NotFound();
         }).DisableAntiforgery()
-          .AuthorizedInHandler("Owner-only delete; non-owners see NotFound.");
+          .AuthorizedInHandler(
+              "Requires Delete on the row's kind, then owner-only; either " +
+              "failure is NotFound.");
 
         return app;
+    }
+
+    // Kind-level check against the row's / request's own kind. Every gate in
+    // this file goes through here so a transformer grant can never be read as
+    // an analyzer grant, or vice versa (#23).
+    private static async Task<bool> CanAsync(
+        IAuthorizer authorizer, HttpContext http, string codeKind, string action, CancellationToken ct)
+    {
+        var decision = await authorizer.AuthorizeAsync(
+            http.User, action, new EntityRef(MapKindToEntityKind(codeKind), string.Empty), ct);
+        return decision.IsAllowed;
     }
 
     private static string MapKindToEntityKind(string codeKind) => codeKind switch
