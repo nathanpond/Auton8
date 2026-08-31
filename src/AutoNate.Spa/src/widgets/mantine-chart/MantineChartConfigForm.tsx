@@ -131,7 +131,7 @@ export function MantineChartConfigForm({
     onChange({ ...value, savedQueryLabelColumn: savedQueryColumns[0].name });
     // Including `value` in deps would loop on every keystroke — onChange
     // is referentially stable enough in practice and we guard above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- including `value` would loop on every keystroke; the guards above make this run once per column set
   }, [isAqlSource, savedQueryColumns]);
 
   // If the currently-selected groupBy points at a custom field the new

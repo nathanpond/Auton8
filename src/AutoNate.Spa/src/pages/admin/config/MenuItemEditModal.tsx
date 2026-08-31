@@ -163,7 +163,7 @@ export default function MenuItemEditModal({ item, onSave, onCancel }: Props) {
     }
 
     return e;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- validation reads only draft and pages; the helpers it calls are module-level
   }, [draft, pages]);
 
   const hasErrors = Object.keys(errors).length > 0;

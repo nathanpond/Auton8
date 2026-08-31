@@ -386,7 +386,7 @@ export default function WorkflowStudio() {
     } else {
       setShowCreateModal(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot initial selection; selectWorkflow would re-run it and fight the user's choice
   }, [workflowsLoaded, workflows]);
 
   const onDiagramChanged = useCallback(() => {

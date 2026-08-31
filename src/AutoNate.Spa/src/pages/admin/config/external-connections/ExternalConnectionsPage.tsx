@@ -446,7 +446,7 @@ function ConnectionFormModal({ form, onChange, onSubmit, onCancel, submitting, s
     if (form.id !== null) return;
     if (!kindDef) return;
     onChange({ ...form, metadata: defaultMetadataFor(kindDef) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires only when the kind changes; depending on `form` would re-seed metadata over the user's edits
   }, [form.kind]);
 
   const update = (patch: Partial<FormState>) => onChange({ ...form, ...patch });

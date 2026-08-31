@@ -20,7 +20,7 @@ export function useInvalidateOnChannels(
     },
     // queryKeys array identity may change per render; stable invalidation
     // depends on the contents, not the wrapper.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the serialized contents; the queryKeys array identity changes per render
     [qc, JSON.stringify(queryKeys)],
   );
   useBusSubscription(channels, handler, options);
