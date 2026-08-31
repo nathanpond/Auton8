@@ -26,7 +26,7 @@ namespace AutoNate.Web.Tests;
 // — anything ZIP-shaped passes the magic-byte sniff and the tests can
 // focus on the dispatch + persistence + cleanup behaviour.
 [Trait("Category", "Integration")]
-public sealed class Phase7DocumentImportTests
+public sealed class DocumentImportTests
 {
     [Fact]
     public async Task ImportDocx_CreatesDocument_StashesBytes()
