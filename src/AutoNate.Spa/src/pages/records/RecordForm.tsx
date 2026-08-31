@@ -103,7 +103,7 @@ export default function RecordForm({
     form.setValues(defaults);
     // form ref is stable from useForm; intentionally not in deps to avoid
     // the setValues → re-render → re-run loop.
-  }, [defaults]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [defaults]); // eslint-disable-line react-hooks/exhaustive-deps -- `form` is stable from useForm; including it loops setValues -> render -> re-run
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 

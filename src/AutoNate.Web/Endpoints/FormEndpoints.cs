@@ -113,16 +113,6 @@ public static class FormEndpoints
             return Results.Ok(versions);
         }).RequirePermission(EntityKinds.Form, Actions.View);
 
-        group.MapGet("/{id:guid}/versions/{versionNumber:int}", async (
-            Guid id,
-            int versionNumber,
-            IFormStore store,
-            CancellationToken ct) =>
-        {
-            var version = await store.GetVersionAsync(id, versionNumber, ct);
-            return version is null ? Results.NotFound() : Results.Ok(version);
-        }).RequirePermission(EntityKinds.Form, Actions.View);
-
         group.MapPost("/{id:guid}/restore/{versionNumber:int}", async (
             Guid id,
             int versionNumber,

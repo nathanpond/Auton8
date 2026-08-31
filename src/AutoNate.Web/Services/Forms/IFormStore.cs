@@ -20,7 +20,6 @@ public interface IFormStore
 
     Task<IReadOnlyList<FormVersion>> ListVersionsAsync(Guid formId, CancellationToken cancellationToken = default);
 
-    Task<FormVersion?> GetVersionAsync(Guid formId, int versionNumber, CancellationToken cancellationToken = default);
 
     Task<Form?> RestoreAsync(Guid id, int versionNumber, Guid actorId, CancellationToken cancellationToken = default);
 

@@ -201,7 +201,7 @@ export function useRegisterPageContext(entry: PageContextProviderEntry): void {
   const registry = useRegistry();
   useEffect(() => {
     return registry.register(entry);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deps list `entry`'s fields rather than `entry`, whose object identity changes every render
   }, [registry, entry.pageKey, entry.getSnapshot, entry.onPageQuery, entry.onPageAction, entry.actions]);
 }
 

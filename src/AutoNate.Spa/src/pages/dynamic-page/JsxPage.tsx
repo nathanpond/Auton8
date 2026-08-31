@@ -209,7 +209,7 @@ export function JsxPage({ source, props }: JsxPageProps) {
     }
     // `navigate`, `api`, and the React hooks are stable references; only the
     // source and the lazy-loaded sucrase module need to retrigger compilation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- navigate/api and the hooks are stable; only source and the lazy sucrase module should retrigger compilation
   }, [sucrase, source]);
 
   if (loadError) {

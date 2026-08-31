@@ -13,7 +13,7 @@ using Xunit;
 namespace AutoNate.Web.Tests;
 
 [Trait("Category", "Integration")]
-public sealed class ProjectionFrameworkPhase3Tests : IDisposable
+public sealed class ProjectionColdTierArchiveTests : IDisposable
 {
     // Each test gets its own cold-tier directory so parallel runs can't
     // see each other's parquet files. Cleaned in Dispose so we don't
