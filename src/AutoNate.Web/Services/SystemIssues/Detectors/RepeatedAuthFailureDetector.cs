@@ -34,8 +34,21 @@ public sealed class RepeatedAuthFailureDetector(
 
     // Concurrent: bus watcher dispatches messages on whatever thread Dapr
     // hands the publish to.
+    //
+    // The key is an attacker-supplied username from the unauthenticated login
+    // endpoint, so this map is only safe if entries leave it. Credential
+    // stuffing with rotating usernames would otherwise add a string + window +
+    // queue per attempt to a singleton that lives for the process, long past
+    // the 5-minute window they fall out of (#72). Every RecordFailure sweeps
+    // windows that have gone empty, and MaxTrackedUsernames is a hard ceiling
+    // for the case where arrivals outpace the sweep.
     private readonly ConcurrentDictionary<string, FailureWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private const int MaxTrackedUsernames = 10_000;
+
+    // Internal so the bounding can be asserted without reaching into the map.
+    internal int TrackedUsernameCount => _windows.Count;
 
     private IDisposable? _subscription;
 
@@ -128,16 +141,61 @@ public sealed class RepeatedAuthFailureDetector(
     internal (int Count, DateTimeOffset WindowStart) RecordFailure(string username)
     {
         var now = DateTimeOffset.UtcNow;
+        var cutoff = now - _authOptions.Window;
+
         var window = _windows.GetOrAdd(username, _ => new FailureWindow());
+        int count;
         lock (window)
         {
-            var cutoff = now - _authOptions.Window;
             while (window.Failures.Count > 0 && window.Failures.Peek() < cutoff)
             {
                 window.Failures.Dequeue();
             }
             window.Failures.Enqueue(now);
-            return (window.Failures.Count, cutoff);
+            count = window.Failures.Count;
+        }
+
+        Sweep(cutoff);
+        return (count, cutoff);
+    }
+
+    // Drops usernames whose window has emptied. O(n) over tracked usernames,
+    // which the ceiling keeps small, and only on a login *failure* — not on
+    // any hot success path.
+    private void Sweep(DateTimeOffset cutoff)
+    {
+        foreach (var (key, tracked) in _windows)
+        {
+            bool empty;
+            lock (tracked)
+            {
+                while (tracked.Failures.Count > 0 && tracked.Failures.Peek() < cutoff)
+                {
+                    tracked.Failures.Dequeue();
+                }
+                empty = tracked.Failures.Count == 0;
+            }
+            if (empty)
+            {
+                // Racy against a concurrent Enqueue on the same username: the
+                // loser re-adds a fresh window on its next failure, which is
+                // the same state either way.
+                _windows.TryRemove(key, out _);
+            }
+        }
+
+        if (_windows.Count <= MaxTrackedUsernames) return;
+
+        // Arrivals outpaced the sweep (a burst inside one window). Shed the
+        // oldest-observed entries rather than letting the map grow without
+        // bound; a shed username simply starts counting again.
+        foreach (var key in _windows
+                     .OrderBy(pair => pair.Value.FirstSeenUtc)
+                     .Take(_windows.Count - MaxTrackedUsernames)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            _windows.TryRemove(key, out _);
         }
     }
 
@@ -164,6 +222,9 @@ public sealed class RepeatedAuthFailureDetector(
     private sealed class FailureWindow
     {
         public Queue<DateTimeOffset> Failures { get; } = new();
+
+        // Only used to pick shed victims when the ceiling is hit.
+        public DateTimeOffset FirstSeenUtc { get; } = DateTimeOffset.UtcNow;
     }
 }
 

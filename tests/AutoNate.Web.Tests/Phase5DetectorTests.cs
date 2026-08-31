@@ -363,8 +363,65 @@ public sealed class RepeatedAuthFailureDetectorTests
         Assert.Empty(await read.SystemIssues.AsNoTracking().ToListAsync());
     }
 
+    // #72: _windows was keyed by the attacker-supplied username from the
+    // unauthenticated login endpoint and never evicted, so credential stuffing
+    // with rotating usernames grew a singleton's heap without bound.
+    [Fact]
+    public async Task Distinct_usernames_do_not_grow_the_window_map_without_bound()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        // Window of zero: every entry is already outside it, so the sweep
+        // should reclaim each username as the next one arrives.
+        var (detector, _) = CreateDetector(db, threshold: 1_000_000, window: TimeSpan.Zero);
+
+        for (var i = 0; i < 50_000; i++)
+        {
+            detector.RecordFailure($"user-{i}@example.com");
+        }
+
+        Assert.True(
+            detector.TrackedUsernameCount < 1_000,
+            $"window map held {detector.TrackedUsernameCount} usernames after 50,000 distinct failures");
+    }
+
+    // The ceiling has to hold even when nothing ages out — a burst inside one
+    // window, where the sweep finds every entry still live.
+    [Fact]
+    public async Task Window_map_is_capped_even_when_nothing_expires()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var (detector, _) = CreateDetector(db, threshold: 1_000_000, window: TimeSpan.FromHours(1));
+
+        for (var i = 0; i < 30_000; i++)
+        {
+            detector.RecordFailure($"burst-{i}@example.com");
+        }
+
+        Assert.True(
+            detector.TrackedUsernameCount <= 10_000,
+            $"window map held {detector.TrackedUsernameCount} usernames, above the 10,000 ceiling");
+    }
+
+    // Bounding must not break the thing the detector exists to do.
+    [Fact]
+    public async Task Sweeping_does_not_lose_an_in_window_count()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var (detector, _) = CreateDetector(db, threshold: 1_000_000, window: TimeSpan.FromMinutes(5));
+
+        for (var i = 0; i < 4; i++)
+        {
+            detector.RecordFailure("noise-" + i);
+        }
+        detector.RecordFailure("victim@example.com");
+        detector.RecordFailure("victim@example.com");
+        var (count, _) = detector.RecordFailure("victim@example.com");
+
+        Assert.Equal(3, count);
+    }
+
     private static (RepeatedAuthFailureDetector detector, EfCoreSystemIssueStore store) CreateDetector(
-        PostgresTestDatabase db, int threshold)
+        PostgresTestDatabase db, int threshold, TimeSpan? window = null)
     {
         var store = new EfCoreSystemIssueStore(
             db.CreateDbContextFactory(), new NoopAuditEventPublisher(), new NoopCriticalIssueNotifier());
@@ -374,7 +431,7 @@ public sealed class RepeatedAuthFailureDetectorTests
             Options.Create(new RepeatedAuthFailureDetectorOptions
             {
                 Threshold = threshold,
-                Window = TimeSpan.FromMinutes(5)
+                Window = window ?? TimeSpan.FromMinutes(5)
             }),
             Options.Create(new SystemIssueOptions { DetectorsEnabled = false }),
             NullLogger<RepeatedAuthFailureDetector>.Instance);
