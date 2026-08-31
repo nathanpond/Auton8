@@ -70,7 +70,7 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
                 ["DevelopmentAutoLogin:Username"] = "admin",
                 // Flowable is not exercised by these tests, but the options binding
                 // requires a section to exist.
-                ["Flowable:BaseAddress"] = "http://localhost/flowable",
+                ["Flowable:BaseUrl"] = "http://localhost/flowable",
                 // Default tests to authorization-off so appsettings.Development.json
                 // (which a dev may have flipped on) doesn't change their semantics.
                 // Tests that need enforcement opt in via extraConfig.
