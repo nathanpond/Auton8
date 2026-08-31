@@ -83,7 +83,7 @@ internal sealed class PluginManagementService : IPluginManagementService
             Directory.CreateDirectory(folder);
             try
             {
-                ZipFile.ExtractToDirectory(tempZip, folder, overwriteFiles: true);
+                PluginZipExtractor.ExtractWithCap(tempZip, folder, _options.MaxUploadBytes);
             }
             catch (Exception ex)
             {
@@ -209,7 +209,7 @@ internal sealed class PluginManagementService : IPluginManagementService
                     Directory.Move(folder, backupFolder);
                 }
                 Directory.CreateDirectory(folder);
-                ZipFile.ExtractToDirectory(tempZip, folder, overwriteFiles: true);
+                PluginZipExtractor.ExtractWithCap(tempZip, folder, _options.MaxUploadBytes);
             }
             catch (Exception ex)
             {

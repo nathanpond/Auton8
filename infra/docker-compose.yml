@@ -122,8 +122,15 @@ services:
       - --http_port
       - "8222"
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      # Loopback-only, matching the Dapr endpoints in this file. NATS runs with
+      # no authentication, so publishing these host-wide let anyone reaching
+      # the Docker host queue work on `pipeline-code-run.>` (the executor runs
+      # it), subscribe to the audit-event and workflow-signal streams, and read
+      # JetStream state on 8222 — the HTTP callbacks have a shared-secret
+      # boundary, NATS has none (#66). Containers still reach it as
+      # `nats:4222` over the compose network, which is unaffected.
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
     volumes:
       - ./mounts/nats/data:/data
     healthcheck:
