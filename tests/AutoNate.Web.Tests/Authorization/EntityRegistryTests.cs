@@ -12,7 +12,7 @@ public sealed class EntityRegistryTests
         var registry = new EntityRegistry(CoreEntityTypes.All);
         var kinds = registry.All.Select(t => t.Kind).ToHashSet();
 
-        Assert.Equal(17, kinds.Count);
+        Assert.Equal(19, kinds.Count);
         Assert.Contains(EntityKinds.User, kinds);
         Assert.Contains(EntityKinds.Group, kinds);
         Assert.Contains(EntityKinds.Role, kinds);
@@ -28,6 +28,12 @@ public sealed class EntityRegistryTests
         Assert.Contains(EntityKinds.SiteConfig, kinds);
         Assert.Contains(EntityKinds.Project, kinds);
         Assert.Contains(EntityKinds.Cabinet, kinds);
+        // Document and Folder joined the registry with #25 — they were enforced
+        // on 22 routes and honoured by ContentAuthorizer's selectors, but the
+        // Grants admin picker could not offer them because /api/admin/registry
+        // is built from this list.
+        Assert.Contains(EntityKinds.Document, kinds);
+        Assert.Contains(EntityKinds.Folder, kinds);
         Assert.Contains(EntityKinds.Notebook, kinds);
         Assert.Contains(EntityKinds.Page, kinds);
     }
