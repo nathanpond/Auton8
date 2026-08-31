@@ -43,7 +43,17 @@ public sealed class ConsoleErrorGuard : IAsyncDisposable
         // Yjs's WebSocket layer logs an error on the server-side
         // permission-denied path. The DocumentEditorTests and NotesTests
         // grant/revoke tests deliberately drive that path.
-        "authentication-failed"
+        "authentication-failed",
+
+        // Chromium's benign "observer changed a size it was observing" notice.
+        // Mantine >= 9.4 `Textarea autosize` (components/Textarea/Autosize)
+        // observes the textarea and sets its own height inside the callback
+        // whenever the width changes (sidebar resize, viewport resize), so
+        // the browser reports the loop as a window `error` event. It is not a
+        // JS exception and layout settles on the next frame. Tracked in the
+        // repo issue for the upstream Mantine bug; drop this entry once
+        // upstream defers the height write.
+        "ResizeObserver loop completed with undelivered notifications"
     ];
 
     private readonly IPage _page;
