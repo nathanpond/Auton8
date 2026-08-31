@@ -313,7 +313,7 @@ function PermissionsPanel({ project }: { project: ProjectDto | null }) {
       children: (
         <Stack gap="xs">
           <Text size="sm">
-            Revoke <strong>{principalLabel}</strong>'s{" "}
+            Revoke <strong>{principalLabel}</strong>&apos;s{" "}
             <strong>{member.action ?? "grant"}</strong> grant?
           </Text>
           <Text size="sm" c="dimmed">

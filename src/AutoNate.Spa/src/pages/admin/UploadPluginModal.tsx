@@ -53,7 +53,7 @@ export default function UploadPluginModal({ onClose, updateTarget }: Props) {
             <Text size="xs" c="dimmed">
               Choose a new plugin <Code>.zip</Code> file to replace{" "}
               <strong>{updateTarget?.name}</strong> (currently v{updateTarget?.version}).
-              The plugin's per-plugin schema and stored data are preserved; only the code
+              The plugin&apos;s per-plugin schema and stored data are preserved; only the code
               is swapped. If the plugin is currently enabled it will be re-enabled
               automatically after the swap.
             </Text>

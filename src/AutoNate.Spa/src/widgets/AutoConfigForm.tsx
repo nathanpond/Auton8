@@ -45,10 +45,10 @@ function unwrap(schema: z.ZodType): { inner: z.ZodType; optional: boolean } {
   // Zod 4 keeps these wrapper names. We walk until we hit a concrete type.
   // (`z.ZodOptional`, `z.ZodNullable`, `z.ZodDefault` are still distinct
   // classes in v4.)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   while ((s as any)._def?.innerType) {
     optional = true;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     s = (s as any)._def.innerType as z.ZodType;
   }
   return { inner: s, optional };
@@ -64,10 +64,10 @@ type Renderer = (props: {
   optional: boolean;
 }) => ReactNode;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function typeName(schema: z.ZodType): string {
   // Zod 4 still names classes ZodString / ZodNumber / etc.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   return (schema as any).constructor?.name ?? "";
 }
 
@@ -131,7 +131,7 @@ const RENDERERS: Record<string, Renderer> = {
     const label = meta.label ?? defaultLabel(fieldKey);
     const required = meta.required ?? !optional;
     // Zod 4 carries min/max as `_def.checks: { check, value }[]`.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const checks = (schema as any)._def?.checks ?? [];
     type Check = { check?: string; value?: number };
     const min = (checks as Check[]).find((c) => c.check === "min")?.value;
@@ -162,7 +162,7 @@ const RENDERERS: Record<string, Renderer> = {
   ),
   ZodEnum: ({ fieldKey, schema, value, onChange, error, meta, optional }) => {
     // Zod 4: `z.enum(['a','b'])._def.entries` is `{ a: 'a', b: 'b' }`.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const entries = (schema as any)._def?.entries ?? {};
     const options = Object.keys(entries);
     return (
@@ -181,11 +181,11 @@ const RENDERERS: Record<string, Renderer> = {
     );
   },
   ZodArray: ({ fieldKey, schema, value, onChange, error, meta, optional }) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const elementSchema = (schema as any)._def?.element ?? (schema as any)._def?.type;
     const elementInner = elementSchema ? unwrap(elementSchema).inner : null;
     if (elementInner && typeName(elementInner) === "ZodEnum") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const entries = (elementInner as any)._def?.entries ?? {};
       const options = Object.keys(entries);
       return (

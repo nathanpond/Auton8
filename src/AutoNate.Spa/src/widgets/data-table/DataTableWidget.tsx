@@ -92,7 +92,7 @@ function RecordsTable({ config, widgetId }: { config: DataTableWidgetConfig; wid
     return (
       <Box p="sm">
         <Alert color="blue" variant="light">
-          "All records" isn't supported yet — pick a record type in widget settings.
+          &quot;All records&quot; isn&apos;t supported yet — pick a record type in widget settings.
         </Alert>
       </Box>
     );

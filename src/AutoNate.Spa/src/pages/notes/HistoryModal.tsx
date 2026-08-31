@@ -175,7 +175,7 @@ export function HistoryModal(props: Props) {
           {error && !isLoading && (
             <div style={{ ...emptyStyle, color: notesTheme.danger }}>
               <i className="fa fa-triangle-exclamation" style={{ marginRight: 6 }} />
-              Couldn't load revisions.
+              Couldn&apos;t load revisions.
             </div>
           )}
           {!isLoading && !error && (

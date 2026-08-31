@@ -305,7 +305,7 @@ function SimpleFieldInput({
           id={`edge-${fieldKey}`}
           checked={Boolean(value)}
           onChange={(e) => onChange(e.currentTarget.checked)}
-          label={Boolean(value) ? "Yes" : "No"}
+          label={value ? "Yes" : "No"}
         />
       );
     case "number":

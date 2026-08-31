@@ -370,7 +370,7 @@ function FolderChildGrid({
     return (
       <Card withBorder padding="lg" mt="md">
         <Text c="dimmed" ta="center">
-          This folder is empty. Use "New subfolder" or "New document" to add something.
+          This folder is empty. Use &quot;New subfolder&quot; or &quot;New document&quot; to add something.
         </Text>
       </Card>
     );
