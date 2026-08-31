@@ -18,7 +18,7 @@ Companion: `docs/codebase/Structure.md` (directory map / "where do I put this").
 | **Plugins** | `plugins/<Name>/` → `dist/<Name>.zip` (MSBuild `AfterTargets="Build"`) | Loaded into a collectible `AssemblyLoadContext` per plugin | Host via `IPluginContext`; own Postgres schema `plg_<code>` |
 | **flowable-extension** | `flowable-extension/` (Maven, Java 21, Spring Boot auto-config) | Baked into the custom Flowable image (`infra/flowable/Dockerfile`) | Dapr sidecar `flowable-dapr` (publishes `workflow.execution.events`); calls back to `/api/workflow-behaviors/{key}/execute` |
 | **hocuspocus** sidecar | `services/hocuspocus/` (Node 22, `@hocuspocus/server`) | `:1234`, compose service | Postgres `yjs_documents`; `/internal/yjs-auth`, `/internal/yjs-webhook` on the host |
-| **executor** sidecar | `services/executor/` (Node, `isolated-vm` + `pyodide`) | NATS subscriber on `pipeline-code-run.>` (durable consumer `executor`); **not in compose or Makefile** | NATS only |
+| **executor** sidecar | `services/executor/` (Node, `isolated-vm` + `pyodide`) | NATS subscriber on `pipeline-code-run.>` (core queue subscriber (queue group `executor`) `executor`); **not in compose or Makefile** | NATS only |
 | **Infra** | `infra/docker-compose.yml` | postgres 16, flowable, flowable-dapr, redis, nats (JetStream), nats-init, dapr-placement, dapr-scheduler, hocuspocus, dapr-dashboard (profile) | — |
 | **Tests** | `tests/AutoNate.Web.Tests` (xUnit + `WebApplicationFactory<Program>` over a real local Postgres), `tests/AutoNate.E2E.Tests` (Playwright .NET, boots the host as a child process), `tests/AutoNate.Web.Tests.SamplePlugin` (fixture plugin) | — | Postgres `localhost:5432` |
 
