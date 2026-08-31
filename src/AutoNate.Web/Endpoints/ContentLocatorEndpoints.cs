@@ -140,10 +140,24 @@ public static class ContentLocatorEndpoints
 
         group.MapGet("/{locator:long}", async (
             long locator,
+            HttpContext http,
             IDbContextFactory<AutoNateDbContext> dbFactory,
+            IContentAuthorizer authorizer,
             CancellationToken ct) =>
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
+
+            // Locators are sequential longs, so an unguarded lookup is a
+            // complete map of the tenant's content tree — kind, GUID and
+            // ancestor chain for every project, cabinet, notebook, page and
+            // note — to any signed-in user, handing them the ids to feed
+            // other endpoints (#21). Every hit is authorized before it is
+            // returned, and a denial is the same NotFound an unknown locator
+            // gets, so the endpoint reveals neither content nor existence.
+            async Task<bool> CanViewAsync(string kind, Guid id) =>
+                (await authorizer.AuthorizeAsync(http.User, kind, id, Actions.View, ct)).IsAllowed;
+
+            var notFound = Results.NotFound(new { error = $"Locator {locator} not found." });
 
             // Five indexed lookups — locator unique index per table — find at
             // most one hit. Cheap because each query short-circuits to a
@@ -154,6 +168,7 @@ public static class ContentLocatorEndpoints
                 .FirstOrDefaultAsync(ct);
             if (projectHit is not null)
             {
+                if (!await CanViewAsync(ContentKinds.Project, projectHit.Id)) return notFound;
                 return Results.Ok(BuildResponseSelfOnly(
                     locator, ContentKinds.Project, projectHit.Id, db, ct));
             }
@@ -164,6 +179,7 @@ public static class ContentLocatorEndpoints
                 .FirstOrDefaultAsync(ct);
             if (cabinetHit is not null)
             {
+                if (!await CanViewAsync(ContentKinds.Cabinet, cabinetHit.Id)) return notFound;
                 return Results.Ok(await BuildResponseAsync(
                     db, locator, ContentKinds.Cabinet, cabinetHit.Id, ct));
             }
@@ -174,6 +190,7 @@ public static class ContentLocatorEndpoints
                 .FirstOrDefaultAsync(ct);
             if (notebookHit is not null)
             {
+                if (!await CanViewAsync(ContentKinds.Notebook, notebookHit.Id)) return notFound;
                 return Results.Ok(await BuildResponseAsync(
                     db, locator, ContentKinds.Notebook, notebookHit.Id, ct));
             }
@@ -184,6 +201,7 @@ public static class ContentLocatorEndpoints
                 .FirstOrDefaultAsync(ct);
             if (pageHit is not null)
             {
+                if (!await CanViewAsync(ContentKinds.Page, pageHit.Id)) return notFound;
                 return Results.Ok(await BuildResponseAsync(
                     db, locator, ContentKinds.Page, pageHit.Id, ct));
             }
@@ -194,6 +212,9 @@ public static class ContentLocatorEndpoints
                 .FirstOrDefaultAsync(ct);
             if (noteHit is not null)
             {
+                // Notes inherit their parent page's permissions (design D10),
+                // so the page is what gets authorized.
+                if (!await CanViewAsync(ContentKinds.Page, noteHit.PageId)) return notFound;
                 // Notes aren't in content_ancestors (they aren't a perm-
                 // issionable kind), so resolve the parent page's chain and
                 // tack the note on top.
@@ -212,12 +233,13 @@ public static class ContentLocatorEndpoints
                     }));
             }
 
-            return Results.NotFound(new { error = $"Locator {locator} not found." });
-        }).OpenToAuthenticated(
-            "Locator → (kind, id, ancestor chain) lookup. Returns identifiers " +
-            "only; the SPA's follow-up fetch for the entity is gated by " +
-            "IContentAuthorizer. Locators are sequential, so authenticated " +
-            "mapping doesn't leak meaningful info.");
+            return notFound;
+        }).AuthorizedInHandler(
+            "Locator → (kind, id, ancestor chain) lookup. Every resolved hit " +
+            "is checked with IContentAuthorizer for View (notes via their " +
+            "parent page) before anything is returned, and a denial is the " +
+            "same NotFound an unknown locator gets — locators are sequential, " +
+            "so an unguarded lookup would enumerate the whole content tree.");
 
         return app;
     }

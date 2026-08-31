@@ -1565,6 +1565,41 @@ internal static class DatabaseSchemaInitializer
             GRANT SELECT, USAGE ON SEQUENCES TO plg_readers;
         """;
 
+    // Runs LAST, after every table exists (#62). Reading app tables is a
+    // documented plugin capability (IPluginDataAccess), so plg_readers keeps a
+    // broad SELECT — but "app tables" was never meant to include password
+    // hashes, DataProtection-encrypted provider secrets, every other plugin's
+    // role password, or share-link token hashes. Any uploaded plugin
+    // authenticates as its own role, which inherits plg_readers, so without
+    // these revokes one plugin could read them all.
+    //
+    // This cannot live beside the GRANT: several of these tables are created
+    // later in the sequence, and ALTER DEFAULT PRIVILEGES would then hand them
+    // straight back. Running it at the end, on every startup, also means a
+    // re-grant or a newly added table cannot silently re-open access.
+    private const string PluginReaderLockdownSql =
+        """
+        DO $$
+        DECLARE
+            t TEXT;
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plg_readers') THEN
+                RETURN;
+            END IF;
+            FOREACH t IN ARRAY ARRAY[
+                'local_users',                -- password hashes, lockout state
+                'external_connections',       -- encrypted provider secrets
+                'plugins',                    -- role_password_encrypted for every plugin
+                'saved_query_share_tokens'    -- share-link token hashes
+            ]
+            LOOP
+                IF to_regclass('public.' || t) IS NOT NULL THEN
+                    EXECUTE format('REVOKE SELECT ON public.%I FROM plg_readers', t);
+                END IF;
+            END LOOP;
+        END $$;
+        """;
+
     // The Plugins entry now lives in the Site Configuration menu (see
     // PluginsSiteConfigMenuSql below); remove any prior icon-menu placement.
     // Idempotent: a DELETE matching nothing is a no-op on subsequent startups.
@@ -3823,5 +3858,9 @@ internal static class DatabaseSchemaInitializer
         {
             await dbContext.Database.ExecuteSqlRawAsync(SuperAdminBackfillSql, cancellationToken);
         }
+
+        // Last: every table above now exists, so the credential tables can be
+        // taken back off plg_readers (#62).
+        await dbContext.Database.ExecuteSqlRawAsync(PluginReaderLockdownSql, cancellationToken);
     }
 }
