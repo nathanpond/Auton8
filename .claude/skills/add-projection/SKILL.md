@@ -11,7 +11,7 @@ into a Postgres table that AQL can query directly. The substrate handles
 batching, retries, pause/resume, health metrics, and admin endpoints — your
 code contributes the *what* and the *where-from*.
 
-Full framework docs: `documentation/projection-framework/`. This skill is the
+Full framework docs: `docs/projection-framework/`. This skill is the
 condensed checklist; consult the docs (especially
 `recipe-add-a-projection.md` and `examples.md`) when the steps below feel
 under-specified.
@@ -27,7 +27,7 @@ under-specified.
 ## When NOT to invoke this
 
 - Plugin-contributed periodic jobs — use `IPluginContext.Projections.RegisterScheduled`.
-  See `documentation/projection-framework/recipe-plugin-projection.md`.
+  See `docs/projection-framework/recipe-plugin-projection.md`.
 - One-off pre-computation that fires on user action (compute it in the
   endpoint handler, no projection needed).
 - Cross-instance signaling, real-time pub/sub fanout — use Dapr / NATS
@@ -60,7 +60,7 @@ include:
 - Indexed scalar columns for the predicates you expect in `WHERE`.
 - An `auth_tags JSONB NOT NULL DEFAULT '{{}}'::jsonb` column **if** the
   cache has its own permission tags (Pattern A in
-  `documentation/projection-framework/aql-integration.md`).
+  `docs/projection-framework/aql-integration.md`).
 - `projection_version INT NOT NULL DEFAULT 1` and
   `last_sync_at TIMESTAMPTZ NOT NULL` (bookkeeping the framework relies on).
 - A `GIN (auth_tags jsonb_path_ops)` index on the JSONB column.
@@ -211,7 +211,7 @@ registry.
 }
 ```
 
-See `documentation/projection-framework/configuration.md` for the
+See `docs/projection-framework/configuration.md` for the
 full reference.
 
 ### 12. Tests

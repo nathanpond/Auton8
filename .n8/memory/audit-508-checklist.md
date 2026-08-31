@@ -12,6 +12,6 @@ Harvested from `.claude/skills/audit-508` on 2026-08-30. Scope: `src/AutoNate.Sp
 **H. Data tables (1.3.1)** — `components/data-table/DataTable.tsx` → `mantine-datatable`: `<th>` headers, `aria-sort`, caption/`aria-label`, announced empty/loading/error.
 **I. Motion / timing (2.2.x, 2.3.x)** — `prefers-reduced-motion` overrides for animations in `widgets.css`, shell CSS, page styles; `autoClose` < ~5s is a finding; no >3 Hz flashing.
 **J. Plugin UI** — sample 2–3 files under `plugins/<name>/spa/` with A/C/E/F; `plugin-creator` skill should state a11y expectations (drift finding if not).
-**K. Tooling** — `eslint-plugin-jsx-a11y` and `axe-core` / `@axe-core/react` are NOT installed (re-verify at audit time); recommend both plus a Playwright + `@axe-core/playwright` golden-path CI check; document the baseline in CLAUDE.md/README.
+**K. Tooling** — `eslint-plugin-jsx-a11y` IS installed (^6.10.2; ~95 open jsx-a11y warnings under the SPA lint cap as of 2026-08-30); `axe-core` / `@axe-core/react` are NOT. Recommend burning down the jsx-a11y warnings, adding axe, plus a Playwright + `@axe-core/playwright` golden-path CI check; document the baseline in CLAUDE.md/README.
 
 Severity: High = blocks an AT user on a primary task or any default-theme contrast failure. Medium = degraded with workaround. Low = defense-in-depth. Remediation for custom-widget findings usually routes to the `mantine-custom-components` / `mantine-combobox` skills.
