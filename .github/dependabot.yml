@@ -11,7 +11,18 @@ updates:
     directory: /src/AutoNate.Spa
     schedule: { interval: weekly, day: monday }
     groups:
-      spa-minor-patch: { update-types: [minor, patch] }
+      spa-minor-patch:
+        update-types: [minor, patch]
+        # Kept out of the group so the ~30 routine bumps can land while these
+        # are decided on their own: BlockNote 0.54 removes the comments API
+        # the SPA uses (needs a migration, with hocuspocus server-util in
+        # lock-step); every @eigenpal/docx-editor-* version is deprecated on
+        # npm (roadmap decision); @hocuspocus/provider must move with the
+        # server in services/hocuspocus. Each still gets its own PR.
+        exclude-patterns:
+          - "@blocknote/*"
+          - "@eigenpal/*"
+          - "@hocuspocus/provider"
   - package-ecosystem: npm
     directory: /services/hocuspocus
     schedule: { interval: weekly, day: monday }
