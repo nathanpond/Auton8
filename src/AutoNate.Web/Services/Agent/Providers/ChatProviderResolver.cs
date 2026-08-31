@@ -18,15 +18,18 @@ public sealed class ChatProviderResolver : IChatProviderResolver
     private readonly IExternalConnectionStore _store;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IAgentModelCatalog _catalog;
+    private readonly AutoNate.Web.Services.ExternalConnections.IProviderBaseUrlPolicy _baseUrlPolicy;
 
     public ChatProviderResolver(
         IExternalConnectionStore store,
         IHttpClientFactory httpClientFactory,
-        IAgentModelCatalog catalog)
+        IAgentModelCatalog catalog,
+        AutoNate.Web.Services.ExternalConnections.IProviderBaseUrlPolicy baseUrlPolicy)
     {
         _store = store;
         _httpClientFactory = httpClientFactory;
         _catalog = catalog;
+        _baseUrlPolicy = baseUrlPolicy;
     }
 
     public async Task<IChatProvider?> ResolveAsync(Guid connectionId, CancellationToken cancellationToken = default)
@@ -54,16 +57,24 @@ public sealed class ChatProviderResolver : IChatProviderResolver
         var modelId = TryReadString(revealed.Metadata, "model")
             ?? CatalogDefault(revealed.Kind)
             ?? DefaultModel(revealed.Kind);
+        // The connection's baseUrl is operator-supplied metadata and the
+        // provider puts the decrypted key on every request built from it, so
+        // it is allowlisted here — at the boundary where untrusted metadata
+        // becomes a destination — rather than in the provider (#61).
         var baseUrl = TryReadString(revealed.Metadata, "baseUrl");
 
         return revealed.Kind switch
         {
             "LlmProvider:Anthropic" => new AnthropicChatProvider(
                 _httpClientFactory.CreateClient("agent.anthropic"),
-                new AnthropicProviderOptions(revealed.Secret, modelId, baseUrl)),
+                new AnthropicProviderOptions(
+                    revealed.Secret, modelId,
+                    _baseUrlPolicy.Resolve(revealed.Kind, baseUrl, "https://api.anthropic.com").ToString())),
             "LlmProvider:OpenAI" => new OpenAIChatProvider(
                 _httpClientFactory.CreateClient("agent.openai"),
-                new OpenAIProviderOptions(revealed.Secret, modelId, baseUrl)),
+                new OpenAIProviderOptions(
+                    revealed.Secret, modelId,
+                    _baseUrlPolicy.Resolve(revealed.Kind, baseUrl, "https://api.openai.com").ToString())),
             _ => null
         };
     }
