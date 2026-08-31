@@ -1,11 +1,10 @@
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { useCreateBlockNote } from "@blocknote/react";
-import {
-  CommentsExtension,
-  DefaultThreadStoreAuth,
-  YjsThreadStore
-} from "@blocknote/core/comments";
+import { CommentsExtension, DefaultThreadStoreAuth } from "@blocknote/core/comments";
+// BlockNote >= 0.52 decouples Yjs from core: the Yjs-backed thread store and
+// the `withCollaboration` options wrapper live under the /yjs entrypoint.
+import { YjsThreadStore, withCollaboration } from "@blocknote/core/yjs";
 import type { ResolveUsersFn } from "./useResolveUsers";
 import { ReadOnlyThreadStoreAuth } from "./ReadOnlyThreadStoreAuth";
 import type { YjsRole } from "./ticket";
@@ -74,7 +73,7 @@ export function useBlockNoteWithYjs(args: {
   // from the doc identity (no separate prop for callers to forget).
   const isPage = args.documentName.startsWith("page:");
 
-  return useCreateBlockNote({
+  return useCreateBlockNote(withCollaboration({
     ...(isPage ? { schema: pageBlockNoteSchema } : {}),
     collaboration: {
       // BlockNote types provider as `{ awareness?: Awareness | undefined }`
@@ -92,5 +91,5 @@ export function useBlockNoteWithYjs(args: {
       CommentsExtension({ threadStore, resolveUsers: args.resolveUsers })
     ],
     placeholders: { default: "Type to start writing…" }
-  });
+  }));
 }

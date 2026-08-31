@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { User } from "@blocknote/core/comments";
+import type { User } from "@blocknote/core";
 import { useUsers } from "@/hooks/useUsers";
 import { userDisplayName } from "@/hooks/useUserDirectory";
 import { LocalUser } from "@/types/flowable";

@@ -1,5 +1,5 @@
 import { api } from "@/api/client";
-import type { YjsThreadStore } from "@blocknote/core/comments";
+import type { YjsThreadStore } from "@blocknote/core/yjs";
 
 type CommentEventType = "created" | "replied" | "resolved" | "reopened" | "deleted";
 
