@@ -1,0 +1,255 @@
+# Concerns
+
+Map-level tech debt, fragile areas and design concerns for AutoNate — the structural view that the 87 per-finding audit issues (#7–#93) do not capture, plus a small set of new, demonstrated findings.
+
+> Generated from commit 01f0f174 on 2026-08-31 by /n8-map.
+
+Scope: `src/AutoNate.Web` (ASP.NET Core net10.0), `src/AutoNate.Spa` (React 19 / Mantine v9 / Vite), `src/AutoNate.Plugin.Abstractions` + `plugins/`, `services/hocuspocus`, `services/executor`, `flowable-extension/`, `infra/`, `tests/`. Sibling maps: `docs/codebase/Stack.md`, `Conventions.md`, `Testing.md`.
+
+---
+
+## 1. Already tracked
+
+Open issues grouped by theme. Numbers only; see GitHub for text. The last column is the structural cause the theme shares.
+
+| Theme | Issues | Structural cause |
+|---|---|---|
+| Executor sandbox (Pyodide/isolated-vm) | #58, #64, #69, #39, #49 | `services/executor` is a hand-rolled NATS worker with no lockfile, no supervisor, no compose entry (see §4.5); the Python path was bolted onto the JS runner. |
+| Agent skills bypass authorization gates | #19, #20 | `IAgentSkill` implementations call stores directly; nothing forces a skill to go through `IAuthorizer` the way `RequireKindPermission` forces endpoints. |
+| Authorization fails open / inert grants | #59, #23, #22, #21, #25, #24, #45 | `AuthorizationOptions` defaults are permissive and live only in `appsettings.Development.json`; `EntityKinds`/`Actions` are string constants with no compile-time link to routes, so grantable ≠ enforced (§2.7). |
+| SSRF / caller-controlled hosts | #60, #61 | Admin-supplied URLs are trusted because "admin" is treated as fully trusted; there is no outbound-host policy layer. |
+| Error text leakage | #68, #20 | Endpoints fold `ex.Message` into responses; no shared problem-details mapper. |
+| Request-body / OOM levers | #67, #63 | Global `MaxRequestBodySize = 1 GiB` (`Program.cs:928`) instead of per-endpoint limits; parsers materialise whole files. |
+| Content-Type / download sanitiser inconsistency | #65 | Two download paths (page attachments vs datastore files) implemented separately. |
+| Local infra unauthenticated | #66 | Compose stack is dev-shaped; NATS/JetStream has no auth config and is published on all interfaces. |
+| Plugin isolation gaps | #62, #70, #63 | `plg_readers` grants SELECT on all of `public` (§2.5); ALC lifecycle on failure is unwound by hand. |
+| Stability: unbounded / untimed loops | #71, #72, #73, #74, #75, #76, #77, #78 | Background services and sidecars each own their retry/timeout policy; no shared resilience helper (`Polly`/`HttpClient` timeouts) and no cancellation discipline (CA2016 is off, #41). |
+| Hot-path performance | #51, #52, #53, #54, #55, #57, #56 | Flowable is read live per request (§2.2); several list endpoints materialise then filter; `DataTable mode="auto"` probes twice. |
+| Dead / orphaned surfaces | #43, #44, #46, #47, #48, #50, #31, #30, #42 | Features shipped in "phases" (see test names #33) leave half-wired endpoints, columns and menu stubs behind. |
+| Docs / skill drift | #26, #27, #28, #29, #49 | Project skills and header comments are hand-maintained prose with no check against code (§2.9). |
+| Lint / analyzer ratchets | #41, #32, #40 | Analyzers run but warnings are not errors (`Directory.Build.props`); ESLint uses a numeric warning budget (§4.2). |
+| Dependency CVEs | #34, #35, #36, #37, #38 | No CI, so `npm audit` / Dependabot output is never enforced. |
+| 508 — notes module | #8, #9, #10 | Notes UI predates the Mantine migration and uses hand-rolled modals/rows instead of Mantine `Modal`/`Table`. |
+| 508 — shell / shared components | #11, #12, #13, #14, #15, #16, #17, #18, #7 | No route-change focus management or document-title convention; `DataTable` and `MenuTreeEditor` expose mouse-only affordances. |
+| No CI / test gaps | #79, #80, #81, #82, #83, #84, #85, #86, #87, #88, #89, #90, #91, #92, #93, #33 | `.github/workflows/` does not exist; ~1,400 tests run only on one machine; gate-presence tests prove a gate exists, not that it denies. |
+
+---
+
+## 2. Structural / design concerns not captured by per-finding issues
+
+### 2.1 Schema is a 3,827-line idempotent SQL script with no version ledger
+
+- **Issue**: `src/AutoNate.Web/Persistence/DatabaseSchemaInitializer.cs` is one static class: ~78 `private const string …Sql` blobs (82 `CREATE TABLE IF NOT EXISTS`, 48 `ALTER TABLE`, 44 of them `ADD COLUMN IF NOT EXISTS`) executed in a fixed order by `EnsureAsync` (`:3746`). There are no EF migrations anywhere (`grep -r 'MigrateAsync\|\[Migration' src` = 0). The only versioning construct is `auth_seed_state` (`:424`), a key/timestamp latch used for *data* seeds (`role_permissions_to_grants_v1` `:636`, `site_config_*` `:1113…2269`, `main_menu_data_v1` `:3177`), not for DDL. Column type changes, renames and drops cannot be expressed idempotently — the five `DROP` sites (`:653` `DROP TABLE role_permissions`, `:680`, `:764`, `:2412`, `:2735`) are one-shot and unrecorded.
+- **Files**: `src/AutoNate.Web/Persistence/DatabaseSchemaInitializer.cs`; `src/AutoNate.Web/Persistence/AutoNateDbContext.cs` (76 `DbSet`s across three partials; 77 POCOs under `Persistence/Scaffolded/`); `infra/postgres/init/02-create-autonate-app-schema.sql` (a *second* copy of the schema replayed by both test fixtures — `tests/AutoNate.Web.Tests/PostgresTestDatabase.cs:370`, `tests/AutoNate.E2E.Tests/AutoNateE2EFixture.cs:269`); `src/AutoNate.Web/Program.cs:1039-1048` (initializer loop).
+- **Impact**: (a) EF model ↔ SQL drift is undetectable — the only schema-existence test is `tests/AutoNate.Web.Tests/AgentFoundationSchemaTest.cs`, which checks four table names; (b) `02-create-autonate-app-schema.sql` and the initializer must be kept in sync by hand; (c) `EnsureAsync` runs with no `pg_advisory_lock`, so two hosts booting concurrently race through the `DO $$ … $$` read-then-write blocks (*unverified, static analysis only* — the advisory lock at `Services/DataStores/Sql/DatastoresDatabaseInitializer.cs:114` covers only the datastores writer role); (d) the file has 57 commits of churn out of 337 and grows with every feature.
+- **Fix approach**: Do not rewrite to EF migrations wholesale. (1) Add a `schema_version` ledger and split the const blobs into ordered, numbered steps applied once each — the in-repo pattern already exists for plugins: `src/AutoNate.Web/Plugins/PluginMigrationRunner.cs:87` (`__plugin_migrations` + lexically ordered `migrations/*.sql`); reuse it for the host by pointing it at `src/AutoNate.Web/Persistence/Migrations/NNN_*.sql`. (2) Take `pg_advisory_lock(hashtext('autonate-schema'))` at the top of `EnsureAsync`. (3) Add one test that boots the host and, for every `DbSet` in `AutoNateDbContext.Model.GetEntityTypes()`, runs `SELECT * FROM <table> LIMIT 0` — this catches column drift in both directions. (4) Delete `infra/postgres/init/02-create-autonate-app-schema.sql` from the fixtures and let the host initializer create the test schema, so there is one source.
+
+### 2.2 Two sources of truth for workflow executions: Flowable REST and `workflow_execution_cache`
+
+- **Issue**: The executions UI reads Flowable live — every route in `src/AutoNate.Web/Endpoints/ExecutionEndpoints.cs` injects `IFlowableClient` (`GET /api/executions` `:35`, `/page` `:96` with in-memory paging), and `IFlowableReadThrough` (`Services/Flowable/Cache/FlowableReadThrough.cs`) is registered at `Program.cs:988` but injected by **zero** endpoints. AQL entities, dashboards and the authorization selector compiler read the Postgres cache instead (`Services/Query/Entities/WorkflowExecutionsQueryEntity.cs:101`, `Authorization/Selectors/WorkflowExecutionCacheSelectorCompiler.cs`), which is refreshed by a 60 s poll (`Services/Flowable/Cache/FlowableExecutionPollingFeed.cs`, `FlowableCache:ExecutionPollInterval`). The projection's `TenantId` is hard-coded `null` (`FlowableExecutionProjection.cs:226`).
+- **Files**: above, plus `Services/Flowable/FlowableClient.cs` (1,761 lines), `Persistence/DatabaseSchemaInitializer.cs:3271` (`WorkflowCacheSchemaSql`), `docs/projection-framework/*.md`.
+- **Impact**: A list page and a dashboard widget can disagree for up to a minute; permission filtering for executions is evaluated against the cache while the row the user clicks comes from Flowable; #52's O(n) fetch exists *because* the endpoints ignore the cache. Any future "cold tier" (`Program.cs:993-1003`) widens the gap.
+- **Fix approach**: Make the cache the read model for lists (`GET /api/executions[/page]` → `WorkflowExecutionsQueryEntity` / `FilterQueryAsync` on `WorkflowExecutionCache`, SQL-side paging like `GET /api/records` uses `BuildRecordSqlFilter`), keep Flowable for detail/actions, and use `FlowableReadThrough` on cache-miss. This also resolves #52. Register a backfill source so the cache can be rebuilt (§4.1).
+
+### 2.3 Seven runtime dependencies for a single-host app
+
+- **Issue**: A fully functional dev stack is 12 processes — 9 containers (`infra/ensure-up.sh:31-41` `REQUIRED_SERVICES`: postgres, flowable, flowable-dapr, redis, nats, nats-init, dapr-placement, dapr-scheduler, hocuspocus) plus host `daprd`, `dotnet`, and Vite — and that still omits `services/executor` (§4.5). Redis exists **only** as the Dapr state store (`infra/dapr/components/statestore.yaml`; zero `StackExchange.Redis` references in `src/`). Dapr is used for pub/sub over NATS JetStream (`infra/dapr/components/pubsub.yaml`) yet the host never uses `DaprClient` — `Services/Events/AuditOutboxDispatcher.cs:161` POSTs raw HTTP to `/v1.0/publish/...`, while `Services/Nats/NatsStreamProvisioner.cs` and `Services/Nats/NatsConnectionProvider.cs` talk to NATS directly. The JetStream stream shape is asserted from two places that must agree: `NatsStreamProvisioner.cs:55-91` and `infra/scripts/bootstrap-jetstream.sh`.
+- **Files**: `infra/docker-compose.yml`, `infra/ensure-up.sh`, `infra/dapr/components/*.yaml`, `Makefile`, `Services/Signals/DaprStreamingSubscriber.cs`, `Services/Events/AuditOutboxDispatcher.cs`, `Services/SystemHealth/SystemHealthService.cs:77-141`.
+- **Impact**: Every environment (CI included — there is none, #79) must reproduce this topology. Dapr adds a second hop and a second failure mode (`healthprobe` self-healing at `DaprStreamingSubscriber.cs:309-322`; the `deliverPolicy: new` incident recorded in `pubsub.yaml`) for a message path that already has a native NATS client in-process. `GET /api/health/system` probes 8 components but not Hocuspocus (§4.4).
+- **Fix approach**: Decide the bus once. The in-repo direction is already NATS-native (`NatsConnectionProvider`, `JetStreamCodeNodeRunner`, `pipeline-code-runs` stream); moving `AuditOutboxDispatcher`, `DaprStreamingSubscriber` and `flowable-extension/.../DaprWorkflowEventPublisher.java` to direct JetStream publish/consume removes daprd, placement, scheduler, flowable-dapr and Redis (five of nine containers). Until then, add Hocuspocus and the executor to `SystemHealthService` so the health page reflects `REQUIRED_SERVICES`.
+
+### 2.4 `Program.cs` is the composition root *and* a home for endpoints and policy
+
+- **Issue**: 1,636 lines, 85 commits of churn. Beyond DI wiring it contains four hand-maintained registries that must move together (§3.1), a ~93-line dev auto-login middleware (`:1150-1242`), `POST /account/login` (`:1304-1396`) and `/account/logout` (`:1404-1419`) as inline lambdas, two WebSocket `app.Map` handlers (`:1253`, `:1292`), three static helpers after `app.Run()` (`:1576-1636`), the `/api` 404 guard (`:1549-1558`), 24 `AddHostedService` calls, ~40 `IAgentSkill` registrations (`:618-730`) and startup validation for secrets (`:779`, `:793`).
+- **Files**: `src/AutoNate.Web/Program.cs`.
+- **Impact**: Every feature touches the same file (merge conflicts, no ownership boundary); the login endpoint is the only endpoint not in `Endpoints/*` and so is missed by conventions like `RequireKindPermission` audits and `AuthorizationGatePresenceTests`.
+- **Fix approach**: Extract per-area `IServiceCollection` extension methods following the existing `AddProjectionFramework`/`AddProjection` pattern (`Program.cs:942-987`) and move `/account/*` into `Endpoints/AccountEndpoints.cs` shaped like the canonical handler in `docs/codebase/Conventions.md` §1.3. Keep the four registries adjacent and add the parity test from §3.1.
+
+### 2.5 Plugin isolation is a hand-kept type-identity contract
+
+- **Issue**: Plugins load in a collectible `AssemblyLoadContext` (`Plugins/PluginAssemblyLoadContext.cs:32`). Type identity across the boundary depends on a five-entry `SharedAssemblies` list (`:16-27`: Abstractions, DI.Abstractions, Logging.Abstractions, Npgsql, Dapper) that must match the exclusion list in `plugins/Directory.Build.targets:19-27` — two hand-maintained lists with no test or build check. `AutoNate.Plugin.Abstractions.csproj` has no `<Version>`; `PluginAssemblyLoadContext.Load` matches on name only (`:39`), so any plugin binds the host's current abstractions regardless of what it compiled against, and breakage surfaces at enable time (`PluginRuntime.cs:131-262`). `plg_readers` receives `SELECT ON ALL TABLES IN SCHEMA public` plus default privileges (`DatabaseSchemaInitializer.cs:1557-1565`, #62). `IPluginContext.HostServices` is an allow-list wrapper (`SafePluginServiceProvider`, `PluginRuntime.cs:248`).
+- **Files**: `src/AutoNate.Web/Plugins/PluginAssemblyLoadContext.cs`, `PluginRuntime.cs`, `PluginSchemaProvisioner.cs`, `plugins/Directory.Build.props`, `plugins/Directory.Build.targets`, `src/AutoNate.Plugin.Abstractions/*.cs`.
+- **Impact**: Adding a type to the abstractions surface that returns a host type (the `NpgsqlConnection` case the comment at `:21-24` describes) silently duplicates that assembly unless both lists are edited; the `HelloPlugin` build output already ships `Npgsql.dll`/`Dapper.dll` into `bin/` (stripped only at zip time). No compatibility version means no way to refuse an old plugin gracefully.
+- **Fix approach**: (1) Generate one list: an MSBuild item in `plugins/Directory.Build.props` and a `SharedAssemblies.txt` embedded resource read by the ALC, or a test in `tests/AutoNate.Web.Tests/Plugins/` that parses `Directory.Build.targets` and asserts set equality with `PluginAssemblyLoadContext.SharedAssemblies`. (2) Add `<Version>` to the abstractions csproj and an `abstractionsVersion` field to `PluginManifest`; reject on major mismatch in `PluginUploadValidator`. (3) Replace the blanket `plg_readers` grant with explicit per-table grants (#62).
+
+### 2.6 Two collaborative rich-text stacks on one Yjs pipe
+
+- **Issue**: Notes/pages use BlockNote (`src/lib/yjs/useBlockNoteWithYjs.ts`, fragment `"document-store"` `:87`); documents use `@eigenpal/docx-editor-*@1.0.3` (ProseMirror; `src/components/documents/DocxDocumentEditor.tsx`, fragment `"default"` `:773`). Both ride the single `useYjsDocument` hook (`src/lib/yjs/useYjsDocument.ts:49`) and the same Hocuspocus sidecar, whose `services/hocuspocus/src/materializers.ts` must know each fragment name to produce `body_jsonb` snapshots. docx-editor needs a CSS button reset (`DocxDocumentEditor.css:16-23`) and a forced remount on role change (`:838`).
+- **Files**: above; `services/hocuspocus/src/{materializers,persistence}.ts`; `src/lib/blocknote/pageSchema.ts`.
+- **Impact**: Two ProseMirror lineages (TipTap via BlockNote, raw PM via docx-editor) with a pinned `@tiptap/core` override in `package.json` to keep them from colliding; two sets of AI/agent integration paths (BlockNote custom extension planned vs docx-editor's bundled agent panel); Excalidraw (`useYjsExcalidraw.ts`) is a third Y-doc shape. Any Hocuspocus materializer change needs to be tested against three document kinds.
+- **Fix approach**: Do not unify the editors. Instead centralise the contract: one `YjsDocumentKinds` module (SPA) mirrored by one table in `materializers.ts` keyed by document-name prefix (`note:`, `page:`, `napkin:`, `diagram:`, docx) listing fragment name + materializer; add a hocuspocus unit test that fails if a prefix has no materializer.
+
+### 2.7 Authorization modes are configuration, not code
+
+- **Issue**: `Authorization/AuthorizationOptions.cs` defaults to `Enabled=false`, `Enforcement="off"`, `AssignSuperAdminToAllExistingUsers=true`, `DryRun=false`; `appsettings.json` has no `Authorization` section — only `appsettings.Development.json:75-80` turns it on (`full`). `Enforcement` is read at four sites in `Authorization/Evaluator/Authorizer.cs` (`:113`, `:242`, `:330`, `:379`); `DryRun` converts only write denials (`MaybeDryRun` `:218-226`) and never applies to `FilterQueryAsync`/SQL filters. The test factory forces `Enabled=false`/`Enforcement=off` (`tests/AutoNate.Web.Tests/AutoNateWebApplicationFactory.cs:52-84`), so most endpoint tests never exercise enforcement (#87).
+- **Files**: above; `Program.cs:286-287`.
+- **Impact**: Beyond #59 (fail-open default), the *shape* means every new gate is written and tested in a mode where it is inert; `read-only` mode produces lists that are filtered but rows that are writable, which is not a state any test asserts.
+- **Fix approach**: Make `Enforcement` a required value with no default (fail startup if unset, mirroring the secret validation at `Program.cs:779`), add a second test factory preset with `full` enforcement used by the no-grant→403 tests (#87), and drop `DryRun` or extend it to the read path so it means one thing.
+
+### 2.8 Single-tenant by construction
+
+- **Issue**: No tenant/organisation concept exists — `grep -ri tenant src/AutoNate.Web` finds only Flowable's pass-through `workflow_execution_cache.tenant_id` (`DatabaseSchemaInitializer.cs:3279`), always written `null` (`FlowableExecutionProjection.cs:226`). Isolation is expressed via grants (`Authorization/`), the content hierarchy (`Project → Cabinet → Notebook → Page`), and per-plugin Postgres schemas. Plugin DB roles, `plg_readers`, `local_users`, `site_settings`, `menus` are global.
+- **Files**: `Persistence/DatabaseSchemaInitializer.cs`, `Authorization/EntityTypes/CoreEntityTypes.cs`, `Plugins/PluginSchemaProvisioner.cs`.
+- **Impact**: Multi-tenancy later would touch 82 tables, every store's `Where`, all selector compilers and the plugin role model — a rewrite, not a feature. Nothing today prevents the assumption from silently spreading.
+- **Fix approach**: Record the decision explicitly in `.n8/decisions.md` (single-tenant; one deployment per tenant) so planning does not assume otherwise; if multi-tenancy is ever required, start at `IRequestContext` + `AutoNateDbContext` global query filters, not at the tables.
+
+### 2.9 Documentation and skills are prose with no link to code
+
+- **Issue**: `docs/plans/` (9 dated files, kept deliberately — `.n8/decisions.md`) cites 17 paths that do not exist (`2026-05-30-data-stores-implementation.md` alone: 13 of 34); `README.md:129` says `appsettings.json` ships `AllowedHosts: "*"` (it ships `""`, `appsettings.json:15`); `README.md:156` documents `AUTONATE_DATA_ROOT`, which nothing reads (the knob is `Data:Root`, `Storage/DataOptions.cs:9`); `Agents.codex.md` instructs `npx playwright test` against `localhost:5173` for a suite that is Playwright .NET (`tests/AutoNate.E2E.Tests/AutoNate.E2E.Tests.csproj:11`) on a random port; `.claude/skills/*` drift is already #26–#28. `docs/mantine/llms.txt` is a vendored snapshot.
+- **Files**: `README.md`, `Agents.codex.md`, `docs/plans/*.md`, `.claude/skills/*/SKILL.md`, `docs/projection-framework/*.md`.
+- **Impact**: An executor agent following README/Agents.codex.md runs the wrong commands; plan files read as delivered structure when they are proposals.
+- **Fix approach**: Delete `Agents.codex.md` (superseded by `CLAUDE.md` + `docs/codebase/`); add a header line `Status: historical proposal — see docs/codebase/` to each `docs/plans/*.md`; fix the two README facts; enforce auto-memory `feedback_skill_drift` (verify a skill's steps when it is invoked) with a `tests/` check that every `path` mentioned in a `SKILL.md` exists.
+
+### 2.10 Configuration surface is partly invisible
+
+- **Issue**: Eight option sections are bound in `Program.cs` but appear in neither appsettings file: `AuditOutbox` (`:204` — unset ⇒ `DirectPublishAuditEventOutbox`, i.e. the outbox is bypassed by default, `:212-221`), `ContentAttachments` (`:377`), `DocumentImports` (`:381`), `DataStores:Sql` (`:470`), `Agent` (`:747`), `SystemIssues` + nine detector sub-sections (`:828-863`), `Data` (`:901`). `Flowable`, `Dapr`, `Nats`, `WorkflowBehaviors`, `YjsServer`, `Authorization`, `ConnectionStrings` exist only in `appsettings.Development.json`, so a non-Development host starts with `Flowable:BaseUrl = ""`. `Features:ScopedSubscriptions` (`Services/BusWatcher/Subscriptions/ScopedSubscriptionsOptions.cs:10`) is never bound at all. Only three `Environment.GetEnvironmentVariable` sites exist (`Program.cs:67`, `:72`, `:1024`).
+- **Impact**: Operators cannot discover knobs from the shipped config; the default outbox mode differs from the mode the stability audit reviewed (#71 assumes the EF outbox is on).
+- **Fix approach**: Ship every bound section in `appsettings.json` with its default value and a one-line comment key (`"//AuditOutbox"` pattern already used in `src/AutoNate.Spa/package.json` `"//overrides"`), delete `ScopedSubscriptionsOptions`, and add `ValidateOnStart()` to the sections that are required outside Development (pattern: `Program.cs:776-796`).
+
+### 2.11 Release build is unpinned to what runs in dev
+
+- **Issue**: `BuildSpa` is `true` only for `Release` (`AutoNate.Web.csproj:17-18`); Debug never populates `wwwroot/`, so the static-file middleware, `MapStaticAssets`, the `/api` 404 guard and `MapFallbackToFile` (`Program.cs:1513-1571`) are all skipped in the configuration developers run. The E2E fixture is the only path that exercises them and it does so by `dotnet run -p:BuildSpa=true` after deleting `src/AutoNate.Web/wwwroot/` (`tests/AutoNate.E2E.Tests/AutoNateE2EFixture.cs:320`). `flowable-extension` builds inside the Flowable image (`infra/flowable/Dockerfile`), Node is pinned only in Dockerfiles (`node:22-alpine`; no `engines`/`.nvmrc`; host runs v24.15.0).
+- **Impact**: Production-only middleware has no unit-level coverage; the 405-vs-404 gap documented at `Program.cs:1564-1570` and the `UseStaticFiles` comma-filename workaround (`:1515-1525`) are invisible in dev.
+- **Fix approach**: Add a `WebApplicationFactory` test variant that sets `WebRootPath` to a temp dir containing an `index.html`, and assert `GET /api/nope` → 404 `no-store`, `GET /some/spa/route` → `index.html`. Pin Node via `"engines"` in all three `package.json` files.
+
+---
+
+## 3. Fragile areas
+
+### 3.1 The four hand-maintained registries in `Program.cs`
+
+- **Files**: `Program.cs:288-295` (entity kinds), `:299-337` (16 `ISelectorCompiler` + registry), `:339-348` (10 `IInstanceAuthorizer`), `:402-437` (11 AQL entities, each registered twice — concrete + `IQueryEntity` forward); `Authorization/EntityTypes/CoreEntityTypes.cs:23-30`, `AnalyticsEntityTypes.cs`.
+- **Why fragile**: No assembly scanning. Drift fails *silently*: a kind without a selector compiler makes `Authorizer.FilterQueryAsync` return `source.Where(_ => false)` with only a WARN (`Authorization/Evaluator/Authorizer.cs:267-275`); an AQL entity registered as concrete but not forwarded to `IQueryEntity` yields `404 Unknown entity` from `/api/aql/schema/entity` (`Endpoints/AqlSchemaEndpoints.cs:36-39`); a missing instance authorizer yields `Deny("no instance handler…")` (`Authorizer.cs:126-131`). Only a *duplicate* `(Kind, ClrType)` fails loudly (`Authorization/Selectors/SelectorCompilerRegistry.cs:18-22`). `tests/AutoNate.Web.Tests/Authorization/EntityRegistryTests.cs:10-33` hard-codes `17` kinds and nothing cross-checks the other three lists. Seven core kinds (Plugin, SystemIssue, SiteConfig, Project, Cabinet, Notebook, Page) have no compiler by design (content kinds go through `IContentAuthorizer`, `Program.cs:354-355`).
+- **How to change safely**: Follow `.claude/skills/add-permission-gate` / `add-projection` (after fixing #26). Add all four registrations in one commit and extend `EntityRegistryTests` with a parity assertion: for every kind in `IEntityRegistry` that is not in an explicit `ContentKinds`/`NoQueryKinds` allow-list, assert an `ISelectorCompiler` and an `IInstanceAuthorizer` resolve. Never register an AQL entity only as the concrete type.
+
+### 3.2 The `/api` 404 guard
+
+- **Files**: `Program.cs:1549-1558` (inside `if (Directory.Exists(app.Environment.WebRootPath))` at `:1513`); rationale `:1529-1548`; `MapFallbackToFile` regex `:1571`.
+- **Why fragile**: It must sit after all `Map*Endpoints()` (`:1421-1487`) and after `UseStaticFiles`/`MapStaticAssets` (`:1526-1527`) so `http.GetEndpoint()` is populated, and before `MapFallbackToFile`. Turning it into a `MapFallback("/api/{**rest}")` route re-introduces the `AcceptsMatcherPolicy` regression (body-less `POST /api/system-issues/{id}/resolve` → 404) and trips `AuthorizationGatePresenceTests`. It does not run in Debug (no `wwwroot/`), and non-GET unknown `/api` paths return 405, not 404 (`:1564-1570`).
+- **How to change safely**: Keep it middleware (auto-memory `reference_test_suite_infra`). If it must move, extract to `Middleware/ApiNotFoundMiddleware.cs` and register it at the same position; add the §2.11 test first so the ordering is pinned.
+
+### 3.3 ALC `SharedAssemblies` vs `plugins/Directory.Build.targets`
+
+- **Files**: `Plugins/PluginAssemblyLoadContext.cs:16-27`; `plugins/Directory.Build.targets:19-27`; `plugins/Directory.Build.props:20-24` (`Private=false` on the abstractions reference only).
+- **Why fragile**: Adding a host type to `IPluginContext` that lives in a new assembly requires editing both lists; missing the ALC side loads a second copy and every `is`/cast across the boundary fails at runtime inside `PluginRuntime.cs:131-262` (reported as a SystemIssue, not a build error). Missing the targets side only bloats the zip.
+- **How to change safely**: Edit both files in the same commit, rebuild `plugins/HelloPlugin`, run `tests/AutoNate.Web.Tests/Plugins/PluginLoaderTests.cs` and `PluginDataIsolationTests.cs` (they load `tests/AutoNate.Web.Tests.SamplePlugin`). Add the parity test from §2.5.
+
+### 3.4 Yjs fragment names and the Hocuspocus materializers
+
+- **Files**: `src/components/documents/DocxDocumentEditor.tsx:773` (`"default"`), `src/lib/yjs/useBlockNoteWithYjs.ts:87` (`"document-store"`), `services/hocuspocus/src/materializers.ts`, `services/hocuspocus/src/persistence.ts`; document-name prefixes at `VisualTextEditor.tsx:86`, `PageOverview.tsx:61`, `NapkinEditor.tsx:108`, `DiagramEditor.tsx:137`, `useYjsNotesList.ts:62`.
+- **Why fragile**: The fragment name is a string agreed between SPA and sidecar; a rename breaks `body_jsonb` snapshots silently (comment at `DocxDocumentEditor.tsx:756-758`) while live collaboration keeps working, so the failure appears only on version restore / search. `ensure-up.sh` rebuilds the hocuspocus image on a content hash of `src/**` — editing the SPA side alone does not trigger it.
+- **How to change safely**: Change SPA and `materializers.ts` together, run `make infra-ensure` (forces the sidecar rebuild), then `DocumentEditorTests`/notes E2E (#89 makes this a 3 s sleep — expect flakiness).
+
+### 3.5 `key={role}` remount on `DocxDocumentEditor`
+
+- **Files**: `src/components/documents/DocxDocumentEditor.tsx:829-838` (key `${importMode}:${role}`), `:810` (`externalPlugins` memo deps include `role`), `src/lib/yjs/useYjsDocument.ts:64` (`role` defaults to `"viewer"`).
+- **Why fragile**: docx-editor latches `readOnly` at mount; removing the key leaves an editor read-only after the server promotes the role. Moving `useYjsDocument` *inside* the keyed component would tear down the provider on every remount and lose the IndexedDB/WS session.
+- **How to change safely**: Keep the Y.Doc/provider one level above the keyed element; if upgrading `@eigenpal/docx-editor-react` past 1.0.3, check whether `readOnly` became reactive and only then drop the key. Re-check the button reset (`DocxDocumentEditor.css:16-23`) after any upgrade — auto-memory `feedback_docx_editor_button_reset`.
+
+### 3.6 Vite dep optimizer after heavy installs
+
+- **Files**: `src/AutoNate.Spa/vite.config.ts` (no `optimizeDeps`, no `manualChunks`, proxy → `http://localhost:5108`, `server.watch.ignored` for `public/drawio/**`), `package.json` `overrides` (`@tiptap/core` pin).
+- **Why fragile**: Installing or bumping BlockNote / docx-editor / Excalidraw leaves stale `node_modules/.vite/deps`, surfacing as `504 Outdated Optimize Dep` on lazy chunks; the `@tiptap/core` override must be re-validated on every BlockNote bump or TypeScript sees two incompatible `@tiptap/core` types.
+- **How to change safely**: `rm -rf node_modules/.vite/deps && npm run dev -- --force` after such installs (auto-memory `feedback_vite_force_after_heavy_deps`); run `npx tsc -b --force` after clearing `tsconfig.*.tsbuildinfo` before believing any type result (auto-memory `feedback_unused_ts_module_verification`).
+
+### 3.7 `WorkflowStudio.tsx` is invisible to `grep`
+
+- **Files**: `src/AutoNate.Spa/src/pages/workflow/WorkflowStudio.tsx:2190`, `:2198` (see §4.3).
+- **Why fragile**: The user's shell aliases `grep` to `ugrep -I`, which silently skips the file (exit 1, no "binary file matches" line). Every "zero importers" or "unused export" claim based on grep is wrong for the 3,916-line file that imports the most modules in the SPA; the audit rejected four such findings for exactly this reason (`.n8/decisions.md`).
+- **How to change safely**: Use `command grep`, `perl -ne`, or `git grep -a`; treat trial-delete + `tsc -b --force` as the only proof of dead code. Fix the root cause per §4.3.
+
+### 3.8 The E2E fixture mutates the working tree
+
+- **Files**: `tests/AutoNate.E2E.Tests/AutoNateE2EFixture.cs:320` (`Directory.Delete(src/AutoNate.Web/wwwroot, recursive: true)`), `:329` (deletes static-web-asset manifests under `src/` and `tests/`), `:251-259` (`DROP DATABASE AutoNate_E2E`), `:132-168` (`dotnet run -p:BuildSpa=true`).
+- **Why fragile**: `dotnet test AutoNate.sln` (README `:106`) includes this project, so a full solution test run rebuilds the SPA and wipes `wwwroot/` — a Release-published tree loses its assets. Both fixtures hard-code `localhost:5432` / `autonate` (`PostgresTestDatabase.cs:41`; only the password and, for E2E, the port are overridable).
+- **How to change safely**: Run backend tests as `dotnet test tests/AutoNate.Web.Tests` and E2E as `make e2e`; never point either at a non-throwaway Postgres.
+
+### 3.9 Startup order and the Dapr fail-fast
+
+- **Files**: `Program.cs:1022-1037` (Development-only sidecar probe; throws unless `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true`), `:1039-1048` (initializers), `:1054-1058` (`NatsStreamProvisioner.EnsureStreamsAsync`), `infra/start-autonate-web-sidecar.sh` (fails if 3500/50001 are held by anything else).
+- **Why fragile**: Schema init runs *before* the pipeline exists, so a schema failure is a crash with no `/api/health`; NATS stream provisioning runs after schema init but before any hosted service, and disagreement with `infra/scripts/bootstrap-jetstream.sh` surfaces as `nats: no response from stream` at first publish, not at startup.
+- **How to change safely**: Keep the order; when adding a stream/subject edit both `NatsStreamProvisioner.cs:55-91` and `bootstrap-jetstream.sh` and add it to `LegacyStreamsToRemove` (`:113`) if a subject moves.
+
+---
+
+## 4. New verified findings
+
+None of these duplicate an open issue title in #7–#93.
+
+### 4.1 `POST /api/admin/projections/{name}/rebuild` returns 400 for every registered projection
+
+- **Issue**: `BackfillRunner.RunGenericAsync` resolves `IProjectionBackfillSource<TSource>` from DI and throws `InvalidOperationException` when none is registered (`src/AutoNate.Web/Services/Projections/BackfillRunner.cs:58-63`); the endpoint maps that to 400 (`Endpoints/AdminProjectionsEndpoints.cs:72-93`). No class in the repo implements `IProjectionBackfillSource<>` (`grep -rn IProjectionBackfillSource src tests plugins` → only the interface, `BackfillRunner`, and two comments; `FlowableExecutionBackfillSource` named at `Services/Flowable/Cache/FlowableExecutionPollingFeed.cs:14` does not exist). The SPA exposes a Rebuild button for each projection (`src/AutoNate.Spa/src/pages/admin/Projections.tsx:176` → `src/api/projections.ts:47`).
+- **Files**: above; `docs/projection-framework/operations.md` documents rebuild as the recovery step.
+- **Impact**: The documented recovery path for a corrupted or retention-truncated cache (`workflow_execution_cache`, `workflow_task_cache`, `workflow_variable_cache`, `workflow_event_log_cache`, `record_activity_rollup_cache`) does not work; admins see a red "No IProjectionBackfillSource<…> registered" toast. Adjacent to #47 (reset-watermark) but distinct.
+- **Fix approach**: Implement `IProjectionBackfillSource<WorkflowExecutionSummary>` over `IFlowableClient.GetWorkflowExecutionsAsync` (the polling feed already has the enumeration), register it next to `AddProjection` at `Program.cs:953-966`, repeat for the task/variable/event-log/rollup sources, and add a `ProjectionFrameworkPhase4Tests`-style test asserting 200 for each name in `GET /api/admin/projections`. Until then, hide the button when `feeds` is empty or return 501 with a clear message.
+- **Evidence**: A temporary xunit test (`tests/AutoNate.Web.Tests/ZzTmpRebuildProbeTests.cs`, deleted afterwards; `git status` clean) booted `AutoNateWebApplicationFactory`, listed `GET /api/admin/projections` (5 projections, all with `"feeds":[]`), and POSTed `/rebuild` for each:
+  ```
+  REBUILD flowable.workflow_execution_cache -> 400 {"ok":false,"message":"No IProjectionBackfillSource<WorkflowExecutionSummary> registered for projection 'flowable.workflow_execution_cache'."}
+  REBUILD flowable.workflow_task_cache -> 400 …<FlowableTaskSummary>…
+  REBUILD flowable.workflow_variable_cache -> 400 …<FlowableInstanceVariables>…
+  REBUILD flowable.workflow_event_log_cache -> 400 …<FlowableHistoricActivityEvent>…
+  REBUILD records.record_activity_rollup_cache -> 400 …<RecordActivityRollupSnapshot>…
+  ```
+
+### 4.2 ESLint warning budget is saturated at exactly 411/411, including 40 `react-hooks/exhaustive-deps`
+
+- **Issue**: `src/AutoNate.Spa/package.json:11` sets `"lint": "eslint src --max-warnings=411"`. The current tree emits exactly 411 warnings and 0 errors, so the next warning anywhere fails `npm run lint` while nothing today is required to go down. Breakdown: `react/no-unescaped-entities` 234 (130 in `pages/admin/config/PluginDocumentation.tsx`), `react-hooks/exhaustive-deps` 40 (5 in `pages/notes/NotesPage.tsx`, 4 in `pages/notes/ProjectSettingsModal.tsx`, 2 in `components/data-table/DataTable.tsx`), `jsx-a11y/*` 97 (#40 territory), `@typescript-eslint/no-unused-vars` 24, and 12 *unused* `eslint-disable` directives (8 in `widgets/AutoConfigForm.tsx`, plus `lib/yjs/commentAudit.ts:21`, `lib/yjs/useYjsExcalidraw.ts:101`, `pages/dashboard/WidgetConfigDrawer.tsx:99`, `pages/dashboard/WidgetHost.tsx:95`).
+- **Files**: `src/AutoNate.Spa/package.json`, `src/AutoNate.Spa/eslint.config.js`, files above.
+- **Impact**: The ratchet is a ceiling, not a ratchet — it blocks new code without shrinking debt; 40 stale-closure warnings are hook-correctness bugs waiting to happen (`DataTable.tsx` is shared by every list page). The 12 unused directives are free to delete and are exactly the kind of thing #32 (missing reasons) will trip over.
+- **Fix approach**: Fix `react/no-unescaped-entities` mechanically (`&apos;`/`{"'"}`) — that alone drops the ceiling to 177; then lower `--max-warnings` in the same PR every time (true ratchet). Treat `react-hooks/exhaustive-deps` as an error once the 40 are triaged. Add `--report-unused-disable-directives` to the lint script.
+- **Evidence**: `npx eslint src -f json` from `src/AutoNate.Spa` → 0 errors, 411 warnings (counted from the JSON); `npm run lint` exits 0.
+
+### 4.3 `WorkflowStudio.tsx` contains two raw NUL bytes, which is why `grep` treats it as binary
+
+- **Issue**: `src/AutoNate.Spa/src/pages/workflow/WorkflowStudio.tsx:2190` and `:2198` build a `Map` key as `` `${topic}<NUL>${eventType}` `` with a literal `0x00` byte in the source (not `\0` / ` `). It is the only tracked text file in the repo containing a NUL. Under the shell's `grep` (a function wrapping `ugrep -I`) the file is silently skipped: `grep -c useState WorkflowStudio.tsx` prints nothing and exits 1, while `command grep -c useState` prints 24.
+- **Files**: `WorkflowStudio.tsx:2186-2200` (`knownEvents` memo).
+- **Impact**: Every grep-based audit, dead-code claim and refactor search misses the largest file in the SPA (3,916 lines, one exported component, 19 private modal components, 24 `useState`); the `/n8-audit` run rejected four false "zero importers" findings for this reason, and the next agent will hit it again.
+- **Fix approach**: Replace both bytes with `" "` (or a visible separator such as `""`/`"::"` since `topic`/`eventType` are identifiers) in one commit; add an ESLint rule (`no-irregular-whitespace` does not catch NUL — use `no-control-regex`-style custom check or a `tests/` guard that fails on `\x00` in tracked text files, e.g. the `perl` one-liner below in a pre-commit hook).
+- **Evidence**: `perl -ne 'print "$.:" . ($_ =~ tr/\0//) . "\n" if /\0/' WorkflowStudio.tsx` → `2190:1`, `2198:1`; repo-wide scan of `git ls-files` for `\0` in text files → only this file.
+
+### 4.4 Production SPA bundle: a single 4.46 MB entry chunk (1.29 MB gzip), no code-splitting configuration
+
+- **Issue**: `vite.config.ts` has no `build.rollupOptions`/`manualChunks` and only 8 `lazy(` sites exist in the SPA. A production build emits 196 JS chunks totalling 14 MB, led by `index-*.js` 4,458 kB / 1,291 kB gzip, `chunk-EIO257PC-*.js` 1,821 kB / 744 kB, `dist-*.js` 897 kB / 251 kB, plus three more chunks above 500 kB.
+- **Files**: `src/AutoNate.Spa/vite.config.ts`; route table in `src/AutoNate.Spa/src/` (8 `lazy()` calls); `package.json` (BlockNote, docx-editor ×4, Excalidraw, `@xyflow/react`, `recharts`, `@svar-ui/react-filemanager`, CodeMirror ×5, `sucrase`).
+- **Impact**: Every first load pulls 1.3 MB gzip of JS before `/api/auth/me`; every deploy invalidates the whole bundle; the `MapStaticAssets` ETag workaround at `Program.cs:1515-1525` exists partly because assets are so few and so large.
+- **Fix approach**: Lazy-import the four editor stacks at the route boundary (`DocumentEditorPage.tsx` already does this for docx-editor — extend the pattern to Notes/BlockNote, Excalidraw, WorkflowStudio, dashboards) and add `manualChunks` for `mantine`, `blocknote`, `docx-editor`, `excalidraw`, `codemirror`; set `build.chunkSizeWarningLimit` only after those land.
+- **Evidence**: `npx vite build --outDir <scratch>` from `src/AutoNate.Spa` (output removed afterwards), sizes read from the build log; Vite's own `(!) Some chunks are larger than 500 kB` warning printed.
+
+### 4.5 `services/executor` is not part of the local stack, and the health page cannot see Hocuspocus — *unverified (static analysis only)*
+
+- **Issue**: `grep -c executor infra/docker-compose.yml infra/ensure-up.sh` → 0 and 0; the `Makefile` has no target for it. The executor has a `Dockerfile` but no compose service, so `JetStreamCodeNodeRunner` (`Services/Pipelines/Execution/`) has nothing consuming `pipeline-code-run.>` in the documented dev stack. Separately, `Services/SystemHealth/SystemHealthService.cs` contains no reference to Hocuspocus or Yjs (`grep -ci 'hocuspocus\|yjs'` → 0) although `ensure-up.sh:39` lists it as required and all notes/pages/documents/diagrams depend on it.
+- **Files**: `infra/docker-compose.yml`, `infra/ensure-up.sh:31-41`, `services/executor/Dockerfile`, `Services/SystemHealth/SystemHealthService.cs:77-141`.
+- **Impact**: A pipeline code node in dev waits for a reply that never comes (behaviour not exercised here — #69 covers the executor's own failure modes); a Hocuspocus outage leaves `/api/health/system` fully green while every Y.Doc load fails.
+- **Fix approach**: Add an `executor` service to `infra/docker-compose.yml` (build `../services/executor`, `NATS_URL=nats://nats:4222`) and to `REQUIRED_SERVICES`; add a `CheckHocuspocusAsync` TCP/HTTP probe to `SystemHealthService` mirroring `CheckDaprControlPlaneAsync` (`:125-141`) and an executor liveness check via a NATS request to a `pipeline-code-run.ping` subject.
+
+### 4.6 Config and test-fixture key drift — *unverified (static analysis only)*
+
+- **Issue**: (a) `tests/AutoNate.Web.Tests/AutoNateWebApplicationFactory.cs:61` sets `"Flowable:BaseAddress"`, but `FlowableOptions` has only `BaseUrl` (`Configuration/InfrastructureOptions.cs:7`) — the key binds to nothing and tests run with `BaseUrl = ""` (masked because `IFlowableClient` is swapped for `StubFlowableClient`). (b) `ScopedSubscriptionsOptions` (`Services/BusWatcher/Subscriptions/ScopedSubscriptionsOptions.cs`) declares `Features:ScopedSubscriptions` and is referenced nowhere else. (c) `README.md:156` documents `AUTONATE_DATA_ROOT`; the only occurrence in the repo is that line. (d) `Agents.codex.md` prescribes `npx playwright test` and `localhost:5173`; the suite is Playwright .NET on a random port.
+- **Files**: above.
+- **Impact**: Misleading to the next executor; (a) means any test that ever un-stubs Flowable will fail with an empty base URL.
+- **Fix approach**: Rename the key to `Flowable:BaseUrl`; delete `ScopedSubscriptionsOptions.cs`; fix README to `Data__Root`; delete `Agents.codex.md`.
+- **Evidence**: `grep -rn` results listed above; `dotnet build AutoNate.sln` is otherwise clean (0 errors, 2 warnings — both `S3398` in `tests/AutoNate.Web.Tests/Authorization/Document*AuthorizerTests.cs`).
+
+## 5. Filed from this map (2026-08-31)
+
+Every item in §4 plus the design concerns in §2 the owner chose to track were filed by `/n8-map` after independent re-verification (see `.n8/decisions.md`):
+
+| Issue | Concern |
+|---|---|
+| #112 (sev:high) | Projection rebuild returns 400 for every projection — no `IProjectionBackfillSource<>` implemented (§4.1) |
+| #113 (sev:medium) | `infra/ensure-nats-stream.sh` narrows the stream on every `make infra-ensure` |
+| #114 (sev:medium) | `services/executor` absent from the local stack (§4.5) |
+| #115 (sev:medium) | No Hocuspocus probe in `SystemHealthService` (§4.5) |
+| #116 (sev:medium) | NUL bytes in `WorkflowStudio.tsx` make grep skip it (§4.3) |
+| #117 (sev:medium) | 3.9 MB entry chunk, no code splitting (§4.4) |
+| #118 (sev:low) | Lint cap is a ceiling; 12 unused `eslint-disable` directives (§4.2) |
+| #119 (sev:low) | `IFlowableReadThrough` registered, injected nowhere |
+| #120 (sev:low) | README `AUTONATE_DATA_ROOT` / Rider run-config drift (§4.6c) |
+| #121 (sev:low) | Test factory sets `Flowable:BaseAddress` (§4.6a) |
+| #122 (sev:low) | `ScopedSubscriptionsOptions` never read (§4.6b) |
+| #123 (sev:low) | `Agents.codex.md` prescribes a Playwright JS suite that doesn't exist (§4.6d) |
+| #124 (spike) | Schema init: no advisory lock, no version ledger (§2) |
+| #125 (spike) | Executions: Flowable live vs `workflow_execution_cache` (§2) |
+| #126 (spike) | Runtime dependency surface — Redis only for Dapr state, outbox → Dapr HTTP hop (§2) |
+
+Rejected during re-verification (not filed): "audit outbox is bypassed by default" — `AuditOutboxOptions.Enabled` defaults to `true` (`Services/Events/AuditOutboxDispatcher.cs:16`), so the durable outbox is the default path.
