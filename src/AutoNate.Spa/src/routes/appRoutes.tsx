@@ -51,6 +51,12 @@ export type AppRoute = {
   index?: boolean;
   element: ReactElement;
   children?: AppRoute[];
+  // Document title for this route, without the site name — useRouteDocumentTitle
+  // appends that. Screen-reader users orient by title on navigation, and every
+  // tab and history entry read "AutoNate" before this existed (WCAG 2.4.2,
+  // 508 §502 — #18). Titles live here rather than in each page so a new route
+  // is one line, not a page edit that is easy to forget.
+  title?: string;
 };
 
 const protect = (node: ReactElement) => <ProtectedRoute>{node}</ProtectedRoute>;
@@ -123,25 +129,25 @@ const template = (key: string) => protect(PAGE_TEMPLATES[key]);
 // PAGE_TEMPLATES and is reachable only when an admin places it on a menu.
 export const APP_ROUTES: AppRoute[] = [
   // Workflow domain (parameterized + tightly coupled siblings)
-  { path: "workflow", element: protect(<WorkflowStudio />) },
-  { path: "workflow-executions", element: protect(<WorkflowExecutions />) },
-  { path: "executions/:id", element: protect(<ExecutionPage />) },
+  { path: "workflow", title: "Workflow Studio", element: protect(<WorkflowStudio />) },
+  { path: "workflow-executions", title: "Workflow Executions", element: protect(<WorkflowExecutions />) },
+  { path: "executions/:id", title: "Execution", element: protect(<ExecutionPage />) },
 
   // Record-types domain
-  { path: "record-types", element: protect(<RecordTypeList />) },
-  { path: "record-types/:id", element: protect(<RecordTypeEditor />) },
+  { path: "record-types", title: "Record Types", element: protect(<RecordTypeList />) },
+  { path: "record-types/:id", title: "Record Type", element: protect(<RecordTypeEditor />) },
 
   // Records domain
-  { path: "records/:typeShortCode/new", element: protect(<RecordCreate />) },
-  { path: "records/:typeShortCode/:key", element: protect(<RecordDetail />) },
-  { path: "record/:key", element: protect(<RecordDetail />) },
-  { path: "records/:typeShortCode", element: protect(<RecordList />) },
+  { path: "records/:typeShortCode/new", title: "New Record", element: protect(<RecordCreate />) },
+  { path: "records/:typeShortCode/:key", title: "Record", element: protect(<RecordDetail />) },
+  { path: "record/:key", title: "Record", element: protect(<RecordDetail />) },
+  { path: "records/:typeShortCode", title: "Records", element: protect(<RecordList />) },
 
   // Record-relationship-types domain (mirrors record-types). The route was
   // previously /record-edge-types — redirects below preserve old bookmarks
   // and any existing menu items still pointing at the legacy path.
-  { path: "record-relationship-types", element: protect(<EdgeTypeList />) },
-  { path: "record-relationship-types/:id", element: protect(<EdgeTypeEditor />) },
+  { path: "record-relationship-types", title: "Relationship Types", element: protect(<EdgeTypeList />) },
+  { path: "record-relationship-types/:id", title: "Relationship Type", element: protect(<EdgeTypeEditor />) },
   { path: "record-edge-types", element: <Navigate to="/record-relationship-types" replace /> },
   {
     path: "record-edge-types/:id",
@@ -149,7 +155,7 @@ export const APP_ROUTES: AppRoute[] = [
   },
 
   // Notifications inbox (per-user; not a configurable page template)
-  { path: "notifications", element: protect(<Notifications />) },
+  { path: "notifications", title: "Notifications", element: protect(<Notifications />) },
 
   // Content hierarchy: project → cabinet → notebook → page → note. Full-bleed
   // layout (project picker + cabinet rail + explorer + tab strip + editors)
@@ -163,12 +169,12 @@ export const APP_ROUTES: AppRoute[] = [
   // semantics turn into setState loops in Mantine's ref-merging utilities.
   // The first splat segment is the entity locator (any kind) and the optional
   // second segment is the page-scoped note index.
-  { path: "notes/*", element: protect(<NotesPage />) },
+  { path: "notes/*", title: "Notes", element: protect(<NotesPage />) },
 
   // Read-only datatable view of every project the user can access. Reached
   // from the project picker in /notes; clicking a row jumps back to /notes
   // with that project selected.
-  { path: "projects", element: protect(<AllProjects />) },
+  { path: "projects", title: "Projects", element: protect(<AllProjects />) },
 
   // Documents subsystem (Phase 1 — folders only; documents + editor land in
   // later phases). Three routes:
@@ -179,12 +185,12 @@ export const APP_ROUTES: AppRoute[] = [
   // The folder view uses a custom side-tree layout; the editor route (later
   // phases) will live OUTSIDE this AppShell so the editor can render full-
   // bleed without the nav chrome.
-  { path: "documents", element: protect(<DocumentsHomePage />) },
+  { path: "documents", title: "Documents", element: protect(<DocumentsHomePage />) },
   // Cross-project template gallery. Templates are stored in the documents
   // table (kind='template') but filtered out of regular folder listings —
   // this is the only navigable surface that lists them.
-  { path: "documents/templates", element: protect(<TemplateGalleryPage />) },
-  { path: "documents/p/:projectId", element: protect(<ProjectDocumentsPage />) },
+  { path: "documents/templates", title: "Document Templates", element: protect(<TemplateGalleryPage />) },
+  { path: "documents/p/:projectId", title: "Project Documents", element: protect(<ProjectDocumentsPage />) },
   {
     path: "documents/p/:projectId/folder/:folderId",
     element: protect(<ProjectDocumentsPage />)

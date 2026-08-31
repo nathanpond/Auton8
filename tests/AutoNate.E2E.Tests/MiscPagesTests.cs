@@ -1,3 +1,4 @@
+using System.Linq;
 using AutoNate.E2E.Tests.Support;
 using Microsoft.Playwright;
 using Xunit;
@@ -21,6 +22,65 @@ namespace AutoNate.E2E.Tests;
 public sealed class MiscPagesTests : E2ETestBase
 {
     public MiscPagesTests(AutoNateE2EFixture fixture) : base(fixture) { }
+
+    // #18: only four admin datastore pages set a document title; every other
+
+    // tab, history entry and window-switcher row read the bare site name, so
+
+    // screen-reader users navigating between pages had nothing to orient by
+
+    // (WCAG 2.4.2 / 508 §502). Titles now come from APP_ROUTES centrally.
+
+    [Fact]
+
+    public async Task Navigation_sets_a_distinct_document_title_per_route()
+
+    {
+
+        await using var session = await NewSignedInAsAdminAsync();
+
+        var page = session.Page;
+
+
+        var seen = new List<string>();
+
+        foreach (var (path, expected) in new[]
+
+                 {
+
+                     ("/workflow-executions", "Workflow Executions"),
+
+                     ("/notifications", "Notifications"),
+
+                     ("/projects", "Projects"),
+
+                     ("/query", "Query"),
+
+                 })
+
+        {
+
+            await page.GotoAsync(path);
+
+            await Assertions.Expect(page).ToHaveTitleAsync(
+
+                new System.Text.RegularExpressions.Regex(expected),
+
+                new() { Timeout = 15_000 });
+
+            seen.Add(await page.TitleAsync());
+
+        }
+
+
+        // Distinct titles are the point — four routes that all read the same
+
+        // thing would satisfy a per-route assertion but not a screen reader.
+
+        Assert.Equal(seen.Count, seen.Distinct().Count());
+
+    }
+
 
     [Fact]
     public async Task Notifications_RendersHeadingAndMarkAllReadButton()
