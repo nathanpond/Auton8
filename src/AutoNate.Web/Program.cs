@@ -283,8 +283,16 @@ builder.Services.AddDbContextFactory<AutoNateDbContext>((sp, options) =>
 // Stores plan adds a secondary at Order 10 against `autonate_datastores`.
 builder.Services.AddSingleton<AutoNate.Web.Persistence.IDatabaseInitializer,
     AutoNate.Web.Persistence.PrimaryDatabaseInitializer>();
+// Authorization posture is fail-closed by default and validated at start-up:
+// a deployment cannot end up with grants ignored by simply omitting these keys
+// (#59). Mirrors the CallbackSharedSecret / InternalSharedSecret validators
+// below. Development stays free to run with enforcement off.
+builder.Services.AddSingleton<
+    Microsoft.Extensions.Options.IValidateOptions<AutoNate.Web.Authorization.AuthorizationOptions>>(
+    new AutoNate.Web.Authorization.AuthorizationOptionsValidator(builder.Environment.IsDevelopment()));
 builder.Services.AddOptions<AutoNate.Web.Authorization.AuthorizationOptions>()
-    .BindConfiguration(AutoNate.Web.Authorization.AuthorizationOptions.SectionName);
+    .BindConfiguration(AutoNate.Web.Authorization.AuthorizationOptions.SectionName)
+    .ValidateOnStart();
 foreach (var entityType in CoreEntityTypes.All)
 {
     builder.Services.AddSingleton<IEntityType>(entityType);
@@ -1003,6 +1011,40 @@ builder.Services.AddHostedService(sp =>
     sp.GetRequiredService<AutoNate.Web.Services.Flowable.Cache.ColdTier.ColdTierArchiverService>());
 
 var app = builder.Build();
+
+// Reading .Value here runs AuthorizationOptionsValidator before any database
+// or hosted-service work, so a fail-open posture — or an Enforcement value the
+// evaluator would silently read as "not full" — crashes start-up with the
+// offending key named rather than serving an open system (#59). ValidateOnStart
+// covers the same ground if this line ever moves.
+var authPosture = app.Services
+    .GetRequiredService<Microsoft.Extensions.Options.IOptions<AutoNate.Web.Authorization.AuthorizationOptions>>()
+    .Value;
+
+// Fail-open-ish authorization flags that are legitimate but should never be
+// left on silently in a real environment (#59). Neither is a refusal: DryRun is
+// the documented staged-rollout tool, and the SuperAdmin backfill is the only
+// thing that grants a greenfield install its first admin.
+if (!app.Environment.IsDevelopment())
+{
+    if (authPosture.DryRun)
+    {
+        app.Logger.LogWarning(
+            "{Section}:DryRun is true — write-path denials are logged but still allowed. " +
+            "This is a temporary rollout setting; turn it off once the warnings are quiet.",
+            AutoNate.Web.Authorization.AuthorizationOptions.SectionName);
+    }
+    if (authPosture.AssignSuperAdminToAllExistingUsers)
+    {
+        app.Logger.LogWarning(
+            "{Section}:AssignSuperAdminToAllExistingUsers is true. The one-shot backfill grants " +
+            "SuperAdmin to every local_user that exists the first time it runs (tracked by the " +
+            "'superadmin_backfill_v1' row in auth_seed_state). Set it to false once the first " +
+            "admin is seeded, and before pointing this deployment at a database that already " +
+            "holds other users.",
+            AutoNate.Web.Authorization.AuthorizationOptions.SectionName);
+    }
+}
 
 // Wire the projection.lag_seconds gauge to the health service. The ObservableGauge
 // callback fires per Prometheus scrape, so this just hands it a delegate that
