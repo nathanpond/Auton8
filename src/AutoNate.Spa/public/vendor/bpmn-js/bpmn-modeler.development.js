@@ -1405,30 +1405,17 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/diagram-js/lib/util/Elements.js
   function getParents(elements) {
+    var elementsSet = new Set(elements);
     return filter(elements, function(element) {
-      return !find(elements, function(e5) {
-        return e5 !== element && getParent(element, e5);
-      });
+      var parent = element.parent;
+      while (parent) {
+        if (elementsSet.has(parent)) {
+          return false;
+        }
+        parent = parent.parent;
+      }
+      return true;
     });
-  }
-  function getParent(element, parent) {
-    if (!parent) {
-      return;
-    }
-    if (element === parent) {
-      return parent;
-    }
-    if (!element.parent) {
-      return;
-    }
-    return getParent(element.parent, parent);
-  }
-  function add(elements, element, unique) {
-    var canAdd = !unique || elements.indexOf(element) === -1;
-    if (canAdd) {
-      elements.push(element);
-    }
-    return canAdd;
   }
   function eachElement(elements, fn, depth) {
     depth = depth || 0;
@@ -1443,20 +1430,21 @@ var __AutoNateBpmnJS__ = (() => {
     });
   }
   function selfAndChildren(elements, unique, maxDepth) {
-    var result = [], processedChildren = [];
+    var result = /* @__PURE__ */ new Set(), processedChildren = /* @__PURE__ */ new Set();
     eachElement(elements, function(element, i3, depth) {
-      add(result, element, unique);
+      result.add(element);
       var children = element.children;
       if (maxDepth === -1 || depth < maxDepth) {
-        if (children && add(processedChildren, children, unique)) {
+        if (children && !processedChildren.has(children)) {
+          processedChildren.add(children);
           return children;
         }
       }
     });
-    return result;
+    return Array.from(result);
   }
   function selfAndAllChildren(elements, allowDuplicates) {
-    return selfAndChildren(elements, !allowDuplicates, -1);
+    return selfAndChildren(elements, true, -1);
   }
   function getClosure(elements, isTopLevel, closure) {
     if (isUndefined(isTopLevel)) {
@@ -1684,7 +1672,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
     return idx;
   }
-  function add2(collection, element, idx) {
+  function add(collection, element, idx) {
     if (!collection || !element) {
       return;
     }
@@ -2335,6 +2323,9 @@ var __AutoNateBpmnJS__ = (() => {
   function isLabel(value) {
     return isObject(value) && has(value, "labelTarget");
   }
+  function isRoot(value) {
+    return isObject(value) && isNil(value.parent);
+  }
 
   // node_modules/diagram-js/lib/layout/LayoutUtil.js
   function roundBounds(bounds) {
@@ -2554,8 +2545,9 @@ var __AutoNateBpmnJS__ = (() => {
     append(container, svg);
     const viewport = this._viewport = createGroup(svg, "viewport");
     if (config.deferUpdate) {
-      this._viewboxChanged = debounce(bind(this._viewboxChanged, this), 300);
+      this._viewboxChanged = debounce(this._viewboxChanged, 300);
     }
+    this._restoreFocus = debounce(this._restoreFocus, 0);
     eventBus.on("diagram.init", () => {
       eventBus.fire("canvas.init", {
         svg,
@@ -2576,6 +2568,7 @@ var __AutoNateBpmnJS__ = (() => {
     eventBus.on("diagram.clear", 500, this._clear, this);
   };
   Canvas.prototype._destroy = function() {
+    this._restoreFocus.cancel();
     this._eventBus.fire("canvas.destroy", {
       svg: this._svg,
       viewport: this._viewport
@@ -2617,6 +2610,9 @@ var __AutoNateBpmnJS__ = (() => {
     this._setFocused(true);
   };
   Canvas.prototype.restoreFocus = function() {
+    this._restoreFocus();
+  };
+  Canvas.prototype._restoreFocus = function() {
     if (document.activeElement === document.body) {
       this.focus();
     }
@@ -2709,16 +2705,21 @@ var __AutoNateBpmnJS__ = (() => {
     return plane.layer;
   };
   Canvas.prototype.findRoot = function(element) {
-    if (typeof element === "string") {
-      element = this._elementRegistry.get(element);
+    const elements = this._resolveElements(element);
+    let root;
+    for (const element2 of elements) {
+      const plane = this._findPlaneForRoot(
+        findRoot(element2)
+      );
+      if (!plane) {
+        return;
+      }
+      if (root && plane.rootElement !== root) {
+        return void 0;
+      }
+      root = plane.rootElement;
     }
-    if (!element) {
-      return;
-    }
-    const plane = this._findPlaneForRoot(
-      findRoot(element)
-    ) || {};
-    return plane.rootElement;
+    return root;
   };
   Canvas.prototype.getRootElements = function() {
     return this._planes.map(function(plane) {
@@ -2730,14 +2731,24 @@ var __AutoNateBpmnJS__ = (() => {
       return plane.rootElement === rootElement;
     });
   };
+  Canvas.prototype._resolveElement = function(element) {
+    if (typeof element === "string") {
+      return this._elementRegistry.get(element);
+    }
+    return element;
+  };
+  Canvas.prototype._resolveElements = function(elements) {
+    if (!isArray(elements)) {
+      elements = [elements];
+    }
+    return elements.map((element) => this._resolveElement(element)).filter(Boolean);
+  };
   Canvas.prototype.getContainer = function() {
     return this._container;
   };
-  Canvas.prototype._updateMarker = function(element, marker, add3) {
+  Canvas.prototype._updateMarker = function(element, marker, add2) {
     let container;
-    if (!element.id) {
-      element = this._elementRegistry.get(element);
-    }
+    element = this._resolveElement(element);
     element.markers = element.markers || /* @__PURE__ */ new Set();
     container = this._elementRegistry._elements[element.id];
     if (!container) {
@@ -2745,7 +2756,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
     forEach([container.gfx, container.secondaryGfx], function(gfx) {
       if (gfx) {
-        if (add3) {
+        if (add2) {
           element.markers.add(marker);
           classes2(gfx).add(marker);
         } else {
@@ -2754,7 +2765,7 @@ var __AutoNateBpmnJS__ = (() => {
         }
       }
     });
-    this._eventBus.fire("element.marker.update", { element, gfx: container.gfx, marker, add: !!add3 });
+    this._eventBus.fire("element.marker.update", { element, gfx: container.gfx, marker, add: !!add2 });
   };
   Canvas.prototype.addMarker = function(element, marker) {
     this._updateMarker(element, marker, true);
@@ -2763,9 +2774,7 @@ var __AutoNateBpmnJS__ = (() => {
     this._updateMarker(element, marker, false);
   };
   Canvas.prototype.hasMarker = function(element, marker) {
-    if (!element.id) {
-      element = this._elementRegistry.get(element);
-    }
+    element = this._resolveElement(element);
     if (!element.markers) {
       return false;
     }
@@ -2806,9 +2815,7 @@ var __AutoNateBpmnJS__ = (() => {
     return rootElement;
   };
   Canvas.prototype.removeRootElement = function(rootElement) {
-    if (typeof rootElement === "string") {
-      rootElement = this._elementRegistry.get(rootElement);
-    }
+    rootElement = this._resolveElement(rootElement);
     const plane = this._findPlaneForRoot(rootElement);
     if (!plane) {
       return;
@@ -2884,7 +2891,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
   };
   Canvas.prototype._setParent = function(element, parent, parentIndex) {
-    add2(parent.children, element, parentIndex);
+    add(parent.children, element, parentIndex);
     element.parent = parent;
   };
   Canvas.prototype._addElement = function(type, element, parent, parentIndex) {
@@ -2989,14 +2996,19 @@ var __AutoNateBpmnJS__ = (() => {
   };
   Canvas.prototype.scrollToElement = function(element, padding) {
     let defaultPadding = 100;
-    if (typeof element === "string") {
-      element = this._elementRegistry.get(element);
+    const elements = this._resolveElements(element);
+    if (!elements.length) {
+      return;
     }
-    const rootElement = this.findRoot(element);
+    const rootElement = this.findRoot(elements);
+    if (!rootElement) {
+      return;
+    }
     if (rootElement !== this.getRootElement()) {
       this.setRootElement(rootElement);
     }
-    if (rootElement === element) {
+    const visibleElements = elements.filter((e5) => e5 != rootElement);
+    if (!visibleElements.length) {
       return;
     }
     if (!padding) {
@@ -3011,7 +3023,7 @@ var __AutoNateBpmnJS__ = (() => {
       bottom: padding.bottom || defaultPadding,
       left: padding.left || defaultPadding
     };
-    const elementBounds = getBBox(element), elementTrbl = asTRBL(elementBounds), viewboxBounds = this.viewbox(), zoom2 = this.zoom();
+    const elementBounds = getBBox(visibleElements), elementTrbl = asTRBL(elementBounds), viewboxBounds = this.viewbox(), zoom2 = this.zoom();
     let dx, dy;
     viewboxBounds.y += padding.top / zoom2;
     viewboxBounds.x += padding.left / zoom2;
@@ -3754,9 +3766,14 @@ var __AutoNateBpmnJS__ = (() => {
         return;
       }
       var childrenGfx = self2._getChildrenContainer(parent);
-      forEach(children.slice().reverse(), function(child) {
-        var childGfx = elementRegistry.getGraphics(child);
-        prependTo(childGfx.parentNode, childrenGfx);
+      var expected = childrenGfx.firstChild;
+      forEach(children, function(child) {
+        var childGfx = elementRegistry.getGraphics(child).parentNode;
+        if (childGfx === expected) {
+          expected = expected.nextSibling;
+        } else {
+          childrenGfx.insertBefore(childGfx, expected);
+        }
       });
     });
   };
@@ -9722,19 +9739,6 @@ var __AutoNateBpmnJS__ = (() => {
     return "<" + e5.$type + (e5.id ? ' id="' + e5.id : "") + '" />';
   }
 
-  // node_modules/bpmn-js/lib/util/CompatibilityUtil.js
-  var DI_ERROR_MESSAGE = "Tried to access di from the businessObject. The di is available through the diagram element only. For more information, see https://github.com/bpmn-io/bpmn-js/issues/1472";
-  function ensureCompatDiRef(businessObject) {
-    if (!has(businessObject, "di")) {
-      Object.defineProperty(businessObject, "di", {
-        enumerable: false,
-        get: function() {
-          throw new Error(DI_ERROR_MESSAGE);
-        }
-      });
-    }
-  }
-
   // node_modules/bpmn-js/lib/import/BpmnTreeWalker.js
   function is(element, type) {
     return element.$instanceOf(type);
@@ -9794,7 +9798,6 @@ var __AutoNateBpmnJS__ = (() => {
           );
         } else {
           diMap[bpmnElement.id] = di;
-          ensureCompatDiRef(bpmnElement);
         }
       } else {
         logError(
@@ -10198,6 +10201,8 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/bpmn-js/lib/BaseViewer.js
+  var EXPORT_PADDING = 5;
+  var OUTLINE_HIDDEN_CLS = "djs-outline-hidden";
   function BaseViewer(options) {
     options = assign({}, DEFAULT_OPTIONS, options);
     this._moddle = this._createModdle(options);
@@ -10310,8 +10315,16 @@ var __AutoNateBpmnJS__ = (() => {
       const canvas = this.get("canvas");
       const contentNode = canvas.getActiveLayer(), defsNode = query(":scope > defs", canvas._svg);
       const contents = innerSVG(contentNode), defs = defsNode ? "<defs>" + innerSVG(defsNode) + "</defs>" : "";
-      const bbox = contentNode.getBBox();
-      svg = '<?xml version="1.0" encoding="utf-8"?>\n<!-- created with bpmn-js / http://bpmn.io -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + bbox.width + '" height="' + bbox.height + '" viewBox="' + bbox.x + " " + bbox.y + " " + bbox.width + " " + bbox.height + '" version="1.1">' + defs + contents + "</svg>";
+      const container = canvas.getContainer();
+      classes(container).add(OUTLINE_HIDDEN_CLS);
+      let bbox;
+      try {
+        bbox = contentNode.getBBox();
+      } finally {
+        classes(container).remove(OUTLINE_HIDDEN_CLS);
+      }
+      const x3 = bbox.x - EXPORT_PADDING, y3 = bbox.y - EXPORT_PADDING, width = bbox.width + EXPORT_PADDING * 2, height = bbox.height + EXPORT_PADDING * 2;
+      svg = '<?xml version="1.0" encoding="utf-8"?>\n<!-- created with bpmn-js / http://bpmn.io -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + width + '" height="' + height + '" viewBox="' + x3 + " " + y3 + " " + width + " " + height + '" version="1.1">' + defs + contents + "</svg>";
     } catch (e5) {
       err = e5;
     }
@@ -10471,10 +10484,10 @@ var __AutoNateBpmnJS__ = (() => {
     return moddle;
   };
   BaseModeler.prototype._collectIds = function(definitions, elementsById) {
-    var moddle = definitions.$model, ids3 = moddle.ids, id;
-    ids3.clear();
+    var moddle = definitions.$model, ids4 = moddle.ids, id;
+    ids4.clear();
     for (id in elementsById) {
-      ids3.claim(id, elementsById[id]);
+      ids4.claim(id, elementsById[id]);
     }
   };
 
@@ -10641,6 +10654,35 @@ var __AutoNateBpmnJS__ = (() => {
   }
   function isExternalLabel(element) {
     return isLabel(element) && isLabelExternal(element.labelTarget);
+  }
+
+  // node_modules/bpmn-js/lib/util/AnnotationUtil.js
+  var TEXT_ANNOTATION_PADDING = 7;
+  function getElementAnnotations(element) {
+    let result = [];
+    forEach(element.incoming, (connection) => {
+      if (is2(connection, "bpmn:Association") && is2(connection.source, "bpmn:TextAnnotation")) {
+        result.push({ annotation: connection.source, association: connection });
+      }
+    });
+    forEach(element.outgoing, (connection) => {
+      if (is2(connection, "bpmn:Association") && is2(connection.target, "bpmn:TextAnnotation")) {
+        result.push({ annotation: connection.target, association: connection });
+      }
+    });
+    return result;
+  }
+  function collectElementsAnnotations(elements) {
+    const result = /* @__PURE__ */ new Map();
+    forEach(selfAndChildren(elements, true, -1), (element) => {
+      forEach(getElementAnnotations(element), (entry) => {
+        if (!result.has(entry.annotation)) {
+          result.set(entry.annotation, { annotation: entry.annotation, associations: [] });
+        }
+        result.get(entry.annotation).associations.push(entry.association);
+      });
+    });
+    return [...result.values()];
   }
 
   // node_modules/bpmn-js/lib/draw/BpmnRenderUtil.js
@@ -11507,14 +11549,13 @@ var __AutoNateBpmnJS__ = (() => {
     }
     function renderExternalLabel(parentGfx, element, attrs = {}) {
       var box = {
-        width: 90,
-        height: 30,
+        width: element.width,
+        height: element.height,
         x: element.width / 2 + element.x,
         y: element.height / 2 + element.y
       };
       return renderLabel(parentGfx, getLabel(element), {
         box,
-        fitBox: true,
         style: assign(
           {},
           textRenderer.getExternalStyle(),
@@ -11847,7 +11888,7 @@ var __AutoNateBpmnJS__ = (() => {
         var dataObject = renderDataObject(parentGfx, element, attrs);
         drawPath2(parentGfx, arrowPathData, {
           strokeWidth: 1,
-          fill: getFillColor(element, defaultFillColor, attrs.fill),
+          fill: getStrokeColor(element, defaultStrokeColor, attrs.stroke),
           stroke: getStrokeColor(element, defaultStrokeColor, attrs.stroke)
         });
         return dataObject;
@@ -12395,9 +12436,7 @@ var __AutoNateBpmnJS__ = (() => {
       "bpmn:TextAnnotation": function(parentGfx, element, attrs = {}) {
         attrs = pickAttrs(attrs, [
           "fill",
-          "stroke",
-          "width",
-          "height"
+          "stroke"
         ]);
         var {
           width,
@@ -12424,7 +12463,7 @@ var __AutoNateBpmnJS__ = (() => {
         renderLabel(parentGfx, text, {
           align: "left-top",
           box: getBounds(element, attrs),
-          padding: 7,
+          padding: TEXT_ANNOTATION_PADDING,
           style: {
             fill: getLabelColor(element, defaultLabelColor, defaultStrokeColor, attrs.stroke)
           }
@@ -12766,7 +12805,7 @@ var __AutoNateBpmnJS__ = (() => {
   // node_modules/bpmn-js/lib/draw/TextRenderer.js
   var DEFAULT_FONT_SIZE = 12;
   var LINE_HEIGHT_RATIO = 1.2;
-  var MIN_TEXT_ANNOTATION_HEIGHT = 30;
+  var MIN_TEXT_ANNOTATION_HEIGHT = 40;
   function TextRenderer(config) {
     var defaultStyle = assign({
       fontFamily: "Arial, sans-serif",
@@ -12782,34 +12821,39 @@ var __AutoNateBpmnJS__ = (() => {
       style: defaultStyle
     });
     this.getExternalLabelBounds = function(bounds, text) {
-      var layoutedDimensions = textUtil.getDimensions(text, {
-        box: {
-          width: 90,
-          height: 30
-        },
+      var box = {
+        width: Math.max(bounds.width, DEFAULT_LABEL_SIZE.width),
+        height: 30
+      };
+      var dimensions = getTextboxDimensions(text, box, {
         style: externalStyle
       });
       return {
-        x: Math.round(bounds.x + bounds.width / 2 - layoutedDimensions.width / 2),
-        y: Math.round(bounds.y),
-        width: Math.ceil(layoutedDimensions.width),
-        height: Math.ceil(layoutedDimensions.height)
+        x: Math.round(bounds.x + bounds.width / 2 - dimensions.width / 2),
+        y: bounds.y,
+        width: Math.ceil(dimensions.width),
+        height: Math.ceil(dimensions.height)
       };
     };
     this.getTextAnnotationBounds = function(bounds, text) {
-      var layoutedDimensions = textUtil.getDimensions(text, {
-        box: bounds,
+      var dimensions = getTextboxDimensions(text, bounds, {
         style: defaultStyle,
         align: "left-top",
-        padding: 5
+        padding: TEXT_ANNOTATION_PADDING
       });
       return {
         x: bounds.x,
         y: bounds.y,
         width: bounds.width,
-        height: Math.max(MIN_TEXT_ANNOTATION_HEIGHT, Math.round(layoutedDimensions.height))
+        height: Math.max(MIN_TEXT_ANNOTATION_HEIGHT, Math.round(dimensions.height))
       };
     };
+    this.getDimensions = function(text, options) {
+      return textUtil.getDimensions(text, options || {});
+    };
+    function getTextboxDimensions(text, box, layoutOptions) {
+      return textUtil.getDimensions(text, assign({ box }, layoutOptions));
+    }
     this.createText = function(text, options) {
       return textUtil.createText(text, options || {});
     };
@@ -13869,18 +13913,30 @@ var __AutoNateBpmnJS__ = (() => {
         if (!parentPlane) {
           return [];
         }
-        var title = escapeHTML(parent.name || parent.id);
-        var link = domify('<li><span class="bjs-crumb"><a title="' + title + '">' + title + "</a></span></li>");
-        link.addEventListener("click", function() {
-          canvas.setRootElement(parentPlane);
-        });
-        return link;
+        return [{ parent, parentPlane }];
       });
       breadcrumbs.innerHTML = "";
       var visible = path.length > 1;
       containerClasses.toggle(OPEN_CLASS, visible);
-      path.forEach(function(element2) {
-        breadcrumbs.appendChild(element2);
+      path.forEach(function(entry, index2) {
+        var parent = entry.parent, parentPlane = entry.parentPlane, title = escapeHTML(parent.name || parent.id);
+        var isCurrent = index2 === path.length - 1;
+        var crumb;
+        if (isCurrent) {
+          crumb = domify(
+            '<li><span class="bjs-crumb" title="' + title + '">' + title + "</span></li>"
+          );
+        } else {
+          var href = "#" + escapeHTML(parent.id);
+          crumb = domify(
+            '<li><a class="bjs-crumb" href="' + href + '" title="' + title + '">' + title + "</a></li>"
+          );
+          crumb.addEventListener("click", function(event2) {
+            event2.preventDefault();
+            canvas.setRootElement(parentPlane);
+          });
+        }
+        breadcrumbs.appendChild(crumb);
       });
     }
     eventBus.on("root.set", function(event2) {
@@ -14529,7 +14585,7 @@ var __AutoNateBpmnJS__ = (() => {
   function Selection(eventBus, canvas) {
     this._eventBus = eventBus;
     this._canvas = canvas;
-    this._selectedElements = [];
+    this._selectedElements = /* @__PURE__ */ new Set();
     var self2 = this;
     eventBus.on(["shape.remove", "connection.remove"], function(e5) {
       var element = e5.element;
@@ -14541,22 +14597,24 @@ var __AutoNateBpmnJS__ = (() => {
   }
   Selection.$inject = ["eventBus", "canvas"];
   Selection.prototype.deselect = function(element) {
-    var selectedElements = this._selectedElements;
-    var idx = selectedElements.indexOf(element);
-    if (idx !== -1) {
-      var oldSelection = selectedElements.slice();
-      selectedElements.splice(idx, 1);
-      this._eventBus.fire("selection.changed", { oldSelection, newSelection: selectedElements });
+    if (!this._selectedElements.has(element)) {
+      return;
     }
+    var oldSelection = this.get();
+    this._selectedElements.delete(element);
+    this._eventBus.fire("selection.changed", {
+      oldSelection,
+      newSelection: this.get()
+    });
   };
   Selection.prototype.get = function() {
-    return this._selectedElements;
+    return Array.from(this._selectedElements);
   };
   Selection.prototype.isSelected = function(element) {
-    return this._selectedElements.indexOf(element) !== -1;
+    return this._selectedElements.has(element);
   };
-  Selection.prototype.select = function(elements, add3) {
-    var selectedElements = this._selectedElements, oldSelection = selectedElements.slice();
+  Selection.prototype.select = function(elements, add2) {
+    var oldSelection = this.get();
     if (!isArray(elements)) {
       elements = elements ? [elements] : [];
     }
@@ -14566,18 +14624,17 @@ var __AutoNateBpmnJS__ = (() => {
       var elementRoot = canvas.findRoot(element);
       return rootElement === elementRoot;
     });
-    if (add3) {
-      forEach(elements, function(element) {
-        if (selectedElements.indexOf(element) !== -1) {
-          return;
-        } else {
-          selectedElements.push(element);
-        }
+    if (add2) {
+      forEach(elements, (element) => {
+        this._selectedElements.add(element);
       });
     } else {
-      this._selectedElements = selectedElements = elements.slice();
+      this._selectedElements = new Set(elements);
     }
-    this._eventBus.fire("selection.changed", { oldSelection, newSelection: selectedElements });
+    this._eventBus.fire("selection.changed", {
+      oldSelection,
+      newSelection: this.get()
+    });
   };
 
   // node_modules/diagram-js/lib/features/selection/SelectionVisuals.js
@@ -14604,17 +14661,17 @@ var __AutoNateBpmnJS__ = (() => {
       function select(s3) {
         addMarker(s3, MARKER_SELECTED);
       }
-      var oldSelection = event2.oldSelection, newSelection = event2.newSelection;
-      forEach(oldSelection, function(e5) {
-        if (newSelection.indexOf(e5) === -1) {
+      var oldSelection = new Set(event2.oldSelection), newSelection = new Set(event2.newSelection);
+      for (let e5 of oldSelection) {
+        if (!newSelection.has(e5)) {
           deselect(e5);
         }
-      });
-      forEach(newSelection, function(e5) {
-        if (oldSelection.indexOf(e5) === -1) {
+      }
+      for (let e5 of newSelection) {
+        if (!oldSelection.has(e5)) {
           select(e5);
         }
-      });
+      }
     });
   }
   SelectionVisuals.$inject = [
@@ -14662,15 +14719,15 @@ var __AutoNateBpmnJS__ = (() => {
         element = null;
       }
       var isSelected = selection.isSelected(element), isMultiSelect = selection.get().length > 1;
-      var add3 = hasSecondaryModifier(event2);
+      var add2 = hasSecondaryModifier(event2);
       if (isSelected && isMultiSelect) {
-        if (add3) {
+        if (add2) {
           return selection.deselect(element);
         } else {
           return selection.select(element);
         }
       } else if (!isSelected) {
-        selection.select(element, add3);
+        selection.select(element, add2);
       } else {
         selection.deselect(element);
       }
@@ -15614,6 +15671,10 @@ var __AutoNateBpmnJS__ = (() => {
     if (!force && this.isOpen(target)) {
       return;
     }
+    var allowed = this._eventBus.fire("contextPad.open.allowed", { target });
+    if (allowed === false) {
+      return;
+    }
     this.close();
     this._updateAndOpen(target);
   };
@@ -15868,8 +15929,8 @@ var __AutoNateBpmnJS__ = (() => {
   var e2;
   var f;
   var c;
-  var s;
   var a;
+  var s;
   var h;
   var p;
   var v;
@@ -15927,33 +15988,33 @@ var __AutoNateBpmnJS__ = (() => {
       i.length = H.__r = 0;
     }
   }
-  function L(n3, l3, u3, t4, i3, r4, o3, e5, f3, c3, s3) {
-    var a3, h3, p3, v3, y3, _3, g3, m4 = t4 && t4.__k || w, b3 = l3.length;
-    for (f3 = T(u3, l3, m4, f3, b3), a3 = 0; a3 < b3; a3++) null != (p3 = u3.__k[a3]) && (h3 = -1 != p3.__i && m4[p3.__i] || d, p3.__i = a3, _3 = q(n3, p3, h3, i3, r4, o3, e5, f3, c3, s3), v3 = p3.__e, p3.ref && h3.ref != p3.ref && (h3.ref && J(h3.ref, null, p3), s3.push(p3.ref, p3.__c || v3, p3)), null == y3 && null != v3 && (y3 = v3), (g3 = !!(4 & p3.__u)) || h3.__k === p3.__k ? (f3 = j(p3, f3, n3, g3), g3 && h3.__e && (h3.__e = null)) : "function" == typeof p3.type && void 0 !== _3 ? f3 = _3 : v3 && (f3 = v3.nextSibling), p3.__u &= -7);
+  function L(n3, l3, u3, t4, i3, r4, o3, e5, f3, c3, a3) {
+    var s3, h3, p3, v3, y3, _3, g3 = t4 && t4.__k || w, m4 = l3.length;
+    for (f3 = T(u3, l3, g3, f3, m4), s3 = 0; s3 < m4; s3++) null != (p3 = u3.__k[s3]) && (h3 = -1 != p3.__i && g3[p3.__i] || d, p3.__i = s3, _3 = q(n3, p3, h3, i3, r4, o3, e5, f3, c3, a3), v3 = p3.__e, p3.ref && h3.ref != p3.ref && (h3.ref && J(h3.ref, null, p3), a3.push(p3.ref, p3.__c || v3, p3)), null == y3 && null != v3 && (y3 = v3), 4 & p3.__u ? (f3 = j(p3, f3, n3), h3.__e && (h3.__e = null)) : "function" == typeof p3.type && void 0 !== _3 ? f3 = _3 : v3 && (f3 = v3.nextSibling), p3.__u &= -7);
     return u3.__e = y3, f3;
   }
   function T(n3, l3, u3, t4, i3) {
-    var r4, o3, e5, f3, c3, s3 = u3.length, a3 = s3, h3 = 0;
-    for (n3.__k = new Array(i3), r4 = 0; r4 < i3; r4++) null != (o3 = l3[r4]) && "boolean" != typeof o3 && "function" != typeof o3 ? ("string" == typeof o3 || "number" == typeof o3 || "bigint" == typeof o3 || o3.constructor == String ? o3 = n3.__k[r4] = x(null, o3, null, null, null) : g(o3) ? o3 = n3.__k[r4] = x(S, { children: o3 }, null, null, null) : void 0 === o3.constructor && o3.__b > 0 ? o3 = n3.__k[r4] = x(o3.type, o3.props, o3.key, o3.ref ? o3.ref : null, o3.__v) : n3.__k[r4] = o3, f3 = r4 + h3, o3.__ = n3, o3.__b = n3.__b + 1, e5 = null, -1 != (c3 = o3.__i = O(o3, u3, f3, a3)) && (a3--, (e5 = u3[c3]) && (e5.__u |= 2)), null == e5 || null == e5.__v ? (-1 == c3 && (i3 > s3 ? h3-- : i3 < s3 && h3++), "function" != typeof o3.type && (o3.__u |= 4)) : c3 != f3 && (c3 == f3 - 1 ? h3-- : c3 == f3 + 1 ? h3++ : (c3 > f3 ? h3-- : h3++, o3.__u |= 4))) : n3.__k[r4] = null;
-    if (a3) for (r4 = 0; r4 < s3; r4++) null != (e5 = u3[r4]) && 0 == (2 & e5.__u) && (e5.__e == t4 && (t4 = $(e5)), K(e5, e5));
+    var r4, o3, e5, f3, c3, a3 = u3.length, s3 = a3, h3 = 0;
+    for (n3.__k = new Array(i3), r4 = 0; r4 < i3; r4++) null != (o3 = l3[r4]) && "boolean" != typeof o3 && "function" != typeof o3 ? ("string" == typeof o3 || "number" == typeof o3 || "bigint" == typeof o3 || o3.constructor == String ? o3 = n3.__k[r4] = x(null, o3, null, null, null) : g(o3) ? o3 = n3.__k[r4] = x(S, { children: o3 }, null, null, null) : void 0 === o3.constructor && o3.__b > 0 ? o3 = n3.__k[r4] = x(o3.type, o3.props, o3.key, o3.ref ? o3.ref : null, o3.__v) : n3.__k[r4] = o3, f3 = r4 + h3, o3.__ = n3, o3.__b = n3.__b + 1, e5 = null, -1 != (c3 = o3.__i = O(o3, u3, f3, s3)) && (s3--, (e5 = u3[c3]) && (e5.__u |= 2)), null == e5 || null == e5.__v ? (-1 == c3 && (i3 > a3 ? h3-- : i3 < a3 && h3++), "function" != typeof o3.type && (o3.__u |= 4)) : c3 != f3 && (c3 == f3 - 1 ? h3-- : c3 == f3 + 1 ? h3++ : (c3 > f3 ? h3-- : h3++, o3.__u |= 4))) : n3.__k[r4] = null;
+    if (s3) for (r4 = 0; r4 < a3; r4++) null != (e5 = u3[r4]) && 0 == (2 & e5.__u) && (e5.__e == t4 && (t4 = $(e5)), K(e5, e5));
     return t4;
   }
-  function j(n3, l3, u3, t4) {
-    var i3, r4;
+  function j(n3, l3, u3) {
+    var t4, i3;
     if ("function" == typeof n3.type) {
-      for (i3 = n3.__k, r4 = 0; i3 && r4 < i3.length; r4++) i3[r4] && (i3[r4].__ = n3, l3 = j(i3[r4], l3, u3, t4));
+      for (t4 = n3.__k, i3 = 0; t4 && i3 < t4.length; i3++) t4[i3] && (t4[i3].__ = n3, l3 = j(t4[i3], l3, u3));
       return l3;
     }
-    n3.__e != l3 && (t4 && (l3 && n3.type && !l3.parentNode && (l3 = $(n3)), u3.insertBefore(n3.__e, l3 || null)), l3 = n3.__e);
+    n3.__e != l3 && (l3 && n3.type && !l3.parentNode && (l3 = $(n3)), l3 = u3.insertBefore(n3.__e, l3 || null));
     do {
       l3 = l3 && l3.nextSibling;
     } while (null != l3 && 8 == l3.nodeType);
     return l3;
   }
   function O(n3, l3, u3, t4) {
-    var i3, r4, o3, e5 = n3.key, f3 = n3.type, c3 = l3[u3], s3 = null != c3 && 0 == (2 & c3.__u);
-    if (null === c3 && null == e5 || s3 && e5 == c3.key && f3 == c3.type) return u3;
-    if (t4 > (s3 ? 1 : 0)) {
+    var i3, r4, o3, e5 = n3.key, f3 = n3.type, c3 = l3[u3], a3 = null != c3 && 0 == (2 & c3.__u);
+    if (null === c3 && null == e5 || a3 && e5 == c3.key && f3 == c3.type) return u3;
+    if (t4 > (a3 ? 1 : 0)) {
       for (i3 = u3 - 1, r4 = u3 + 1; i3 >= 0 || r4 < l3.length; ) if (null != (c3 = l3[o3 = i3 >= 0 ? i3-- : r4++]) && 0 == (2 & c3.__u) && e5 == c3.key && f3 == c3.type) return o3;
     }
     return -1;
@@ -15968,7 +16029,7 @@ var __AutoNateBpmnJS__ = (() => {
       if ("string" == typeof t4 && (n3.style.cssText = t4 = ""), t4) for (l3 in t4) u3 && l3 in u3 || z(n3.style, l3, "");
       if (u3) for (l3 in u3) t4 && u3[l3] == t4[l3] || z(n3.style, l3, u3[l3]);
     }
-    else if ("o" == l3[0] && "n" == l3[1]) r4 = l3 != (l3 = l3.replace(a, "$1")), o3 = l3.toLowerCase(), l3 = o3 in n3 || "onFocusOut" == l3 || "onFocusIn" == l3 ? o3.slice(2) : l3.slice(2), n3.l || (n3.l = {}), n3.l[l3 + r4] = u3, u3 ? t4 ? u3[s] = t4[s] : (u3[s] = h, n3.addEventListener(l3, r4 ? v : p, r4)) : n3.removeEventListener(l3, r4 ? v : p, r4);
+    else if ("o" == l3[0] && "n" == l3[1]) r4 = l3 != (l3 = l3.replace(s, "$1")), o3 = l3.toLowerCase(), l3 = o3 in n3 || "onFocusOut" == l3 || "onFocusIn" == l3 ? o3.slice(2) : l3.slice(2), n3.l || (n3.l = {}), n3.l[l3 + r4] = u3, u3 ? t4 ? u3[a] = t4[a] : (u3[a] = h, n3.addEventListener(l3, r4 ? v : p, r4)) : n3.removeEventListener(l3, r4 ? v : p, r4);
     else {
       if ("http://www.w3.org/2000/svg" == i3) l3 = l3.replace(/xlink(H|:h)/, "h").replace(/sName$/, "s");
       else if ("width" != l3 && "height" != l3 && "href" != l3 && "list" != l3 && "form" != l3 && "tabIndex" != l3 && "download" != l3 && "rowSpan" != l3 && "colSpan" != l3 && "role" != l3 && "popover" != l3 && l3 in n3) try {
@@ -15984,46 +16045,46 @@ var __AutoNateBpmnJS__ = (() => {
       if (this.l) {
         var t4 = this.l[u3.type + n3];
         if (null == u3[c]) u3[c] = h++;
-        else if (u3[c] < t4[s]) return;
+        else if (u3[c] < t4[a]) return;
         return t4(l.event ? l.event(u3) : u3);
       }
     };
   }
-  function q(n3, u3, t4, i3, r4, o3, e5, f3, c3, s3) {
-    var a3, h3, p3, v3, y3, d3, _3, k3, x3, M, $2, I2, P3, A3, H2, T3 = u3.type;
+  function q(n3, u3, t4, i3, r4, o3, e5, f3, c3, a3) {
+    var s3, h3, p3, v3, y3, d3, _3, k3, x3, M, I2, P3, A3, H2, T3, j3, F2 = u3.type;
     if (void 0 !== u3.constructor) return null;
-    128 & t4.__u && (c3 = !!(32 & t4.__u), o3 = [f3 = u3.__e = t4.__e]), (a3 = l.__b) && a3(u3);
-    n: if ("function" == typeof T3) try {
-      if (k3 = u3.props, x3 = T3.prototype && T3.prototype.render, M = (a3 = T3.contextType) && i3[a3.__c], $2 = a3 ? M ? M.props.value : a3.__ : i3, t4.__c ? _3 = (h3 = u3.__c = t4.__c).__ = h3.__E : (x3 ? u3.__c = h3 = new T3(k3, $2) : (u3.__c = h3 = new C(k3, $2), h3.constructor = T3, h3.render = Q), M && M.sub(h3), h3.state || (h3.state = {}), h3.__n = i3, p3 = h3.__d = true, h3.__h = [], h3._sb = []), x3 && null == h3.__s && (h3.__s = h3.state), x3 && null != T3.getDerivedStateFromProps && (h3.__s == h3.state && (h3.__s = m({}, h3.__s)), m(h3.__s, T3.getDerivedStateFromProps(k3, h3.__s))), v3 = h3.props, y3 = h3.state, h3.__v = u3, p3) x3 && null == T3.getDerivedStateFromProps && null != h3.componentWillMount && h3.componentWillMount(), x3 && null != h3.componentDidMount && h3.__h.push(h3.componentDidMount);
-      else {
-        if (x3 && null == T3.getDerivedStateFromProps && k3 !== v3 && null != h3.componentWillReceiveProps && h3.componentWillReceiveProps(k3, $2), u3.__v == t4.__v || !h3.__e && null != h3.shouldComponentUpdate && false === h3.shouldComponentUpdate(k3, h3.__s, $2)) {
-          u3.__v != t4.__v && (h3.props = k3, h3.state = h3.__s, h3.__d = false), u3.__e = t4.__e, u3.__k = t4.__k, u3.__k.some(function(n4) {
-            n4 && (n4.__ = u3);
-          }), w.push.apply(h3.__h, h3._sb), h3._sb = [], h3.__h.length && e5.push(h3);
-          break n;
+    128 & t4.__u && (c3 = !!(32 & t4.__u), o3 = [f3 = u3.__e = t4.__e]), (s3 = l.__b) && s3(u3);
+    n: if ("function" == typeof F2) {
+      h3 = e5.length;
+      try {
+        if (x3 = u3.props, M = F2.prototype && F2.prototype.render, I2 = (s3 = F2.contextType) && i3[s3.__c], P3 = s3 ? I2 ? I2.props.value : s3.__ : i3, t4.__c ? k3 = (p3 = u3.__c = t4.__c).__ = p3.__E : (M ? u3.__c = p3 = new F2(x3, P3) : (u3.__c = p3 = new C(x3, P3), p3.constructor = F2, p3.render = Q), I2 && I2.sub(p3), p3.state || (p3.state = {}), p3.__n = i3, v3 = p3.__d = true, p3.__h = [], p3._sb = []), M && null == p3.__s && (p3.__s = p3.state), M && null != F2.getDerivedStateFromProps && (p3.__s == p3.state && (p3.__s = m({}, p3.__s)), m(p3.__s, F2.getDerivedStateFromProps(x3, p3.__s))), y3 = p3.props, d3 = p3.state, p3.__v = u3, v3) M && null == F2.getDerivedStateFromProps && null != p3.componentWillMount && p3.componentWillMount(), M && null != p3.componentDidMount && p3.__h.push(p3.componentDidMount);
+        else {
+          if (M && null == F2.getDerivedStateFromProps && x3 !== y3 && null != p3.componentWillReceiveProps && p3.componentWillReceiveProps(x3, P3), u3.__v == t4.__v || !p3.__e && null != p3.shouldComponentUpdate && false === p3.shouldComponentUpdate(x3, p3.__s, P3)) {
+            u3.__v != t4.__v && (p3.props = x3, p3.state = p3.__s, p3.__d = false), u3.__e = t4.__e, u3.__k = t4.__k, u3.__k.some(function(n4) {
+              n4 && (n4.__ = u3);
+            }), w.push.apply(p3.__h, p3._sb), p3._sb = [], p3.__h.length && e5.push(p3), f3 = $(t4);
+            break n;
+          }
+          null != p3.componentWillUpdate && p3.componentWillUpdate(x3, p3.__s, P3), M && null != p3.componentDidUpdate && p3.__h.push(function() {
+            p3.componentDidUpdate(y3, d3, _3);
+          });
         }
-        null != h3.componentWillUpdate && h3.componentWillUpdate(k3, h3.__s, $2), x3 && null != h3.componentDidUpdate && h3.__h.push(function() {
-          h3.componentDidUpdate(v3, y3, d3);
-        });
+        if (p3.context = P3, p3.props = x3, p3.__P = n3, p3.__e = false, A3 = l.__r, H2 = 0, M) p3.state = p3.__s, p3.__d = false, A3 && A3(u3), s3 = p3.render(p3.props, p3.state, p3.context), w.push.apply(p3.__h, p3._sb), p3._sb = [];
+        else do {
+          p3.__d = false, A3 && A3(u3), s3 = p3.render(p3.props, p3.state, p3.context), p3.state = p3.__s;
+        } while (p3.__d && ++H2 < 25);
+        p3.state = p3.__s, null != p3.getChildContext && (i3 = m(m({}, i3), p3.getChildContext())), M && !v3 && null != p3.getSnapshotBeforeUpdate && (_3 = p3.getSnapshotBeforeUpdate(y3, d3)), T3 = null != s3 && s3.type === S && null == s3.key ? E(s3.props.children) : s3, f3 = L(n3, g(T3) ? T3 : [T3], u3, t4, i3, r4, o3, e5, f3, c3, a3), p3.base = u3.__e, u3.__u &= -161, p3.__h.length && e5.push(p3), k3 && (p3.__E = p3.__ = null);
+      } catch (n4) {
+        if (e5.length = h3, u3.__v = null, c3 || null != o3) {
+          if (n4.then) {
+            for (u3.__u |= c3 ? 160 : 128; f3 && 8 == f3.nodeType && f3.nextSibling; ) f3 = f3.nextSibling;
+            null != o3 && (o3[o3.indexOf(f3)] = null), u3.__e = f3;
+          } else if (null != o3) for (j3 = o3.length; j3--; ) b(o3[j3]);
+        } else u3.__e = t4.__e;
+        null == u3.__k && (u3.__k = t4.__k || []), n4.then || B(u3), l.__e(n4, u3, t4);
       }
-      if (h3.context = $2, h3.props = k3, h3.__P = n3, h3.__e = false, I2 = l.__r, P3 = 0, x3) h3.state = h3.__s, h3.__d = false, I2 && I2(u3), a3 = h3.render(h3.props, h3.state, h3.context), w.push.apply(h3.__h, h3._sb), h3._sb = [];
-      else do {
-        h3.__d = false, I2 && I2(u3), a3 = h3.render(h3.props, h3.state, h3.context), h3.state = h3.__s;
-      } while (h3.__d && ++P3 < 25);
-      h3.state = h3.__s, null != h3.getChildContext && (i3 = m(m({}, i3), h3.getChildContext())), x3 && !p3 && null != h3.getSnapshotBeforeUpdate && (d3 = h3.getSnapshotBeforeUpdate(v3, y3)), A3 = null != a3 && a3.type === S && null == a3.key ? E(a3.props.children) : a3, f3 = L(n3, g(A3) ? A3 : [A3], u3, t4, i3, r4, o3, e5, f3, c3, s3), h3.base = u3.__e, u3.__u &= -161, h3.__h.length && e5.push(h3), _3 && (h3.__E = h3.__ = null);
-    } catch (n4) {
-      if (u3.__v = null, c3 || null != o3) if (n4.then) {
-        for (u3.__u |= c3 ? 160 : 128; f3 && 8 == f3.nodeType && f3.nextSibling; ) f3 = f3.nextSibling;
-        o3[o3.indexOf(f3)] = null, u3.__e = f3;
-      } else {
-        for (H2 = o3.length; H2--; ) b(o3[H2]);
-        B(u3);
-      }
-      else u3.__e = t4.__e, u3.__k = t4.__k, n4.then || B(u3);
-      l.__e(n4, u3, t4);
-    }
-    else null == o3 && u3.__v == t4.__v ? (u3.__k = t4.__k, u3.__e = t4.__e) : f3 = u3.__e = G(t4.__e, u3, t4, i3, r4, o3, e5, c3, s3);
-    return (a3 = l.diffed) && a3(u3), 128 & u3.__u ? void 0 : f3;
+    } else null == o3 && u3.__v == t4.__v ? (u3.__k = t4.__k, u3.__e = t4.__e) : f3 = u3.__e = G(t4.__e, u3, t4, i3, r4, o3, e5, c3, a3);
+    return (s3 = l.diffed) && s3(u3), 128 & u3.__u ? void 0 : f3;
   }
   function B(n3) {
     n3 && (n3.__c && (n3.__c.__e = true), n3.__k && n3.__k.some(B));
@@ -16041,13 +16102,13 @@ var __AutoNateBpmnJS__ = (() => {
     });
   }
   function E(n3) {
-    return "object" != typeof n3 || null == n3 || n3.__b > 0 ? n3 : g(n3) ? n3.map(E) : m({}, n3);
+    return "object" != typeof n3 || null == n3 || n3.__b > 0 ? n3 : g(n3) ? n3.map(E) : void 0 !== n3.constructor ? null : m({}, n3);
   }
-  function G(u3, t4, i3, r4, o3, e5, f3, c3, s3) {
-    var a3, h3, p3, v3, y3, w3, _3, m4 = i3.props || d, k3 = t4.props, x3 = t4.type;
+  function G(u3, t4, i3, r4, o3, e5, f3, c3, a3) {
+    var s3, h3, p3, v3, y3, w3, _3, m4 = i3.props || d, k3 = t4.props, x3 = t4.type;
     if ("svg" == x3 ? o3 = "http://www.w3.org/2000/svg" : "math" == x3 ? o3 = "http://www.w3.org/1998/Math/MathML" : o3 || (o3 = "http://www.w3.org/1999/xhtml"), null != e5) {
-      for (a3 = 0; a3 < e5.length; a3++) if ((y3 = e5[a3]) && "setAttribute" in y3 == !!x3 && (x3 ? y3.localName == x3 : 3 == y3.nodeType)) {
-        u3 = y3, e5[a3] = null;
+      for (s3 = 0; s3 < e5.length; s3++) if ((y3 = e5[s3]) && "setAttribute" in y3 == !!x3 && (x3 ? y3.localName == x3 : 3 == y3.nodeType)) {
+        u3 = y3, e5[s3] = null;
         break;
       }
     }
@@ -16057,12 +16118,12 @@ var __AutoNateBpmnJS__ = (() => {
     }
     if (null == x3) m4 === k3 || c3 && u3.data == k3 || (u3.data = k3);
     else {
-      if (e5 = e5 && n.call(u3.childNodes), !c3 && null != e5) for (m4 = {}, a3 = 0; a3 < u3.attributes.length; a3++) m4[(y3 = u3.attributes[a3]).name] = y3.value;
-      for (a3 in m4) y3 = m4[a3], "dangerouslySetInnerHTML" == a3 ? p3 = y3 : "children" == a3 || a3 in k3 || "value" == a3 && "defaultValue" in k3 || "checked" == a3 && "defaultChecked" in k3 || N(u3, a3, null, y3, o3);
-      for (a3 in k3) y3 = k3[a3], "children" == a3 ? v3 = y3 : "dangerouslySetInnerHTML" == a3 ? h3 = y3 : "value" == a3 ? w3 = y3 : "checked" == a3 ? _3 = y3 : c3 && "function" != typeof y3 || m4[a3] === y3 || N(u3, a3, y3, m4[a3], o3);
+      if (e5 = "textarea" == x3 && null != k3.defaultValue ? null : e5 && n.call(u3.childNodes), !c3 && null != e5) for (m4 = {}, s3 = 0; s3 < u3.attributes.length; s3++) m4[(y3 = u3.attributes[s3]).name] = y3.value;
+      for (s3 in m4) y3 = m4[s3], "dangerouslySetInnerHTML" == s3 ? p3 = y3 : "children" == s3 || s3 in k3 || "value" == s3 && "defaultValue" in k3 || "checked" == s3 && "defaultChecked" in k3 || N(u3, s3, null, y3, o3);
+      for (s3 in k3) y3 = k3[s3], "children" == s3 ? v3 = y3 : "dangerouslySetInnerHTML" == s3 ? h3 = y3 : "value" == s3 ? w3 = y3 : "checked" == s3 ? _3 = y3 : c3 && "function" != typeof y3 || m4[s3] === y3 || N(u3, s3, y3, m4[s3], o3);
       if (h3) c3 || p3 && (h3.__html == p3.__html || h3.__html == u3.innerHTML) || (u3.innerHTML = h3.__html), t4.__k = [];
-      else if (p3 && (u3.innerHTML = ""), L("template" == t4.type ? u3.content : u3, g(v3) ? v3 : [v3], t4, i3, r4, "foreignObject" == x3 ? "http://www.w3.org/1999/xhtml" : o3, e5, f3, e5 ? e5[0] : i3.__k && $(i3, 0), c3, s3), null != e5) for (a3 = e5.length; a3--; ) b(e5[a3]);
-      c3 || (a3 = "value", "progress" == x3 && null == w3 ? u3.removeAttribute("value") : null != w3 && (w3 !== u3[a3] || "progress" == x3 && !w3 || "option" == x3 && w3 != m4[a3]) && N(u3, a3, w3, m4[a3], o3), a3 = "checked", null != _3 && _3 != u3[a3] && N(u3, a3, _3, m4[a3], o3));
+      else if (p3 && (u3.innerHTML = ""), L("template" == t4.type ? u3.content : u3, g(v3) ? v3 : [v3], t4, i3, r4, "foreignObject" == x3 ? "http://www.w3.org/1999/xhtml" : o3, e5, f3, e5 ? e5[0] : i3.__k && $(i3, 0), c3, a3), null != e5) for (s3 = e5.length; s3--; ) b(e5[s3]);
+      c3 && "textarea" != x3 || (s3 = "value", "progress" == x3 && null == w3 ? u3.removeAttribute("value") : null != w3 && (w3 !== u3[s3] || "progress" == x3 && !w3 || "option" == x3 && w3 != m4[s3]) && N(u3, s3, w3, m4[s3], o3), s3 = "checked", null != _3 && _3 != u3[s3] && N(u3, s3, _3, m4[s3], o3));
     }
     return u3;
   }
@@ -16084,7 +16145,7 @@ var __AutoNateBpmnJS__ = (() => {
       } catch (n4) {
         l.__e(n4, u3);
       }
-      i3.base = i3.__P = null;
+      i3.base = i3.__P = i3.__n = null;
     }
     if (i3 = n3.__k) for (r4 = 0; r4 < i3.length; r4++) i3[r4] && K(i3[r4], u3, t4 || "function" != typeof n3.type);
     t4 || b(n3.__e), n3.__c = n3.__ = n3.__e = void 0;
@@ -16094,7 +16155,7 @@ var __AutoNateBpmnJS__ = (() => {
   }
   function R(u3, t4, i3) {
     var r4, o3, e5, f3;
-    t4 == document && (t4 = document.documentElement), l.__ && l.__(u3, t4), o3 = (r4 = "function" == typeof i3) ? null : i3 && i3.__k || t4.__k, e5 = [], f3 = [], q(t4, u3 = (!r4 && i3 || t4).__k = k(S, null, [u3]), o3 || d, d, t4.namespaceURI, !r4 && i3 ? [i3] : o3 ? null : t4.firstChild ? n.call(t4.childNodes) : null, e5, !r4 && i3 ? i3 : o3 ? o3.__e : t4.firstChild, r4, f3), D(e5, u3, f3);
+    t4 == document && (t4 = document.documentElement), l.__ && l.__(u3, t4), o3 = (r4 = "function" == typeof i3) ? null : i3 && i3.__k || t4.__k, e5 = [], f3 = [], q(t4, u3 = (!r4 && i3 || t4).__k = k(S, null, [u3]), o3 || d, d, t4.namespaceURI, !r4 && i3 ? [i3] : o3 ? null : t4.firstChild ? n.call(t4.childNodes) : null, e5, !r4 && i3 ? i3 : o3 ? o3.__e : t4.firstChild, r4, f3), D(e5, u3, f3), u3.props.children = null;
   }
   n = w.slice, l = { __e: function(n3, l3, u3, t4) {
     for (var i3, r4, o3; l3 = l3.__; ) if ((i3 = l3.__c) && !i3.__) try {
@@ -16112,7 +16173,7 @@ var __AutoNateBpmnJS__ = (() => {
     this.__v && (this.__e = true, n3 && this.__h.push(n3), A(this));
   }, C.prototype.render = S, i = [], o = "function" == typeof Promise ? Promise.prototype.then.bind(Promise.resolve()) : setTimeout, e2 = function(n3, l3) {
     return n3.__v.__b - l3.__v.__b;
-  }, H.__r = 0, f = Math.random().toString(8), c = "__d" + f, s = "__a" + f, a = /(PointerCapture)$|Capture$/i, h = 0, p = V(false), v = V(true), y = 0;
+  }, H.__r = 0, f = Math.random().toString(8), c = "__d" + f, a = "__a" + f, s = /(PointerCapture)$|Capture$/i, h = 0, p = V(false), v = V(true), y = 0;
 
   // node_modules/htm/dist/htm.module.js
   var n2 = function(t4, s3, r4, e5) {
@@ -16154,36 +16215,35 @@ var __AutoNateBpmnJS__ = (() => {
   var v2 = c2.diffed;
   var l2 = c2.__c;
   var m3 = c2.unmount;
-  var s2 = c2.__;
-  function p2(n3, t4) {
+  var p2 = c2.__;
+  function s2(n3, t4) {
     c2.__h && c2.__h(r2, n3, o2 || t4), o2 = 0;
     var u3 = r2.__H || (r2.__H = { __: [], __h: [] });
     return n3 >= u3.__.length && u3.__.push({}), u3.__[n3];
   }
   function d2(n3) {
-    return o2 = 1, h2(D2, n3);
+    return o2 = 1, y2(D2, n3);
   }
-  function h2(n3, u3, i3) {
-    var o3 = p2(t3++, 2);
+  function y2(n3, u3, i3) {
+    var o3 = s2(t3++, 2);
     if (o3.t = n3, !o3.__c && (o3.__ = [i3 ? i3(u3) : D2(void 0, u3), function(n4) {
       var t4 = o3.__N ? o3.__N[0] : o3.__[0], r4 = o3.t(t4, n4);
       t4 !== r4 && (o3.__N = [r4, o3.__[1]], o3.__c.setState({}));
     }], o3.__c = r2, !r2.__f)) {
       var f3 = function(n4, t4, r4) {
         if (!o3.__c.__H) return true;
-        var u4 = o3.__c.__H.__.filter(function(n5) {
-          return n5.__c;
-        });
-        if (u4.every(function(n5) {
-          return !n5.__N;
-        })) return !c3 || c3.call(this, n4, t4, r4);
-        var i4 = o3.__c.props !== n4;
-        return u4.some(function(n5) {
+        var u4 = false, i4 = o3.__c.props !== n4;
+        if (o3.__c.__H.__.some(function(n5) {
           if (n5.__N) {
+            u4 = true;
             var t5 = n5.__[0];
             n5.__ = n5.__N, n5.__N = void 0, t5 !== n5.__[0] && (i4 = true);
           }
-        }), c3 && c3.call(this, n4, t4, r4) || i4;
+        }), c3) {
+          var f4 = c3.call(this, n4, t4, r4);
+          return u4 ? f4 || i4 : f4;
+        }
+        return !u4 || i4;
       };
       r2.__f = true;
       var c3 = r2.shouldComponentUpdate, e5 = r2.componentWillUpdate;
@@ -16197,12 +16257,12 @@ var __AutoNateBpmnJS__ = (() => {
     }
     return o3.__N || o3.__;
   }
-  function y2(n3, u3) {
-    var i3 = p2(t3++, 3);
+  function h2(n3, u3) {
+    var i3 = s2(t3++, 3);
     !c2.__s && C2(i3.__H, u3) && (i3.__ = n3, i3.u = u3, r2.__H.__h.push(i3));
   }
   function _2(n3, u3) {
-    var i3 = p2(t3++, 4);
+    var i3 = s2(t3++, 4);
     !c2.__s && C2(i3.__H, u3) && (i3.__ = n3, i3.u = u3, r2.__h.push(i3));
   }
   function A2(n3) {
@@ -16211,7 +16271,7 @@ var __AutoNateBpmnJS__ = (() => {
     }, []);
   }
   function T2(n3, r4) {
-    var u3 = p2(t3++, 7);
+    var u3 = s2(t3++, 7);
     return C2(u3.__H, r4) && (u3.__ = n3(), u3.__H = r4, u3.__h = n3), u3.__;
   }
   function q2(n3, t4) {
@@ -16232,7 +16292,7 @@ var __AutoNateBpmnJS__ = (() => {
   c2.__b = function(n3) {
     r2 = null, e3 && e3(n3);
   }, c2.__ = function(n3, t4) {
-    n3 && t4.__k && t4.__k.__m && (n3.__m = t4.__k.__m), s2 && s2(n3, t4);
+    n3 && t4.__k && t4.__k.__m && (n3.__m = t4.__k.__m), p2 && p2(n3, t4);
   }, c2.__r = function(n3) {
     a2 && a2(n3), t3 = 0;
     var i3 = (r2 = n3.__c).__H;
@@ -16243,7 +16303,7 @@ var __AutoNateBpmnJS__ = (() => {
     v2 && v2(n3);
     var t4 = n3.__c;
     t4 && t4.__H && (t4.__H.__h.length && (1 !== f2.push(t4) && i2 === c2.requestAnimationFrame || ((i2 = c2.requestAnimationFrame) || w2)(j2)), t4.__H.__.some(function(n4) {
-      n4.u && (n4.__H = n4.u), n4.u = void 0;
+      n4.u && (n4.__H = n4.u, n4.u = void 0);
     })), u2 = r2 = null;
   }, c2.__c = function(n3, t4) {
     t4.some(function(n4) {
@@ -16290,6 +16350,59 @@ var __AutoNateBpmnJS__ = (() => {
   }
   function D2(n3, t4) {
     return "function" == typeof t4 ? t4(n3) : t4;
+  }
+
+  // node_modules/diagram-js/lib/features/popup-menu/PopupMenuBreadcrumbs.js
+  function PopupMenuBreadcrumbs(props) {
+    const {
+      navigationStack,
+      setNavigationStack
+    } = props;
+    const breadcrumbs = T2(() => {
+      if (navigationStack.length <= 1) {
+        return [];
+      }
+      return navigationStack.slice(0, -1).map((entry, index2) => ({
+        label: entry.label,
+        onClick: () => setNavigationStack((stack) => stack.slice(0, index2 + 1))
+      }));
+    }, [navigationStack, setNavigationStack]);
+    const handleBackClick = navigationStack.length > 0 ? () => setNavigationStack([]) : null;
+    const currentLabel = navigationStack.length > 0 ? navigationStack[navigationStack.length - 1].label : null;
+    return m2`
+    <div class="djs-popup-breadcrumbs">
+      ${handleBackClick && m2`
+        <button
+          type="button"
+          class="djs-popup-breadcrumbs-item djs-popup-breadcrumbs-item--back"
+          title="Back"
+          aria-label="Back"
+          onClick=${handleBackClick}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M8.03033 1.46967C8.32322 1.76256 8.32322 2.23744 8.03033 2.53033L4.56066 6L8.03033 9.46967C8.32322 9.76256 8.32322 10.2374 8.03033 10.5303C7.73744 10.8232 7.26256 10.8232 6.96967 10.5303L2.96967 6.53033C2.67678 6.23744 2.67678 5.76256 2.96967 5.46967L6.96967 1.46967C7.26256 1.17678 7.73744 1.17678 8.03033 1.46967Z" fill="currentColor"/>
+          </svg>
+        </button>
+      `}
+      ${breadcrumbs.map((crumb, i3) => m2`
+        <button
+          key=${i3}
+          type="button"
+          class="djs-popup-breadcrumbs-item"
+          onClick=${crumb.onClick}
+          title=${crumb.label}
+        >
+          ${crumb.label}
+        </button>
+        <span class="djs-popup-breadcrumbs-item--separator" aria-hidden="true"></span>
+      `)}
+      ${currentLabel && m2`
+        <span class="djs-popup-breadcrumbs-item djs-popup-breadcrumbs-item--current" title=${currentLabel}>
+          ${currentLabel}
+        </span>
+      `}
+    </div>
+  `;
   }
 
   // node_modules/clsx/dist/clsx.mjs
@@ -16384,8 +16497,12 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/diagram-js/lib/features/popup-menu/PopupMenuItem.js
+  function getPopupMenuItemId(idPrefix, entry) {
+    return `${idPrefix}-entry-${entry.id}`;
+  }
   function PopupMenuItem(props) {
     const {
+      idPrefix,
       entry,
       selected,
       onMouseEnter,
@@ -16398,20 +16515,22 @@ var __AutoNateBpmnJS__ = (() => {
       }
       return onAction(event2, entry, action);
     };
+    const draggable = !entry.entries;
     return m2`
     <li
       class=${clsx_default("entry", { selected, disabled: entry.disabled })}
       data-id=${entry.id}
-      title=${entry.title || entry.label}
+      id=${getPopupMenuItemId(idPrefix, entry)}
+      role="option"
+      aria-selected=${selected || void 0}
+      aria-haspopup=${entry.entries ? "true" : void 0}
+      title=${entry.title}
       aria-disabled=${entry.disabled || void 0}
-      tabIndex="0"
       onClick=${handleClick}
-      onFocus=${onMouseEnter}
-      onBlur=${onMouseLeave}
       onMouseEnter=${onMouseEnter}
       onMouseLeave=${onMouseLeave}
-      onDragStart=${(event2) => handleClick(event2, "dragstart")}
-      draggable=${true}
+      onDragStart=${(event2) => draggable && handleClick(event2, "dragstart")}
+      draggable=${draggable}
     >
       <div class="djs-popup-entry-content">
         <span
@@ -16428,25 +16547,36 @@ var __AutoNateBpmnJS__ = (() => {
         ${entry.description && m2`
           <span
             class="djs-popup-entry-description"
-            title=${entry.description}
           >
             ${entry.description}
           </span>
         `}
       </div>
-      ${entry.documentationRef && m2`
-        <div class="djs-popup-entry-docs">
-          <a
-            href="${entry.documentationRef}"
-            onClick=${(event2) => event2.stopPropagation()}
-            title="Open element documentation"
-            target="_blank"
-            rel="noopener"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path fill-rule="evenodd" clip-rule="evenodd" d="M10.6368 10.6375V5.91761H11.9995V10.6382C11.9995 10.9973 11.8623 11.3141 11.5878 11.5885C11.3134 11.863 10.9966 12.0002 10.6375 12.0002H1.36266C0.982345 12.0002 0.660159 11.8681 0.396102 11.6041C0.132044 11.34 1.52588e-05 11.0178 1.52588e-05 10.6375V1.36267C1.52588e-05 0.98236 0.132044 0.660173 0.396102 0.396116C0.660159 0.132058 0.982345 2.95639e-05 1.36266 2.95639e-05H5.91624V1.36267H1.36266V10.6375H10.6368ZM12 0H7.2794L7.27873 1.36197H9.68701L3.06507 7.98391L4.01541 8.93425L10.6373 2.31231V4.72059H12V0Z" fill="#818798"/>
-            </svg>
-          </a>
+      ${(entry.documentationRef || entry.entries) && m2`
+        <div class="djs-popup-entry-actions">
+          ${entry.documentationRef && m2`
+            <a
+              class="djs-popup-entry-docs"
+              href=${entry.documentationRef}
+              onClick=${(event2) => event2.stopPropagation()}
+              title="Open entry documentation"
+              tabIndex="-1"
+              aria-hidden="true"
+              target="_blank"
+              rel="noopener"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M10.6368 10.6375V5.91761H11.9995V10.6382C11.9995 10.9973 11.8623 11.3141 11.5878 11.5885C11.3134 11.863 10.9966 12.0002 10.6375 12.0002H1.36266C0.982345 12.0002 0.660159 11.8681 0.396102 11.6041C0.132044 11.34 1.52588e-05 11.0178 1.52588e-05 10.6375V1.36267C1.52588e-05 0.98236 0.132044 0.660173 0.396102 0.396116C0.660159 0.132058 0.982345 2.95639e-05 1.36266 2.95639e-05H5.91624V1.36267H1.36266V10.6375H10.6368ZM12 0H7.2794L7.27873 1.36197H9.68701L3.06507 7.98391L4.01541 8.93425L10.6373 2.31231V4.72059H12V0Z" fill="currentColor"/>
+              </svg>
+            </a>
+          `}
+          ${entry.entries && m2`
+            <div class="djs-popup-entry-chevron" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M3.96967 1.46967C4.26256 1.17678 4.73744 1.17678 5.03033 1.46967L9.03033 5.46967C9.32322 5.76256 9.32322 6.23744 9.03033 6.53033L5.03033 10.5303C4.73744 10.8232 4.26256 10.8232 3.96967 10.5303C3.67678 10.2374 3.67678 9.76256 3.96967 9.46967L7.43934 6L3.96967 2.53033C3.67678 2.23744 3.67678 1.76256 3.96967 1.46967Z" fill="currentColor"/>
+              </svg>
+            </div>
+          `}
         </div>
       `}
     </li>
@@ -16459,10 +16589,19 @@ var __AutoNateBpmnJS__ = (() => {
       selectedEntry,
       setSelectedEntry,
       groupedEntries,
+      keyboardSelection,
+      idPrefix,
+      id,
+      ariaLabel,
+      tabIndex,
+      ariaActivedescendant,
       ...restProps
     } = props;
     const resultsRef = A2();
     _2(() => {
+      if (!keyboardSelection || !keyboardSelection.current) {
+        return;
+      }
       const containerEl = resultsRef.current;
       if (!containerEl)
         return;
@@ -16471,22 +16610,52 @@ var __AutoNateBpmnJS__ = (() => {
         scrollIntoView(selectedEl);
       }
     }, [selectedEntry]);
+    const handleMouseMove = () => {
+      keyboardSelection.current = false;
+    };
+    const handleEntryMouseEnter = (entry) => {
+      if (keyboardSelection.current) {
+        return;
+      }
+      setSelectedEntry(entry);
+    };
+    const handleEntryMouseLeave = () => {
+      if (keyboardSelection.current) {
+        return;
+      }
+      setSelectedEntry(null);
+    };
     return m2`
-    <div class="djs-popup-results" ref=${resultsRef}>
+    <div
+      class="djs-popup-results"
+      ref=${resultsRef}
+      id=${id}
+      role="listbox"
+      aria-label=${ariaLabel}
+      tabIndex=${tabIndex}
+      aria-activedescendant=${ariaActivedescendant}
+      onMouseMove=${handleMouseMove}
+    >
       ${groupedEntries.map((group) => m2`
         ${group.name && m2`
-          <div key=${group.id} class="entry-header" title=${group.name}>
+          <div key=${group.id} id=${getGroupHeaderId(idPrefix, group)} class="entry-header" title=${group.name}>
             ${group.name}
           </div>
         `}
-        <ul class="djs-popup-group" data-group=${group.id}>
+        <ul
+          class="djs-popup-group"
+          data-group=${group.id}
+          role="group"
+          aria-labelledby=${group.name ? getGroupHeaderId(idPrefix, group) : void 0}
+        >
           ${group.entries.map((entry) => m2`
             <${PopupMenuItem}
               key=${entry.id}
+              idPrefix=${idPrefix}
               entry=${entry}
               selected=${entry === selectedEntry}
-              onMouseEnter=${() => setSelectedEntry(entry)}
-              onMouseLeave=${() => setSelectedEntry(null)}
+              onMouseEnter=${() => handleEntryMouseEnter(entry)}
+              onMouseLeave=${handleEntryMouseLeave}
               ...${restProps}
             />
           `)}
@@ -16494,6 +16663,9 @@ var __AutoNateBpmnJS__ = (() => {
       `)}
     </div>
   `;
+  }
+  function getGroupHeaderId(idPrefix, group) {
+    return `${idPrefix}-group-${group.id}`;
   }
   function scrollIntoView(el) {
     if (typeof el.scrollIntoViewIfNeeded === "function") {
@@ -16507,6 +16679,7 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/diagram-js/lib/features/popup-menu/PopupMenuComponent.js
+  var ids2 = new IdGenerator("djs-popup");
   function PopupMenuComponent(props) {
     const {
       onClose,
@@ -16520,44 +16693,151 @@ var __AutoNateBpmnJS__ = (() => {
       search: search2,
       emptyPlaceholder,
       searchFn,
-      entries: originalEntries,
+      entries,
       onOpened,
-      onClosed
+      onClosed,
+      defaultTab
     } = props;
+    const [navigationStack, setNavigationStack] = d2([]);
+    h2(() => {
+      setNavigationStack([]);
+      setActiveTab(null);
+    }, [entries]);
+    const tabs = T2(() => {
+      const tabbed = [];
+      const seen = /* @__PURE__ */ new Set();
+      let hasUntagged = false;
+      entries.forEach(({ tab }) => {
+        if (!tab) {
+          hasUntagged = true;
+          return;
+        }
+        if (!seen.has(tab.id)) {
+          seen.add(tab.id);
+          tabbed.push(tab);
+        }
+      });
+      if (!tabbed.length) {
+        return [];
+      }
+      if (hasUntagged && !defaultTab) {
+        return [];
+      }
+      if (!hasUntagged) {
+        return tabbed;
+      }
+      return [
+        defaultTab,
+        ...tabbed.filter((tab) => tab.id !== defaultTab.id)
+      ];
+    }, [entries, defaultTab]);
+    const [activeTabOverride, setActiveTab] = d2(null);
+    const activeTabId = tabs.some((tab) => tab.id === activeTabOverride) ? activeTabOverride : tabs.length ? tabs[0].id : null;
+    const tabsRef = A2();
+    _2(() => {
+      const tabsEl = tabsRef.current;
+      if (!tabsEl) {
+        return;
+      }
+      const activeTabEl = tabsEl.querySelector('[aria-selected="true"]');
+      if (activeTabEl) {
+        scrollIntoView2(activeTabEl);
+      }
+    }, [activeTabId]);
+    const [overflow, setOverflow] = d2({ start: false, end: false });
+    const updateOverflow = q2(() => {
+      const { scrollLeft, scrollWidth, clientWidth } = tabsRef.current;
+      setOverflow({
+        start: scrollLeft > 0,
+        // sub-pixel widths leave a fractional remainder at the end
+        end: scrollWidth - clientWidth - scrollLeft > 1
+      });
+    }, []);
+    const handleWheel2 = q2((event2) => {
+      const tabsEl = tabsRef.current;
+      const delta2 = Math.abs(event2.deltaX) > Math.abs(event2.deltaY) ? event2.deltaX : event2.deltaY;
+      if (!delta2) {
+        return;
+      }
+      const { scrollLeft, scrollWidth, clientWidth } = tabsEl;
+      if (scrollWidth - clientWidth < 1) {
+        return;
+      }
+      event2.preventDefault();
+      tabsEl.scrollLeft = scrollLeft + delta2;
+      updateOverflow();
+    }, [updateOverflow]);
+    _2(() => {
+      const tabsEl = tabsRef.current;
+      if (!tabsEl) {
+        return;
+      }
+      updateOverflow();
+      tabsEl.addEventListener("scroll", updateOverflow);
+      tabsEl.addEventListener("wheel", handleWheel2, { passive: false });
+      return () => {
+        tabsEl.removeEventListener("scroll", updateOverflow);
+        tabsEl.removeEventListener("wheel", handleWheel2);
+      };
+    }, [tabs, activeTabId, updateOverflow, handleWheel2]);
+    const scrollTabs = q2((direction) => {
+      const tabsEl = tabsRef.current;
+      const tabEls = direction > 0 ? [...tabsEl.children] : [...tabsEl.children].reverse();
+      const stripBounds = tabsEl.getBoundingClientRect();
+      const cutOff = tabEls.find((tabEl) => {
+        const bounds = tabEl.getBoundingClientRect();
+        return direction > 0 ? bounds.right > stripBounds.right + 1 : bounds.left < stripBounds.left - 1;
+      });
+      if (cutOff) {
+        scrollIntoView2(cutOff);
+        updateOverflow();
+      }
+    }, [updateOverflow]);
+    const getEntryTabId = q2((entry) => {
+      return entry.tab && entry.tab.id || defaultTab && defaultTab.id;
+    }, [defaultTab]);
+    const [searchValue, setSearchValue] = d2("");
+    const isSearching = searchValue.trim().length > 0;
+    const actionableEntries = T2(() => getActionableEntries(entries), [entries]);
     const searchable = T2(() => {
       if (!isDefined(search2)) {
         return false;
       }
-      return originalEntries.length > 5;
-    }, [search2, originalEntries]);
-    const [searchValue, setSearchValue] = d2("");
-    const filterEntries = q2((originalEntries2, searchValue2) => {
-      if (!searchable) {
-        return originalEntries2;
+      return actionableEntries.length > 5;
+    }, [search2, actionableEntries]);
+    const entriesToShow = T2(() => {
+      const availableEntries = navigationStack.length ? navigationStack[navigationStack.length - 1].entries : tabs.length > 1 ? entries.filter((entry) => getEntryTabId(entry) === activeTabId) : entries;
+      if (!searchable) return availableEntries;
+      if (isSearching) {
+        return searchFn(
+          actionableEntries.filter(({ searchable: searchable2 }) => searchable2 !== false),
+          searchValue,
+          { keys: ["label", "search", "description"] }
+        ).map(({ item }) => item);
       }
-      if (!searchValue2.trim()) {
-        return originalEntries2.filter(({ rank = 0 }) => rank >= 0);
-      }
-      const searchableEntries = originalEntries2.filter(({ searchable: searchable2 }) => searchable2 !== false);
-      return searchFn(searchableEntries, searchValue2, {
-        keys: [
-          "label",
-          "search",
-          "description"
-        ]
-      }).map(({ item }) => item);
-    }, [searchable]);
-    const entries = T2(() => filterEntries(originalEntries, searchValue), [originalEntries, searchValue, filterEntries]);
-    const [selectedEntry, setSelectedEntry] = d2(entries[0]);
+      return availableEntries.filter(({ rank = 0 }) => rank >= 0);
+    }, [searchable, isSearching, actionableEntries, searchValue, searchFn, navigationStack, entries, tabs, activeTabId, getEntryTabId]);
     const groupedEntries = T2(() => {
-      if (searchValue.trim()) {
-        return entries.length ? [{ id: "default", entries }] : [];
+      if (isSearching) {
+        return entriesToShow.length ? [{ id: "default", entries: entriesToShow }] : [];
       }
-      return groupEntries2(entries);
-    }, [entries, searchValue]);
-    y2(() => {
-      setSelectedEntry(entries[0]);
-    }, [entries]);
+      return groupEntries2(entriesToShow);
+    }, [entriesToShow, isSearching]);
+    const [selectedEntry, setSelectedEntry] = d2(entriesToShow[0]);
+    const restoreSelection = A2(null);
+    const keyboardSelection = A2(false);
+    const idPrefix = T2(() => ids2.next(), []);
+    const resultsId = `${idPrefix}-results`;
+    const activeDescendantId = selectedEntry && getPopupMenuItemId(idPrefix, selectedEntry);
+    h2(() => {
+      const restore = restoreSelection.current;
+      if (restore && entriesToShow.includes(restore)) {
+        setSelectedEntry(restore);
+      } else {
+        setSelectedEntry(entriesToShow[0]);
+      }
+      restoreSelection.current = null;
+    }, [entriesToShow]);
     const keyboardSelect = q2((direction) => {
       const entries2 = getOrderedEntries(groupedEntries);
       const idx = entries2.indexOf(selectedEntry);
@@ -16568,14 +16848,49 @@ var __AutoNateBpmnJS__ = (() => {
       if (nextIdx >= entries2.length) {
         nextIdx = 0;
       }
+      keyboardSelection.current = true;
       setSelectedEntry(entries2[nextIdx]);
-    }, [groupedEntries, selectedEntry, setSelectedEntry]);
+    }, [groupedEntries, selectedEntry]);
+    const keyboardDrilldown = q2((direction) => {
+      if (direction > 0 && selectedEntry && selectedEntry.entries) {
+        keyboardSelection.current = true;
+        setNavigationStack((stack) => [...stack, selectedEntry]);
+      }
+      if (direction < 0 && navigationStack.length > 0) {
+        keyboardSelection.current = true;
+        restoreSelection.current = navigationStack[navigationStack.length + direction];
+        setNavigationStack((stack) => stack.slice(0, direction));
+      }
+    }, [selectedEntry, navigationStack]);
+    const handleEntryAction = q2((event2, entry, action) => {
+      if (!entry || entry.disabled) {
+        return;
+      }
+      if (entry.entries) {
+        event2.preventDefault();
+        return keyboardDrilldown(1);
+      }
+      return onSelect(event2, entry, action);
+    }, [onSelect, keyboardDrilldown]);
     const handleKeyDown = q2((event2) => {
       if (event2.key === "Enter" && selectedEntry) {
+        const target = event2.target;
+        const isNativeActionTarget = !!closest(target, "a, button", true);
+        if (isNativeActionTarget) {
+          return;
+        }
         if (selectedEntry.disabled) {
           return;
         }
-        return onSelect(event2, selectedEntry);
+        return handleEntryAction(event2, selectedEntry);
+      }
+      if (event2.key === "Backspace") {
+        const target = event2.target;
+        const isEditingSearch = matches(target, "input") && target.value !== "";
+        if (!isEditingSearch) {
+          keyboardDrilldown(-1);
+          return event2.preventDefault();
+        }
       }
       if (event2.key === "ArrowUp") {
         keyboardSelect(-1);
@@ -16585,19 +16900,69 @@ var __AutoNateBpmnJS__ = (() => {
         keyboardSelect(1);
         return event2.preventDefault();
       }
-    }, [onSelect, selectedEntry, keyboardSelect]);
+      if (event2.key === "ArrowRight") {
+        keyboardDrilldown(1);
+        return event2.preventDefault();
+      }
+      if (event2.key === "ArrowLeft") {
+        keyboardDrilldown(-1);
+        return event2.preventDefault();
+      }
+    }, [selectedEntry, keyboardSelect, keyboardDrilldown, handleEntryAction]);
+    const selectTab = q2((event2, tabId) => {
+      setActiveTab(tabId);
+      if (!event2.detail) {
+        return;
+      }
+      const popupEl = closest(event2.currentTarget, ".djs-popup", true);
+      const inputEl = popupEl && popupEl.querySelector("input");
+      inputEl && inputEl.focus();
+    }, []);
+    const handleTabKeyDown = q2((event2) => {
+      if (event2.key === "Enter" || event2.key === " ") {
+        event2.stopPropagation();
+        return;
+      }
+      if (event2.key === "ArrowDown" || event2.key === "ArrowUp") {
+        const popupEl = closest(event2.currentTarget, ".djs-popup", true);
+        const focusEl = popupEl.querySelector("input") || popupEl.querySelector('[role="listbox"]');
+        focusEl && focusEl.focus();
+        return;
+      }
+      const idx = tabs.findIndex((tab) => tab.id === activeTabId);
+      let nextIdx;
+      if (event2.key === "ArrowLeft") {
+        nextIdx = (idx - 1 + tabs.length) % tabs.length;
+      } else if (event2.key === "ArrowRight") {
+        nextIdx = (idx + 1) % tabs.length;
+      } else if (event2.key === "Home") {
+        nextIdx = 0;
+      } else if (event2.key === "End") {
+        nextIdx = tabs.length - 1;
+      } else {
+        return;
+      }
+      event2.preventDefault();
+      event2.stopPropagation();
+      setActiveTab(tabs[nextIdx].id);
+      const strip = event2.currentTarget.parentNode;
+      const nextButton = strip && strip.children[nextIdx];
+      nextButton && nextButton.focus();
+    }, [tabs, activeTabId]);
     const handleKey = q2((event2) => {
       if (matches(event2.target, "input")) {
         setSearchValue(() => event2.target.value);
       }
     }, [setSearchValue]);
-    y2(() => {
+    h2(() => {
       onOpened();
       return () => {
         onClosed();
       };
     }, []);
-    const displayHeader = T2(() => title || headerEntries.length > 0, [title, headerEntries]);
+    const displayBreadcrumbs = !isSearching && navigationStack.length > 0;
+    const displayTabs = tabs.length > 1 && !isSearching && navigationStack.length === 0;
+    const displayHeader = (title || headerEntries.length > 0) && !displayBreadcrumbs;
     return m2`
     <${PopupMenuWrapper}
       onClose=${onClose}
@@ -16607,6 +16972,7 @@ var __AutoNateBpmnJS__ = (() => {
       position=${position}
       width=${width}
       scale=${scale}
+      navigationStack=${navigationStack}
     >
       ${displayHeader && m2`
         <${PopupMenuHeader}
@@ -16617,7 +16983,13 @@ var __AutoNateBpmnJS__ = (() => {
           title=${title}
         />
       `}
-      ${originalEntries.length > 0 && m2`
+      ${displayBreadcrumbs && m2`
+        <${PopupMenuBreadcrumbs}
+          navigationStack=${navigationStack}
+          setNavigationStack=${setNavigationStack}
+        />
+      `}
+      ${entries.length > 0 && m2`
         <div class="djs-popup-body">
 
           ${searchable && m2`
@@ -16625,23 +16997,112 @@ var __AutoNateBpmnJS__ = (() => {
             <svg class="djs-popup-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path fill-rule="evenodd" clip-rule="evenodd" d="M9.0325 8.5H9.625L13.3675 12.25L12.25 13.3675L8.5 9.625V9.0325L8.2975 8.8225C7.4425 9.5575 6.3325 10 5.125 10C2.4325 10 0.25 7.8175 0.25 5.125C0.25 2.4325 2.4325 0.25 5.125 0.25C7.8175 0.25 10 2.4325 10 5.125C10 6.3325 9.5575 7.4425 8.8225 8.2975L9.0325 8.5ZM1.75 5.125C1.75 6.9925 3.2575 8.5 5.125 8.5C6.9925 8.5 8.5 6.9925 8.5 5.125C8.5 3.2575 6.9925 1.75 5.125 1.75C3.2575 1.75 1.75 3.2575 1.75 5.125Z" fill="#22242A"/>
             </svg>
-            <input type="text" spellcheck=${false} aria-label="${title}" />
+            <input
+              type="text"
+              spellcheck=${false}
+              role="combobox"
+              aria-label="${title || "Search"}"
+              aria-expanded="true"
+              aria-controls=${resultsId}
+              aria-activedescendant=${activeDescendantId || void 0}
+              aria-autocomplete="list"
+            />
           </div>
+          `}
+
+          ${displayTabs && m2`
+            <div class="djs-popup-tabs-container">
+              <div class="djs-popup-tabs" ref=${tabsRef} role="tablist">
+                ${tabs.map((tab) => m2`
+                  <button
+                    type="button"
+                    class="djs-popup-tab"
+                    role="tab"
+                    title=${tab.title || void 0}
+                    aria-controls=${resultsId}
+                    aria-selected=${tab.id === activeTabId}
+                    tabIndex=${tab.id === activeTabId ? 0 : -1}
+                    onClick=${(event2) => selectTab(event2, tab.id)}
+                    onKeydown=${handleTabKeyDown}
+                  >${tab.label}</button>
+                `)}
+              </div>
+
+              ${/* outside the tablist: its children must be tabs. Keyboard
+        users navigate with the arrow keys instead */
+    ""}
+              ${[-1, 1].map((direction) => (direction < 0 ? overflow.start : overflow.end) && m2`
+                <button
+                  type="button"
+                  class=${`djs-popup-tabs-scroll djs-popup-tabs-scroll-${direction < 0 ? "start" : "end"}`}
+                  aria-hidden="true"
+                  tabIndex="-1"
+                  onMousedown=${(event2) => event2.preventDefault()}
+                  onClick=${() => scrollTabs(direction)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M3.96967 1.46967C4.26256 1.17678 4.73744 1.17678 5.03033 1.46967L9.03033 5.46967C9.32322 5.76256 9.32322 6.23744 9.03033 6.53033L5.03033 10.5303C4.73744 10.8232 4.26256 10.8232 3.96967 10.5303C3.67678 10.2374 3.67678 9.76256 3.96967 9.46967L7.43934 6L3.96967 2.53033C3.67678 2.23744 3.67678 1.76256 3.96967 1.46967Z" fill="currentColor"/>
+                  </svg>
+                </button>
+              `)}
+            </div>
+          `}
+
+          ${isSearching && m2`
+            <div class="djs-popup-search-count" aria-live="polite">
+              ${entriesToShow.length} ${entriesToShow.length === 1 ? "result" : "results"} found
+            </div>
           `}
 
           <${PopupMenuList}
             groupedEntries=${groupedEntries}
             selectedEntry=${selectedEntry}
             setSelectedEntry=${setSelectedEntry}
-            onAction=${onSelect}
+            keyboardSelection=${keyboardSelection}
+            onAction=${handleEntryAction}
+            idPrefix=${idPrefix}
+            id=${resultsId}
+            ariaLabel=${title || "Results"}
+            tabIndex=${searchable ? -1 : 0}
+            ariaActivedescendant=${searchable ? void 0 : activeDescendantId || void 0}
           />
+
+          ${selectedEntry && selectedEntry.documentationRef && m2`
+            <div class="djs-popup-footer">
+              <a
+                class="djs-popup-footer-docs"
+                href=${selectedEntry.documentationRef}
+                onClick=${(event2) => event2.stopPropagation()}
+                aria-label=${selectedEntry.label ? `Open entry documentation for ${selectedEntry.label}` : "Open entry documentation"}
+                target="_blank"
+                rel="noopener"
+              >
+                Open entry documentation
+
+                <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M10.6368 10.6375V5.91761H11.9995V10.6382C11.9995 10.9973 11.8623 11.3141 11.5878 11.5885C11.3134 11.863 10.9966 12.0002 10.6375 12.0002H1.36266C0.982345 12.0002 0.660159 11.8681 0.396102 11.6041C0.132044 11.34 1.52588e-05 11.0178 1.52588e-05 10.6375V1.36267C1.52588e-05 0.98236 0.132044 0.660173 0.396102 0.396116C0.660159 0.132058 0.982345 2.95639e-05 1.36266 2.95639e-05H5.91624V1.36267H1.36266V10.6375H10.6368ZM12 0H7.2794L7.27873 1.36197H9.68701L3.06507 7.98391L4.01541 8.93425L10.6373 2.31231V4.72059H12V0Z" fill="#818798"/>
+                </svg>
+              </a>
+            </div>
+          `}
         </div>
       `}
-    ${emptyPlaceholder && entries.length === 0 && m2`
+    ${emptyPlaceholder && entriesToShow.length === 0 && m2`
       <div class="djs-popup-no-results">${isFunction(emptyPlaceholder) ? emptyPlaceholder(searchValue) : emptyPlaceholder}</div>
     `}
     </${PopupMenuWrapper}>
   `;
+  }
+  function scrollIntoView2(el) {
+    if (typeof el.scrollIntoViewIfNeeded === "function") {
+      el.scrollIntoViewIfNeeded();
+    } else {
+      el.scrollIntoView({
+        scrollMode: "if-needed",
+        block: "nearest",
+        inline: "nearest"
+      });
+    }
   }
   function PopupMenuWrapper(props) {
     const {
@@ -16650,6 +17111,7 @@ var __AutoNateBpmnJS__ = (() => {
       onKeyup,
       className,
       children,
+      navigationStack,
       position: positionGetter
     } = props;
     const popupRef = A2();
@@ -16667,10 +17129,10 @@ var __AutoNateBpmnJS__ = (() => {
       if (!popupEl) {
         return;
       }
-      const inputEl = popupEl.querySelector("input");
-      (inputEl || popupEl).focus();
-    }, []);
-    y2(() => {
+      const focusEl = popupEl.querySelector("input") || popupEl.querySelector('[role="listbox"]') || popupEl;
+      focusEl.focus();
+    }, [navigationStack]);
+    h2(() => {
       const handleKeyDown = (event2) => {
         if (event2.key === "Escape") {
           event2.preventDefault();
@@ -16685,10 +17147,10 @@ var __AutoNateBpmnJS__ = (() => {
         return onClose();
       };
       document.documentElement.addEventListener("keydown", handleKeyDown);
-      document.body.addEventListener("click", handleClick);
+      document.body.addEventListener("click", handleClick, true);
       return () => {
         document.documentElement.removeEventListener("keydown", handleKeyDown);
-        document.body.removeEventListener("click", handleClick);
+        document.body.removeEventListener("click", handleClick, true);
       };
     }, []);
     return m2`
@@ -16705,9 +17167,12 @@ var __AutoNateBpmnJS__ = (() => {
   `;
   }
   function getPopupStyle(props) {
+    const { width } = props;
+    const normalizedWidth = typeof width === "number" ? `${width}px` : width;
     return {
       transform: `scale(${props.scale})`,
-      width: `${props.width}px`,
+      width: isDefined(width) ? normalizedWidth : void 0,
+      maxWidth: isDefined(width) ? "unset" : void 0,
       "transform-origin": "top left"
     };
   }
@@ -16719,6 +17184,20 @@ var __AutoNateBpmnJS__ = (() => {
       });
     });
     return entries;
+  }
+  function getActionableEntries(entries) {
+    const leaves = [];
+    function walk(entries2) {
+      entries2.forEach((entry) => {
+        if (entry.entries) {
+          walk(entry.entries);
+          return;
+        }
+        leaves.push(entry);
+      });
+    }
+    walk(entries);
+    return leaves;
   }
   function groupEntries2(entries) {
     const groups = [];
@@ -16754,7 +17233,8 @@ var __AutoNateBpmnJS__ = (() => {
       max: 1
     };
     this._config = {
-      scale
+      scale,
+      defaultTab: config && config.defaultTab
     };
     eventBus.on("diagram.destroy", () => {
       this.close();
@@ -16781,9 +17261,7 @@ var __AutoNateBpmnJS__ = (() => {
       emptyPlaceholder,
       options
     } = this._current;
-    const entriesArray = Object.entries(entries).map(
-      ([key, value]) => ({ id: key, ...value })
-    );
+    const entriesArray = flattenEntries(entries);
     const headerEntriesArray = Object.entries(headerEntries).map(
       ([key, value]) => ({ id: key, ...value })
     );
@@ -16805,6 +17283,7 @@ var __AutoNateBpmnJS__ = (() => {
         onOpened=${this._onOpened.bind(this)}
         onClosed=${this._onClosed.bind(this)}
         searchFn=${this._search}
+        defaultTab=${this._config.defaultTab}
         ...${{ ...options }}
       />
     `,
@@ -16820,6 +17299,13 @@ var __AutoNateBpmnJS__ = (() => {
     }
     if (!position) {
       throw new Error("position is missing");
+    }
+    var allowed = this._eventBus.fire("popupMenu.open.allowed", {
+      target,
+      providerId
+    });
+    if (allowed === false) {
+      return;
     }
     if (this.isOpen()) {
       this.close();
@@ -17084,6 +17570,26 @@ var __AutoNateBpmnJS__ = (() => {
     }
     return entry;
   };
+  function flattenEntries(entriesMap, search2 = []) {
+    return Object.entries(entriesMap).map(([id, value]) => {
+      const entry = { id, ...value };
+      if (entry.entries) {
+        entry.entries = flattenEntries(
+          entry.entries,
+          [...search2, ...asArray(entry.search)]
+        );
+      } else if (search2.length) {
+        entry.search = [...search2, ...asArray(entry.search)];
+      }
+      return entry;
+    });
+  }
+  function asArray(value) {
+    if (!value) {
+      return [];
+    }
+    return isArray(value) ? value : [value];
+  }
 
   // node_modules/diagram-js/lib/features/search/search.js
   function search(items, pattern, options) {
@@ -17732,7 +18238,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/modeling/util/ModelingUtil.js
-  function getParent2(element, anyType) {
+  function getParent(element, anyType) {
     if (isString(anyType)) {
       anyType = [anyType];
     }
@@ -17744,12 +18250,12 @@ var __AutoNateBpmnJS__ = (() => {
     return null;
   }
   function isDirectionHorizontal(element, elementRegistry) {
-    var parent = getParent2(element, "bpmn:Process");
+    var parent = getParent(element, "bpmn:Process");
     if (parent) {
       return true;
     }
     var types3 = ["bpmn:Participant", "bpmn:Lane"];
-    parent = getParent2(element, types3);
+    parent = getParent(element, types3);
     if (parent) {
       return isHorizontal(parent);
     } else if (isAny(element, types3)) {
@@ -18412,7 +18918,10 @@ var __AutoNateBpmnJS__ = (() => {
         eventBus.on("element.hover", hover);
         eventBus.on("element.out", out);
       }
-      fire("init");
+      if (fire("init") === false) {
+        cancel();
+        return false;
+      }
       if (options.autoActivate) {
         move2(event2, true);
       }
@@ -18807,12 +19316,15 @@ var __AutoNateBpmnJS__ = (() => {
         return;
       }
       threshold = calculateIntersectionThreshold(connection, intersection2);
+      var result;
       if (isIntersectionMiddle(intersection2, waypoints, threshold)) {
-        connectionSegmentMove.start(event2, connection, intersection2.index);
+        result = connectionSegmentMove.start(event2, connection, intersection2.index);
       } else {
-        bendpointMove.start(event2, connection, intersection2.index, !intersection2.bendpoint);
+        result = bendpointMove.start(event2, connection, intersection2.index, !intersection2.bendpoint);
       }
-      return true;
+      if (result !== false) {
+        return true;
+      }
     }
     function bindInteractionEvents(node2, eventName, element) {
       event.bind(node2, eventName, function(event2) {
@@ -18894,6 +19406,7 @@ var __AutoNateBpmnJS__ = (() => {
         return;
       }
       translate(floating, point.x, point.y);
+      classes2(floating).add("positioned");
     }
     function updateSegmentDraggerPosition(parentGfx, intersection2, waypoints) {
       var draggerGfx = getSegmentDragger(intersection2.index, parentGfx), segmentStart = waypoints[intersection2.index - 1], segmentEnd = waypoints[intersection2.index], point = intersection2.point, mid4 = getMidPoint(segmentStart, segmentEnd), alignment = pointsAligned(segmentStart, segmentEnd), draggerVisual, relativePosition;
@@ -18968,11 +19481,21 @@ var __AutoNateBpmnJS__ = (() => {
       var element = event2.element;
       if (element.waypoints) {
         addHandles(element);
-        interactionEvents.registerEvent(event2.gfx, "mousemove", "element.mousemove");
       }
     });
     eventBus.on("element.out", function(event2) {
-      interactionEvents.unregisterEvent(event2.gfx, "mousemove", "element.mousemove");
+      var element = event2.element;
+      if (!element.waypoints) {
+        return;
+      }
+      var bendpointsGfx = getBendpointsContainer(element);
+      if (!bendpointsGfx) {
+        return;
+      }
+      var floating = query(".floating", bendpointsGfx);
+      if (floating) {
+        classes2(floating).remove("positioned");
+      }
     });
     eventBus.on("element.updateId", function(context) {
       var element = context.element, newId = context.newId;
@@ -19031,7 +19554,7 @@ var __AutoNateBpmnJS__ = (() => {
       if (allowed === false) {
         return;
       }
-      dragging.init(event2, "bendpoint.move", {
+      return dragging.init(event2, "bendpoint.move", {
         data: {
           connection,
           connectionGfx: gfx,
@@ -19338,7 +19861,7 @@ var __AutoNateBpmnJS__ = (() => {
         axis,
         dragPosition
       };
-      dragging.init(event2, dragPosition, "connectionSegment.move", {
+      return dragging.init(event2, dragPosition, "connectionSegment.move", {
         cursor: axis === "x" ? "resize-ew" : "resize-ns",
         data: {
           connection,
@@ -20008,12 +20531,8 @@ var __AutoNateBpmnJS__ = (() => {
   PreviewSupport.prototype.addDragger = function(element, group, gfx, className = "djs-dragger") {
     gfx = gfx || this.getGfx(element);
     var dragger = clone(gfx);
-    var bbox = gfx.getBoundingClientRect();
     this._cloneMarkers(getVisual(dragger), className);
-    attr2(dragger, this._styles.cls(className, [], {
-      x: bbox.top,
-      y: bbox.left
-    }));
+    attr2(dragger, this._styles.cls(className, []));
     append(group, dragger);
     attr2(dragger, "data-preview-support-element-id", element.id);
     return dragger;
@@ -20312,7 +20831,10 @@ var __AutoNateBpmnJS__ = (() => {
       return takenAlignments.indexOf(alignment) === -1;
     });
     if (freeAlignments.indexOf(labelOrientation) !== -1) {
-      return;
+      if (getOrientation(element.label, element) !== "intersect") {
+        return;
+      }
+      return labelOrientation;
     }
     return freeAlignments[0];
   }
@@ -20350,13 +20872,13 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/ArtifactBehavior.js
   var HIGH_PRIORITY4 = 1500;
-  function ArtifactBehavior(injector, eventBus, canvas, modeling) {
+  function ArtifactBehavior(injector, eventBus, canvas) {
     injector.invoke(CommandInterceptor, this);
     this.preExecute("elements.delete", HIGH_PRIORITY4, function(event2) {
       var context = event2.context, elements = context.elements;
       var enclosedArtifacts = getEnclosedArtifacts(elements);
       if (enclosedArtifacts.length) {
-        modeling.removeElements(enclosedArtifacts);
+        context.elements = elements.concat(enclosedArtifacts);
       }
     });
     eventBus.on("shape.move.start", function(event2) {
@@ -20396,8 +20918,7 @@ var __AutoNateBpmnJS__ = (() => {
   ArtifactBehavior.$inject = [
     "injector",
     "eventBus",
-    "canvas",
-    "modeling"
+    "canvas"
   ];
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/AssociationBehavior.js
@@ -20507,6 +21028,144 @@ var __AutoNateBpmnJS__ = (() => {
     "modeling"
   ];
   e(BoundaryEventBehavior, CommandInterceptor);
+
+  // node_modules/bpmn-js/lib/features/modeling/behavior/util/CategoryUtil.js
+  function createCategory(bpmnFactory) {
+    return bpmnFactory.create("bpmn:Category");
+  }
+  function createCategoryValue(bpmnFactory) {
+    return bpmnFactory.create("bpmn:CategoryValue");
+  }
+  function getOrCreateCategoryValueForGroup(bpmnFactory, groupBo) {
+    var categoryValue = groupBo.get("categoryValueRef");
+    if (!categoryValue) {
+      categoryValue = groupBo.categoryValueRef = createCategoryValue(bpmnFactory);
+    }
+    if (!categoryValue.$parent) {
+      categoryValue.$parent = createCategory(bpmnFactory);
+    }
+    return categoryValue;
+  }
+  function linkCategoryValue(categoryValue, category, definitions) {
+    add(category.get("categoryValue"), categoryValue);
+    categoryValue.$parent = category;
+    add(definitions.get("rootElements"), category);
+    category.$parent = definitions;
+    return categoryValue;
+  }
+  function unlinkCategoryValue(categoryValue) {
+    var category = categoryValue.$parent;
+    if (category) {
+      remove3(category.get("categoryValue"), categoryValue);
+      categoryValue.$parent = null;
+    }
+    return categoryValue;
+  }
+  function unlinkCategory(category) {
+    var definitions = category.$parent;
+    if (definitions) {
+      remove3(definitions.get("rootElements"), category);
+      category.$parent = null;
+    }
+    return category;
+  }
+
+  // node_modules/bpmn-js/lib/features/modeling/behavior/CategoryRootElementReferenceBehavior.js
+  var LOW_PRIORITY9 = 500;
+  function CategoryRootElementReferenceBehavior(bpmnjs, elementRegistry, injector) {
+    injector.invoke(CommandInterceptor, this);
+    function getGroupBusinessObjects(ignoredBusinessObject) {
+      return elementRegistry.filter(function(element) {
+        return is2(element, "bpmn:Group") && !element.labelTarget;
+      }).map(getBusinessObject).filter(function(businessObject) {
+        return businessObject !== ignoredBusinessObject;
+      });
+    }
+    function isCategoryValueReferenced(categoryValue, ignoredBusinessObject) {
+      return getGroupBusinessObjects(ignoredBusinessObject).some(function(businessObject) {
+        return businessObject.get("categoryValueRef") === categoryValue;
+      });
+    }
+    function isCategoryReferenced(category, ignoredBusinessObject) {
+      return getGroupBusinessObjects(ignoredBusinessObject).some(function(businessObject) {
+        var categoryValue = businessObject.get("categoryValueRef");
+        return categoryValue && categoryValue.$parent === category;
+      });
+    }
+    function link(categoryValue, category) {
+      if (categoryValue && category) {
+        linkCategoryValue(categoryValue, category, bpmnjs.getDefinitions());
+      }
+    }
+    function unlink(categoryValue, category, ignoredBusinessObject) {
+      if (category && !isCategoryReferenced(category, ignoredBusinessObject)) {
+        unlinkCategory(category);
+      }
+      if (categoryValue && !isCategoryValueReferenced(categoryValue, ignoredBusinessObject)) {
+        unlinkCategoryValue(categoryValue);
+      }
+    }
+    this.executed(["shape.create", "label.create"], function(context) {
+      var shape = context.labelTarget || context.shape;
+      if (!is2(shape, "bpmn:Group") || shape.labelTarget) {
+        return;
+      }
+      link(context.categoryValue, context.category);
+    }, true);
+    this.reverted(["shape.create", "label.create"], function(context) {
+      var shape = context.labelTarget || context.shape;
+      if (!is2(shape, "bpmn:Group") || shape.labelTarget) {
+        return;
+      }
+      unlink(context.categoryValue, context.category, getBusinessObject(shape));
+    }, true);
+    this.executed(["shape.move", "shape.resize"], LOW_PRIORITY9, function(context) {
+      link(context.categoryValue, context.category);
+    }, true);
+    this.reverted(["shape.move", "shape.resize"], function(context) {
+      var shape = context.shape;
+      if (context.categoryValue) {
+        unlink(context.categoryValue, context.category, getBusinessObject(shape));
+      }
+    }, true);
+    this.executed("group.updateRefs", function(context) {
+      getGroupUpdates(context).forEach(function(update) {
+        link(update.categoryValue, update.category);
+      });
+    }, true);
+    this.reverted("group.updateRefs", function(context) {
+      getGroupUpdates(context).forEach(function(update) {
+        unlink(
+          update.categoryValue,
+          update.category,
+          getBusinessObject(update.groupShape)
+        );
+      });
+    }, true);
+    this.executed("shape.delete", function(context) {
+      var shape = context.shape;
+      if (!is2(shape, "bpmn:Group") || shape.labelTarget) {
+        return;
+      }
+      unlink(context.categoryValue, context.category, getBusinessObject(shape));
+    }, true);
+    this.reverted("shape.delete", function(context) {
+      var shape = context.shape;
+      if (!is2(shape, "bpmn:Group") || shape.labelTarget) {
+        return;
+      }
+      link(context.categoryValue, context.category);
+    }, true);
+  }
+  CategoryRootElementReferenceBehavior.$inject = [
+    "bpmnjs",
+    "elementRegistry",
+    "injector"
+  ];
+  e(CategoryRootElementReferenceBehavior, CommandInterceptor);
+  function getGroupUpdates(context) {
+    return context.updates?.groups || [];
+  }
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/CompensateBoundaryEventBehavior.js
   function CompensateBoundaryEventBehavior(eventBus, modeling, bpmnRules) {
@@ -20647,7 +21306,7 @@ var __AutoNateBpmnJS__ = (() => {
     this.preExecute("shape.create", 1500, function(event2) {
       var context = event2.context, parent = context.parent, shape = context.shape;
       if (is2(parent, "bpmn:Lane") && !is2(shape, "bpmn:Lane")) {
-        context.parent = getParent2(parent, "bpmn:Participant");
+        context.parent = getParent(parent, "bpmn:Participant");
       }
     });
   }
@@ -20825,7 +21484,7 @@ var __AutoNateBpmnJS__ = (() => {
         targetRefProp = bpmnFactory.create("bpmn:Property", {
           name: TARGET_REF_PLACEHOLDER_NAME
         });
-        add2(properties, targetRefProp);
+        add(properties, targetRefProp);
       }
       return targetRefProp;
     }
@@ -21154,7 +21813,7 @@ var __AutoNateBpmnJS__ = (() => {
     });
   }
   function getLanesRoot(shape) {
-    return getParent2(shape, LANE_PARENTS) || shape;
+    return getParent(shape, LANE_PARENTS) || shape;
   }
   function computeLanesResize(shape, newBounds) {
     var rootElement = getLanesRoot(shape);
@@ -21215,7 +21874,7 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/DeleteLaneBehavior.js
-  var LOW_PRIORITY9 = 500;
+  var LOW_PRIORITY10 = 500;
   function DeleteLaneBehavior(eventBus, spaceTool) {
     CommandInterceptor.call(this, eventBus);
     function compensateLaneDelete(shape, oldParent) {
@@ -21316,7 +21975,7 @@ var __AutoNateBpmnJS__ = (() => {
         );
       }
     }
-    this.postExecuted("shape.delete", LOW_PRIORITY9, function(event2) {
+    this.postExecuted("shape.delete", LOW_PRIORITY10, function(event2) {
       var context = event2.context, hints = context.hints, shape = context.shape, oldParent = context.oldParent;
       if (!is2(shape, "bpmn:Lane")) {
         return;
@@ -21334,12 +21993,12 @@ var __AutoNateBpmnJS__ = (() => {
   e(DeleteLaneBehavior, CommandInterceptor);
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/DetachEventBehavior.js
-  var LOW_PRIORITY10 = 500;
+  var LOW_PRIORITY11 = 500;
   function DetachEventBehavior(bpmnReplace, injector) {
     injector.invoke(CommandInterceptor, this);
     this._bpmnReplace = bpmnReplace;
     var self2 = this;
-    this.postExecuted("elements.create", LOW_PRIORITY10, function(context) {
+    this.postExecuted("elements.create", LOW_PRIORITY11, function(context) {
       var elements = context.elements;
       elements.filter(function(shape) {
         var host = shape.host;
@@ -21350,7 +22009,7 @@ var __AutoNateBpmnJS__ = (() => {
         context.elements[index2] = self2._replaceShape(elements[index2]);
       });
     }, true);
-    this.preExecute("elements.move", LOW_PRIORITY10, function(context) {
+    this.preExecute("elements.move", LOW_PRIORITY11, function(context) {
       var shapes = context.shapes, newHost = context.newHost;
       shapes.forEach(function(shape, index2) {
         var host = shape.host;
@@ -21579,7 +22238,7 @@ var __AutoNateBpmnJS__ = (() => {
         event2.hoverGfx = elementRegistry.getGraphics(event2.hover);
       }
       var rootElement = canvas.getRootElement();
-      if (hover !== rootElement && (shape.labelTarget || isAny(shape, ["bpmn:Group", "bpmn:TextAnnotation"]))) {
+      if (hover && hover !== rootElement && (shape.labelTarget || isAny(shape, ["bpmn:Group", "bpmn:TextAnnotation"]))) {
         event2.hover = rootElement;
         event2.hoverGfx = elementRegistry.getGraphics(event2.hover);
       }
@@ -21636,91 +22295,27 @@ var __AutoNateBpmnJS__ = (() => {
     "canvas"
   ];
 
-  // node_modules/bpmn-js/lib/features/modeling/behavior/util/CategoryUtil.js
-  function createCategory(bpmnFactory) {
-    return bpmnFactory.create("bpmn:Category");
-  }
-  function createCategoryValue(bpmnFactory) {
-    return bpmnFactory.create("bpmn:CategoryValue");
-  }
-  function linkCategoryValue(categoryValue, category, definitions) {
-    add2(category.get("categoryValue"), categoryValue);
-    categoryValue.$parent = category;
-    add2(definitions.get("rootElements"), category);
-    category.$parent = definitions;
-    return categoryValue;
-  }
-  function unlinkCategoryValue(categoryValue) {
-    var category = categoryValue.$parent;
-    if (category) {
-      remove3(category.get("categoryValue"), categoryValue);
-      categoryValue.$parent = null;
-    }
-    return categoryValue;
-  }
-  function unlinkCategory(category) {
-    var definitions = category.$parent;
-    if (definitions) {
-      remove3(definitions.get("rootElements"), category);
-      category.$parent = null;
-    }
-    return category;
-  }
-
   // node_modules/bpmn-js/lib/features/modeling/behavior/GroupBehavior.js
   var LOWER_PRIORITY = 770;
-  function GroupBehavior(bpmnFactory, bpmnjs, elementRegistry, eventBus, injector, moddleCopy) {
+  function GroupBehavior(bpmnFactory, eventBus, injector, moddleCopy) {
     injector.invoke(CommandInterceptor, this);
-    function getGroupElements() {
-      return elementRegistry.filter(function(e5) {
-        return is2(e5, "bpmn:Group");
-      });
-    }
-    function isReferencedCategory(elements, category) {
-      return elements.some(function(element) {
-        var businessObject = getBusinessObject(element);
-        var _category = businessObject.categoryValueRef && businessObject.categoryValueRef.$parent;
-        return _category === category;
-      });
-    }
-    function isReferencedCategoryValue(elements, categoryValue) {
-      return elements.some(function(element) {
-        var businessObject = getBusinessObject(element);
-        return businessObject.categoryValueRef === categoryValue;
-      });
-    }
-    function removeCategoryValue(categoryValue, category, businessObject) {
-      var groups = getGroupElements().filter(function(element) {
-        return element.businessObject !== businessObject;
-      });
-      if (category && !isReferencedCategory(groups, category)) {
-        unlinkCategory(category);
-      }
-      if (categoryValue && !isReferencedCategoryValue(groups, categoryValue)) {
-        unlinkCategoryValue(categoryValue);
-      }
-    }
-    function addCategoryValue(categoryValue, category) {
-      return linkCategoryValue(categoryValue, category, bpmnjs.getDefinitions());
-    }
     function setCategoryValue(element, context) {
-      var businessObject = getBusinessObject(element), categoryValue = businessObject.categoryValueRef;
+      var businessObject = getBusinessObject(element), categoryValue = context.categoryValue || businessObject.categoryValueRef;
       if (!categoryValue) {
-        categoryValue = businessObject.categoryValueRef = context.categoryValue = context.categoryValue || createCategoryValue(bpmnFactory);
+        categoryValue = getOrCreateCategoryValueForGroup(bpmnFactory, businessObject);
       }
-      var category = categoryValue.$parent;
-      if (!category) {
-        category = categoryValue.$parent = context.category = context.category || createCategory(bpmnFactory);
-      }
-      addCategoryValue(categoryValue, category, bpmnjs.getDefinitions());
+      var category = context.category || categoryValue.$parent || createCategory(bpmnFactory);
+      businessObject.categoryValueRef = categoryValue;
+      categoryValue.$parent = category;
+      context.categoryValue = categoryValue;
+      context.category = category;
     }
     function unsetCategoryValue(element, context) {
-      var category = context.category, categoryValue = context.categoryValue, businessObject = getBusinessObject(element);
+      var businessObject = getBusinessObject(element), categoryValue = context.categoryValue || businessObject.categoryValueRef, category = context.category || categoryValue && categoryValue.$parent;
       if (categoryValue) {
+        context.categoryValue = categoryValue;
+        context.category = category;
         businessObject.categoryValueRef = null;
-        removeCategoryValue(categoryValue, category, businessObject);
-      } else {
-        removeCategoryValue(null, businessObject.categoryValueRef.$parent, businessObject);
       }
     }
     this.execute("label.create", function(event2) {
@@ -21742,10 +22337,9 @@ var __AutoNateBpmnJS__ = (() => {
       if (!is2(shape, "bpmn:Group") || shape.labelTarget) {
         return;
       }
-      var categoryValue = context.categoryValue = businessObject.categoryValueRef, category;
+      var categoryValue = context.categoryValue = businessObject.categoryValueRef;
       if (categoryValue) {
-        category = context.category = categoryValue.$parent;
-        removeCategoryValue(categoryValue, category, businessObject);
+        context.category = categoryValue.$parent;
         businessObject.categoryValueRef = null;
       }
     });
@@ -21757,26 +22351,42 @@ var __AutoNateBpmnJS__ = (() => {
       var category = context.category, categoryValue = context.categoryValue, businessObject = getBusinessObject(shape);
       if (categoryValue) {
         businessObject.categoryValueRef = categoryValue;
-        addCategoryValue(categoryValue, category);
+        categoryValue.$parent = category;
       }
     });
     this.execute("shape.create", function(event2) {
-      var context = event2.context, shape = context.shape;
+      var context = event2.context, shape = context.shape, hints = context.hints || {};
       if (!is2(shape, "bpmn:Group") || shape.labelTarget) {
         return;
       }
-      if (getBusinessObject(shape).categoryValueRef) {
-        setCategoryValue(shape, context);
+      if (hints.createElementsBehavior === false && !getBusinessObject(shape).categoryValueRef && !context.categoryValue) {
+        return;
       }
+      setCategoryValue(shape, context);
     });
     this.reverted("shape.create", function(event2) {
-      var context = event2.context, shape = context.shape;
+      var context = event2.context, shape = context.shape, hints = context.hints || {};
       if (!is2(shape, "bpmn:Group") || shape.labelTarget) {
         return;
       }
-      if (getBusinessObject(shape).categoryValueRef) {
-        unsetCategoryValue(shape, context);
+      if (hints.createElementsBehavior === false && !getBusinessObject(shape).categoryValueRef && !context.categoryValue) {
+        return;
       }
+      unsetCategoryValue(shape, context);
+    });
+    this.executed(["shape.move", "shape.resize"], function(event2) {
+      var context = event2.context, shape = context.shape;
+      if (!is2(shape, "bpmn:Group") || shape.labelTarget || getBusinessObject(shape).categoryValueRef) {
+        return;
+      }
+      setCategoryValue(shape, context);
+    });
+    this.reverted(["shape.move", "shape.resize"], function(event2) {
+      var context = event2.context, shape = context.shape;
+      if (!is2(shape, "bpmn:Group") || shape.labelTarget || !context.categoryValue) {
+        return;
+      }
+      unsetCategoryValue(shape, context);
     });
     function copy2(bo, clone2) {
       var targetBo = bpmnFactory.create(bo.$type);
@@ -21810,8 +22420,6 @@ var __AutoNateBpmnJS__ = (() => {
   }
   GroupBehavior.$inject = [
     "bpmnFactory",
-    "bpmnjs",
-    "elementRegistry",
     "eventBus",
     "injector",
     "moddleCopy"
@@ -22293,14 +22901,35 @@ var __AutoNateBpmnJS__ = (() => {
         newShape.label.y = oldShape.label.y;
       }
     });
+    this.preExecute("shape.resize", function(event2) {
+      var context = event2.context, shape = context.shape, hints = context.hints || {};
+      if (!isLabel(shape) || hints.autoResize) {
+        return;
+      }
+      var newBounds = context.newBounds;
+      var dimensions = textRenderer.getDimensions(getLabel(shape) || "", {
+        box: newBounds,
+        style: textRenderer.getExternalStyle()
+      });
+      var height = Math.ceil(dimensions.height);
+      var topEdgeMoved = newBounds.y !== shape.y;
+      var bottom = shape.y + shape.height;
+      context.newBounds = {
+        width: newBounds.width,
+        height,
+        x: newBounds.x,
+        y: topEdgeMoved ? bottom - height : newBounds.y
+      };
+    });
     this.postExecute("shape.resize", function(event2) {
       var context = event2.context, shape = context.shape, newBounds = context.newBounds, oldBounds = context.oldBounds;
-      if (hasExternalLabel(shape)) {
-        var label = shape.label, labelMid = getMid(label), edges = asEdges(oldBounds);
-        var referencePoint = getReferencePoint(labelMid, edges);
-        var delta2 = getReferencePointDelta(referencePoint, oldBounds, newBounds);
-        modeling.moveShape(label, delta2);
+      if (!hasExternalLabel(shape)) {
+        return;
       }
+      var label = shape.label, labelMid = getMid(label), edges = asEdges(oldBounds);
+      var referencePoint = getReferencePoint(labelMid, edges);
+      var delta2 = getReferencePointDelta(referencePoint, oldBounds, newBounds);
+      modeling.moveShape(label, delta2);
     });
   }
   e(LabelBehavior, CommandInterceptor);
@@ -22859,7 +23488,7 @@ var __AutoNateBpmnJS__ = (() => {
   var PARTICIPANT_MIN_DIMENSIONS = { width: 300, height: 150 };
   var VERTICAL_PARTICIPANT_MIN_DIMENSIONS = { width: 150, height: 300 };
   var SUB_PROCESS_MIN_DIMENSIONS = { width: 140, height: 120 };
-  var TEXT_ANNOTATION_MIN_DIMENSIONS = { width: 50, height: 30 };
+  var TEXT_ANNOTATION_MIN_DIMENSIONS = { width: 100, height: 40 };
   function ResizeBehavior(eventBus) {
     eventBus.on("resize.start", HIGH_PRIORITY7, function(event2) {
       var context = event2.context, shape = context.shape, direction = context.direction, balanced = context.balanced;
@@ -23008,7 +23637,7 @@ var __AutoNateBpmnJS__ = (() => {
   ];
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/RootElementReferenceBehavior.js
-  var LOW_PRIORITY11 = 500;
+  var LOW_PRIORITY12 = 500;
   function RootElementReferenceBehavior(bpmnjs, eventBus, injector, moddleCopy, bpmnFactory) {
     injector.invoke(CommandInterceptor, this);
     function canHaveRootElementReference(element) {
@@ -23060,7 +23689,7 @@ var __AutoNateBpmnJS__ = (() => {
       var businessObject = getBusinessObject(shape), rootElement = getRootElement2(businessObject), rootElements;
       if (rootElement && !hasRootElement(rootElement)) {
         rootElements = bpmnjs.getDefinitions().get("rootElements");
-        add2(rootElements, rootElement);
+        add(rootElements, rootElement);
         context.addedRootElement = rootElement;
       }
     }, true);
@@ -23086,7 +23715,7 @@ var __AutoNateBpmnJS__ = (() => {
         descriptor.referencedRootElement = rootElement;
       }
     });
-    eventBus.on("copyPaste.pasteElement", LOW_PRIORITY11, function(context) {
+    eventBus.on("copyPaste.pasteElement", LOW_PRIORITY12, function(context) {
       var descriptor = context.descriptor, businessObject = descriptor.businessObject, referencedRootElement = descriptor.referencedRootElement;
       if (!referencedRootElement) {
         return;
@@ -23213,36 +23842,8 @@ var __AutoNateBpmnJS__ = (() => {
     }
   }
 
-  // node_modules/bpmn-js/lib/util/AnnotationUtil.js
-  function getElementAnnotations(element) {
-    let result = [];
-    forEach(element.incoming, (connection) => {
-      if (is2(connection, "bpmn:Association") && is2(connection.source, "bpmn:TextAnnotation")) {
-        result.push({ annotation: connection.source, association: connection });
-      }
-    });
-    forEach(element.outgoing, (connection) => {
-      if (is2(connection, "bpmn:Association") && is2(connection.target, "bpmn:TextAnnotation")) {
-        result.push({ annotation: connection.target, association: connection });
-      }
-    });
-    return result;
-  }
-  function collectElementsAnnotations(elements) {
-    const result = /* @__PURE__ */ new Map();
-    forEach(selfAndChildren(elements, true, -1), (element) => {
-      forEach(getElementAnnotations(element), (entry) => {
-        if (!result.has(entry.annotation)) {
-          result.set(entry.annotation, { annotation: entry.annotation, associations: [] });
-        }
-        result.get(entry.annotation).associations.push(entry.association);
-      });
-    });
-    return [...result.values()];
-  }
-
   // node_modules/bpmn-js/lib/features/modeling/behavior/SubProcessPlaneBehavior.js
-  var LOW_PRIORITY12 = 400;
+  var LOW_PRIORITY13 = 400;
   var HIGH_PRIORITY8 = 600;
   var DEFAULT_POSITION2 = {
     x: 180,
@@ -23409,7 +24010,7 @@ var __AutoNateBpmnJS__ = (() => {
       }
       eventBus.fire("element.changed", { element: primaryShape });
     });
-    this.executed("shape.toggleCollapse", LOW_PRIORITY12, function(context) {
+    this.executed("shape.toggleCollapse", LOW_PRIORITY13, function(context) {
       var shape = context.shape;
       if (!is2(shape, "bpmn:SubProcess")) {
         return;
@@ -23421,7 +24022,7 @@ var __AutoNateBpmnJS__ = (() => {
         removeRoot(context);
       }
     }, true);
-    this.reverted("shape.toggleCollapse", LOW_PRIORITY12, function(context) {
+    this.reverted("shape.toggleCollapse", LOW_PRIORITY13, function(context) {
       var shape = context.shape;
       if (!is2(shape, "bpmn:SubProcess")) {
         return;
@@ -23643,7 +24244,7 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/TextAnnotationBehavior.js
-  function TextAnnotationBehavior(eventBus) {
+  function TextAnnotationBehavior(eventBus, textRenderer) {
     CommandInterceptor.call(this, eventBus);
     this.preExecute("connection.create", function(context) {
       const { target } = context;
@@ -23659,10 +24260,27 @@ var __AutoNateBpmnJS__ = (() => {
         context.hints.autoResize = false;
       }
     }, true);
+    this.preExecute("shape.resize", function(event2) {
+      var context = event2.context, shape = context.shape, hints = context.hints || {};
+      if (!is2(shape, "bpmn:TextAnnotation") || hints.autoResize) {
+        return;
+      }
+      var newBounds = context.newBounds;
+      var resizeBounds3 = textRenderer.getTextAnnotationBounds(newBounds, getLabel(shape) || "");
+      var topEdgeMoved = newBounds.y !== shape.y && Math.abs(newBounds.y + newBounds.height - (shape.y + shape.height)) <= 1;
+      var bottom = shape.y + shape.height;
+      context.newBounds = {
+        width: newBounds.width,
+        height: resizeBounds3.height,
+        x: newBounds.x,
+        y: topEdgeMoved ? bottom - resizeBounds3.height : newBounds.y
+      };
+    });
   }
   e(TextAnnotationBehavior, CommandInterceptor);
   TextAnnotationBehavior.$inject = [
-    "eventBus"
+    "eventBus",
+    "textRenderer"
   ];
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/ToggleCollapseConnectionBehaviour.js
@@ -23705,7 +24323,7 @@ var __AutoNateBpmnJS__ = (() => {
   ];
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/ToggleElementCollapseBehaviour.js
-  var LOW_PRIORITY13 = 500;
+  var LOW_PRIORITY14 = 500;
   function ToggleElementCollapseBehaviour(eventBus, elementFactory, modeling) {
     CommandInterceptor.call(this, eventBus);
     function hideEmptyLabels(children) {
@@ -23740,7 +24358,7 @@ var __AutoNateBpmnJS__ = (() => {
         height: defaultSize.height
       };
     }
-    this.executed(["shape.toggleCollapse"], LOW_PRIORITY13, function(e5) {
+    this.executed(["shape.toggleCollapse"], LOW_PRIORITY14, function(e5) {
       var context = e5.context, shape = context.shape;
       if (!is2(shape, "bpmn:SubProcess")) {
         return;
@@ -23752,7 +24370,7 @@ var __AutoNateBpmnJS__ = (() => {
         getDi(shape).isExpanded = false;
       }
     });
-    this.reverted(["shape.toggleCollapse"], LOW_PRIORITY13, function(e5) {
+    this.reverted(["shape.toggleCollapse"], LOW_PRIORITY14, function(e5) {
       var context = e5.context;
       var shape = context.shape;
       if (!shape.collapsed) {
@@ -23761,7 +24379,7 @@ var __AutoNateBpmnJS__ = (() => {
         getDi(shape).isExpanded = false;
       }
     });
-    this.postExecuted(["shape.toggleCollapse"], LOW_PRIORITY13, function(e5) {
+    this.postExecuted(["shape.toggleCollapse"], LOW_PRIORITY14, function(e5) {
       var shape = e5.context.shape, defaultSize = elementFactory.getDefaultSize(shape), newBounds;
       if (shape.collapsed) {
         newBounds = collapsedBounds(shape, defaultSize);
@@ -23838,8 +24456,24 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/bpmn-js/lib/features/modeling/behavior/UpdateFlowNodeRefsBehavior.js
-  var LOW_PRIORITY14 = 500;
+  var LOW_PRIORITY15 = 500;
   var HIGH_PRIORITY9 = 5e3;
+  var laneRefShapeEvents = [
+    "shape.create",
+    "shape.delete",
+    "shape.move",
+    "shape.resize"
+  ];
+  var laneRefUpdateEvents = [
+    ...laneRefShapeEvents,
+    "spaceTool",
+    "lane.add",
+    "lane.resize",
+    "lane.split",
+    "elements.create",
+    "elements.delete",
+    "elements.move"
+  ];
   function UpdateFlowNodeRefsBehavior(eventBus, modeling) {
     CommandInterceptor.call(this, eventBus);
     var context;
@@ -23865,34 +24499,16 @@ var __AutoNateBpmnJS__ = (() => {
       }
       return triggerUpdate;
     }
-    var laneRefUpdateEvents = [
-      "spaceTool",
-      "lane.add",
-      "lane.resize",
-      "lane.split",
-      "elements.create",
-      "elements.delete",
-      "elements.move",
-      "shape.create",
-      "shape.delete",
-      "shape.move",
-      "shape.resize"
-    ];
-    this.preExecute(laneRefUpdateEvents, HIGH_PRIORITY9, function(event2) {
+    this.preExecute(laneRefUpdateEvents, HIGH_PRIORITY9, function() {
       initContext();
     });
-    this.postExecuted(laneRefUpdateEvents, LOW_PRIORITY14, function(event2) {
+    this.postExecuted(laneRefUpdateEvents, LOW_PRIORITY15, function() {
       releaseContext();
     });
-    this.preExecute([
-      "shape.create",
-      "shape.move",
-      "shape.delete",
-      "shape.resize"
-    ], function(event2) {
+    this.preExecute(laneRefShapeEvents, function(event2) {
       var context2 = event2.context, shape = context2.shape;
       var updateContext = getContext();
-      if (shape.labelTarget) {
+      if (!shape || shape.labelTarget) {
         return;
       }
       if (is2(shape, "bpmn:Lane")) {
@@ -23917,6 +24533,111 @@ var __AutoNateBpmnJS__ = (() => {
     };
     this.addFlowNode = function(flowNode) {
       this.flowNodes.push(flowNode);
+    };
+    this.enter = function() {
+      this.counter++;
+    };
+    this.leave = function() {
+      this.counter--;
+      return !this.counter;
+    };
+  }
+
+  // node_modules/bpmn-js/lib/features/modeling/behavior/UpdateCategoryValueRefsBehavior.js
+  var LOW_PRIORITY16 = 500;
+  var HIGH_PRIORITY10 = 5e3;
+  var categoryValueRefShapeAndConnectionEvents = [
+    "connection.create",
+    "connection.delete",
+    "connection.layout",
+    "connection.move",
+    "connection.reconnect",
+    "connection.updateWaypoints",
+    "shape.create",
+    "shape.delete",
+    "shape.move",
+    "shape.resize"
+  ];
+  var categoryValueRefUpdateEvents = [
+    ...categoryValueRefShapeAndConnectionEvents,
+    "elements.create",
+    "elements.delete",
+    "elements.move",
+    "label.create",
+    "spaceTool"
+  ];
+  function UpdateCategoryValueRefsBehavior(eventBus, modeling) {
+    CommandInterceptor.call(this, eventBus);
+    var context;
+    function initContext() {
+      context = context || new UpdateContext2();
+      context.enter();
+      return context;
+    }
+    function getContext() {
+      if (!context) {
+        throw new Error("out of bounds release");
+      }
+      return context;
+    }
+    function releaseContext() {
+      if (!context) {
+        throw new Error("out of bounds release");
+      }
+      var triggerUpdate = context.leave();
+      if (triggerUpdate) {
+        modeling.updateCategoryValueRefs(
+          Array.from(context.affectedFlowElements),
+          Array.from(context.affectedGroupEntries.values())
+        );
+        context = null;
+      }
+      return triggerUpdate;
+    }
+    this.preExecute(categoryValueRefUpdateEvents, HIGH_PRIORITY10, function() {
+      initContext();
+    });
+    this.postExecuted(categoryValueRefUpdateEvents, LOW_PRIORITY16, function() {
+      releaseContext();
+    });
+    this.preExecute(categoryValueRefShapeAndConnectionEvents, function(event2) {
+      var shape = event2.context.connection || event2.context.shape, updateContext = getContext();
+      if (!shape || shape.labelTarget) {
+        return;
+      }
+      if (is2(shape, "bpmn:FlowElement")) {
+        updateContext.addFlowElement(shape);
+      }
+      if (is2(shape, "bpmn:Group")) {
+        updateContext.addGroup(shape);
+      }
+    });
+    this.preExecute("label.create", function(event2) {
+      var labelTarget = event2.context.labelTarget;
+      if (is2(labelTarget, "bpmn:Group")) {
+        getContext().addGroup(labelTarget);
+      }
+    });
+  }
+  UpdateCategoryValueRefsBehavior.$inject = [
+    "eventBus",
+    "modeling"
+  ];
+  e(UpdateCategoryValueRefsBehavior, CommandInterceptor);
+  function UpdateContext2() {
+    this.affectedFlowElements = /* @__PURE__ */ new Set();
+    this.affectedGroupEntries = /* @__PURE__ */ new Map();
+    this.counter = 0;
+    this.addFlowElement = function(flowElement) {
+      this.affectedFlowElements.add(flowElement);
+    };
+    this.addGroup = function(group) {
+      if (!this.affectedGroupEntries.has(group)) {
+        this.affectedGroupEntries.set(group, {
+          categoryValue: group.businessObject.categoryValueRef,
+          groupShape: group
+        });
+      }
     };
     this.enter = function() {
       this.counter++;
@@ -23970,6 +24691,7 @@ var __AutoNateBpmnJS__ = (() => {
       "associationBehavior",
       "attachEventBehavior",
       "boundaryEventBehavior",
+      "categoryRootElementReferenceBehavior",
       "compensateBoundaryEventBehaviour",
       "createBehavior",
       "createDataObjectBehavior",
@@ -24004,6 +24726,7 @@ var __AutoNateBpmnJS__ = (() => {
       "toggleElementCollapseBehaviour",
       "unclaimIdBehavior",
       "updateFlowNodeRefsBehavior",
+      "updateCategoryValueRefsBehavior",
       "unsetDefaultFlowBehavior",
       "setCompensationActivityAfterPasteBehavior"
     ],
@@ -24013,6 +24736,7 @@ var __AutoNateBpmnJS__ = (() => {
     attachEventBehavior: ["type", AttachEventBehavior],
     artifactBehavior: ["type", ArtifactBehavior],
     boundaryEventBehavior: ["type", BoundaryEventBehavior],
+    categoryRootElementReferenceBehavior: ["type", CategoryRootElementReferenceBehavior],
     compensateBoundaryEventBehaviour: ["type", CompensateBoundaryEventBehavior],
     createBehavior: ["type", CreateBehavior],
     createDataObjectBehavior: ["type", CreateDataObjectBehavior],
@@ -24048,6 +24772,7 @@ var __AutoNateBpmnJS__ = (() => {
     unclaimIdBehavior: ["type", UnclaimIdBehavior],
     unsetDefaultFlowBehavior: ["type", DeleteSequenceFlowBehavior],
     updateFlowNodeRefsBehavior: ["type", UpdateFlowNodeRefsBehavior],
+    updateCategoryValueRefsBehavior: ["type", UpdateCategoryValueRefsBehavior],
     setCompensationActivityAfterPasteBehavior: ["type", SetCompensationActivityAfterPasteBehavior]
   };
 
@@ -24098,8 +24823,8 @@ var __AutoNateBpmnJS__ = (() => {
       };
     });
     this.addRule("shape.resize", function(context) {
-      var shape = context.shape, newBounds = context.newBounds;
-      return canResize(shape, newBounds);
+      var shape = context.shape, newBounds = context.newBounds, direction = context.direction;
+      return canResize(shape, newBounds, direction);
     });
     this.addRule("elements.create", function(context) {
       var elements = context.elements, position = context.position, target = context.target;
@@ -24467,8 +25192,11 @@ var __AutoNateBpmnJS__ = (() => {
     if (some(elements, isLane)) {
       return false;
     }
-    if (!target) {
+    if (target === void 0) {
       return true;
+    }
+    if (target === null) {
+      return false;
     }
     return elements.every(function(element) {
       return canDrop(element, target);
@@ -24483,7 +25211,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
     return canDrop(shape, target, position) || canInsert(shape, target, position);
   }
-  function canResize(shape, newBounds) {
+  function canResize(shape, newBounds, direction) {
     if (is2(shape, "bpmn:SubProcess")) {
       return isExpanded(shape) && (!newBounds || newBounds.width >= 100 && newBounds.height >= 80);
     }
@@ -24494,9 +25222,18 @@ var __AutoNateBpmnJS__ = (() => {
       return true;
     }
     if (isTextAnnotation(shape)) {
+      if (direction) {
+        return direction === "e" || direction === "w";
+      }
       return true;
     }
     if (isGroup(shape)) {
+      return true;
+    }
+    if (isLabel(shape)) {
+      if (direction) {
+        return direction === "e" || direction === "w";
+      }
       return true;
     }
     return false;
@@ -24560,10 +25297,25 @@ var __AutoNateBpmnJS__ = (() => {
     if (is2(element, "bpmn:Lane") && !includes2(elements, element.parent)) {
       return false;
     }
+    if (is2(element, "bpmn:MessageFlow") && !canCopyMessageFlow(elements, element)) {
+      return false;
+    }
     return true;
   }
+  function canCopyMessageFlow(elements, connection) {
+    var sourceParticipant = getParticipant(connection.source), targetParticipant = getParticipant(connection.target);
+    return includes2(elements, sourceParticipant) && includes2(elements, targetParticipant);
+  }
+  function getParticipant(element) {
+    for (; element; element = element.parent) {
+      if (is2(element, "bpmn:Participant")) {
+        return element;
+      }
+    }
+    return null;
+  }
   function getRootElement(element) {
-    return getParent2(element, "bpmn:Process") || getParent2(element, "bpmn:Collaboration");
+    return getParent(element, "bpmn:Process") || getParent(element, "bpmn:Collaboration");
   }
   function isHostOfElement(potentialHost, element) {
     return potentialHost.attachers.includes(element);
@@ -24579,9 +25331,9 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/di-ordering/BpmnDiOrdering.js
-  var HIGH_PRIORITY10 = 2e3;
+  var HIGH_PRIORITY11 = 2e3;
   function BpmnDiOrdering(eventBus, canvas) {
-    eventBus.on("saveXML.start", HIGH_PRIORITY10, orderDi);
+    eventBus.on("saveXML.start", HIGH_PRIORITY11, orderDi);
     function orderDi() {
       var rootElements = canvas.getRootElements();
       forEach(rootElements, function(root) {
@@ -24800,7 +25552,7 @@ var __AutoNateBpmnJS__ = (() => {
   var MARKER_ATTACH = "attach-ok";
   var MARKER_NEW_PARENT = "new-parent";
   var PREFIX = "create";
-  var HIGH_PRIORITY11 = 2e3;
+  var HIGH_PRIORITY12 = 2e3;
   function Create(canvas, dragging, eventBus, modeling, rules) {
     function canCreate2(elements, target, position, source, hints) {
       if (!target) {
@@ -24937,7 +25689,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
     eventBus.on("create.init", function() {
       eventBus.on("elements.changed", cancel);
-      eventBus.once(["create.cancel", "create.end"], HIGH_PRIORITY11, function() {
+      eventBus.once(["create.cancel", "create.end"], HIGH_PRIORITY12, function() {
         eventBus.off("elements.changed", cancel);
       });
     });
@@ -25023,7 +25775,7 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/diagram-js/lib/features/create/CreatePreview.js
-  var LOW_PRIORITY15 = 750;
+  var LOW_PRIORITY17 = 750;
   function CreatePreview(canvas, eventBus, graphicsFactory, previewSupport, styles) {
     function createDragGroup(elements) {
       var dragGroup = create("g");
@@ -25046,7 +25798,7 @@ var __AutoNateBpmnJS__ = (() => {
       });
       return dragGroup;
     }
-    eventBus.on("create.move", LOW_PRIORITY15, function(event2) {
+    eventBus.on("create.move", LOW_PRIORITY17, function(event2) {
       var hover = event2.hover, context = event2.context, elements = context.elements, dragGroup = context.dragGroup;
       if (!dragGroup) {
         dragGroup = context.dragGroup = createDragGroup(elements);
@@ -25145,7 +25897,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/copy-paste/CopyPaste.js
-  var HIGH_PRIORITY12 = 2e3;
+  var HIGH_PRIORITY13 = 2e3;
   function CopyPaste(canvas, create3, clipboard, elementFactory, eventBus, modeling, mouse, rules) {
     this._canvas = canvas;
     this._create = create3;
@@ -25155,13 +25907,10 @@ var __AutoNateBpmnJS__ = (() => {
     this._mouse = mouse;
     this._rules = rules;
     eventBus.on("copyPaste.copyElement", function(context) {
-      var descriptor = context.descriptor, element = context.element, elements = context.elements;
+      var descriptor = context.descriptor, element = context.element, elementsSet = context.elementsSet;
       descriptor.priority = 1;
       descriptor.id = element.id;
-      var parentCopied = find(elements, function(e5) {
-        return e5 === element.parent;
-      });
-      if (parentCopied) {
+      if (elementsSet.has(element.parent)) {
         descriptor.parent = element.parent.id;
       }
       if (isAttacher(element)) {
@@ -25186,12 +25935,12 @@ var __AutoNateBpmnJS__ = (() => {
       descriptor.hidden = element.hidden;
       descriptor.collapsed = element.collapsed;
     });
-    eventBus.on("copyPaste.elementsCopied", HIGH_PRIORITY12, function(context) {
+    eventBus.on("copyPaste.elementsCopied", HIGH_PRIORITY13, function(context) {
       if (context.hints?.clip !== false) {
         clipboard.set(context.tree);
       }
     });
-    eventBus.on("copyPaste.pasteElements", HIGH_PRIORITY12, function(context) {
+    eventBus.on("copyPaste.pasteElements", HIGH_PRIORITY13, function(context) {
       if (!context.tree) {
         context.tree = clipboard.get();
       }
@@ -25365,18 +26114,17 @@ var __AutoNateBpmnJS__ = (() => {
     var shape = this._elementFactory.createShape(omit(attrs, ["id"]));
     return shape;
   };
-  CopyPaste.prototype.hasRelations = function(element, elements) {
-    var labelTarget, source, target;
+  CopyPaste.prototype.hasRelations = function(element, elements, elementsSet) {
+    if (!elementsSet) {
+      elementsSet = new Set(elements);
+    }
     if (isConnection(element)) {
-      source = find(elements, matchPattern({ id: element.source.id }));
-      target = find(elements, matchPattern({ id: element.target.id }));
-      if (!source || !target) {
+      if (!elementsSet.has(element.source) || !elementsSet.has(element.target)) {
         return false;
       }
     }
     if (isLabel(element)) {
-      labelTarget = find(elements, matchPattern({ id: element.labelTarget.id }));
-      if (!labelTarget) {
+      if (!elementsSet.has(element.labelTarget)) {
         return false;
       }
     }
@@ -25385,6 +26133,7 @@ var __AutoNateBpmnJS__ = (() => {
   CopyPaste.prototype.createTree = function(elements) {
     var rules = this._rules, self2 = this;
     var tree = {}, elementsData = [];
+    var elementsDataMap = /* @__PURE__ */ new Map();
     var parents = getParents(elements);
     function canCopy2(element, elements2) {
       return rules.allowed("element.copy", {
@@ -25393,22 +26142,24 @@ var __AutoNateBpmnJS__ = (() => {
       });
     }
     function addElementData(element, depth) {
-      var foundElementData = find(elementsData, function(elementsData2) {
-        return element === elementsData2.element;
-      });
+      var foundElementData = elementsDataMap.get(element);
       if (!foundElementData) {
-        elementsData.push({
+        var elementData2 = {
           element,
           depth
-        });
+        };
+        elementsData.push(elementData2);
+        elementsDataMap.set(element, elementData2);
         return;
       }
       if (foundElementData.depth < depth) {
         elementsData = removeElementData(foundElementData, elementsData);
-        elementsData.push({
+        var updatedElementData = {
           element: foundElementData.element,
           depth
-        });
+        };
+        elementsData.push(updatedElementData);
+        elementsDataMap.set(element, updatedElementData);
       }
     }
     function removeElementData(elementData2, elementsData2) {
@@ -25448,12 +26199,14 @@ var __AutoNateBpmnJS__ = (() => {
     elements = map(elementsData, function(elementData2) {
       return elementData2.element;
     });
+    var elementsSet = new Set(elements);
     elementsData = map(elementsData, function(elementData2) {
       elementData2.descriptor = {};
       self2._eventBus.fire("copyPaste.copyElement", {
         descriptor: elementData2.descriptor,
         element: elementData2.element,
-        elements
+        elements,
+        elementsSet
       });
       return elementData2;
     });
@@ -25465,12 +26218,14 @@ var __AutoNateBpmnJS__ = (() => {
     });
     forEach(elementsData, function(elementData2) {
       var depth = elementData2.depth;
-      if (!self2.hasRelations(elementData2.element, elements)) {
+      if (!self2.hasRelations(elementData2.element, elements, elementsSet)) {
         removeElement(elementData2.element, elements);
+        elementsSet.delete(elementData2.element);
         return;
       }
       if (!canCopy2(elementData2.element, elements)) {
         removeElement(elementData2.element, elements);
+        elementsSet.delete(elementData2.element);
         return;
       }
       if (!tree[depth]) {
@@ -25526,13 +26281,13 @@ var __AutoNateBpmnJS__ = (() => {
       }
     });
   }
-  var LOW_PRIORITY16 = 750;
+  var LOW_PRIORITY18 = 750;
   function BpmnCopyPaste(bpmnFactory, eventBus, moddleCopy) {
     function copy2(bo, clone2) {
       var targetBo = bpmnFactory.create(bo.$type);
       return moddleCopy.copyElement(bo, targetBo, null, clone2);
     }
-    eventBus.on("copyPaste.copyElement", LOW_PRIORITY16, function(context) {
+    eventBus.on("copyPaste.copyElement", LOW_PRIORITY18, function(context) {
       var descriptor = context.descriptor, element = context.element, businessObject = getBusinessObject(element);
       if (isLabel(element)) {
         return descriptor;
@@ -25589,7 +26344,7 @@ var __AutoNateBpmnJS__ = (() => {
       ]);
       descriptor.type = businessObject.$type;
     });
-    eventBus.on("copyPaste.copyElement", LOW_PRIORITY16, function(context) {
+    eventBus.on("copyPaste.copyElement", LOW_PRIORITY18, function(context) {
       var descriptor = context.descriptor, element = context.element;
       if (!is2(element, "bpmn:Participant")) {
         return;
@@ -25614,7 +26369,7 @@ var __AutoNateBpmnJS__ = (() => {
         children.push(entry.annotation);
       });
     });
-    eventBus.on("copyPaste.pasteElement", LOW_PRIORITY16, function(context) {
+    eventBus.on("copyPaste.pasteElement", LOW_PRIORITY18, function(context) {
       var cache = context.cache, descriptor = context.descriptor;
       setReferences(
         cache,
@@ -26048,7 +26803,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/tool-manager/ToolManager.js
-  var LOW_PRIORITY17 = 250;
+  var LOW_PRIORITY19 = 250;
   function ToolManager(eventBus) {
     this._eventBus = eventBus;
     this._tools = [];
@@ -26091,7 +26846,7 @@ var __AutoNateBpmnJS__ = (() => {
       eventsToRegister.push(event2 + ".ended");
       eventsToRegister.push(event2 + ".canceled");
     });
-    eventBus.on(eventsToRegister, LOW_PRIORITY17, function(event2) {
+    eventBus.on(eventsToRegister, LOW_PRIORITY19, function(event2) {
       if (!this._active) {
         return;
       }
@@ -26137,21 +26892,24 @@ var __AutoNateBpmnJS__ = (() => {
   }
   function getWaypointsUpdatingConnections(movingShapes, resizingShapes) {
     var waypointsUpdatingConnections = [];
-    forEach(movingShapes.concat(resizingShapes), function(shape) {
+    var adjustedShapes = new Set(movingShapes);
+    forEach(resizingShapes, function(shape) {
+      adjustedShapes.add(shape);
+    });
+    var seenConnections = /* @__PURE__ */ new Set();
+    adjustedShapes.forEach(function(shape) {
       var incoming = shape.incoming, outgoing = shape.outgoing;
       forEach(incoming.concat(outgoing), function(connection) {
         var source = connection.source, target = connection.target;
-        if (includes3(movingShapes, source) || includes3(movingShapes, target) || includes3(resizingShapes, source) || includes3(resizingShapes, target)) {
-          if (!includes3(waypointsUpdatingConnections, connection)) {
+        if (adjustedShapes.has(source) || adjustedShapes.has(target)) {
+          if (!seenConnections.has(connection)) {
+            seenConnections.add(connection);
             waypointsUpdatingConnections.push(connection);
           }
         }
       });
     });
     return waypointsUpdatingConnections;
-  }
-  function includes3(array, item) {
-    return array.indexOf(item) !== -1;
   }
   function resizeBounds2(bounds, direction, delta2) {
     var x3 = bounds.x, y3 = bounds.y, width = bounds.width, height = bounds.height, dx = delta2.x, dy = delta2.y;
@@ -26203,7 +26961,7 @@ var __AutoNateBpmnJS__ = (() => {
     s: "bottom",
     e: "right"
   };
-  var HIGH_PRIORITY13 = 1500;
+  var HIGH_PRIORITY14 = 1500;
   var DIRECTION_TO_OPPOSITE = {
     n: "s",
     w: "e",
@@ -26229,7 +26987,7 @@ var __AutoNateBpmnJS__ = (() => {
         self2.activateMakeSpace(event2.originalEvent);
       });
     });
-    eventBus.on("spaceTool.move", HIGH_PRIORITY13, function(event2) {
+    eventBus.on("spaceTool.move", HIGH_PRIORITY14, function(event2) {
       var context = event2.context, initialized = context.initialized;
       if (!initialized) {
         initialized = context.initialized = self2.init(event2, context);
@@ -26305,7 +27063,7 @@ var __AutoNateBpmnJS__ = (() => {
       root = event2.hover;
     }
     var children = [
-      ...selfAndAllChildren(root, true),
+      ...selfAndAllChildren(root),
       ...root.attachers || []
     ];
     var elements = this.calculateAdjustments(children, axis, delta2, start);
@@ -26332,18 +27090,22 @@ var __AutoNateBpmnJS__ = (() => {
   SpaceTool.prototype.calculateAdjustments = function(elements, axis, delta2, start) {
     var rules = this._rules;
     var movingShapes = [], resizingShapes = [];
+    var movingShapesSet = /* @__PURE__ */ new Set(), resizingShapesSet = /* @__PURE__ */ new Set();
     var attachers = [], connections = [];
     function moveShape(shape) {
-      if (!movingShapes.includes(shape)) {
+      if (!movingShapesSet.has(shape)) {
+        movingShapesSet.add(shape);
         movingShapes.push(shape);
       }
       var label = shape.label;
-      if (label && !movingShapes.includes(label)) {
+      if (label && !movingShapesSet.has(label)) {
+        movingShapesSet.add(label);
         movingShapes.push(label);
       }
     }
     function resizeShape(shape) {
-      if (!resizingShapes.includes(shape)) {
+      if (!resizingShapesSet.has(shape)) {
+        resizingShapesSet.add(shape);
         resizingShapes.push(shape);
       }
     }
@@ -26377,17 +27139,15 @@ var __AutoNateBpmnJS__ = (() => {
         });
       }
     });
-    var allShapes = movingShapes.concat(resizingShapes);
     forEach(attachers, function(attacher) {
       var host = attacher.host;
-      if (includes4(allShapes, host)) {
+      if (movingShapesSet.has(host) || resizingShapesSet.has(host)) {
         moveShape(attacher);
       }
     });
-    allShapes = movingShapes.concat(resizingShapes);
     forEach(connections, function(connection) {
       var source = connection.source, target = connection.target, label = connection.label;
-      if (includes4(allShapes, source) && includes4(allShapes, target) && label) {
+      if ((movingShapesSet.has(source) || resizingShapesSet.has(source)) && (movingShapesSet.has(target) || resizingShapesSet.has(target)) && label) {
         moveShape(label);
       }
     });
@@ -26451,14 +27211,15 @@ var __AutoNateBpmnJS__ = (() => {
       return;
     }
     var spaceToolConstraints = {}, min5, max8;
+    var movingShapesSet = new Set(movingShapes), resizingShapesSet = new Set(resizingShapes);
     forEach(resizingShapes, function(resizingShape) {
       var attachers = resizingShape.attachers, children = resizingShape.children;
       var resizingShapeBBox = asTRBL(resizingShape);
       var nonMovingResizingChildren = filter(children, function(child) {
-        return !isConnection(child) && !isLabel(child) && !includes4(movingShapes, child) && !includes4(resizingShapes, child);
+        return !isConnection(child) && !isLabel(child) && !movingShapesSet.has(child) && !resizingShapesSet.has(child);
       });
       var movingChildren = filter(children, function(child) {
-        return !isConnection(child) && !isLabel(child) && includes4(movingShapes, child);
+        return !isConnection(child) && !isLabel(child) && movingShapesSet.has(child);
       });
       var minOrMax, nonMovingResizingChildrenBBox, movingChildrenBBox, movingAttachers = [], nonMovingAttachers = [], movingAttachersBBox, movingAttachersConstraint, nonMovingAttachersBBox, nonMovingAttachersConstraint;
       if (nonMovingResizingChildren.length) {
@@ -26489,7 +27250,7 @@ var __AutoNateBpmnJS__ = (() => {
       }
       if (attachers && attachers.length) {
         attachers.forEach(function(attacher) {
-          if (includes4(movingShapes, attacher)) {
+          if (movingShapesSet.has(attacher)) {
             movingAttachers.push(attacher);
           } else {
             nonMovingAttachers.push(attacher);
@@ -26536,9 +27297,6 @@ var __AutoNateBpmnJS__ = (() => {
     });
     return spaceToolConstraints;
   }
-  function includes4(array, item) {
-    return array.indexOf(item) !== -1;
-  }
   function isAttacher2(element) {
     return !!element.host;
   }
@@ -26546,7 +27304,7 @@ var __AutoNateBpmnJS__ = (() => {
   // node_modules/diagram-js/lib/features/space-tool/SpaceToolPreview.js
   var MARKER_DRAGGING = "djs-dragging";
   var MARKER_RESIZING = "djs-resizing";
-  var LOW_PRIORITY18 = 250;
+  var LOW_PRIORITY20 = 250;
   var max6 = Math.max;
   function SpaceToolPreview(eventBus, elementRegistry, canvas, styles, previewSupport) {
     function addPreviewGfx(collection, dragGroup) {
@@ -26584,7 +27342,7 @@ var __AutoNateBpmnJS__ = (() => {
         remove2(crosshairGroup);
       }
     });
-    eventBus.on("spaceTool.move", LOW_PRIORITY18, function(event2) {
+    eventBus.on("spaceTool.move", LOW_PRIORITY20, function(event2) {
       var context = event2.context, line = context.line, axis = context.axis, movingShapes = context.movingShapes, resizingShapes = context.resizingShapes;
       if (!context.initialized) {
         return;
@@ -26600,40 +27358,20 @@ var __AutoNateBpmnJS__ = (() => {
         attr2(dragGroup, styles.cls("djs-drag-group", ["no-events"]));
         append(canvas.getActiveLayer(), dragGroup);
         addPreviewGfx(movingShapes, dragGroup);
-        var movingConnections = context.movingConnections = elementRegistry.filter(function(element) {
-          var sourceIsMoving = false;
-          forEach(movingShapes, function(shape) {
-            forEach(shape.outgoing, function(connection) {
-              if (element === connection) {
-                sourceIsMoving = true;
-              }
-            });
+        var adjustedShapes = new Set(movingShapes);
+        forEach(resizingShapes, function(shape) {
+          adjustedShapes.add(shape);
+        });
+        var seenConnections = /* @__PURE__ */ new Set();
+        var movingConnections = context.movingConnections = [];
+        adjustedShapes.forEach(function(shape) {
+          forEach(shape.outgoing, function(connection) {
+            if (seenConnections.has(connection) || !isConnection(connection) || !adjustedShapes.has(connection.target)) {
+              return;
+            }
+            seenConnections.add(connection);
+            movingConnections.push(connection);
           });
-          var targetIsMoving = false;
-          forEach(movingShapes, function(shape) {
-            forEach(shape.incoming, function(connection) {
-              if (element === connection) {
-                targetIsMoving = true;
-              }
-            });
-          });
-          var sourceIsResizing = false;
-          forEach(resizingShapes, function(shape) {
-            forEach(shape.outgoing, function(connection) {
-              if (element === connection) {
-                sourceIsResizing = true;
-              }
-            });
-          });
-          var targetIsResizing = false;
-          forEach(resizingShapes, function(shape) {
-            forEach(shape.incoming, function(connection) {
-              if (element === connection) {
-                targetIsResizing = true;
-              }
-            });
-          });
-          return isConnection(element) && (sourceIsMoving || sourceIsResizing) && (targetIsMoving || targetIsResizing);
         });
         addPreviewGfx(movingConnections, dragGroup);
         context.dragGroup = dragGroup;
@@ -27018,7 +27756,7 @@ var __AutoNateBpmnJS__ = (() => {
       throw new Error("removeFn iterator must be a function");
     }
     if (!collection) {
-      return;
+      return [];
     }
     var e5;
     while (e5 = collection[0]) {
@@ -27028,34 +27766,33 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/diagram-js/lib/features/label-support/LabelSupport.js
-  var LOW_PRIORITY19 = 250;
-  var HIGH_PRIORITY14 = 1400;
+  var LOW_PRIORITY21 = 250;
+  var HIGH_PRIORITY15 = 1400;
   function LabelSupport(injector, eventBus, modeling) {
     CommandInterceptor.call(this, eventBus);
     var movePreview = injector.get("movePreview", false);
-    eventBus.on("shape.move.start", HIGH_PRIORITY14, function(e5) {
+    eventBus.on("shape.move.start", HIGH_PRIORITY15, function(e5) {
       var context = e5.context, shapes = context.shapes, validatedShapes = context.validatedShapes;
       context.shapes = removeLabels(shapes);
       context.validatedShapes = removeLabels(validatedShapes);
     });
-    movePreview && eventBus.on("shape.move.start", LOW_PRIORITY19, function(e5) {
-      var context = e5.context, shapes = context.shapes;
-      var labels = [];
-      forEach(shapes, function(element) {
-        forEach(element.labels, function(label) {
-          if (!label.hidden && context.shapes.indexOf(label) === -1) {
-            labels.push(label);
+    movePreview && eventBus.on("shape.move.start", LOW_PRIORITY21, function(e5) {
+      var context = e5.context, shapeSet = new Set(context.shapes), labelSet = /* @__PURE__ */ new Set();
+      for (const shape of shapeSet) {
+        for (const label of shape.labels) {
+          if (!label.hidden && !shapeSet.has(label)) {
+            labelSet.add(label);
           }
-          if (element.labelTarget) {
-            labels.push(element);
+          if (shape.labelTarget) {
+            labelSet.add(shape);
           }
-        });
-      });
-      forEach(labels, function(label) {
+        }
+      }
+      for (const label of labelSet) {
         movePreview.makeDraggable(context, label, true);
-      });
+      }
     });
-    this.preExecuted("elements.move", HIGH_PRIORITY14, function(e5) {
+    this.preExecuted("elements.move", HIGH_PRIORITY15, function(e5) {
       var context = e5.context, closure = context.closure, enclosedElements = closure.enclosedElements;
       var enclosedLabels = [];
       forEach(enclosedElements, function(element) {
@@ -27087,7 +27824,7 @@ var __AutoNateBpmnJS__ = (() => {
     this.revert("shape.delete", function(e5) {
       var context = e5.context, shape = context.shape, labelTarget = context.labelTarget, labelTargetIndex = context.labelTargetIndex;
       if (labelTarget) {
-        add2(labelTarget.labels, shape, labelTargetIndex);
+        add(labelTarget.labels, shape, labelTargetIndex);
         shape.labelTarget = labelTarget;
       }
     });
@@ -27099,8 +27836,9 @@ var __AutoNateBpmnJS__ = (() => {
     "modeling"
   ];
   function removeLabels(elements) {
+    var elementsSet = new Set(elements);
     return filter(elements, function(element) {
-      return elements.indexOf(element.labelTarget) === -1;
+      return !elementsSet.has(element.labelTarget);
     });
   }
 
@@ -27111,18 +27849,18 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/attach-support/AttachSupport.js
-  var LOW_PRIORITY20 = 251;
-  var HIGH_PRIORITY15 = 1401;
+  var LOW_PRIORITY22 = 251;
+  var HIGH_PRIORITY16 = 1401;
   var MARKER_ATTACH2 = "attach-ok";
   function AttachSupport(injector, eventBus, canvas, rules, modeling) {
     CommandInterceptor.call(this, eventBus);
     var movePreview = injector.get("movePreview", false);
-    eventBus.on("shape.move.start", HIGH_PRIORITY15, function(e5) {
+    eventBus.on("shape.move.start", HIGH_PRIORITY16, function(e5) {
       var context = e5.context, shapes = context.shapes, validatedShapes = context.validatedShapes;
       context.shapes = addAttached(shapes);
       context.validatedShapes = removeAttached(validatedShapes);
     });
-    movePreview && eventBus.on("shape.move.start", LOW_PRIORITY20, function(e5) {
+    movePreview && eventBus.on("shape.move.start", LOW_PRIORITY22, function(e5) {
       var context = e5.context, shapes = context.shapes, attachers = getAttachers(shapes);
       forEach(attachers, function(attacher) {
         movePreview.makeDraggable(context, attacher, true);
@@ -27148,7 +27886,7 @@ var __AutoNateBpmnJS__ = (() => {
         });
       }
     });
-    this.preExecuted("elements.move", HIGH_PRIORITY15, function(e5) {
+    this.preExecuted("elements.move", HIGH_PRIORITY16, function(e5) {
       var context = e5.context, closure = context.closure, shapes = context.shapes, attachers = getAttachers(shapes);
       forEach(attachers, function(attacher) {
         closure.add(attacher, closure.topLevel[attacher.host.id]);
@@ -27164,7 +27902,7 @@ var __AutoNateBpmnJS__ = (() => {
       } else {
         attachers = filter(shapes, function(shape) {
           var host = shape.host;
-          return isAttacher3(shape) && !includes5(shapes, host);
+          return isAttacher3(shape) && !includes3(shapes, host);
         });
       }
       forEach(attachers, function(attacher) {
@@ -27265,10 +28003,10 @@ var __AutoNateBpmnJS__ = (() => {
     return unionBy("id", elements, attachers);
   }
   function removeAttached(elements) {
-    var ids3 = groupBy(elements, "id");
+    var ids4 = groupBy(elements, "id");
     return filter(elements, function(element) {
       while (element) {
-        if (element.host && ids3[element.host.id]) {
+        if (element.host && ids4[element.host.id]) {
           return false;
         }
         element = element.parent;
@@ -27279,7 +28017,7 @@ var __AutoNateBpmnJS__ = (() => {
   function isAttacher3(shape) {
     return !!shape.host;
   }
-  function includes5(array, item) {
+  function includes3(array, item) {
     return array.indexOf(item) !== -1;
   }
 
@@ -27606,7 +28344,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
     if (is2(newContainment, "bpmn:Lane")) {
       newRefs = newContainment.get("flowNodeRef");
-      add2(newRefs, businessObject);
+      add(newRefs, businessObject);
     }
   };
   BpmnUpdater.prototype.updateDiConnection = function(connection, newSource, newTarget) {
@@ -27714,7 +28452,7 @@ var __AutoNateBpmnJS__ = (() => {
           process.$parent = null;
         }
         if (newParent) {
-          add2(definitions.get("rootElements"), process);
+          add(definitions.get("rootElements"), process);
           process.$parent = definitions;
         }
       }
@@ -27817,6 +28555,73 @@ var __AutoNateBpmnJS__ = (() => {
     return label.get("bounds");
   }
 
+  // node_modules/bpmn-js/lib/util/ElementSizeUtil.js
+  var DEFAULT_SIZE = { width: 100, height: 80 };
+  var DEFAULT_TASK_SIZE = { width: 100, height: 80 };
+  var DEFAULT_GATEWAY_SIZE = { width: 50, height: 50 };
+  var DEFAULT_EVENT_SIZE = { width: 36, height: 36 };
+  var DEFAULT_SUB_PROCESS_SIZE = { width: 350, height: 200 };
+  var DEFAULT_COLLAPSED_SUB_PROCESS_SIZE = { width: 100, height: 80 };
+  var DEFAULT_PARTICIPANT_SIZE = { width: 600, height: 250 };
+  var DEFAULT_VERTICAL_PARTICIPANT_SIZE = { width: 250, height: 600 };
+  var DEFAULT_COLLAPSED_PARTICIPANT_SIZE = { width: 400, height: 60 };
+  var DEFAULT_VERTICAL_COLLAPSED_PARTICIPANT_SIZE = { width: 60, height: 400 };
+  var DEFAULT_LANE_SIZE = { width: 400, height: 100 };
+  var DEFAULT_DATA_OBJECT_REFERENCE_SIZE = { width: 36, height: 50 };
+  var DEFAULT_DATA_STORE_REFERENCE_SIZE = { width: 50, height: 50 };
+  var DEFAULT_TEXT_ANNOTATION_SIZE = { width: 100, height: 40 };
+  var DEFAULT_GROUP_SIZE = { width: 300, height: 300 };
+  function getDefaultSize(element, di) {
+    const bo = getBusinessObject(element);
+    di = di || getDi(element);
+    if (is2(bo, "bpmn:SubProcess")) {
+      if (isExpanded(bo, di)) {
+        return { ...DEFAULT_SUB_PROCESS_SIZE };
+      } else {
+        return { ...DEFAULT_COLLAPSED_SUB_PROCESS_SIZE };
+      }
+    }
+    if (is2(bo, "bpmn:Task")) {
+      return { ...DEFAULT_TASK_SIZE };
+    }
+    if (is2(bo, "bpmn:Gateway")) {
+      return { ...DEFAULT_GATEWAY_SIZE };
+    }
+    if (is2(bo, "bpmn:Event")) {
+      return { ...DEFAULT_EVENT_SIZE };
+    }
+    if (is2(bo, "bpmn:Participant")) {
+      const isHorizontalPool = !di || di.isHorizontal === void 0 || di.isHorizontal === true;
+      if (isExpanded(bo, di)) {
+        if (isHorizontalPool) {
+          return { ...DEFAULT_PARTICIPANT_SIZE };
+        }
+        return { ...DEFAULT_VERTICAL_PARTICIPANT_SIZE };
+      } else {
+        if (isHorizontalPool) {
+          return { ...DEFAULT_COLLAPSED_PARTICIPANT_SIZE };
+        }
+        return { ...DEFAULT_VERTICAL_COLLAPSED_PARTICIPANT_SIZE };
+      }
+    }
+    if (is2(bo, "bpmn:Lane")) {
+      return { ...DEFAULT_LANE_SIZE };
+    }
+    if (is2(bo, "bpmn:DataObjectReference")) {
+      return { ...DEFAULT_DATA_OBJECT_REFERENCE_SIZE };
+    }
+    if (is2(bo, "bpmn:DataStoreReference")) {
+      return { ...DEFAULT_DATA_STORE_REFERENCE_SIZE };
+    }
+    if (is2(bo, "bpmn:TextAnnotation")) {
+      return { ...DEFAULT_TEXT_ANNOTATION_SIZE };
+    }
+    if (is2(bo, "bpmn:Group")) {
+      return { ...DEFAULT_GROUP_SIZE };
+    }
+    return { ...DEFAULT_SIZE };
+  }
+
   // node_modules/bpmn-js/lib/features/modeling/ElementFactory.js
   function ElementFactory2(bpmnFactory, moddle) {
     ElementFactory.call(this);
@@ -27845,7 +28650,6 @@ var __AutoNateBpmnJS__ = (() => {
         throw new Error("no shape type specified");
       }
       businessObject = this._bpmnFactory.create(attrs.type);
-      ensureCompatDiRef(businessObject);
     }
     if (!isModdleDi(di)) {
       var diAttrs = assign(
@@ -27920,54 +28724,7 @@ var __AutoNateBpmnJS__ = (() => {
     return this._baseCreate(elementType, attrs);
   };
   ElementFactory2.prototype.getDefaultSize = function(element, di) {
-    var bo = getBusinessObject(element);
-    di = di || getDi(element);
-    if (is2(bo, "bpmn:SubProcess")) {
-      if (isExpanded(bo, di)) {
-        return { width: 350, height: 200 };
-      } else {
-        return { width: 100, height: 80 };
-      }
-    }
-    if (is2(bo, "bpmn:Task")) {
-      return { width: 100, height: 80 };
-    }
-    if (is2(bo, "bpmn:Gateway")) {
-      return { width: 50, height: 50 };
-    }
-    if (is2(bo, "bpmn:Event")) {
-      return { width: 36, height: 36 };
-    }
-    if (is2(bo, "bpmn:Participant")) {
-      var isHorizontalPool = di.isHorizontal === void 0 || di.isHorizontal === true;
-      if (isExpanded(bo, di)) {
-        if (isHorizontalPool) {
-          return { width: 600, height: 250 };
-        }
-        return { width: 250, height: 600 };
-      } else {
-        if (isHorizontalPool) {
-          return { width: 400, height: 60 };
-        }
-        return { width: 60, height: 400 };
-      }
-    }
-    if (is2(bo, "bpmn:Lane")) {
-      return { width: 400, height: 100 };
-    }
-    if (is2(bo, "bpmn:DataObjectReference")) {
-      return { width: 36, height: 50 };
-    }
-    if (is2(bo, "bpmn:DataStoreReference")) {
-      return { width: 50, height: 50 };
-    }
-    if (is2(bo, "bpmn:TextAnnotation")) {
-      return { width: 100, height: 30 };
-    }
-    if (is2(bo, "bpmn:Group")) {
-      return { width: 300, height: 300 };
-    }
-    return { width: 100, height: 80 };
+    return getDefaultSize(element, di);
   };
   ElementFactory2.prototype.createParticipantShape = function(attrs) {
     if (!isObject(attrs)) {
@@ -28136,7 +28893,7 @@ var __AutoNateBpmnJS__ = (() => {
         y: round9(element.y - bbox.y - bbox.height / 2 + position.y)
       });
     });
-    var parents = getParents(elements);
+    var parentsSet = new Set(getParents(elements));
     var cache = {};
     forEach(elements, function(element) {
       if (isConnection(element)) {
@@ -28157,7 +28914,7 @@ var __AutoNateBpmnJS__ = (() => {
         return;
       }
       var createShapeHints = assign({}, hints);
-      if (parents.indexOf(element) === -1) {
+      if (!parentsSet.has(element)) {
         createShapeHints.autoResize = false;
       }
       if (isLabel(element)) {
@@ -28270,7 +29027,7 @@ var __AutoNateBpmnJS__ = (() => {
     var connection = context.connection, parent = context.parent, parentIndex = context.parentIndex;
     connection.source = context.source;
     connection.target = context.target;
-    add2(parent.children, connection, parentIndex);
+    add(parent.children, connection, parentIndex);
     this._canvas.addConnection(connection, parent);
     return connection;
   };
@@ -28332,7 +29089,7 @@ var __AutoNateBpmnJS__ = (() => {
   DeleteShapeHandler.prototype.revert = function(context) {
     var canvas = this._canvas;
     var shape = context.shape, oldParent = context.oldParent, oldParentIndex = context.oldParentIndex;
-    add2(oldParent.children, shape, oldParentIndex);
+    add(oldParent.children, shape, oldParentIndex);
     canvas.addShape(shape, oldParent);
     return shape;
   };
@@ -28460,7 +29217,7 @@ var __AutoNateBpmnJS__ = (() => {
     var newParent = context.newParent || connection.parent, newParentIndex = context.newParentIndex, oldParent = connection.parent;
     context.oldParent = oldParent;
     context.oldParentIndex = remove3(oldParent.children, connection);
-    add2(newParent.children, connection, newParentIndex);
+    add(newParent.children, connection, newParentIndex);
     connection.parent = newParent;
     forEach(connection.waypoints, function(p3) {
       p3.x += delta2.x;
@@ -28475,7 +29232,7 @@ var __AutoNateBpmnJS__ = (() => {
   MoveConnectionHandler.prototype.revert = function(context) {
     var connection = context.connection, newParent = connection.parent, oldParent = context.oldParent, oldParentIndex = context.oldParentIndex, delta2 = context.delta;
     remove3(newParent.children, connection);
-    add2(oldParent.children, connection, oldParentIndex);
+    add(oldParent.children, connection, oldParentIndex);
     connection.parent = oldParent;
     forEach(connection.waypoints, function(p3) {
       p3.x -= delta2.x;
@@ -28578,7 +29335,7 @@ var __AutoNateBpmnJS__ = (() => {
     context.oldBounds = pick(shape, ["x", "y", "width", "height"]);
     context.oldParent = oldParent;
     context.oldParentIndex = remove3(oldParent.children, shape);
-    add2(newParent.children, shape, newParentIndex);
+    add(newParent.children, shape, newParentIndex);
     assign(shape, {
       parent: newParent,
       x: shape.x + delta2.x,
@@ -28607,7 +29364,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
   MoveShapeHandler.prototype.revert = function(context) {
     var shape = context.shape, oldParent = context.oldParent, oldParentIndex = context.oldParentIndex, delta2 = context.delta;
-    add2(oldParent.children, shape, oldParentIndex);
+    add(oldParent.children, shape, oldParentIndex);
     assign(shape, {
       parent: oldParent,
       x: shape.x - delta2.x,
@@ -28869,10 +29626,11 @@ var __AutoNateBpmnJS__ = (() => {
     });
   };
   SpaceToolHandler.prototype.updateConnectionWaypoints = function(connections, delta2, direction, start, movingShapes, resizingShapes, oldBounds) {
-    var self2 = this, affectedShapes = movingShapes.concat(resizingShapes);
+    var self2 = this, movingShapesSet = new Set(movingShapes), resizingShapesSet = new Set(resizingShapes);
     forEach(connections, function(connection) {
       var source = connection.source, target = connection.target, waypoints = copyWaypoints2(connection), axis = getAxisFromDirection(direction), layoutHints = {};
-      if (includes6(affectedShapes, source) && includes6(affectedShapes, target)) {
+      var sourceAffected = movingShapesSet.has(source) || resizingShapesSet.has(source), targetAffected = movingShapesSet.has(target) || resizingShapesSet.has(target);
+      if (sourceAffected && targetAffected) {
         waypoints = map(waypoints, function(waypoint) {
           if (shouldMoveWaypoint(waypoint, start, direction)) {
             waypoint[axis] = waypoint[axis] + delta2[axis];
@@ -28885,18 +29643,18 @@ var __AutoNateBpmnJS__ = (() => {
         self2._modeling.updateWaypoints(connection, waypoints, {
           labelBehavior: false
         });
-      } else if (includes6(affectedShapes, source) || includes6(affectedShapes, target)) {
-        if (includes6(movingShapes, source)) {
+      } else if (sourceAffected || targetAffected) {
+        if (movingShapesSet.has(source)) {
           layoutHints.connectionStart = getMovedSourceAnchor(connection, source, delta2);
-        } else if (includes6(movingShapes, target)) {
+        } else if (movingShapesSet.has(target)) {
           layoutHints.connectionEnd = getMovedTargetAnchor(connection, target, delta2);
-        } else if (includes6(resizingShapes, source)) {
+        } else if (resizingShapesSet.has(source)) {
           layoutHints.connectionStart = getResizedSourceAnchor(
             connection,
             source,
             oldBounds[source.id]
           );
-        } else if (includes6(resizingShapes, target)) {
+        } else if (resizingShapesSet.has(target)) {
           layoutHints.connectionEnd = getResizedTargetAnchor(
             connection,
             target,
@@ -28938,9 +29696,6 @@ var __AutoNateBpmnJS__ = (() => {
     } else if (/n|w/.test(direction)) {
       return waypoint[relevantAxis] < start;
     }
-  }
-  function includes6(array, item) {
-    return array.indexOf(item) !== -1;
   }
   function getBounds2(shape) {
     return {
@@ -29034,7 +29789,7 @@ var __AutoNateBpmnJS__ = (() => {
     if (!attachers) {
       host.attachers = attachers = [];
     }
-    add2(attachers, attacher, idx);
+    add(attachers, attacher, idx);
   }
 
   // node_modules/diagram-js/lib/features/modeling/cmd/UpdateWaypointsHandler.js
@@ -29429,12 +30184,12 @@ var __AutoNateBpmnJS__ = (() => {
     if (!element) {
       throw new Error("element required");
     }
-    var elementRegistry = this._elementRegistry, ids3 = this._moddle.ids;
+    var elementRegistry = this._elementRegistry, ids4 = this._moddle.ids;
     var businessObject = element.businessObject, properties = unwrapBusinessObjects(context.properties), oldProperties = context.oldProperties || getProperties(element, properties);
     if (isIdChange(properties, businessObject)) {
-      ids3.unclaim(businessObject[ID]);
+      ids4.unclaim(businessObject[ID]);
       elementRegistry.updateId(element, properties[ID]);
-      ids3.claim(properties[ID], businessObject);
+      ids4.claim(properties[ID], businessObject);
     }
     if (DEFAULT_FLOW in properties) {
       if (properties[DEFAULT_FLOW]) {
@@ -29459,12 +30214,12 @@ var __AutoNateBpmnJS__ = (() => {
     this._modeling.resizeShape(label, newLabelBounds, NULL_DIMENSIONS);
   };
   UpdatePropertiesHandler.prototype.revert = function(context) {
-    var element = context.element, properties = context.properties, oldProperties = context.oldProperties, businessObject = element.businessObject, elementRegistry = this._elementRegistry, ids3 = this._moddle.ids;
+    var element = context.element, properties = context.properties, oldProperties = context.oldProperties, businessObject = element.businessObject, elementRegistry = this._elementRegistry, ids4 = this._moddle.ids;
     setProperties(element, oldProperties);
     if (isIdChange(properties, businessObject)) {
-      ids3.unclaim(properties[ID]);
+      ids4.unclaim(properties[ID]);
       elementRegistry.updateId(element, oldProperties[ID]);
-      ids3.claim(oldProperties[ID], businessObject);
+      ids4.claim(oldProperties[ID], businessObject);
     }
     return context.changed;
   };
@@ -29530,7 +30285,7 @@ var __AutoNateBpmnJS__ = (() => {
     var newRoot = context.newRoot, newRootBusinessObject = newRoot.businessObject, oldRoot = canvas.getRootElement(), oldRootBusinessObject = oldRoot.businessObject, bpmnDefinitions = oldRootBusinessObject.$parent, diPlane = getDi(oldRoot);
     canvas.setRootElement(newRoot);
     canvas.removeRootElement(oldRoot);
-    add2(bpmnDefinitions.rootElements, newRootBusinessObject);
+    add(bpmnDefinitions.rootElements, newRootBusinessObject);
     newRootBusinessObject.$parent = bpmnDefinitions;
     remove3(bpmnDefinitions.rootElements, oldRootBusinessObject);
     oldRootBusinessObject.$parent = null;
@@ -29547,7 +30302,7 @@ var __AutoNateBpmnJS__ = (() => {
     canvas.removeRootElement(newRoot);
     remove3(bpmnDefinitions.rootElements, newRootBusinessObject);
     newRootBusinessObject.$parent = null;
-    add2(bpmnDefinitions.rootElements, oldRootBusinessObject);
+    add(bpmnDefinitions.rootElements, oldRootBusinessObject);
     oldRootBusinessObject.$parent = bpmnDefinitions;
     newRoot.di = null;
     diPlane.bpmnElement = oldRootBusinessObject;
@@ -29568,7 +30323,7 @@ var __AutoNateBpmnJS__ = (() => {
     var spaceTool = this._spaceTool, modeling = this._modeling;
     var shape = context.shape, location = context.location;
     var lanesRoot = getLanesRoot(shape);
-    var isRoot = lanesRoot === shape, laneParent = isRoot ? shape : shape.parent;
+    var isRoot2 = lanesRoot === shape, laneParent = isRoot2 ? shape : shape.parent;
     var existingChildLanes = getChildLanes(laneParent);
     var isHorizontalLane = isHorizontal(shape);
     if (isHorizontalLane) {
@@ -29654,15 +30409,15 @@ var __AutoNateBpmnJS__ = (() => {
       spacePos
     );
     var newLanePosition = isHorizontalLane ? {
-      x: shape.x + (isRoot ? LANE_INDENTATION : 0),
+      x: shape.x + (isRoot2 ? LANE_INDENTATION : 0),
       y: lanePosition - (location === "top" ? 120 : 0),
-      width: shape.width - (isRoot ? LANE_INDENTATION : 0),
+      width: shape.width - (isRoot2 ? LANE_INDENTATION : 0),
       height: 120
     } : {
       x: lanePosition - (location === "left" ? 120 : 0),
-      y: shape.y + (isRoot ? LANE_INDENTATION : 0),
+      y: shape.y + (isRoot2 ? LANE_INDENTATION : 0),
       width: 120,
-      height: shape.height - (isRoot ? LANE_INDENTATION : 0)
+      height: shape.height - (isRoot2 ? LANE_INDENTATION : 0)
     };
     context.newLane = modeling.createShape(
       {
@@ -29781,12 +30536,8 @@ var __AutoNateBpmnJS__ = (() => {
   // node_modules/bpmn-js/lib/features/modeling/cmd/UpdateFlowNodeRefsHandler.js
   var FLOW_NODE_REFS_ATTR = "flowNodeRef";
   var LANES_ATTR = "lanes";
-  function UpdateFlowNodeRefsHandler(elementRegistry) {
-    this._elementRegistry = elementRegistry;
+  function UpdateFlowNodeRefsHandler() {
   }
-  UpdateFlowNodeRefsHandler.$inject = [
-    "elementRegistry"
-  ];
   UpdateFlowNodeRefsHandler.prototype._computeUpdates = function(flowNodeShapes, laneShapes) {
     var handledNodes = [];
     var updates = [];
@@ -29838,8 +30589,8 @@ var __AutoNateBpmnJS__ = (() => {
     flowNodeShapes.forEach(addFlowNodeShape);
     allFlowNodeShapes.forEach(function(flowNodeShape) {
       var flowNode = flowNodeShape.businessObject;
-      var lanes = flowNode.get(LANES_ATTR), remove4 = lanes.slice(), add3 = getNewLanes(flowNodeShape);
-      updates.push({ flowNode, remove: remove4, add: add3 });
+      var lanes = flowNode.get(LANES_ATTR), remove4 = lanes.slice(), add2 = getNewLanes(flowNodeShape);
+      updates.push({ flowNode, remove: remove4, add: add2 });
     });
     laneShapes.forEach(function(laneShape) {
       var lane = laneShape.businessObject;
@@ -29863,8 +30614,8 @@ var __AutoNateBpmnJS__ = (() => {
         remove3(oldLane.get(FLOW_NODE_REFS_ATTR), flowNode);
       });
       update.add.forEach(function(newLane) {
-        add2(lanes, newLane);
-        add2(newLane.get(FLOW_NODE_REFS_ATTR), flowNode);
+        add(lanes, newLane);
+        add(newLane.get(FLOW_NODE_REFS_ATTR), flowNode);
       });
     });
     return [];
@@ -29878,12 +30629,224 @@ var __AutoNateBpmnJS__ = (() => {
         remove3(newLane.get(FLOW_NODE_REFS_ATTR), flowNode);
       });
       update.remove.forEach(function(oldLane) {
-        add2(lanes, oldLane);
-        add2(oldLane.get(FLOW_NODE_REFS_ATTR), flowNode);
+        add(lanes, oldLane);
+        add(oldLane.get(FLOW_NODE_REFS_ATTR), flowNode);
       });
     });
     return [];
   };
+
+  // node_modules/bpmn-js/lib/features/modeling/cmd/UpdateCategoryValueRefsHandler.js
+  var CATEGORY_VALUE_REFS_ATTR = "categoryValueRef";
+  function UpdateCategoryValueRefsHandler(bpmnFactory, elementRegistry) {
+    this._bpmnFactory = bpmnFactory;
+    this._elementRegistry = elementRegistry;
+  }
+  UpdateCategoryValueRefsHandler.$inject = [
+    "bpmnFactory",
+    "elementRegistry"
+  ];
+  UpdateCategoryValueRefsHandler.prototype._computeUpdates = function(affectedFlowElements, affectedGroupEntries) {
+    var elementRegistry = this._elementRegistry, bpmnFactory = this._bpmnFactory;
+    var flowElementBusinessObjects = /* @__PURE__ */ new Map();
+    var groupUpdates = [];
+    var categoryGroups = /* @__PURE__ */ new Map();
+    function addGroup(groupShape, categoryValue, isPresent) {
+      if (!categoryValue) {
+        return;
+      }
+      var categoryGroup = categoryGroups.get(groupShape);
+      if (!categoryGroup) {
+        categoryGroup = {};
+        categoryGroups.set(groupShape, categoryGroup);
+      }
+      if (isPresent && categoryGroup.present) {
+        return;
+      }
+      if (!isPresent && categoryGroup.past) {
+        return;
+      }
+      if (isPresent) {
+        categoryGroup.present = {
+          categoryValue,
+          root: getRoot(groupShape)
+        };
+      } else {
+        categoryGroup.past = {
+          categoryValue
+        };
+      }
+    }
+    function addFlowElement(flowElement) {
+      flowElementBusinessObjects.set(
+        flowElement,
+        getBusinessObject(flowElement)
+      );
+    }
+    function addAllFlowElements() {
+      elementRegistry.filter(function(element) {
+        return is2(element, "bpmn:FlowElement") && !isLabel(element) && element.parent;
+      }).forEach(addFlowElement);
+    }
+    function getCategoryValue2(groupShape) {
+      var groupBo = getBusinessObject(groupShape), categoryValue = groupBo.get("categoryValueRef");
+      if (!categoryValue) {
+        categoryValue = getOrCreateCategoryValueForGroup(bpmnFactory, groupBo);
+        groupUpdates.push(createGroupUpdate(groupShape, categoryValue));
+      }
+      return categoryValue;
+    }
+    function getElementsByRoot(elements) {
+      return elements.reduce(function(elementsByRoot, element) {
+        var root = getRoot(element), elementsInRoot = elementsByRoot.get(root);
+        if (!elementsInRoot) {
+          elementsInRoot = [];
+          elementsByRoot.set(root, elementsInRoot);
+        }
+        elementsInRoot.push(element);
+        return elementsByRoot;
+      }, /* @__PURE__ */ new Map());
+    }
+    affectedFlowElements = Array.from(affectedFlowElements || []);
+    var affectedFlowElementsByRoot = getElementsByRoot(affectedFlowElements);
+    if (affectedGroupEntries.length) {
+      addAllFlowElements();
+    }
+    affectedFlowElements.forEach(addFlowElement);
+    elementRegistry.filter(function(element) {
+      return is2(element, "bpmn:Group") && !isLabel(element) && element.parent;
+    }).forEach(function(groupShape) {
+      var categoryValue = getBusinessObject(groupShape).get("categoryValueRef");
+      if (!categoryValue) {
+        var groupRoot = getRoot(groupShape), affectedFlowElementsInRoot = affectedFlowElementsByRoot.get(groupRoot) || [], enclosedAffectedFlowElements = getEnclosedElements(
+          affectedFlowElementsInRoot,
+          groupShape
+        ), enclosesAffectedFlowElement = Object.keys(enclosedAffectedFlowElements).length > 0;
+        if (enclosesAffectedFlowElement) {
+          categoryValue = getCategoryValue2(groupShape);
+        }
+      }
+      addGroup(groupShape, categoryValue, true);
+    });
+    affectedGroupEntries.forEach(function(groupEntry) {
+      addGroup(groupEntry.groupShape, groupEntry.categoryValue, false);
+    });
+    if (groupUpdates.length) {
+      addAllFlowElements();
+    }
+    var flowElements = Array.from(flowElementBusinessObjects.keys());
+    var managedCategoryValues = Array.from(categoryGroups.values()).reduce(function(set4, group) {
+      if (group.present) {
+        set4.add(group.present.categoryValue);
+      }
+      if (group.past) {
+        set4.add(group.past.categoryValue);
+      }
+      return set4;
+    }, /* @__PURE__ */ new Set());
+    var categoryValuesByFlowElement = /* @__PURE__ */ new Map(), flowElementsByRoot = getElementsByRoot(flowElements);
+    categoryGroups.forEach(function(categoryGroup, groupShape) {
+      var presentGroup = categoryGroup.present;
+      if (!presentGroup) {
+        return;
+      }
+      var flowElementsInRoot = flowElementsByRoot.get(presentGroup.root) || [], enclosedFlowElements = getEnclosedElements(flowElementsInRoot, groupShape);
+      flowElementsInRoot.forEach(function(flowElement) {
+        if (!enclosedFlowElements[flowElement.id]) {
+          return;
+        }
+        var categoryValues = categoryValuesByFlowElement.get(flowElement);
+        if (!categoryValues) {
+          categoryValues = /* @__PURE__ */ new Set();
+          categoryValuesByFlowElement.set(flowElement, categoryValues);
+        }
+        categoryValues.add(presentGroup.categoryValue);
+      });
+    });
+    var flowElementUpdates = flowElements.reduce(function(flowElementUpdates2, flowElement) {
+      var flowElementBo = flowElementBusinessObjects.get(flowElement), categoryValueRefs = flowElementBo.get(CATEGORY_VALUE_REFS_ATTR), categoryValueRefSet = new Set(categoryValueRefs), enclosingCategoryValues = categoryValuesByFlowElement.get(flowElement) || /* @__PURE__ */ new Set(), categoryValuesToAdd = Array.from(enclosingCategoryValues).filter(function(categoryValue) {
+        return !categoryValueRefSet.has(categoryValue);
+      }), categoryValuesToRemove = categoryValueRefs.filter(function(categoryValue) {
+        return managedCategoryValues.has(categoryValue) && !enclosingCategoryValues.has(categoryValue);
+      });
+      if (categoryValuesToAdd.length || categoryValuesToRemove.length) {
+        flowElementUpdates2.push({
+          businessObject: flowElementBo,
+          categoryValuesToAdd,
+          categoryValuesToRemove
+        });
+      }
+      return flowElementUpdates2;
+    }, []);
+    return {
+      flowElements: flowElementUpdates,
+      groups: groupUpdates
+    };
+  };
+  UpdateCategoryValueRefsHandler.prototype.execute = function(context) {
+    var updates = context.updates;
+    if (!updates) {
+      updates = context.updates = this._computeUpdates(
+        context.affectedFlowElements,
+        context.affectedGroupEntries
+      );
+    }
+    applyGroupUpdates(updates.groups);
+    applyFlowElementUpdates(updates.flowElements);
+    return [];
+  };
+  UpdateCategoryValueRefsHandler.prototype.revert = function(context) {
+    var updates = context.updates;
+    revertFlowElementUpdates(updates.flowElements);
+    revertGroupUpdates(updates.groups);
+    return [];
+  };
+  function createGroupUpdate(groupShape, categoryValue) {
+    return {
+      groupShape,
+      categoryValue,
+      category: categoryValue.$parent
+    };
+  }
+  function applyGroupUpdates(groupUpdates) {
+    groupUpdates.forEach(function(groupUpdate) {
+      getBusinessObject(groupUpdate.groupShape).categoryValueRef = groupUpdate.categoryValue;
+      groupUpdate.categoryValue.$parent = groupUpdate.category;
+    });
+  }
+  function revertGroupUpdates(groupUpdates) {
+    groupUpdates.forEach(function(groupUpdate) {
+      getBusinessObject(groupUpdate.groupShape).categoryValueRef = null;
+    });
+  }
+  function applyFlowElementUpdates(flowElementUpdates) {
+    flowElementUpdates.forEach(function(flowElementUpdate) {
+      var businessObject = flowElementUpdate.businessObject, categoryValueRefs = businessObject.get(CATEGORY_VALUE_REFS_ATTR);
+      flowElementUpdate.categoryValuesToRemove.forEach(function(categoryValue) {
+        remove3(categoryValueRefs, categoryValue);
+      });
+      flowElementUpdate.categoryValuesToAdd.forEach(function(categoryValue) {
+        add(categoryValueRefs, categoryValue, true);
+      });
+    });
+  }
+  function revertFlowElementUpdates(flowElementUpdates) {
+    flowElementUpdates.forEach(function(flowElementUpdate) {
+      var businessObject = flowElementUpdate.businessObject, categoryValueRefs = businessObject.get(CATEGORY_VALUE_REFS_ATTR);
+      flowElementUpdate.categoryValuesToAdd.forEach(function(categoryValue) {
+        remove3(categoryValueRefs, categoryValue);
+      });
+      flowElementUpdate.categoryValuesToRemove.forEach(function(categoryValue) {
+        add(categoryValueRefs, categoryValue, true);
+      });
+    });
+  }
+  function getRoot(element) {
+    while (element.parent) {
+      element = element.parent;
+    }
+    return element;
+  }
 
   // node_modules/bpmn-js/lib/features/modeling/cmd/IdClaimHandler.js
   function IdClaimHandler(moddle) {
@@ -29891,20 +30854,20 @@ var __AutoNateBpmnJS__ = (() => {
   }
   IdClaimHandler.$inject = ["moddle"];
   IdClaimHandler.prototype.execute = function(context) {
-    var ids3 = this._moddle.ids, id = context.id, element = context.element, claiming = context.claiming;
+    var ids4 = this._moddle.ids, id = context.id, element = context.element, claiming = context.claiming;
     if (claiming) {
-      ids3.claim(id, element);
+      ids4.claim(id, element);
     } else {
-      ids3.unclaim(id);
+      ids4.unclaim(id);
     }
     return [];
   };
   IdClaimHandler.prototype.revert = function(context) {
-    var ids3 = this._moddle.ids, id = context.id, element = context.element, claiming = context.claiming;
+    var ids4 = this._moddle.ids, id = context.id, element = context.element, claiming = context.claiming;
     if (claiming) {
-      ids3.unclaim(id);
+      ids4.unclaim(id);
     } else {
-      ids3.claim(id, element);
+      ids4.claim(id, element);
     }
     return [];
   };
@@ -30077,6 +31040,7 @@ var __AutoNateBpmnJS__ = (() => {
     handlers["lane.resize"] = ResizeLaneHandler;
     handlers["lane.split"] = SplitLaneHandler;
     handlers["lane.updateRefs"] = UpdateFlowNodeRefsHandler;
+    handlers["group.updateRefs"] = UpdateCategoryValueRefsHandler;
     handlers["id.updateClaim"] = IdClaimHandler;
     handlers["element.setColor"] = SetColorHandler;
     handlers["element.updateLabel"] = UpdateLabelHandler;
@@ -30158,6 +31122,12 @@ var __AutoNateBpmnJS__ = (() => {
     this._commandStack.execute("lane.updateRefs", {
       flowNodeShapes,
       laneShapes
+    });
+  };
+  Modeling2.prototype.updateCategoryValueRefs = function(affectedFlowElements, affectedGroupEntries) {
+    this._commandStack.execute("group.updateRefs", {
+      affectedFlowElements,
+      affectedGroupEntries
     });
   };
   Modeling2.prototype.claimId = function(id, moddleElement) {
@@ -31032,6 +32002,8 @@ var __AutoNateBpmnJS__ = (() => {
     };
     this.resizeHandler = options.resizeHandler || function() {
     };
+    this.focusoutHandler = options.focusoutHandler || function() {
+    };
     this.autoResize = bind(this.autoResize, this);
     this.handlePaste = bind(this.handlePaste, this);
   }
@@ -31104,6 +32076,7 @@ var __AutoNateBpmnJS__ = (() => {
     event.bind(content, "keydown", this.keyHandler);
     event.bind(content, "mousedown", stopPropagation2);
     event.bind(content, "paste", self2.handlePaste);
+    event.bind(content, "focusout", this.focusoutHandler);
     if (options.autoResize) {
       event.bind(content, "input", this.autoResize);
     }
@@ -31251,6 +32224,7 @@ var __AutoNateBpmnJS__ = (() => {
     event.unbind(content, "mousedown", stopPropagation2);
     event.unbind(content, "input", this.autoResize);
     event.unbind(content, "paste", this.handlePaste);
+    event.unbind(content, "focusout", this.focusoutHandler);
     if (resizeHandle) {
       resizeHandle.removeAttribute("style");
       remove(resizeHandle);
@@ -31288,8 +32262,10 @@ var __AutoNateBpmnJS__ = (() => {
     this._textbox = new TextBox({
       container: canvas.getContainer(),
       keyHandler: bind(this._handleKey, this),
-      resizeHandler: bind(this._handleResize, this)
+      resizeHandler: bind(this._handleResize, this),
+      focusoutHandler: bind(this._handleFocusout, this)
     });
+    eventBus.on(["diagram.clear", "diagram.destroy"], () => this._cleanup());
   }
   DirectEditing.$inject = ["eventBus", "canvas"];
   DirectEditing.prototype.registerProvider = function(provider) {
@@ -31309,11 +32285,17 @@ var __AutoNateBpmnJS__ = (() => {
     this._eventBus.fire("directEditing." + event2, context || { active: this._active });
   };
   DirectEditing.prototype.close = function() {
-    this._textbox.destroy();
     this._fire("deactivate");
+    this._cleanup();
+    this._canvas.restoreFocus && this._canvas.restoreFocus();
+  };
+  DirectEditing.prototype._cleanup = function() {
+    if (!this._active) {
+      return;
+    }
+    this._textbox.destroy();
     this._active = null;
     this.resizable = void 0;
-    this._canvas.restoreFocus && this._canvas.restoreFocus();
   };
   DirectEditing.prototype.complete = function() {
     var active = this._active;
@@ -31351,9 +32333,18 @@ var __AutoNateBpmnJS__ = (() => {
   DirectEditing.prototype._handleResize = function(event2) {
     this._fire("resize", event2);
   };
+  DirectEditing.prototype._handleFocusout = function(event2) {
+    if (event2.relatedTarget && this._textbox.parent.contains(event2.relatedTarget)) {
+      return;
+    }
+    this.complete();
+  };
   DirectEditing.prototype.activate = function(element) {
     if (this.isActive()) {
       this.cancel();
+    }
+    if (this._eventBus.fire("directEditing.activate.allowed", { element }) === false) {
+      return false;
     }
     var context;
     var provider = find(this._providers, function(p3) {
@@ -31404,168 +32395,374 @@ var __AutoNateBpmnJS__ = (() => {
     };
   }
 
-  // node_modules/bpmn-js/lib/features/replace/ReplaceOptions.js
-  var START_EVENT = [
-    {
+  // node_modules/bpmn-js/lib/features/popup-menu/PopupEntries.js
+  var PopupEntries = {
+    // Tasks
+    "task": {
+      label: "Task",
+      className: "bpmn-icon-task",
+      target: {
+        type: "bpmn:Task"
+      }
+    },
+    "user-task": {
+      label: "User task",
+      className: "bpmn-icon-user",
+      target: {
+        type: "bpmn:UserTask"
+      }
+    },
+    "service-task": {
+      label: "Service task",
+      className: "bpmn-icon-service",
+      target: {
+        type: "bpmn:ServiceTask"
+      }
+    },
+    "send-task": {
+      label: "Send task",
+      className: "bpmn-icon-send",
+      target: {
+        type: "bpmn:SendTask"
+      }
+    },
+    "receive-task": {
+      label: "Receive task",
+      className: "bpmn-icon-receive",
+      target: {
+        type: "bpmn:ReceiveTask"
+      }
+    },
+    "manual-task": {
+      label: "Manual task",
+      className: "bpmn-icon-manual",
+      target: {
+        type: "bpmn:ManualTask"
+      }
+    },
+    "rule-task": {
+      label: "Business rule task",
+      className: "bpmn-icon-business-rule",
+      target: {
+        type: "bpmn:BusinessRuleTask"
+      }
+    },
+    "script-task": {
+      label: "Script task",
+      className: "bpmn-icon-script",
+      target: {
+        type: "bpmn:ScriptTask"
+      }
+    },
+    // Sub-processes
+    "call-activity": {
+      label: "Call activity",
+      className: "bpmn-icon-call-activity",
+      target: {
+        type: "bpmn:CallActivity"
+      }
+    },
+    "transaction": {
+      label: "Transaction",
+      className: "bpmn-icon-transaction",
+      target: {
+        type: "bpmn:Transaction",
+        isExpanded: true
+      }
+    },
+    "event-subprocess": {
+      label: "Event sub-process",
+      className: "bpmn-icon-event-subprocess-expanded",
+      target: {
+        type: "bpmn:SubProcess",
+        triggeredByEvent: true,
+        isExpanded: true
+      }
+    },
+    "collapsed-subprocess": {
+      label: "Sub-process (collapsed)",
+      className: "bpmn-icon-subprocess-collapsed",
+      target: {
+        type: "bpmn:SubProcess",
+        isExpanded: false
+      }
+    },
+    "expanded-subprocess": {
+      label: "Sub-process (expanded)",
+      className: "bpmn-icon-subprocess-expanded",
+      target: {
+        type: "bpmn:SubProcess",
+        isExpanded: true
+      }
+    },
+    "collapsed-ad-hoc-subprocess": {
+      label: "Ad-hoc sub-process (collapsed)",
+      className: "bpmn-icon-subprocess-collapsed",
+      target: {
+        type: "bpmn:AdHocSubProcess",
+        isExpanded: false
+      }
+    },
+    "expanded-ad-hoc-subprocess": {
+      label: "Ad-hoc sub-process (expanded)",
+      className: "bpmn-icon-subprocess-expanded",
+      target: {
+        type: "bpmn:AdHocSubProcess",
+        isExpanded: true
+      }
+    },
+    // Gateways
+    "exclusive-gateway": {
+      label: "Exclusive gateway",
+      className: "bpmn-icon-gateway-xor",
+      target: {
+        type: "bpmn:ExclusiveGateway"
+      }
+    },
+    "parallel-gateway": {
+      label: "Parallel gateway",
+      className: "bpmn-icon-gateway-parallel",
+      target: {
+        type: "bpmn:ParallelGateway"
+      }
+    },
+    "inclusive-gateway": {
+      label: "Inclusive gateway",
+      className: "bpmn-icon-gateway-or",
+      target: {
+        type: "bpmn:InclusiveGateway"
+      }
+    },
+    "complex-gateway": {
+      label: "Complex gateway",
+      className: "bpmn-icon-gateway-complex",
+      target: {
+        type: "bpmn:ComplexGateway"
+      }
+    },
+    "event-based-gateway": {
+      label: "Event-based gateway",
+      className: "bpmn-icon-gateway-eventbased",
+      target: {
+        type: "bpmn:EventBasedGateway",
+        instantiate: false,
+        eventGatewayType: "Exclusive"
+      }
+    },
+    // Data
+    "data-store-reference": {
+      label: "Data store reference",
+      className: "bpmn-icon-data-store",
+      target: {
+        type: "bpmn:DataStoreReference"
+      }
+    },
+    "data-object-reference": {
+      label: "Data object reference",
+      className: "bpmn-icon-data-object",
+      target: {
+        type: "bpmn:DataObjectReference"
+      }
+    },
+    // Participants
+    "expanded-pool": {
+      label: "Expanded pool/participant",
+      className: "bpmn-icon-participant",
+      target: {
+        type: "bpmn:Participant",
+        isExpanded: true
+      }
+    },
+    "collapsed-pool": {
+      label: "Empty pool/participant",
+      className: "bpmn-icon-lane",
+      target: {
+        type: "bpmn:Participant",
+        isExpanded: false
+      }
+    },
+    // Events — none
+    "none-start-event": {
       label: "Start event",
-      actionName: "replace-with-none-start",
       className: "bpmn-icon-start-event-none",
       target: {
         type: "bpmn:StartEvent"
       }
     },
-    {
+    "none-intermediate-throwing": {
       label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throwing",
       className: "bpmn-icon-intermediate-event-none",
       target: {
         type: "bpmn:IntermediateThrowEvent"
       }
     },
-    {
+    "none-boundary-event": {
+      label: "Boundary event",
+      className: "bpmn-icon-intermediate-event-none",
+      target: {
+        type: "bpmn:BoundaryEvent"
+      }
+    },
+    "none-end-event": {
       label: "End event",
-      actionName: "replace-with-none-end",
       className: "bpmn-icon-end-event-none",
       target: {
         type: "bpmn:EndEvent"
       }
     },
-    {
+    // Events — typed start
+    "message-start": {
       label: "Message start event",
-      actionName: "replace-with-message-start",
       className: "bpmn-icon-start-event-message",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition"
+        eventDefinitionType: "bpmn:MessageEventDefinition",
+        isInterrupting: true
       }
     },
-    {
+    "timer-start": {
       label: "Timer start event",
-      actionName: "replace-with-timer-start",
       className: "bpmn-icon-start-event-timer",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition"
+        eventDefinitionType: "bpmn:TimerEventDefinition",
+        isInterrupting: true
       }
     },
-    {
+    "conditional-start": {
       label: "Conditional start event",
-      actionName: "replace-with-conditional-start",
       className: "bpmn-icon-start-event-condition",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition"
+        eventDefinitionType: "bpmn:ConditionalEventDefinition",
+        isInterrupting: true
       }
     },
-    {
+    "signal-start": {
       label: "Signal start event",
-      actionName: "replace-with-signal-start",
       className: "bpmn-icon-start-event-signal",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition"
-      }
-    }
-  ];
-  var START_EVENT_SUB_PROCESS = [
-    {
-      label: "Start event",
-      actionName: "replace-with-none-start",
-      className: "bpmn-icon-start-event-none",
-      target: {
-        type: "bpmn:StartEvent"
+        eventDefinitionType: "bpmn:SignalEventDefinition",
+        isInterrupting: true
       }
     },
-    {
-      label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throwing",
-      className: "bpmn-icon-intermediate-event-none",
+    "error-start": {
+      label: "Error start event",
+      className: "bpmn-icon-start-event-error",
       target: {
-        type: "bpmn:IntermediateThrowEvent"
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:ErrorEventDefinition",
+        isInterrupting: true
       }
     },
-    {
-      label: "End event",
-      actionName: "replace-with-none-end",
-      className: "bpmn-icon-end-event-none",
+    "escalation-start": {
+      label: "Escalation start event",
+      className: "bpmn-icon-start-event-escalation",
       target: {
-        type: "bpmn:EndEvent"
-      }
-    }
-  ];
-  var INTERMEDIATE_EVENT = [
-    {
-      label: "Start event",
-      actionName: "replace-with-none-start",
-      className: "bpmn-icon-start-event-none",
-      target: {
-        type: "bpmn:StartEvent"
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:EscalationEventDefinition",
+        isInterrupting: true
       }
     },
-    {
-      label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-none",
+    "compensation-start": {
+      label: "Compensation start event",
+      className: "bpmn-icon-start-event-compensation",
       target: {
-        type: "bpmn:IntermediateThrowEvent"
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:CompensateEventDefinition",
+        isInterrupting: true
       }
     },
-    {
-      label: "End event",
-      actionName: "replace-with-none-end",
-      className: "bpmn-icon-end-event-none",
+    // Events — non-interrupting start (event subprocess)
+    "non-interrupting-message-start": {
+      label: "Message start event (non-interrupting)",
+      className: "bpmn-icon-start-event-non-interrupting-message",
       target: {
-        type: "bpmn:EndEvent"
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:MessageEventDefinition",
+        isInterrupting: false
       }
     },
-    {
+    "non-interrupting-timer-start": {
+      label: "Timer start event (non-interrupting)",
+      className: "bpmn-icon-start-event-non-interrupting-timer",
+      target: {
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:TimerEventDefinition",
+        isInterrupting: false
+      }
+    },
+    "non-interrupting-conditional-start": {
+      label: "Conditional start event (non-interrupting)",
+      className: "bpmn-icon-start-event-non-interrupting-condition",
+      target: {
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:ConditionalEventDefinition",
+        isInterrupting: false
+      }
+    },
+    "non-interrupting-signal-start": {
+      label: "Signal start event (non-interrupting)",
+      className: "bpmn-icon-start-event-non-interrupting-signal",
+      target: {
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:SignalEventDefinition",
+        isInterrupting: false
+      }
+    },
+    "non-interrupting-escalation-start": {
+      label: "Escalation start event (non-interrupting)",
+      className: "bpmn-icon-start-event-non-interrupting-escalation",
+      target: {
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:EscalationEventDefinition",
+        isInterrupting: false
+      }
+    },
+    // Events — intermediate (catch/throw)
+    "message-intermediate-catch": {
       label: "Message intermediate catch event",
-      actionName: "replace-with-message-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-message",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:MessageEventDefinition"
       }
     },
-    {
+    "message-intermediate-throw": {
       label: "Message intermediate throw event",
-      actionName: "replace-with-message-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-message",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:MessageEventDefinition"
       }
     },
-    {
+    "timer-intermediate-catch": {
       label: "Timer intermediate catch event",
-      actionName: "replace-with-timer-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-timer",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:TimerEventDefinition"
       }
     },
-    {
+    "escalation-intermediate-throw": {
       label: "Escalation intermediate throw event",
-      actionName: "replace-with-escalation-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-escalation",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:EscalationEventDefinition"
       }
     },
-    {
+    "conditional-intermediate-catch": {
       label: "Conditional intermediate catch event",
-      actionName: "replace-with-conditional-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-condition",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:ConditionalEventDefinition"
       }
     },
-    {
+    "link-intermediate-catch": {
       label: "Link intermediate catch event",
-      actionName: "replace-with-link-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-link",
       target: {
         type: "bpmn:IntermediateCatchEvent",
@@ -31575,9 +32772,8 @@ var __AutoNateBpmnJS__ = (() => {
         }
       }
     },
-    {
+    "link-intermediate-throw": {
       label: "Link intermediate throw event",
-      actionName: "replace-with-link-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-link",
       target: {
         type: "bpmn:IntermediateThrowEvent",
@@ -31587,166 +32783,267 @@ var __AutoNateBpmnJS__ = (() => {
         }
       }
     },
-    {
+    "compensation-intermediate-throw": {
       label: "Compensation intermediate throw event",
-      actionName: "replace-with-compensation-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-compensation",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:CompensateEventDefinition"
       }
     },
-    {
+    "signal-intermediate-catch": {
       label: "Signal intermediate catch event",
-      actionName: "replace-with-signal-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-signal",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:SignalEventDefinition"
       }
     },
-    {
+    "signal-intermediate-throw": {
       label: "Signal intermediate throw event",
-      actionName: "replace-with-signal-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-signal",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:SignalEventDefinition"
       }
-    }
-  ];
-  var END_EVENT = [
-    {
-      label: "Start event",
-      actionName: "replace-with-none-start",
-      className: "bpmn-icon-start-event-none",
+    },
+    // Events — boundary (interrupting)
+    "message-boundary": {
+      label: "Message boundary event",
+      className: "bpmn-icon-intermediate-event-catch-message",
       target: {
-        type: "bpmn:StartEvent"
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:MessageEventDefinition",
+        cancelActivity: true
       }
     },
-    {
-      label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-none",
+    "timer-boundary": {
+      label: "Timer boundary event",
+      className: "bpmn-icon-intermediate-event-catch-timer",
       target: {
-        type: "bpmn:IntermediateThrowEvent"
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:TimerEventDefinition",
+        cancelActivity: true
       }
     },
-    {
-      label: "End event",
-      actionName: "replace-with-none-end",
-      className: "bpmn-icon-end-event-none",
+    "escalation-boundary": {
+      label: "Escalation boundary event",
+      className: "bpmn-icon-intermediate-event-catch-escalation",
       target: {
-        type: "bpmn:EndEvent"
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:EscalationEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "conditional-boundary": {
+      label: "Conditional boundary event",
+      className: "bpmn-icon-intermediate-event-catch-condition",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:ConditionalEventDefinition",
+        cancelActivity: true
+      }
+    },
+    "error-boundary": {
+      label: "Error boundary event",
+      className: "bpmn-icon-intermediate-event-catch-error",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:ErrorEventDefinition",
+        cancelActivity: true
+      }
+    },
+    "cancel-boundary": {
+      label: "Cancel boundary event",
+      className: "bpmn-icon-intermediate-event-catch-cancel",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:CancelEventDefinition",
+        cancelActivity: true
+      }
+    },
+    "signal-boundary": {
+      label: "Signal boundary event",
+      className: "bpmn-icon-intermediate-event-catch-signal",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:SignalEventDefinition",
+        cancelActivity: true
+      }
+    },
+    "compensation-boundary": {
+      label: "Compensation boundary event",
+      className: "bpmn-icon-intermediate-event-catch-compensation",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:CompensateEventDefinition",
+        cancelActivity: true
+      }
+    },
+    // Events — boundary (non-interrupting)
+    "non-interrupting-message-boundary": {
+      label: "Message boundary event (non-interrupting)",
+      className: "bpmn-icon-intermediate-event-catch-non-interrupting-message",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:MessageEventDefinition",
+        cancelActivity: false
+      }
+    },
+    "non-interrupting-timer-boundary": {
+      label: "Timer boundary event (non-interrupting)",
+      className: "bpmn-icon-intermediate-event-catch-non-interrupting-timer",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:TimerEventDefinition",
+        cancelActivity: false
+      }
+    },
+    "non-interrupting-escalation-boundary": {
+      label: "Escalation boundary event (non-interrupting)",
+      className: "bpmn-icon-intermediate-event-catch-non-interrupting-escalation",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:EscalationEventDefinition",
+        cancelActivity: false
+      }
+    },
+    "non-interrupting-conditional-boundary": {
+      label: "Conditional boundary event (non-interrupting)",
+      className: "bpmn-icon-intermediate-event-catch-non-interrupting-condition",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:ConditionalEventDefinition",
+        cancelActivity: false
+      }
+    },
+    "non-interrupting-signal-boundary": {
+      label: "Signal boundary event (non-interrupting)",
+      className: "bpmn-icon-intermediate-event-catch-non-interrupting-signal",
+      target: {
+        type: "bpmn:BoundaryEvent",
+        eventDefinitionType: "bpmn:SignalEventDefinition",
+        cancelActivity: false
+      }
+    },
+    // Events — typed end
+    "message-end": {
       label: "Message end event",
-      actionName: "replace-with-message-end",
       className: "bpmn-icon-end-event-message",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:MessageEventDefinition"
       }
     },
-    {
+    "escalation-end": {
       label: "Escalation end event",
-      actionName: "replace-with-escalation-end",
       className: "bpmn-icon-end-event-escalation",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:EscalationEventDefinition"
       }
     },
-    {
+    "error-end": {
       label: "Error end event",
-      actionName: "replace-with-error-end",
       className: "bpmn-icon-end-event-error",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:ErrorEventDefinition"
       }
     },
-    {
+    "cancel-end": {
       label: "Cancel end event",
-      actionName: "replace-with-cancel-end",
       className: "bpmn-icon-end-event-cancel",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:CancelEventDefinition"
       }
     },
-    {
+    "compensation-end": {
       label: "Compensation end event",
-      actionName: "replace-with-compensation-end",
       className: "bpmn-icon-end-event-compensation",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:CompensateEventDefinition"
       }
     },
-    {
+    "signal-end": {
       label: "Signal end event",
-      actionName: "replace-with-signal-end",
       className: "bpmn-icon-end-event-signal",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:SignalEventDefinition"
       }
     },
-    {
+    "terminate-end": {
       label: "Terminate end event",
-      actionName: "replace-with-terminate-end",
       className: "bpmn-icon-end-event-terminate",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:TerminateEventDefinition"
       }
     }
+  };
+
+  // node_modules/bpmn-js/lib/features/replace/ReplaceOptions.js
+  function replaceWith(id, extra = {}) {
+    var entry = PopupEntries[id];
+    if (!entry) {
+      throw new Error("unknown popup entry <" + id + ">");
+    }
+    return {
+      ...entry,
+      actionName: "replace-with-" + id,
+      ...extra
+    };
+  }
+  var START_EVENT = [
+    replaceWith("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith("none-intermediate-throwing"),
+    replaceWith("none-end-event", { actionName: "replace-with-none-end" }),
+    replaceWith("message-start"),
+    replaceWith("timer-start"),
+    replaceWith("conditional-start"),
+    replaceWith("signal-start")
+  ];
+  var START_EVENT_SUB_PROCESS = [
+    replaceWith("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith("none-intermediate-throwing"),
+    replaceWith("none-end-event", { actionName: "replace-with-none-end" })
+  ];
+  var INTERMEDIATE_EVENT = [
+    replaceWith("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith("none-intermediate-throwing", { actionName: "replace-with-none-intermediate-throw" }),
+    replaceWith("none-end-event", { actionName: "replace-with-none-end" }),
+    replaceWith("message-intermediate-catch"),
+    replaceWith("message-intermediate-throw"),
+    replaceWith("timer-intermediate-catch"),
+    replaceWith("escalation-intermediate-throw"),
+    replaceWith("conditional-intermediate-catch"),
+    replaceWith("link-intermediate-catch"),
+    replaceWith("link-intermediate-throw"),
+    replaceWith("compensation-intermediate-throw"),
+    replaceWith("signal-intermediate-catch"),
+    replaceWith("signal-intermediate-throw")
+  ];
+  var END_EVENT = [
+    replaceWith("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith("none-intermediate-throwing", { actionName: "replace-with-none-intermediate-throw" }),
+    replaceWith("none-end-event", { actionName: "replace-with-none-end" }),
+    replaceWith("message-end"),
+    replaceWith("escalation-end"),
+    replaceWith("error-end"),
+    replaceWith("cancel-end"),
+    replaceWith("compensation-end"),
+    replaceWith("signal-end"),
+    replaceWith("terminate-end")
   ];
   var GATEWAY = [
-    {
-      label: "Exclusive gateway",
-      actionName: "replace-with-exclusive-gateway",
-      className: "bpmn-icon-gateway-xor",
-      target: {
-        type: "bpmn:ExclusiveGateway"
-      }
-    },
-    {
-      label: "Parallel gateway",
-      actionName: "replace-with-parallel-gateway",
-      className: "bpmn-icon-gateway-parallel",
-      target: {
-        type: "bpmn:ParallelGateway"
-      }
-    },
-    {
-      label: "Inclusive gateway",
-      actionName: "replace-with-inclusive-gateway",
-      className: "bpmn-icon-gateway-or",
-      target: {
-        type: "bpmn:InclusiveGateway"
-      }
-    },
-    {
-      label: "Complex gateway",
-      actionName: "replace-with-complex-gateway",
-      className: "bpmn-icon-gateway-complex",
-      target: {
-        type: "bpmn:ComplexGateway"
-      }
-    },
-    {
-      label: "Event-based gateway",
-      actionName: "replace-with-event-based-gateway",
-      className: "bpmn-icon-gateway-eventbased",
-      target: {
-        type: "bpmn:EventBasedGateway",
-        instantiate: false,
-        eventGatewayType: "Exclusive"
-      }
-    }
+    replaceWith("exclusive-gateway"),
+    replaceWith("parallel-gateway"),
+    replaceWith("inclusive-gateway"),
+    replaceWith("complex-gateway"),
+    replaceWith("event-based-gateway")
     // Gateways deactivated until https://github.com/bpmn-io/bpmn-js/issues/194
     // {
     //   label: 'Event based instantiating Gateway',
@@ -31772,506 +33069,73 @@ var __AutoNateBpmnJS__ = (() => {
     // }
   ];
   var SUBPROCESS_EXPANDED = [
-    {
-      label: "Transaction",
-      actionName: "replace-with-transaction",
-      className: "bpmn-icon-transaction",
-      target: {
-        type: "bpmn:Transaction",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Event sub-process",
-      actionName: "replace-with-event-subprocess",
-      className: "bpmn-icon-event-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        triggeredByEvent: true,
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process",
-      actionName: "replace-with-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Sub-process (collapsed)",
-      actionName: "replace-with-collapsed-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: false
-      }
-    }
+    replaceWith("transaction"),
+    replaceWith("event-subprocess"),
+    replaceWith("expanded-ad-hoc-subprocess", { actionName: "replace-with-ad-hoc-subprocess", label: "Ad-hoc sub-process" }),
+    replaceWith("collapsed-subprocess")
   ];
   var AD_HOC_SUBPROCESS_EXPANDED = [
-    {
-      label: "Sub-process",
-      actionName: "replace-with-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Transaction",
-      actionName: "replace-with-transaction",
-      className: "bpmn-icon-transaction",
-      target: {
-        type: "bpmn:Transaction",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Event sub-process",
-      actionName: "replace-with-event-subprocess",
-      className: "bpmn-icon-event-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        triggeredByEvent: true,
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (collapsed)",
-      actionName: "replace-with-collapsed-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: false
-      }
-    }
+    replaceWith("expanded-subprocess", { actionName: "replace-with-subprocess", label: "Sub-process" }),
+    replaceWith("transaction"),
+    replaceWith("event-subprocess"),
+    replaceWith("collapsed-ad-hoc-subprocess")
   ];
   var TRANSACTION = [
-    {
-      label: "Transaction",
-      actionName: "replace-with-transaction",
-      className: "bpmn-icon-transaction",
-      target: {
-        type: "bpmn:Transaction",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Sub-process",
-      actionName: "replace-with-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process",
-      actionName: "replace-with-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Event sub-process",
-      actionName: "replace-with-event-subprocess",
-      className: "bpmn-icon-event-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        triggeredByEvent: true,
-        isExpanded: true
-      }
-    }
+    replaceWith("transaction"),
+    replaceWith("expanded-subprocess", { actionName: "replace-with-subprocess", label: "Sub-process" }),
+    replaceWith("expanded-ad-hoc-subprocess", { actionName: "replace-with-ad-hoc-subprocess", label: "Ad-hoc sub-process" }),
+    replaceWith("event-subprocess")
   ];
   var EVENT_SUB_PROCESS = TRANSACTION;
   var TASK = [
-    {
-      label: "Task",
-      actionName: "replace-with-task",
-      className: "bpmn-icon-task",
-      target: {
-        type: "bpmn:Task"
-      }
-    },
-    {
-      label: "User task",
-      actionName: "replace-with-user-task",
-      className: "bpmn-icon-user",
-      target: {
-        type: "bpmn:UserTask"
-      }
-    },
-    {
-      label: "Service task",
-      actionName: "replace-with-service-task",
-      className: "bpmn-icon-service",
-      target: {
-        type: "bpmn:ServiceTask"
-      }
-    },
-    {
-      label: "Send task",
-      actionName: "replace-with-send-task",
-      className: "bpmn-icon-send",
-      target: {
-        type: "bpmn:SendTask"
-      }
-    },
-    {
-      label: "Receive task",
-      actionName: "replace-with-receive-task",
-      className: "bpmn-icon-receive",
-      target: {
-        type: "bpmn:ReceiveTask"
-      }
-    },
-    {
-      label: "Manual task",
-      actionName: "replace-with-manual-task",
-      className: "bpmn-icon-manual",
-      target: {
-        type: "bpmn:ManualTask"
-      }
-    },
-    {
-      label: "Business rule task",
-      actionName: "replace-with-rule-task",
-      className: "bpmn-icon-business-rule",
-      target: {
-        type: "bpmn:BusinessRuleTask"
-      }
-    },
-    {
-      label: "Script task",
-      actionName: "replace-with-script-task",
-      className: "bpmn-icon-script",
-      target: {
-        type: "bpmn:ScriptTask"
-      }
-    },
-    {
-      label: "Call activity",
-      actionName: "replace-with-call-activity",
-      className: "bpmn-icon-call-activity",
-      target: {
-        type: "bpmn:CallActivity"
-      }
-    },
-    {
-      label: "Sub-process (collapsed)",
-      actionName: "replace-with-collapsed-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: false
-      }
-    },
-    {
-      label: "Sub-process (expanded)",
-      actionName: "replace-with-expanded-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (collapsed)",
-      actionName: "replace-with-collapsed-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: false
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (expanded)",
-      actionName: "replace-with-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: true
-      }
-    }
+    replaceWith("task"),
+    replaceWith("user-task"),
+    replaceWith("service-task"),
+    replaceWith("send-task"),
+    replaceWith("receive-task"),
+    replaceWith("manual-task"),
+    replaceWith("rule-task"),
+    replaceWith("script-task"),
+    replaceWith("call-activity"),
+    replaceWith("collapsed-subprocess"),
+    replaceWith("expanded-subprocess"),
+    replaceWith("collapsed-ad-hoc-subprocess"),
+    replaceWith("expanded-ad-hoc-subprocess", { actionName: "replace-with-ad-hoc-subprocess" })
   ];
   var DATA_OBJECT_REFERENCE = [
-    {
-      label: "Data store reference",
-      actionName: "replace-with-data-store-reference",
-      className: "bpmn-icon-data-store",
-      target: {
-        type: "bpmn:DataStoreReference"
-      }
-    }
+    replaceWith("data-store-reference")
   ];
   var DATA_STORE_REFERENCE = [
-    {
-      label: "Data object reference",
-      actionName: "replace-with-data-object-reference",
-      className: "bpmn-icon-data-object",
-      target: {
-        type: "bpmn:DataObjectReference"
-      }
-    }
+    replaceWith("data-object-reference")
   ];
   var BOUNDARY_EVENT = [
-    {
-      label: "Message boundary event",
-      actionName: "replace-with-message-boundary",
-      className: "bpmn-icon-intermediate-event-catch-message",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Timer boundary event",
-      actionName: "replace-with-timer-boundary",
-      className: "bpmn-icon-intermediate-event-catch-timer",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Escalation boundary event",
-      actionName: "replace-with-escalation-boundary",
-      className: "bpmn-icon-intermediate-event-catch-escalation",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Conditional boundary event",
-      actionName: "replace-with-conditional-boundary",
-      className: "bpmn-icon-intermediate-event-catch-condition",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Error boundary event",
-      actionName: "replace-with-error-boundary",
-      className: "bpmn-icon-intermediate-event-catch-error",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ErrorEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Cancel boundary event",
-      actionName: "replace-with-cancel-boundary",
-      className: "bpmn-icon-intermediate-event-catch-cancel",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:CancelEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Signal boundary event",
-      actionName: "replace-with-signal-boundary",
-      className: "bpmn-icon-intermediate-event-catch-signal",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Compensation boundary event",
-      actionName: "replace-with-compensation-boundary",
-      className: "bpmn-icon-intermediate-event-catch-compensation",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:CompensateEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Message boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-message-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-message",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Timer boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-timer-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-timer",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Escalation boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-escalation-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-escalation",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Conditional boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-conditional-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-condition",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Signal boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-signal-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-signal",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        cancelActivity: false
-      }
-    }
+    replaceWith("message-boundary"),
+    replaceWith("timer-boundary"),
+    replaceWith("escalation-boundary"),
+    replaceWith("conditional-boundary"),
+    replaceWith("error-boundary"),
+    replaceWith("cancel-boundary"),
+    replaceWith("signal-boundary"),
+    replaceWith("compensation-boundary"),
+    replaceWith("non-interrupting-message-boundary"),
+    replaceWith("non-interrupting-timer-boundary"),
+    replaceWith("non-interrupting-escalation-boundary"),
+    replaceWith("non-interrupting-conditional-boundary"),
+    replaceWith("non-interrupting-signal-boundary")
   ];
   var EVENT_SUB_PROCESS_START_EVENT = [
-    {
-      label: "Message start event",
-      actionName: "replace-with-message-start",
-      className: "bpmn-icon-start-event-message",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Timer start event",
-      actionName: "replace-with-timer-start",
-      className: "bpmn-icon-start-event-timer",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Conditional start event",
-      actionName: "replace-with-conditional-start",
-      className: "bpmn-icon-start-event-condition",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Signal start event",
-      actionName: "replace-with-signal-start",
-      className: "bpmn-icon-start-event-signal",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Error start event",
-      actionName: "replace-with-error-start",
-      className: "bpmn-icon-start-event-error",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ErrorEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Escalation start event",
-      actionName: "replace-with-escalation-start",
-      className: "bpmn-icon-start-event-escalation",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Compensation start event",
-      actionName: "replace-with-compensation-start",
-      className: "bpmn-icon-start-event-compensation",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:CompensateEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Message start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-message-start",
-      className: "bpmn-icon-start-event-non-interrupting-message",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Timer start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-timer-start",
-      className: "bpmn-icon-start-event-non-interrupting-timer",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Conditional start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-conditional-start",
-      className: "bpmn-icon-start-event-non-interrupting-condition",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Signal start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-signal-start",
-      className: "bpmn-icon-start-event-non-interrupting-signal",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Escalation start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-escalation-start",
-      className: "bpmn-icon-start-event-non-interrupting-escalation",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        isInterrupting: false
-      }
-    }
+    replaceWith("message-start"),
+    replaceWith("timer-start"),
+    replaceWith("conditional-start"),
+    replaceWith("signal-start"),
+    replaceWith("error-start"),
+    replaceWith("escalation-start"),
+    replaceWith("compensation-start"),
+    replaceWith("non-interrupting-message-start"),
+    replaceWith("non-interrupting-timer-start"),
+    replaceWith("non-interrupting-conditional-start"),
+    replaceWith("non-interrupting-signal-start"),
+    replaceWith("non-interrupting-escalation-start")
   ];
   var SEQUENCE_FLOW = [
     {
@@ -32291,233 +33155,51 @@ var __AutoNateBpmnJS__ = (() => {
     }
   ];
   var PARTICIPANT = [
-    {
-      label: "Expanded pool/participant",
-      actionName: "replace-with-expanded-pool",
-      className: "bpmn-icon-participant",
-      target: {
-        type: "bpmn:Participant",
-        isExpanded: true
-      }
-    },
-    {
+    replaceWith("expanded-pool"),
+    replaceWith("collapsed-pool", {
       label: function(element) {
         var label = "Empty pool/participant";
         if (element.children && element.children.length) {
           label += " (removes content)";
         }
         return label;
-      },
-      actionName: "replace-with-collapsed-pool",
-      // TODO(@janstuemmel): maybe design new icon
-      className: "bpmn-icon-lane",
-      target: {
-        type: "bpmn:Participant",
-        isExpanded: false
       }
-    }
+    })
   ];
   var TYPED_EVENT = {
     "bpmn:MessageEventDefinition": [
-      {
-        label: "Message start event",
-        actionName: "replace-with-message-start",
-        className: "bpmn-icon-start-event-message",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition",
-          isInterrupting: true
-        }
-      },
-      {
-        label: "Message intermediate catch event",
-        actionName: "replace-with-message-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-message",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition"
-        }
-      },
-      {
-        label: "Message intermediate throw event",
-        actionName: "replace-with-message-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-message",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition"
-        }
-      },
-      {
-        label: "Message end event",
-        actionName: "replace-with-message-end",
-        className: "bpmn-icon-end-event-message",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition"
-        }
-      }
+      replaceWith("message-start"),
+      replaceWith("message-intermediate-catch"),
+      replaceWith("message-intermediate-throw"),
+      replaceWith("message-end")
     ],
     "bpmn:TimerEventDefinition": [
-      {
-        label: "Timer start event",
-        actionName: "replace-with-timer-start",
-        className: "bpmn-icon-start-event-timer",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:TimerEventDefinition",
-          isInterrupting: true
-        }
-      },
-      {
-        label: "Timer intermediate catch event",
-        actionName: "replace-with-timer-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-timer",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:TimerEventDefinition"
-        }
-      }
+      replaceWith("timer-start"),
+      replaceWith("timer-intermediate-catch")
     ],
     "bpmn:ConditionalEventDefinition": [
-      {
-        label: "Conditional start event",
-        actionName: "replace-with-conditional-start",
-        className: "bpmn-icon-start-event-condition",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:ConditionalEventDefinition",
-          isInterrupting: true
-        }
-      },
-      {
-        label: "Conditional intermediate catch event",
-        actionName: "replace-with-conditional-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-condition",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:ConditionalEventDefinition"
-        }
-      }
+      replaceWith("conditional-start"),
+      replaceWith("conditional-intermediate-catch")
     ],
     "bpmn:SignalEventDefinition": [
-      {
-        label: "Signal start event",
-        actionName: "replace-with-signal-start",
-        className: "bpmn-icon-start-event-signal",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition",
-          isInterrupting: true
-        }
-      },
-      {
-        label: "Signal intermediate catch event",
-        actionName: "replace-with-signal-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-signal",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition"
-        }
-      },
-      {
-        label: "Signal intermediate throw event",
-        actionName: "replace-with-signal-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-signal",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition"
-        }
-      },
-      {
-        label: "Signal end event",
-        actionName: "replace-with-signal-end",
-        className: "bpmn-icon-end-event-signal",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition"
-        }
-      }
+      replaceWith("signal-start"),
+      replaceWith("signal-intermediate-catch"),
+      replaceWith("signal-intermediate-throw"),
+      replaceWith("signal-end")
     ],
     "bpmn:ErrorEventDefinition": [
-      {
-        label: "Error start event",
-        actionName: "replace-with-error-start",
-        className: "bpmn-icon-start-event-error",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:ErrorEventDefinition",
-          isInterrupting: true
-        }
-      },
-      {
-        label: "Error end event",
-        actionName: "replace-with-error-end",
-        className: "bpmn-icon-end-event-error",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:ErrorEventDefinition"
-        }
-      }
+      replaceWith("error-start"),
+      replaceWith("error-end")
     ],
     "bpmn:EscalationEventDefinition": [
-      {
-        label: "Escalation start event",
-        actionName: "replace-with-escalation-start",
-        className: "bpmn-icon-start-event-escalation",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:EscalationEventDefinition",
-          isInterrupting: true
-        }
-      },
-      {
-        label: "Escalation intermediate throw event",
-        actionName: "replace-with-escalation-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-escalation",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:EscalationEventDefinition"
-        }
-      },
-      {
-        label: "Escalation end event",
-        actionName: "replace-with-escalation-end",
-        className: "bpmn-icon-end-event-escalation",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:EscalationEventDefinition"
-        }
-      }
+      replaceWith("escalation-start"),
+      replaceWith("escalation-intermediate-throw"),
+      replaceWith("escalation-end")
     ],
     "bpmn:CompensateEventDefinition": [
-      {
-        label: "Compensation start event",
-        actionName: "replace-with-compensation-start",
-        className: "bpmn-icon-start-event-compensation",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:CompensateEventDefinition",
-          isInterrupting: true
-        }
-      },
-      {
-        label: "Compensation intermediate throw event",
-        actionName: "replace-with-compensation-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-compensation",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:CompensateEventDefinition"
-        }
-      },
-      {
-        label: "Compensation end event",
-        actionName: "replace-with-compensation-end",
-        className: "bpmn-icon-end-event-compensation",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:CompensateEventDefinition"
-        }
-      }
+      replaceWith("compensation-start"),
+      replaceWith("compensation-intermediate-throw"),
+      replaceWith("compensation-end")
     ]
   };
 
@@ -33209,7 +33891,7 @@ var __AutoNateBpmnJS__ = (() => {
               });
               popupMenu.open(element2, "bpmn-replace", position, {
                 title: translate3("Change element"),
-                width: 300,
+                width: "var(--bpmn-replace-popup-width, 300px)",
                 search: true
               });
             }
@@ -33460,13 +34142,13 @@ var __AutoNateBpmnJS__ = (() => {
   var DistributeElementsIcons_default = icons2;
 
   // node_modules/bpmn-js/lib/features/distribute-elements/DistributeElementsMenuProvider.js
-  var LOW_PRIORITY21 = 900;
+  var LOW_PRIORITY23 = 900;
   function DistributeElementsMenuProvider(popupMenu, distributeElements, translate3, rules) {
     this._distributeElements = distributeElements;
     this._translate = translate3;
     this._popupMenu = popupMenu;
     this._rules = rules;
-    popupMenu.registerProvider("align-elements", LOW_PRIORITY21, this);
+    popupMenu.registerProvider("align-elements", LOW_PRIORITY23, this);
   }
   DistributeElementsMenuProvider.$inject = [
     "popupMenu",
@@ -33528,6 +34210,7 @@ var __AutoNateBpmnJS__ = (() => {
   var NOT_REGISTERED_ERROR = "is not a registered action";
   var IS_REGISTERED_ERROR = "is already registered";
   function EditorActions(eventBus, injector) {
+    this._eventBus = eventBus;
     this._actions = {};
     var self2 = this;
     eventBus.on("diagram.init", function() {
@@ -33637,6 +34320,13 @@ var __AutoNateBpmnJS__ = (() => {
   EditorActions.prototype.trigger = function(action, opts) {
     if (!this._actions[action]) {
       throw error3(action, NOT_REGISTERED_ERROR);
+    }
+    var allowed = this._eventBus.fire("editorActions.allowed", {
+      action,
+      opts
+    });
+    if (allowed === false) {
+      return;
     }
     return this._actions[action](opts);
   };
@@ -33826,6 +34516,133 @@ var __AutoNateBpmnJS__ = (() => {
   }
   BpmnGridSnapping.$inject = ["eventBus"];
 
+  // node_modules/diagram-js/lib/features/grid-snapping/behavior/ResizeBehavior.js
+  function ResizeBehavior2(eventBus, gridSnapping) {
+    CommandInterceptor.call(this, eventBus);
+    this._gridSnapping = gridSnapping;
+    var self2 = this;
+    this.preExecute("shape.resize", function(event2) {
+      var context = event2.context, hints = context.hints || {}, autoResize = hints.autoResize;
+      if (!autoResize) {
+        return;
+      }
+      var shape = context.shape, newBounds = context.newBounds;
+      if (isString(autoResize)) {
+        context.newBounds = self2.snapComplex(newBounds, autoResize);
+      } else {
+        context.newBounds = self2.snapSimple(shape, newBounds);
+      }
+    });
+  }
+  ResizeBehavior2.$inject = [
+    "eventBus",
+    "gridSnapping",
+    "modeling"
+  ];
+  e(ResizeBehavior2, CommandInterceptor);
+  ResizeBehavior2.prototype.snapSimple = function(shape, newBounds) {
+    var gridSnapping = this._gridSnapping;
+    newBounds.width = gridSnapping.snapValue(newBounds.width, {
+      min: newBounds.width
+    });
+    newBounds.height = gridSnapping.snapValue(newBounds.height, {
+      min: newBounds.height
+    });
+    newBounds.x = shape.x + shape.width / 2 - newBounds.width / 2;
+    newBounds.y = shape.y + shape.height / 2 - newBounds.height / 2;
+    return newBounds;
+  };
+  ResizeBehavior2.prototype.snapComplex = function(newBounds, directions2) {
+    if (/w|e/.test(directions2)) {
+      newBounds = this.snapHorizontally(newBounds, directions2);
+    }
+    if (/n|s/.test(directions2)) {
+      newBounds = this.snapVertically(newBounds, directions2);
+    }
+    return newBounds;
+  };
+  ResizeBehavior2.prototype.snapHorizontally = function(newBounds, directions2) {
+    var gridSnapping = this._gridSnapping, west = /w/.test(directions2), east = /e/.test(directions2);
+    var snappedNewBounds = {};
+    snappedNewBounds.width = gridSnapping.snapValue(newBounds.width, {
+      min: newBounds.width
+    });
+    if (east) {
+      if (west) {
+        snappedNewBounds.x = gridSnapping.snapValue(newBounds.x, {
+          max: newBounds.x
+        });
+        snappedNewBounds.width += gridSnapping.snapValue(newBounds.x - snappedNewBounds.x, {
+          min: newBounds.x - snappedNewBounds.x
+        });
+      } else {
+        newBounds.x = newBounds.x + newBounds.width - snappedNewBounds.width;
+      }
+    }
+    assign(newBounds, snappedNewBounds);
+    return newBounds;
+  };
+  ResizeBehavior2.prototype.snapVertically = function(newBounds, directions2) {
+    var gridSnapping = this._gridSnapping, north = /n/.test(directions2), south = /s/.test(directions2);
+    var snappedNewBounds = {};
+    snappedNewBounds.height = gridSnapping.snapValue(newBounds.height, {
+      min: newBounds.height
+    });
+    if (north) {
+      if (south) {
+        snappedNewBounds.y = gridSnapping.snapValue(newBounds.y, {
+          max: newBounds.y
+        });
+        snappedNewBounds.height += gridSnapping.snapValue(newBounds.y - snappedNewBounds.y, {
+          min: newBounds.y - snappedNewBounds.y
+        });
+      } else {
+        newBounds.y = newBounds.y + newBounds.height - snappedNewBounds.height;
+      }
+    }
+    assign(newBounds, snappedNewBounds);
+    return newBounds;
+  };
+
+  // node_modules/diagram-js/lib/features/grid-snapping/behavior/SpaceToolBehavior.js
+  var HIGH_PRIORITY17 = 2e3;
+  function SpaceToolBehavior2(eventBus, gridSnapping) {
+    eventBus.on([
+      "spaceTool.move",
+      "spaceTool.end"
+    ], HIGH_PRIORITY17, function(event2) {
+      var context = event2.context;
+      if (!context.initialized) {
+        return;
+      }
+      var axis = context.axis;
+      var snapped;
+      if (axis === "x") {
+        snapped = gridSnapping.snapValue(event2.dx);
+        event2.x = event2.x + snapped - event2.dx;
+        event2.dx = snapped;
+      } else {
+        snapped = gridSnapping.snapValue(event2.dy);
+        event2.y = event2.y + snapped - event2.dy;
+        event2.dy = snapped;
+      }
+    });
+  }
+  SpaceToolBehavior2.$inject = [
+    "eventBus",
+    "gridSnapping"
+  ];
+
+  // node_modules/diagram-js/lib/features/grid-snapping/behavior/index.js
+  var behavior_default2 = {
+    __init__: [
+      "gridSnappingResizeBehavior",
+      "gridSnappingSpaceToolBehavior"
+    ],
+    gridSnappingResizeBehavior: ["type", ResizeBehavior2],
+    gridSnappingSpaceToolBehavior: ["type", SpaceToolBehavior2]
+  };
+
   // node_modules/diagram-js/lib/features/grid-snapping/GridUtil.js
   var SPACING = 10;
   function quantize(value, quantum, fn) {
@@ -33837,12 +34654,12 @@ var __AutoNateBpmnJS__ = (() => {
 
   // node_modules/diagram-js/lib/features/grid-snapping/GridSnapping.js
   var LOWER_PRIORITY2 = 1200;
-  var LOW_PRIORITY22 = 800;
+  var LOW_PRIORITY24 = 800;
   function GridSnapping(elementRegistry, eventBus, config) {
     var active = !config || config.active !== false;
     this._eventBus = eventBus;
     var self2 = this;
-    eventBus.on("diagram.init", LOW_PRIORITY22, function() {
+    eventBus.on("diagram.init", LOW_PRIORITY24, function() {
       self2.setActive(active);
     });
     eventBus.on([
@@ -34033,133 +34850,6 @@ var __AutoNateBpmnJS__ = (() => {
     return direction.indexOf("w") !== -1;
   }
 
-  // node_modules/diagram-js/lib/features/grid-snapping/behavior/ResizeBehavior.js
-  function ResizeBehavior2(eventBus, gridSnapping) {
-    CommandInterceptor.call(this, eventBus);
-    this._gridSnapping = gridSnapping;
-    var self2 = this;
-    this.preExecute("shape.resize", function(event2) {
-      var context = event2.context, hints = context.hints || {}, autoResize = hints.autoResize;
-      if (!autoResize) {
-        return;
-      }
-      var shape = context.shape, newBounds = context.newBounds;
-      if (isString(autoResize)) {
-        context.newBounds = self2.snapComplex(newBounds, autoResize);
-      } else {
-        context.newBounds = self2.snapSimple(shape, newBounds);
-      }
-    });
-  }
-  ResizeBehavior2.$inject = [
-    "eventBus",
-    "gridSnapping",
-    "modeling"
-  ];
-  e(ResizeBehavior2, CommandInterceptor);
-  ResizeBehavior2.prototype.snapSimple = function(shape, newBounds) {
-    var gridSnapping = this._gridSnapping;
-    newBounds.width = gridSnapping.snapValue(newBounds.width, {
-      min: newBounds.width
-    });
-    newBounds.height = gridSnapping.snapValue(newBounds.height, {
-      min: newBounds.height
-    });
-    newBounds.x = shape.x + shape.width / 2 - newBounds.width / 2;
-    newBounds.y = shape.y + shape.height / 2 - newBounds.height / 2;
-    return newBounds;
-  };
-  ResizeBehavior2.prototype.snapComplex = function(newBounds, directions2) {
-    if (/w|e/.test(directions2)) {
-      newBounds = this.snapHorizontally(newBounds, directions2);
-    }
-    if (/n|s/.test(directions2)) {
-      newBounds = this.snapVertically(newBounds, directions2);
-    }
-    return newBounds;
-  };
-  ResizeBehavior2.prototype.snapHorizontally = function(newBounds, directions2) {
-    var gridSnapping = this._gridSnapping, west = /w/.test(directions2), east = /e/.test(directions2);
-    var snappedNewBounds = {};
-    snappedNewBounds.width = gridSnapping.snapValue(newBounds.width, {
-      min: newBounds.width
-    });
-    if (east) {
-      if (west) {
-        snappedNewBounds.x = gridSnapping.snapValue(newBounds.x, {
-          max: newBounds.x
-        });
-        snappedNewBounds.width += gridSnapping.snapValue(newBounds.x - snappedNewBounds.x, {
-          min: newBounds.x - snappedNewBounds.x
-        });
-      } else {
-        newBounds.x = newBounds.x + newBounds.width - snappedNewBounds.width;
-      }
-    }
-    assign(newBounds, snappedNewBounds);
-    return newBounds;
-  };
-  ResizeBehavior2.prototype.snapVertically = function(newBounds, directions2) {
-    var gridSnapping = this._gridSnapping, north = /n/.test(directions2), south = /s/.test(directions2);
-    var snappedNewBounds = {};
-    snappedNewBounds.height = gridSnapping.snapValue(newBounds.height, {
-      min: newBounds.height
-    });
-    if (north) {
-      if (south) {
-        snappedNewBounds.y = gridSnapping.snapValue(newBounds.y, {
-          max: newBounds.y
-        });
-        snappedNewBounds.height += gridSnapping.snapValue(newBounds.y - snappedNewBounds.y, {
-          min: newBounds.y - snappedNewBounds.y
-        });
-      } else {
-        newBounds.y = newBounds.y + newBounds.height - snappedNewBounds.height;
-      }
-    }
-    assign(newBounds, snappedNewBounds);
-    return newBounds;
-  };
-
-  // node_modules/diagram-js/lib/features/grid-snapping/behavior/SpaceToolBehavior.js
-  var HIGH_PRIORITY16 = 2e3;
-  function SpaceToolBehavior2(eventBus, gridSnapping) {
-    eventBus.on([
-      "spaceTool.move",
-      "spaceTool.end"
-    ], HIGH_PRIORITY16, function(event2) {
-      var context = event2.context;
-      if (!context.initialized) {
-        return;
-      }
-      var axis = context.axis;
-      var snapped;
-      if (axis === "x") {
-        snapped = gridSnapping.snapValue(event2.dx);
-        event2.x = event2.x + snapped - event2.dx;
-        event2.dx = snapped;
-      } else {
-        snapped = gridSnapping.snapValue(event2.dy);
-        event2.y = event2.y + snapped - event2.dy;
-        event2.dy = snapped;
-      }
-    });
-  }
-  SpaceToolBehavior2.$inject = [
-    "eventBus",
-    "gridSnapping"
-  ];
-
-  // node_modules/diagram-js/lib/features/grid-snapping/behavior/index.js
-  var behavior_default2 = {
-    __init__: [
-      "gridSnappingResizeBehavior",
-      "gridSnappingSpaceToolBehavior"
-    ],
-    gridSnappingResizeBehavior: ["type", ResizeBehavior2],
-    gridSnappingSpaceToolBehavior: ["type", SpaceToolBehavior2]
-  };
-
   // node_modules/diagram-js/lib/features/grid-snapping/index.js
   var grid_snapping_default = {
     __depends__: [behavior_default2],
@@ -34168,9 +34858,9 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/grid-snapping/behavior/GridSnappingAutoPlaceBehavior.js
-  var HIGH_PRIORITY17 = 2e3;
+  var HIGH_PRIORITY18 = 2e3;
   function GridSnappingAutoPlaceBehavior(eventBus, gridSnapping, elementRegistry) {
-    eventBus.on("autoPlace", HIGH_PRIORITY17, function(context) {
+    eventBus.on("autoPlace", HIGH_PRIORITY18, function(context) {
       var source = context.source, sourceMid = getMid(source), shape = context.shape;
       var position = getNewShapePosition2(source, shape, elementRegistry);
       ["x", "y"].forEach(function(axis) {
@@ -34230,7 +34920,7 @@ var __AutoNateBpmnJS__ = (() => {
   ];
 
   // node_modules/bpmn-js/lib/features/grid-snapping/behavior/GridSnappingLayoutConnectionBehavior.js
-  var HIGH_PRIORITY18 = 3e3;
+  var HIGH_PRIORITY19 = 3e3;
   function GridSnappingLayoutConnectionBehavior(eventBus, gridSnapping, modeling) {
     CommandInterceptor.call(this, eventBus);
     this._gridSnapping = gridSnapping;
@@ -34238,7 +34928,7 @@ var __AutoNateBpmnJS__ = (() => {
     this.postExecuted([
       "connection.create",
       "connection.layout"
-    ], HIGH_PRIORITY18, function(event2) {
+    ], HIGH_PRIORITY19, function(event2) {
       var context = event2.context, connection = context.connection, hints = context.hints || {}, waypoints = connection.waypoints;
       if (hints.connectionStart || hints.connectionEnd || hints.createElementsBehavior === false) {
         return;
@@ -34719,7 +35409,7 @@ var __AutoNateBpmnJS__ = (() => {
   // node_modules/diagram-js/lib/features/resize/ResizePreview.js
   var MARKER_RESIZING2 = "djs-resizing";
   var MARKER_RESIZE_NOT_OK = "resize-not-ok";
-  var LOW_PRIORITY23 = 500;
+  var LOW_PRIORITY25 = 500;
   function ResizePreview(eventBus, canvas, previewSupport) {
     function updateFrame(context) {
       var shape = context.shape, bounds = context.newBounds, frame = context.frame;
@@ -34746,7 +35436,7 @@ var __AutoNateBpmnJS__ = (() => {
       }
       canvas.removeMarker(shape, MARKER_RESIZING2);
     }
-    eventBus.on("resize.move", LOW_PRIORITY23, function(event2) {
+    eventBus.on("resize.move", LOW_PRIORITY25, function(event2) {
       updateFrame(event2.context);
     });
     eventBus.on("resize.cleanup", function(event2) {
@@ -34830,11 +35520,13 @@ var __AutoNateBpmnJS__ = (() => {
   };
   ResizeHandles.prototype.addResizer = function(element) {
     var self2 = this;
-    if (isConnection(element) || !this._resize.canResize({ shape: element })) {
+    if (isConnection(element)) {
       return;
     }
     forEach(directions, function(direction) {
-      self2.createResizer(element, direction);
+      if (self2._resize.canResize({ shape: element, direction })) {
+        self2.createResizer(element, direction);
+      }
     });
   };
   ResizeHandles.prototype.removeResizers = function() {
@@ -34886,7 +35578,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/label-editing/LabelEditingProvider.js
-  var HIGH_PRIORITY19 = 2e3;
+  var HIGH_PRIORITY20 = 2e3;
   function LabelEditingProvider(eventBus, bpmnFactory, canvas, directEditing, modeling, resizeHandles, textRenderer) {
     this._bpmnFactory = bpmnFactory;
     this._canvas = canvas;
@@ -34912,7 +35604,7 @@ var __AutoNateBpmnJS__ = (() => {
     eventBus.on([
       "shape.remove",
       "connection.remove"
-    ], HIGH_PRIORITY19, function(event2) {
+    ], HIGH_PRIORITY20, function(event2) {
       if (directEditing.isActive(event2.element)) {
         directEditing.cancel();
       }
@@ -34984,6 +35676,7 @@ var __AutoNateBpmnJS__ = (() => {
     }
     if (isLabelExternal(element)) {
       assign(options, {
+        resizable: true,
         autoResize: true
       });
       assign(style, {
@@ -35095,19 +35788,18 @@ var __AutoNateBpmnJS__ = (() => {
         paddingRight: 5 * zoom2 + "px"
       });
     }
-    var width = 90 * zoom2, paddingTop = 7 * zoom2, paddingBottom = 4 * zoom2;
+    var BORDER_WIDTH = 1;
+    var width = bbox.width + 2 * BORDER_WIDTH;
     if (target.labelTarget) {
       assign(bounds, {
         width,
-        height: bbox.height + paddingTop + paddingBottom,
-        x: mid4.x - width / 2,
-        y: bbox.y - paddingTop
+        height: bbox.height + 2 * BORDER_WIDTH,
+        x: bbox.x - BORDER_WIDTH,
+        y: bbox.y - BORDER_WIDTH
       });
       assign(style, {
         fontSize: externalFontSize + "px",
-        lineHeight: externalLineHeight,
-        paddingTop: paddingTop + "px",
-        paddingBottom: paddingBottom + "px"
+        lineHeight: externalLineHeight
       });
     }
     if (isLabelExternal(target) && !hasExternalLabel(target) && !isLabel(target)) {
@@ -35118,33 +35810,34 @@ var __AutoNateBpmnJS__ = (() => {
         width: 0,
         height: 0
       });
-      var height = externalFontSize + paddingTop + paddingBottom;
+      var height = externalFontSize;
+      var newLabelWidth = DEFAULT_LABEL_SIZE.width * zoom2 + 2 * BORDER_WIDTH;
       assign(bounds, {
-        width,
-        height,
-        x: absoluteBBox.x - width / 2,
-        y: absoluteBBox.y - height / 2
+        width: newLabelWidth,
+        height: height + 2 * BORDER_WIDTH,
+        x: absoluteBBox.x - newLabelWidth / 2,
+        y: absoluteBBox.y - height / 2 - BORDER_WIDTH
       });
       assign(style, {
         fontSize: externalFontSize + "px",
-        lineHeight: externalLineHeight,
-        paddingTop: paddingTop + "px",
-        paddingBottom: paddingBottom + "px"
+        lineHeight: externalLineHeight
       });
     }
     if (is2(element, "bpmn:TextAnnotation")) {
       assign(bounds, {
-        width: bbox.width,
-        height: bbox.height,
+        width: bbox.width + 2 * BORDER_WIDTH,
+        height: bbox.height + 2 * BORDER_WIDTH,
+        x: bbox.x - BORDER_WIDTH,
+        y: bbox.y - BORDER_WIDTH,
         minWidth: 30 * zoom2,
         minHeight: 10 * zoom2
       });
       assign(style, {
         textAlign: "left",
-        paddingTop: 5 * zoom2 + "px",
-        paddingBottom: 7 * zoom2 + "px",
-        paddingLeft: 7 * zoom2 + "px",
-        paddingRight: 5 * zoom2 + "px",
+        paddingTop: TEXT_ANNOTATION_PADDING * zoom2 + "px",
+        paddingBottom: TEXT_ANNOTATION_PADDING * zoom2 + "px",
+        paddingLeft: TEXT_ANNOTATION_PADDING * zoom2 + "px",
+        paddingRight: TEXT_ANNOTATION_PADDING * zoom2 + "px",
         fontSize: defaultFontSize + "px",
         lineHeight: defaultLineHeight
       });
@@ -35281,43 +35974,65 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/outline/Outline.js
-  var LOW_PRIORITY24 = 500;
+  var LOW_PRIORITY26 = 500;
   var DEFAULT_PRIORITY6 = 1e3;
-  function Outline(eventBus, styles) {
+  function Outline(eventBus, styles, elementRegistry) {
     this._eventBus = eventBus;
-    this.offset = 5;
-    var OUTLINE_STYLE = styles.cls("djs-outline", ["no-fill"]);
+    this._elementRegistry = elementRegistry;
+    this._outlineOffset = 5;
+    this._outlineStyle = styles.cls("djs-outline", ["no-fill"]);
     var self2 = this;
-    function createOutline(gfx) {
-      var outline = create("rect");
-      attr2(outline, assign({
-        x: 0,
-        y: 0,
-        rx: 4,
-        width: 100,
-        height: 100
-      }, OUTLINE_STYLE));
-      return outline;
+    function createElementOutline(element) {
+      if (isRoot(element)) {
+        return;
+      }
+      self2.createOutline(element);
     }
-    eventBus.on(["shape.added", "shape.changed"], LOW_PRIORITY24, function(event2) {
-      var element = event2.element, gfx = event2.gfx;
-      var outline = query(".djs-outline", gfx);
-      if (!outline) {
-        outline = self2.getOutline(element) || createOutline(gfx);
-        append(gfx, outline);
-      }
-      self2.updateShapeOutline(outline, element);
+    eventBus.on("element.hover", function(event2) {
+      createElementOutline(event2.element);
     });
-    eventBus.on(["connection.added", "connection.changed"], function(event2) {
+    eventBus.on("selection.changed", function(event2) {
+      forEach(event2.newSelection, createElementOutline);
+    });
+    eventBus.on(["shape.changed", "connection.changed"], LOW_PRIORITY26, function(event2) {
       var element = event2.element, gfx = event2.gfx;
       var outline = query(".djs-outline", gfx);
-      if (!outline) {
-        outline = createOutline(gfx);
-        append(gfx, outline);
+      if (outline) {
+        self2.updateOutline(element, outline);
       }
-      self2.updateConnectionOutline(outline, element);
     });
   }
+  Outline.prototype.createOutline = function(element) {
+    var gfx = this._elementRegistry.getGraphics(element);
+    if (!gfx) {
+      throw new Error("cannot create outline for non-rendered element");
+    }
+    var outline = query(".djs-outline", gfx);
+    if (!outline) {
+      outline = this.getOutline(element) || this._createOutlineGfx();
+      append(gfx, outline);
+      this.updateOutline(element, outline);
+    }
+    return outline;
+  };
+  Outline.prototype._createOutlineGfx = function() {
+    var outline = create("rect");
+    attr2(outline, assign({
+      x: 0,
+      y: 0,
+      rx: 4,
+      width: 100,
+      height: 100
+    }, this._outlineStyle));
+    return outline;
+  };
+  Outline.prototype.updateOutline = function(element, outline) {
+    if (element.waypoints) {
+      this.updateConnectionOutline(outline, element);
+    } else {
+      this.updateShapeOutline(outline, element);
+    }
+  };
   Outline.prototype.updateShapeOutline = function(outline, element) {
     var updated = false;
     var providers = this._getProviders();
@@ -35328,20 +36043,20 @@ var __AutoNateBpmnJS__ = (() => {
     }
     if (!updated) {
       attr2(outline, {
-        x: -this.offset,
-        y: -this.offset,
-        width: element.width + this.offset * 2,
-        height: element.height + this.offset * 2
+        x: -this._outlineOffset,
+        y: -this._outlineOffset,
+        width: element.width + this._outlineOffset * 2,
+        height: element.height + this._outlineOffset * 2
       });
     }
   };
   Outline.prototype.updateConnectionOutline = function(outline, connection) {
     var bbox = getBBox(connection);
     attr2(outline, {
-      x: bbox.x - this.offset,
-      y: bbox.y - this.offset,
-      width: bbox.width + this.offset * 2,
-      height: bbox.height + this.offset * 2
+      x: bbox.x - this._outlineOffset,
+      y: bbox.y - this._outlineOffset,
+      width: bbox.width + this._outlineOffset * 2,
+      height: bbox.height + this._outlineOffset * 2
     });
   };
   Outline.prototype.registerProvider = function(priority, provider) {
@@ -35445,16 +36160,16 @@ var __AutoNateBpmnJS__ = (() => {
       if (allowedElements.length === 1) {
         const element = allowedElements[0];
         if (isLabel(element)) {
-          createLink(element, element.labelTarget, newSelection);
+          createLink(element, element.labelTarget);
         } else if (element.labels?.length) {
-          createLink(element.labels[0], element, newSelection);
+          createLink(element.labels[0], element);
         }
       }
       if (allowedElements.length === 2) {
         const label = allowedElements.find(isLabel);
         const target = allowedElements.find((el) => el.labels?.includes(label));
         if (label && target) {
-          createLink(label, target, newSelection);
+          createLink(label, target);
         }
       }
     });
@@ -35463,24 +36178,24 @@ var __AutoNateBpmnJS__ = (() => {
         return;
       }
       if (isLabel(element)) {
-        createLink(element, element.labelTarget, selection.get());
+        createLink(element, element.labelTarget);
       } else if (element.labels?.length) {
-        createLink(element.labels[0], element, selection.get());
+        createLink(element.labels[0], element);
       }
     });
-    function createLink(label, target, selection2 = []) {
+    function createLink(label, target) {
       const line = createLine(
         [getMid(target), getMid(label)],
         LINE_STYLE
       );
       const linePath2 = line.getAttribute("d");
-      const labelSelected = selection2.includes(label);
+      const labelSelected = selection.isSelected(label);
       const labelPath = labelSelected ? getElementOutlinePath(label) : getElementPath(label);
       const labelInter = getElementLineIntersection(labelPath, linePath2);
       if (!labelInter) {
         return;
       }
-      const targetSelected = selection2.includes(target);
+      const targetSelected = selection.isSelected(target);
       const targetPath = targetSelected ? getElementOutlinePath(target) : getElementPath(target);
       const targetInter = getElementLineIntersection(targetPath, linePath2) || getMid(target);
       const distance2 = getDistancePointPoint(targetInter, labelInter);
@@ -35495,7 +36210,6 @@ var __AutoNateBpmnJS__ = (() => {
     }
     function getElementOutlinePath(element) {
       const outlineShape = outline.getOutline(element);
-      const outlineOffset = outline.offset;
       if (!outlineShape) {
         return getElementPath(element);
       }
@@ -35509,11 +36223,12 @@ var __AutoNateBpmnJS__ = (() => {
         return getRoundRectPath(shape, parseSvgNumAttr(outlineShape, "rx"));
       }
       if (outlineShape.cx) {
+        const radius = parseSvgNumAttr(outlineShape, "r");
         const shape = {
-          x: element.x - outlineOffset,
-          y: element.y - outlineOffset,
-          width: parseSvgNumAttr(outlineShape, "r") * 2,
-          height: parseSvgNumAttr(outlineShape, "r") * 2
+          x: element.x + parseSvgNumAttr(outlineShape, "cx") - radius,
+          y: element.y + parseSvgNumAttr(outlineShape, "cy") - radius,
+          width: radius * 2,
+          height: radius * 2
         };
         return getCirclePath(shape);
       }
@@ -35522,7 +36237,7 @@ var __AutoNateBpmnJS__ = (() => {
       return graphicsFactory.getShapePath(element);
     }
     function isElementSelected(element) {
-      return selection.get().includes(element);
+      return selection.isSelected(element);
     }
   }
   LabelLink.$inject = [
@@ -35549,7 +36264,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/tooltips/Tooltips.js
-  var ids2 = new IdGenerator("tt");
+  var ids3 = new IdGenerator("tt");
   function createRoot2(parentNode) {
     var root = domify(
       '<div class="djs-tooltip-container" />'
@@ -35573,7 +36288,7 @@ var __AutoNateBpmnJS__ = (() => {
   function Tooltips(eventBus, canvas) {
     this._eventBus = eventBus;
     this._canvas = canvas;
-    this._ids = ids2;
+    this._ids = ids3;
     this._tooltipDefaults = {
       show: {
         minZoom: 0.7,
@@ -35778,9 +36493,9 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/move/Move.js
-  var LOW_PRIORITY25 = 500;
+  var LOW_PRIORITY27 = 500;
   var MEDIUM_PRIORITY = 1250;
-  var HIGH_PRIORITY20 = 1500;
+  var HIGH_PRIORITY21 = 1500;
   var round13 = Math.round;
   function mid3(element) {
     return {
@@ -35797,7 +36512,7 @@ var __AutoNateBpmnJS__ = (() => {
         target
       });
     }
-    eventBus.on("shape.move.start", HIGH_PRIORITY20, function(event2) {
+    eventBus.on("shape.move.start", HIGH_PRIORITY21, function(event2) {
       var context = event2.context, shape = event2.shape, shapes = selection.get().slice();
       if (shapes.indexOf(shape) === -1) {
         shapes = [shape];
@@ -35816,7 +36531,7 @@ var __AutoNateBpmnJS__ = (() => {
         return false;
       }
     });
-    eventBus.on("shape.move.move", LOW_PRIORITY25, function(event2) {
+    eventBus.on("shape.move.move", LOW_PRIORITY27, function(event2) {
       var context = event2.context, validatedShapes = context.validatedShapes, hover = event2.hover, delta2 = { x: event2.dx, y: event2.dy }, position = { x: event2.x, y: event2.y }, canExecute;
       canExecute = canMove2(validatedShapes, delta2, position, hover);
       context.delta = delta2;
@@ -35865,7 +36580,7 @@ var __AutoNateBpmnJS__ = (() => {
         return;
       }
       var referencePoint = mid3(element);
-      dragging.init(event2, referencePoint, "shape.move", {
+      var result = dragging.init(event2, referencePoint, "shape.move", {
         cursor: "grabbing",
         autoActivate: activate,
         data: {
@@ -35873,7 +36588,9 @@ var __AutoNateBpmnJS__ = (() => {
           context: context || {}
         }
       });
-      return true;
+      if (result !== false) {
+        return true;
+      }
     }
     this.start = start;
   }
@@ -35885,10 +36602,10 @@ var __AutoNateBpmnJS__ = (() => {
     "rules"
   ];
   function removeNested(elements) {
-    var ids3 = groupBy(elements, "id");
+    var ids4 = groupBy(elements, "id");
     return filter(elements, function(element) {
       while (element = element.parent) {
-        if (ids3[element.id]) {
+        if (ids4[element.id]) {
           return false;
         }
       }
@@ -35897,7 +36614,7 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/diagram-js/lib/features/move/MovePreview.js
-  var LOW_PRIORITY26 = 499;
+  var LOW_PRIORITY28 = 499;
   var MARKER_DRAGGING2 = "djs-dragging";
   var MARKER_OK4 = "drop-ok";
   var MARKER_NOT_OK4 = "drop-not-ok";
@@ -35910,7 +36627,7 @@ var __AutoNateBpmnJS__ = (() => {
       return filteredElements;
     }
     function getAllDraggedElements(shapes) {
-      var allShapes = selfAndAllChildren(shapes, true);
+      var allShapes = selfAndAllChildren(shapes);
       var allConnections = allShapes.flatMap(
         (shape) => (shape.incoming || []).concat(shape.outgoing || [])
       );
@@ -35938,7 +36655,7 @@ var __AutoNateBpmnJS__ = (() => {
         context.allDraggedElements = [element];
       }
     }
-    eventBus.on("shape.move.start", LOW_PRIORITY26, function(event2) {
+    eventBus.on("shape.move.start", LOW_PRIORITY28, function(event2) {
       var context = event2.context, dragShapes = context.shapes, allDraggedElements = context.allDraggedElements;
       var visuallyDraggedShapes = getVisualDragShapes(dragShapes);
       if (!context.dragGroup) {
@@ -35965,7 +36682,7 @@ var __AutoNateBpmnJS__ = (() => {
       context.allDraggedElements = allDraggedElements;
       context.differentParents = haveDifferentParents(dragShapes);
     });
-    eventBus.on("shape.move.move", LOW_PRIORITY26, function(event2) {
+    eventBus.on("shape.move.move", LOW_PRIORITY28, function(event2) {
       var context = event2.context, dragGroup = context.dragGroup, target = context.target, parent = context.shape.parent, canExecute = context.canExecute;
       if (target) {
         if (canExecute === "attach") {
@@ -36002,11 +36719,15 @@ var __AutoNateBpmnJS__ = (() => {
     "previewSupport"
   ];
   function removeEdges(elements) {
+    var elementIds = /* @__PURE__ */ new Set();
+    elements.forEach(function(element) {
+      elementIds.add(element.id);
+    });
     var filteredElements = filter(elements, function(element) {
       if (!isConnection(element)) {
         return true;
       } else {
-        return find(elements, matchPattern({ id: element.source.id })) && find(elements, matchPattern({ id: element.target.id }));
+        return elementIds.has(element.source.id) && elementIds.has(element.target.id);
       }
     });
     return filteredElements;
@@ -36521,7 +37242,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/diagram-js/lib/features/hand-tool/HandTool.js
-  var HIGH_PRIORITY21 = 1500;
+  var HIGH_PRIORITY22 = 1500;
   var HAND_CURSOR = "grab";
   function HandTool(eventBus, canvas, dragging, injector, toolManager, mouse) {
     this._dragging = dragging;
@@ -36531,21 +37252,21 @@ var __AutoNateBpmnJS__ = (() => {
       tool: "hand",
       dragging: "hand.move"
     });
-    eventBus.on("element.mousedown", HIGH_PRIORITY21, function(event2) {
+    eventBus.on("element.mousedown", HIGH_PRIORITY22, function(event2) {
       if (!hasPrimaryModifier(event2)) {
         return;
       }
       self2.activateMove(event2.originalEvent, true);
       return false;
     });
-    keyboard && keyboard.addListener(HIGH_PRIORITY21, function(e5) {
+    keyboard && keyboard.addListener(HIGH_PRIORITY22, function(e5) {
       if (!isSpace(e5.keyEvent) || self2.isActive()) {
         return;
       }
       var mouseEvent = self2._mouse.getLastMoveEvent();
       self2.activateMove(mouseEvent, !!mouseEvent);
     }, "keyboard.keydown");
-    keyboard && keyboard.addListener(HIGH_PRIORITY21, function(e5) {
+    keyboard && keyboard.addListener(HIGH_PRIORITY22, function(e5) {
       if (!isSpace(e5.keyEvent) || !self2.isActive()) {
         return;
       }
@@ -36920,7 +37641,7 @@ var __AutoNateBpmnJS__ = (() => {
   };
 
   // node_modules/bpmn-js/lib/features/replace-preview/BpmnReplacePreview.js
-  var LOW_PRIORITY27 = 250;
+  var LOW_PRIORITY29 = 250;
   function BpmnReplacePreview(eventBus, elementRegistry, elementFactory, canvas, previewSupport) {
     CommandInterceptor.call(this, eventBus);
     function replaceVisual(context) {
@@ -36959,7 +37680,7 @@ var __AutoNateBpmnJS__ = (() => {
         }
       });
     }
-    eventBus.on("shape.move.move", LOW_PRIORITY27, function(event2) {
+    eventBus.on("shape.move.move", LOW_PRIORITY29, function(event2) {
       var context = event2.context, canExecute = context.canExecute;
       if (!context.visualReplacements) {
         context.visualReplacements = {};
@@ -37301,16 +38022,16 @@ var __AutoNateBpmnJS__ = (() => {
   }
 
   // node_modules/bpmn-js/lib/features/snapping/BpmnCreateMoveSnapping.js
-  var HIGH_PRIORITY22 = 1500;
+  var HIGH_PRIORITY23 = 1500;
   function BpmnCreateMoveSnapping(eventBus, injector) {
     injector.invoke(CreateMoveSnapping, this);
-    eventBus.on(["create.move", "create.end"], HIGH_PRIORITY22, setSnappedIfConstrained);
+    eventBus.on(["create.move", "create.end"], HIGH_PRIORITY23, setSnappedIfConstrained);
     eventBus.on([
       "create.move",
       "create.end",
       "shape.move.move",
       "shape.move.end"
-    ], HIGH_PRIORITY22, function(event2) {
+    ], HIGH_PRIORITY23, function(event2) {
       var context = event2.context, canExecute = context.canExecute, target = context.target;
       var canAttach2 = canExecute && (canExecute === "attach" || canExecute.attach);
       if (canAttach2 && !isSnapped(event2)) {
@@ -37354,7 +38075,7 @@ var __AutoNateBpmnJS__ = (() => {
     var elementRegistry = this._elementRegistry;
     forEach(shape.incoming, function(connection) {
       if (elementRegistry.get(shape.id)) {
-        if (!includes7(snapTargets, connection.source)) {
+        if (!includes4(snapTargets, connection.source)) {
           snapPoints.add("mid", getMid(connection.source));
         }
         var docking = connection.waypoints[0];
@@ -37363,7 +38084,7 @@ var __AutoNateBpmnJS__ = (() => {
     });
     forEach(shape.outgoing, function(connection) {
       if (elementRegistry.get(shape.id)) {
-        if (!includes7(snapTargets, connection.target)) {
+        if (!includes4(snapTargets, connection.target)) {
           snapPoints.add("mid", getMid(connection.target));
         }
         var docking = connection.waypoints[connection.waypoints.length - 1];
@@ -37425,7 +38146,7 @@ var __AutoNateBpmnJS__ = (() => {
       setSnapped(event2, "y", event2.y);
     }
   }
-  function includes7(array, value) {
+  function includes4(array, value) {
     return array.indexOf(value) !== -1;
   }
   function getDockingSnapOrigin(docking, isMove, event2) {
@@ -38256,106 +38977,505 @@ var __AutoNateBpmnJS__ = (() => {
   function assign3(target, ...others) {
     return Object.assign(target, ...others);
   }
-  var EVENT_GROUP = {
-    id: "events",
-    name: "Events"
-  };
-  var TASK_GROUP = {
-    id: "tasks",
-    name: "Tasks"
-  };
-  var DATA_GROUP = {
-    id: "data",
-    name: "Data"
-  };
-  var PARTICIPANT_GROUP = {
-    id: "participants",
-    name: "Participants"
-  };
-  var SUBPROCESS_GROUP = {
-    id: "subprocess",
-    name: "Sub-processes"
-  };
-  var GATEWAY_GROUP = {
-    id: "gateways",
-    name: "Gateways"
-  };
-  var NONE_EVENTS = [
-    {
+  var componentEvent2 = {};
+  var hasRequiredComponentEvent2;
+  function requireComponentEvent2() {
+    if (hasRequiredComponentEvent2) return componentEvent2;
+    hasRequiredComponentEvent2 = 1;
+    var bind3, unbind2, prefix2;
+    function detect() {
+      bind3 = window.addEventListener ? "addEventListener" : "attachEvent";
+      unbind2 = window.removeEventListener ? "removeEventListener" : "detachEvent";
+      prefix2 = bind3 !== "addEventListener" ? "on" : "";
+    }
+    componentEvent2.bind = function(el, type, fn, capture) {
+      if (!bind3) detect();
+      el[bind3](prefix2 + type, fn, capture || false);
+      return fn;
+    };
+    componentEvent2.unbind = function(el, type, fn, capture) {
+      if (!unbind2) detect();
+      el[unbind2](prefix2 + type, fn, capture || false);
+      return fn;
+    };
+    return componentEvent2;
+  }
+  requireComponentEvent2();
+  function query2(selector, el) {
+    el = el || document;
+    return el.querySelector(selector);
+  }
+  var nativeToString$1 = Object.prototype.toString;
+  var nativeHasOwnProperty$1 = Object.prototype.hasOwnProperty;
+  function isUndefined$1(obj) {
+    return obj === void 0;
+  }
+  function isNil$1(obj) {
+    return obj == null;
+  }
+  function isArray$1(obj) {
+    return nativeToString$1.call(obj) === "[object Array]";
+  }
+  function isObject2(obj) {
+    return nativeToString$1.call(obj) === "[object Object]";
+  }
+  function isNumber2(obj) {
+    return nativeToString$1.call(obj) === "[object Number]";
+  }
+  function isFunction$1(obj) {
+    const tag = nativeToString$1.call(obj);
+    return tag === "[object Function]" || tag === "[object AsyncFunction]" || tag === "[object GeneratorFunction]" || tag === "[object AsyncGeneratorFunction]" || tag === "[object Proxy]";
+  }
+  function has$1(target, key) {
+    return !isNil$1(target) && nativeHasOwnProperty$1.call(target, key);
+  }
+  function forEach$1(collection, iterator) {
+    let val, result;
+    if (isUndefined$1(collection)) {
+      return;
+    }
+    const convertKey = isArray$1(collection) ? toNum$1 : identity$1;
+    for (let key in collection) {
+      if (has$1(collection, key)) {
+        val = collection[key];
+        result = iterator(val, convertKey(key));
+        if (result === false) {
+          return val;
+        }
+      }
+    }
+  }
+  function identity$1(arg) {
+    return arg;
+  }
+  function toNum$1(arg) {
+    return Number(arg);
+  }
+  var KEYS_COPY2 = ["c", "C"];
+  var KEYS_PASTE2 = ["v", "V"];
+  var KEYS_DUPLICATE2 = ["d", "D"];
+  var KEYS_CUT2 = ["x", "X"];
+  var KEYS_REDO2 = ["y", "Y"];
+  var KEYS_UNDO2 = ["z", "Z"];
+  function isCmd2(event2) {
+    if (event2.altKey) {
+      return false;
+    }
+    return event2.ctrlKey || event2.metaKey;
+  }
+  function isKey2(keys2, event2) {
+    keys2 = isArray$1(keys2) ? keys2 : [keys2];
+    return keys2.indexOf(event2.key) !== -1 || keys2.indexOf(event2.code) !== -1;
+  }
+  function isShift2(event2) {
+    return event2.shiftKey;
+  }
+  function isCopy2(event2) {
+    return isCmd2(event2) && isKey2(KEYS_COPY2, event2);
+  }
+  function isPaste2(event2) {
+    return isCmd2(event2) && isKey2(KEYS_PASTE2, event2);
+  }
+  function isDuplicate2(event2) {
+    return isCmd2(event2) && isKey2(KEYS_DUPLICATE2, event2);
+  }
+  function isCut2(event2) {
+    return isCmd2(event2) && isKey2(KEYS_CUT2, event2);
+  }
+  function isUndo2(event2) {
+    return isCmd2(event2) && !isShift2(event2) && isKey2(KEYS_UNDO2, event2);
+  }
+  function isRedo2(event2) {
+    return isCmd2(event2) && (isKey2(KEYS_REDO2, event2) || isKey2(KEYS_UNDO2, event2) && isShift2(event2));
+  }
+  function isLabel2(value) {
+    return isObject2(value) && has$1(value, "labelTarget");
+  }
+  var nativeToString2 = Object.prototype.toString;
+  var nativeHasOwnProperty2 = Object.prototype.hasOwnProperty;
+  function isUndefined3(obj) {
+    return obj === void 0;
+  }
+  function isNil2(obj) {
+    return obj == null;
+  }
+  function isArray4(obj) {
+    return nativeToString2.call(obj) === "[object Array]";
+  }
+  function isFunction2(obj) {
+    const tag = nativeToString2.call(obj);
+    return tag === "[object Function]" || tag === "[object AsyncFunction]" || tag === "[object GeneratorFunction]" || tag === "[object AsyncGeneratorFunction]" || tag === "[object Proxy]";
+  }
+  function has2(target, key) {
+    return !isNil2(target) && nativeHasOwnProperty2.call(target, key);
+  }
+  function find2(collection, matcher) {
+    const matchFn = toMatcher2(matcher);
+    let match;
+    forEach2(collection, function(val, key) {
+      if (matchFn(val, key)) {
+        match = val;
+        return false;
+      }
+    });
+    return match;
+  }
+  function forEach2(collection, iterator) {
+    let val, result;
+    if (isUndefined3(collection)) {
+      return;
+    }
+    const convertKey = isArray4(collection) ? toNum2 : identity2;
+    for (let key in collection) {
+      if (has2(collection, key)) {
+        val = collection[key];
+        result = iterator(val, convertKey(key));
+        if (result === false) {
+          return val;
+        }
+      }
+    }
+  }
+  function some2(collection, matcher) {
+    return !!find2(collection, matcher);
+  }
+  function toMatcher2(matcher) {
+    return isFunction2(matcher) ? matcher : (e5) => {
+      return e5 === matcher;
+    };
+  }
+  function identity2(arg) {
+    return arg;
+  }
+  function toNum2(arg) {
+    return Number(arg);
+  }
+  function is3(element, type) {
+    var bo = getBusinessObject2(element);
+    return bo && typeof bo.$instanceOf === "function" && bo.$instanceOf(type);
+  }
+  function isAny2(element, types3) {
+    return some2(types3, function(t4) {
+      return is3(element, t4);
+    });
+  }
+  function getBusinessObject2(element) {
+    return element && element.businessObject || element;
+  }
+  function getDi2(element) {
+    return element && element.di;
+  }
+  function isExpanded2(element, di) {
+    if (is3(element, "bpmn:CallActivity")) {
+      return false;
+    }
+    if (is3(element, "bpmn:SubProcess")) {
+      di = di || getDi2(element);
+      if (di && is3(di, "bpmndi:BPMNPlane")) {
+        return true;
+      }
+      return di && !!di.isExpanded;
+    }
+    if (is3(element, "bpmn:Participant")) {
+      return !!getBusinessObject2(element).processRef;
+    }
+    return true;
+  }
+  function isDifferentType2(element) {
+    return function(entry) {
+      var target = entry.target;
+      var businessObject = getBusinessObject2(element), eventDefinition = businessObject.eventDefinitions && businessObject.eventDefinitions[0];
+      var isTypeEqual = businessObject.$type === target.type;
+      var isEventDefinitionEqual = (eventDefinition && eventDefinition.$type) === target.eventDefinitionType;
+      var isTriggeredByEventEqual = (
+        // coherse to <false>
+        !!target.triggeredByEvent === !!businessObject.triggeredByEvent
+      );
+      var isExpandedEqual = target.isExpanded === void 0 || target.isExpanded === isExpanded2(element);
+      return !isTypeEqual || !isEventDefinitionEqual || !isTriggeredByEventEqual || !isExpandedEqual;
+    };
+  }
+  var PopupEntries2 = {
+    // Tasks
+    "task": {
+      label: "Task",
+      className: "bpmn-icon-task",
+      target: {
+        type: "bpmn:Task"
+      }
+    },
+    "user-task": {
+      label: "User task",
+      className: "bpmn-icon-user",
+      target: {
+        type: "bpmn:UserTask"
+      }
+    },
+    "service-task": {
+      label: "Service task",
+      className: "bpmn-icon-service",
+      target: {
+        type: "bpmn:ServiceTask"
+      }
+    },
+    "send-task": {
+      label: "Send task",
+      className: "bpmn-icon-send",
+      target: {
+        type: "bpmn:SendTask"
+      }
+    },
+    "receive-task": {
+      label: "Receive task",
+      className: "bpmn-icon-receive",
+      target: {
+        type: "bpmn:ReceiveTask"
+      }
+    },
+    "manual-task": {
+      label: "Manual task",
+      className: "bpmn-icon-manual",
+      target: {
+        type: "bpmn:ManualTask"
+      }
+    },
+    "rule-task": {
+      label: "Business rule task",
+      className: "bpmn-icon-business-rule",
+      target: {
+        type: "bpmn:BusinessRuleTask"
+      }
+    },
+    "script-task": {
+      label: "Script task",
+      className: "bpmn-icon-script",
+      target: {
+        type: "bpmn:ScriptTask"
+      }
+    },
+    // Sub-processes
+    "call-activity": {
+      label: "Call activity",
+      className: "bpmn-icon-call-activity",
+      target: {
+        type: "bpmn:CallActivity"
+      }
+    },
+    "transaction": {
+      label: "Transaction",
+      className: "bpmn-icon-transaction",
+      target: {
+        type: "bpmn:Transaction",
+        isExpanded: true
+      }
+    },
+    "event-subprocess": {
+      label: "Event sub-process",
+      className: "bpmn-icon-event-subprocess-expanded",
+      target: {
+        type: "bpmn:SubProcess",
+        triggeredByEvent: true,
+        isExpanded: true
+      }
+    },
+    "collapsed-subprocess": {
+      label: "Sub-process (collapsed)",
+      className: "bpmn-icon-subprocess-collapsed",
+      target: {
+        type: "bpmn:SubProcess",
+        isExpanded: false
+      }
+    },
+    "expanded-subprocess": {
+      label: "Sub-process (expanded)",
+      className: "bpmn-icon-subprocess-expanded",
+      target: {
+        type: "bpmn:SubProcess",
+        isExpanded: true
+      }
+    },
+    "collapsed-ad-hoc-subprocess": {
+      label: "Ad-hoc sub-process (collapsed)",
+      className: "bpmn-icon-subprocess-collapsed",
+      target: {
+        type: "bpmn:AdHocSubProcess",
+        isExpanded: false
+      }
+    },
+    "expanded-ad-hoc-subprocess": {
+      label: "Ad-hoc sub-process (expanded)",
+      className: "bpmn-icon-subprocess-expanded",
+      target: {
+        type: "bpmn:AdHocSubProcess",
+        isExpanded: true
+      }
+    },
+    // Gateways
+    "exclusive-gateway": {
+      label: "Exclusive gateway",
+      className: "bpmn-icon-gateway-xor",
+      target: {
+        type: "bpmn:ExclusiveGateway"
+      }
+    },
+    "parallel-gateway": {
+      label: "Parallel gateway",
+      className: "bpmn-icon-gateway-parallel",
+      target: {
+        type: "bpmn:ParallelGateway"
+      }
+    },
+    "inclusive-gateway": {
+      label: "Inclusive gateway",
+      className: "bpmn-icon-gateway-or",
+      target: {
+        type: "bpmn:InclusiveGateway"
+      }
+    },
+    "complex-gateway": {
+      label: "Complex gateway",
+      className: "bpmn-icon-gateway-complex",
+      target: {
+        type: "bpmn:ComplexGateway"
+      }
+    },
+    "event-based-gateway": {
+      label: "Event-based gateway",
+      className: "bpmn-icon-gateway-eventbased",
+      target: {
+        type: "bpmn:EventBasedGateway",
+        instantiate: false,
+        eventGatewayType: "Exclusive"
+      }
+    },
+    // Data
+    "data-store-reference": {
+      label: "Data store reference",
+      className: "bpmn-icon-data-store",
+      target: {
+        type: "bpmn:DataStoreReference"
+      }
+    },
+    "data-object-reference": {
+      label: "Data object reference",
+      className: "bpmn-icon-data-object",
+      target: {
+        type: "bpmn:DataObjectReference"
+      }
+    },
+    // Participants
+    "expanded-pool": {
+      label: "Expanded pool/participant",
+      className: "bpmn-icon-participant",
+      target: {
+        type: "bpmn:Participant",
+        isExpanded: true
+      }
+    },
+    "collapsed-pool": {
+      label: "Empty pool/participant",
+      className: "bpmn-icon-lane",
+      target: {
+        type: "bpmn:Participant",
+        isExpanded: false
+      }
+    },
+    // Events — none
+    "none-start-event": {
       label: "Start event",
-      actionName: "none-start-event",
       className: "bpmn-icon-start-event-none",
       target: {
         type: "bpmn:StartEvent"
       }
     },
-    {
+    "none-intermediate-throwing": {
       label: "Intermediate throw event",
-      actionName: "none-intermediate-throwing",
       className: "bpmn-icon-intermediate-event-none",
       target: {
         type: "bpmn:IntermediateThrowEvent"
       }
     },
-    {
+    "none-boundary-event": {
       label: "Boundary event",
-      actionName: "none-boundary-event",
       className: "bpmn-icon-intermediate-event-none",
       target: {
         type: "bpmn:BoundaryEvent"
       }
     },
-    {
+    "none-end-event": {
       label: "End event",
-      actionName: "none-end-event",
       className: "bpmn-icon-end-event-none",
       target: {
         type: "bpmn:EndEvent"
       }
-    }
-  ].map((option) => ({ ...option, group: EVENT_GROUP }));
-  var TYPED_START_EVENTS = [
-    {
+    },
+    // Events — typed start
+    "message-start": {
       label: "Message start event",
-      actionName: "message-start",
       className: "bpmn-icon-start-event-message",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition"
+        eventDefinitionType: "bpmn:MessageEventDefinition",
+        isInterrupting: true
       }
     },
-    {
+    "timer-start": {
       label: "Timer start event",
-      actionName: "timer-start",
       className: "bpmn-icon-start-event-timer",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition"
+        eventDefinitionType: "bpmn:TimerEventDefinition",
+        isInterrupting: true
       }
     },
-    {
+    "conditional-start": {
       label: "Conditional start event",
-      actionName: "conditional-start",
       className: "bpmn-icon-start-event-condition",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition"
+        eventDefinitionType: "bpmn:ConditionalEventDefinition",
+        isInterrupting: true
       }
     },
-    {
+    "signal-start": {
       label: "Signal start event",
-      actionName: "signal-start",
       className: "bpmn-icon-start-event-signal",
       target: {
         type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition"
+        eventDefinitionType: "bpmn:SignalEventDefinition",
+        isInterrupting: true
       }
-    }
-  ].map((option) => ({ ...option, group: EVENT_GROUP }));
-  var TYPED_NON_INTERRUPTING_START_EVENTS = [
-    {
+    },
+    "error-start": {
+      label: "Error start event",
+      className: "bpmn-icon-start-event-error",
+      target: {
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:ErrorEventDefinition",
+        isInterrupting: true
+      }
+    },
+    "escalation-start": {
+      label: "Escalation start event",
+      className: "bpmn-icon-start-event-escalation",
+      target: {
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:EscalationEventDefinition",
+        isInterrupting: true
+      }
+    },
+    "compensation-start": {
+      label: "Compensation start event",
+      className: "bpmn-icon-start-event-compensation",
+      target: {
+        type: "bpmn:StartEvent",
+        eventDefinitionType: "bpmn:CompensateEventDefinition",
+        isInterrupting: true
+      }
+    },
+    // Events — non-interrupting start (event subprocess)
+    "non-interrupting-message-start": {
       label: "Message start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-message-start",
       className: "bpmn-icon-start-event-non-interrupting-message",
       target: {
         type: "bpmn:StartEvent",
@@ -38363,9 +39483,8 @@ var __AutoNateBpmnJS__ = (() => {
         isInterrupting: false
       }
     },
-    {
+    "non-interrupting-timer-start": {
       label: "Timer start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-timer-start",
       className: "bpmn-icon-start-event-non-interrupting-timer",
       target: {
         type: "bpmn:StartEvent",
@@ -38373,9 +39492,8 @@ var __AutoNateBpmnJS__ = (() => {
         isInterrupting: false
       }
     },
-    {
+    "non-interrupting-conditional-start": {
       label: "Conditional start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-conditional-start",
       className: "bpmn-icon-start-event-non-interrupting-condition",
       target: {
         type: "bpmn:StartEvent",
@@ -38383,9 +39501,8 @@ var __AutoNateBpmnJS__ = (() => {
         isInterrupting: false
       }
     },
-    {
+    "non-interrupting-signal-start": {
       label: "Signal start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-signal-start",
       className: "bpmn-icon-start-event-non-interrupting-signal",
       target: {
         type: "bpmn:StartEvent",
@@ -38393,66 +39510,58 @@ var __AutoNateBpmnJS__ = (() => {
         isInterrupting: false
       }
     },
-    {
+    "non-interrupting-escalation-start": {
       label: "Escalation start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-escalation-start",
       className: "bpmn-icon-start-event-non-interrupting-escalation",
       target: {
         type: "bpmn:StartEvent",
         eventDefinitionType: "bpmn:EscalationEventDefinition",
         isInterrupting: false
       }
-    }
-  ].map((option) => ({ ...option, group: EVENT_GROUP, rank: -1 }));
-  var TYPED_INTERMEDIATE_EVENT = [
-    {
+    },
+    // Events — intermediate (catch/throw)
+    "message-intermediate-catch": {
       label: "Message intermediate catch event",
-      actionName: "message-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-message",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:MessageEventDefinition"
       }
     },
-    {
+    "message-intermediate-throw": {
       label: "Message intermediate throw event",
-      actionName: "message-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-message",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:MessageEventDefinition"
       }
     },
-    {
+    "timer-intermediate-catch": {
       label: "Timer intermediate catch event",
-      actionName: "timer-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-timer",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:TimerEventDefinition"
       }
     },
-    {
+    "escalation-intermediate-throw": {
       label: "Escalation intermediate throw event",
-      actionName: "escalation-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-escalation",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:EscalationEventDefinition"
       }
     },
-    {
+    "conditional-intermediate-catch": {
       label: "Conditional intermediate catch event",
-      actionName: "conditional-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-condition",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:ConditionalEventDefinition"
       }
     },
-    {
+    "link-intermediate-catch": {
       label: "Link intermediate catch event",
-      actionName: "link-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-link",
       target: {
         type: "bpmn:IntermediateCatchEvent",
@@ -38462,9 +39571,8 @@ var __AutoNateBpmnJS__ = (() => {
         }
       }
     },
-    {
+    "link-intermediate-throw": {
       label: "Link intermediate throw event",
-      actionName: "link-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-link",
       target: {
         type: "bpmn:IntermediateThrowEvent",
@@ -38474,110 +39582,106 @@ var __AutoNateBpmnJS__ = (() => {
         }
       }
     },
-    {
+    "compensation-intermediate-throw": {
       label: "Compensation intermediate throw event",
-      actionName: "compensation-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-compensation",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:CompensateEventDefinition"
       }
     },
-    {
+    "signal-intermediate-catch": {
       label: "Signal intermediate catch event",
-      actionName: "signal-intermediate-catch",
       className: "bpmn-icon-intermediate-event-catch-signal",
       target: {
         type: "bpmn:IntermediateCatchEvent",
         eventDefinitionType: "bpmn:SignalEventDefinition"
       }
     },
-    {
+    "signal-intermediate-throw": {
       label: "Signal intermediate throw event",
-      actionName: "signal-intermediate-throw",
       className: "bpmn-icon-intermediate-event-throw-signal",
       target: {
         type: "bpmn:IntermediateThrowEvent",
         eventDefinitionType: "bpmn:SignalEventDefinition"
       }
-    }
-  ].map((option) => ({ ...option, group: EVENT_GROUP }));
-  var TYPED_BOUNDARY_EVENT = [
-    {
+    },
+    // Events — boundary (interrupting)
+    "message-boundary": {
       label: "Message boundary event",
-      actionName: "message-boundary",
       className: "bpmn-icon-intermediate-event-catch-message",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition"
+        eventDefinitionType: "bpmn:MessageEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "timer-boundary": {
       label: "Timer boundary event",
-      actionName: "timer-boundary",
       className: "bpmn-icon-intermediate-event-catch-timer",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition"
+        eventDefinitionType: "bpmn:TimerEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "escalation-boundary": {
       label: "Escalation boundary event",
-      actionName: "escalation-boundary",
       className: "bpmn-icon-intermediate-event-catch-escalation",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition"
+        eventDefinitionType: "bpmn:EscalationEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "conditional-boundary": {
       label: "Conditional boundary event",
-      actionName: "conditional-boundary",
       className: "bpmn-icon-intermediate-event-catch-condition",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition"
+        eventDefinitionType: "bpmn:ConditionalEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "error-boundary": {
       label: "Error boundary event",
-      actionName: "error-boundary",
       className: "bpmn-icon-intermediate-event-catch-error",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ErrorEventDefinition"
+        eventDefinitionType: "bpmn:ErrorEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "cancel-boundary": {
       label: "Cancel boundary event",
-      actionName: "cancel-boundary",
       className: "bpmn-icon-intermediate-event-catch-cancel",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:CancelEventDefinition"
+        eventDefinitionType: "bpmn:CancelEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "signal-boundary": {
       label: "Signal boundary event",
-      actionName: "signal-boundary",
       className: "bpmn-icon-intermediate-event-catch-signal",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition"
+        eventDefinitionType: "bpmn:SignalEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    "compensation-boundary": {
       label: "Compensation boundary event",
-      actionName: "compensation-boundary",
       className: "bpmn-icon-intermediate-event-catch-compensation",
       target: {
         type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:CompensateEventDefinition"
+        eventDefinitionType: "bpmn:CompensateEventDefinition",
+        cancelActivity: true
       }
     },
-    {
+    // Events — boundary (non-interrupting)
+    "non-interrupting-message-boundary": {
       label: "Message boundary event (non-interrupting)",
-      actionName: "non-interrupting-message-boundary",
       className: "bpmn-icon-intermediate-event-catch-non-interrupting-message",
       target: {
         type: "bpmn:BoundaryEvent",
@@ -38585,9 +39689,8 @@ var __AutoNateBpmnJS__ = (() => {
         cancelActivity: false
       }
     },
-    {
+    "non-interrupting-timer-boundary": {
       label: "Timer boundary event (non-interrupting)",
-      actionName: "non-interrupting-timer-boundary",
       className: "bpmn-icon-intermediate-event-catch-non-interrupting-timer",
       target: {
         type: "bpmn:BoundaryEvent",
@@ -38595,9 +39698,8 @@ var __AutoNateBpmnJS__ = (() => {
         cancelActivity: false
       }
     },
-    {
+    "non-interrupting-escalation-boundary": {
       label: "Escalation boundary event (non-interrupting)",
-      actionName: "non-interrupting-escalation-boundary",
       className: "bpmn-icon-intermediate-event-catch-non-interrupting-escalation",
       target: {
         type: "bpmn:BoundaryEvent",
@@ -38605,9 +39707,8 @@ var __AutoNateBpmnJS__ = (() => {
         cancelActivity: false
       }
     },
-    {
+    "non-interrupting-conditional-boundary": {
       label: "Conditional boundary event (non-interrupting)",
-      actionName: "non-interrupting-conditional-boundary",
       className: "bpmn-icon-intermediate-event-catch-non-interrupting-condition",
       target: {
         type: "bpmn:BoundaryEvent",
@@ -38615,321 +39716,451 @@ var __AutoNateBpmnJS__ = (() => {
         cancelActivity: false
       }
     },
-    {
+    "non-interrupting-signal-boundary": {
       label: "Signal boundary event (non-interrupting)",
-      actionName: "non-interrupting-signal-boundary",
       className: "bpmn-icon-intermediate-event-catch-non-interrupting-signal",
       target: {
         type: "bpmn:BoundaryEvent",
         eventDefinitionType: "bpmn:SignalEventDefinition",
         cancelActivity: false
       }
-    }
-  ].map((option) => ({ ...option, group: EVENT_GROUP }));
-  var TYPED_END_EVENT = [
-    {
+    },
+    // Events — typed end
+    "message-end": {
       label: "Message end event",
-      actionName: "message-end",
       className: "bpmn-icon-end-event-message",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:MessageEventDefinition"
       }
     },
-    {
+    "escalation-end": {
       label: "Escalation end event",
-      actionName: "escalation-end",
       className: "bpmn-icon-end-event-escalation",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:EscalationEventDefinition"
       }
     },
-    {
+    "error-end": {
       label: "Error end event",
-      actionName: "error-end",
       className: "bpmn-icon-end-event-error",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:ErrorEventDefinition"
       }
     },
-    {
+    "cancel-end": {
       label: "Cancel end event",
-      actionName: "cancel-end",
       className: "bpmn-icon-end-event-cancel",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:CancelEventDefinition"
       }
     },
-    {
+    "compensation-end": {
       label: "Compensation end event",
-      actionName: "compensation-end",
       className: "bpmn-icon-end-event-compensation",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:CompensateEventDefinition"
       }
     },
-    {
+    "signal-end": {
       label: "Signal end event",
-      actionName: "signal-end",
       className: "bpmn-icon-end-event-signal",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:SignalEventDefinition"
       }
     },
-    {
+    "terminate-end": {
       label: "Terminate end event",
-      actionName: "terminate-end",
       className: "bpmn-icon-end-event-terminate",
       target: {
         type: "bpmn:EndEvent",
         eventDefinitionType: "bpmn:TerminateEventDefinition"
       }
     }
-  ].map((option) => ({ ...option, group: EVENT_GROUP }));
+  };
+  function replaceWith2(id, extra = {}) {
+    var entry = PopupEntries2[id];
+    if (!entry) {
+      throw new Error("unknown popup entry <" + id + ">");
+    }
+    return {
+      ...entry,
+      actionName: "replace-with-" + id,
+      ...extra
+    };
+  }
+  var START_EVENT2 = [
+    replaceWith2("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith2("none-intermediate-throwing"),
+    replaceWith2("none-end-event", { actionName: "replace-with-none-end" }),
+    replaceWith2("message-start"),
+    replaceWith2("timer-start"),
+    replaceWith2("conditional-start"),
+    replaceWith2("signal-start")
+  ];
+  var START_EVENT_SUB_PROCESS2 = [
+    replaceWith2("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith2("none-intermediate-throwing"),
+    replaceWith2("none-end-event", { actionName: "replace-with-none-end" })
+  ];
+  var INTERMEDIATE_EVENT2 = [
+    replaceWith2("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith2("none-intermediate-throwing", { actionName: "replace-with-none-intermediate-throw" }),
+    replaceWith2("none-end-event", { actionName: "replace-with-none-end" }),
+    replaceWith2("message-intermediate-catch"),
+    replaceWith2("message-intermediate-throw"),
+    replaceWith2("timer-intermediate-catch"),
+    replaceWith2("escalation-intermediate-throw"),
+    replaceWith2("conditional-intermediate-catch"),
+    replaceWith2("link-intermediate-catch"),
+    replaceWith2("link-intermediate-throw"),
+    replaceWith2("compensation-intermediate-throw"),
+    replaceWith2("signal-intermediate-catch"),
+    replaceWith2("signal-intermediate-throw")
+  ];
+  var END_EVENT2 = [
+    replaceWith2("none-start-event", { actionName: "replace-with-none-start" }),
+    replaceWith2("none-intermediate-throwing", { actionName: "replace-with-none-intermediate-throw" }),
+    replaceWith2("none-end-event", { actionName: "replace-with-none-end" }),
+    replaceWith2("message-end"),
+    replaceWith2("escalation-end"),
+    replaceWith2("error-end"),
+    replaceWith2("cancel-end"),
+    replaceWith2("compensation-end"),
+    replaceWith2("signal-end"),
+    replaceWith2("terminate-end")
+  ];
   var GATEWAY$1 = [
-    {
-      label: "Exclusive gateway",
-      actionName: "exclusive-gateway",
-      className: "bpmn-icon-gateway-xor",
-      target: {
-        type: "bpmn:ExclusiveGateway"
-      }
-    },
-    {
-      label: "Parallel gateway",
-      actionName: "parallel-gateway",
-      className: "bpmn-icon-gateway-parallel",
-      target: {
-        type: "bpmn:ParallelGateway"
-      }
-    },
-    {
-      label: "Inclusive gateway",
-      search: "or",
-      actionName: "inclusive-gateway",
-      className: "bpmn-icon-gateway-or",
-      target: {
-        type: "bpmn:InclusiveGateway"
-      },
-      rank: -1
-    },
-    {
-      label: "Complex gateway",
-      actionName: "complex-gateway",
-      className: "bpmn-icon-gateway-complex",
-      target: {
-        type: "bpmn:ComplexGateway"
-      },
-      rank: -1
-    },
-    {
-      label: "Event-based gateway",
-      actionName: "event-based-gateway",
-      className: "bpmn-icon-gateway-eventbased",
-      target: {
-        type: "bpmn:EventBasedGateway",
-        instantiate: false,
-        eventGatewayType: "Exclusive"
-      }
-    }
-  ].map((option) => ({ ...option, group: GATEWAY_GROUP }));
-  var SUBPROCESS = [
-    {
-      label: "Call activity",
-      actionName: "call-activity",
-      className: "bpmn-icon-call-activity",
-      target: {
-        type: "bpmn:CallActivity"
-      }
-    },
-    {
-      label: "Transaction",
-      actionName: "transaction",
-      className: "bpmn-icon-transaction",
-      target: {
-        type: "bpmn:Transaction",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Event sub-process",
-      search: "subprocess",
-      actionName: "event-subprocess",
-      className: "bpmn-icon-event-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        triggeredByEvent: true,
-        isExpanded: true
-      }
-    },
-    {
-      label: "Sub-process (collapsed)",
-      search: "subprocess",
-      actionName: "collapsed-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: false
-      }
-    },
-    {
-      label: "Sub-process (expanded)",
-      search: "subprocess",
-      actionName: "expanded-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (collapsed)",
-      search: "adhoc subprocess",
-      actionName: "collapsed-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: false
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (expanded)",
-      search: "adhoc subprocess",
-      actionName: "expanded-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: true
-      }
-    }
-  ].map((option) => ({ ...option, group: SUBPROCESS_GROUP }));
+    replaceWith2("exclusive-gateway"),
+    replaceWith2("parallel-gateway"),
+    replaceWith2("inclusive-gateway"),
+    replaceWith2("complex-gateway"),
+    replaceWith2("event-based-gateway")
+    // Gateways deactivated until https://github.com/bpmn-io/bpmn-js/issues/194
+    // {
+    //   label: 'Event based instantiating Gateway',
+    //   actionName: 'replace-with-exclusive-event-based-gateway',
+    //   className: 'bpmn-icon-exclusive-event-based',
+    //   target: {
+    //     type: 'bpmn:EventBasedGateway'
+    //   },
+    //   options: {
+    //     businessObject: { instantiate: true, eventGatewayType: 'Exclusive' }
+    //   }
+    // },
+    // {
+    //   label: 'Parallel Event based instantiating Gateway',
+    //   actionName: 'replace-with-parallel-event-based-instantiate-gateway',
+    //   className: 'bpmn-icon-parallel-event-based-instantiate-gateway',
+    //   target: {
+    //     type: 'bpmn:EventBasedGateway'
+    //   },
+    //   options: {
+    //     businessObject: { instantiate: true, eventGatewayType: 'Parallel' }
+    //   }
+    // }
+  ];
+  var SUBPROCESS_EXPANDED2 = [
+    replaceWith2("transaction"),
+    replaceWith2("event-subprocess"),
+    replaceWith2("expanded-ad-hoc-subprocess", { actionName: "replace-with-ad-hoc-subprocess", label: "Ad-hoc sub-process" }),
+    replaceWith2("collapsed-subprocess")
+  ];
+  var AD_HOC_SUBPROCESS_EXPANDED2 = [
+    replaceWith2("expanded-subprocess", { actionName: "replace-with-subprocess", label: "Sub-process" }),
+    replaceWith2("transaction"),
+    replaceWith2("event-subprocess"),
+    replaceWith2("collapsed-ad-hoc-subprocess")
+  ];
+  var TRANSACTION2 = [
+    replaceWith2("transaction"),
+    replaceWith2("expanded-subprocess", { actionName: "replace-with-subprocess", label: "Sub-process" }),
+    replaceWith2("expanded-ad-hoc-subprocess", { actionName: "replace-with-ad-hoc-subprocess", label: "Ad-hoc sub-process" }),
+    replaceWith2("event-subprocess")
+  ];
+  var EVENT_SUB_PROCESS2 = TRANSACTION2;
   var TASK$1 = [
+    replaceWith2("task"),
+    replaceWith2("user-task"),
+    replaceWith2("service-task"),
+    replaceWith2("send-task"),
+    replaceWith2("receive-task"),
+    replaceWith2("manual-task"),
+    replaceWith2("rule-task"),
+    replaceWith2("script-task"),
+    replaceWith2("call-activity"),
+    replaceWith2("collapsed-subprocess"),
+    replaceWith2("expanded-subprocess"),
+    replaceWith2("collapsed-ad-hoc-subprocess"),
+    replaceWith2("expanded-ad-hoc-subprocess", { actionName: "replace-with-ad-hoc-subprocess" })
+  ];
+  var DATA_OBJECT_REFERENCE2 = [
+    replaceWith2("data-store-reference")
+  ];
+  var DATA_STORE_REFERENCE2 = [
+    replaceWith2("data-object-reference")
+  ];
+  var BOUNDARY_EVENT2 = [
+    replaceWith2("message-boundary"),
+    replaceWith2("timer-boundary"),
+    replaceWith2("escalation-boundary"),
+    replaceWith2("conditional-boundary"),
+    replaceWith2("error-boundary"),
+    replaceWith2("cancel-boundary"),
+    replaceWith2("signal-boundary"),
+    replaceWith2("compensation-boundary"),
+    replaceWith2("non-interrupting-message-boundary"),
+    replaceWith2("non-interrupting-timer-boundary"),
+    replaceWith2("non-interrupting-escalation-boundary"),
+    replaceWith2("non-interrupting-conditional-boundary"),
+    replaceWith2("non-interrupting-signal-boundary")
+  ];
+  var EVENT_SUB_PROCESS_START_EVENT2 = [
+    replaceWith2("message-start"),
+    replaceWith2("timer-start"),
+    replaceWith2("conditional-start"),
+    replaceWith2("signal-start"),
+    replaceWith2("error-start"),
+    replaceWith2("escalation-start"),
+    replaceWith2("compensation-start"),
+    replaceWith2("non-interrupting-message-start"),
+    replaceWith2("non-interrupting-timer-start"),
+    replaceWith2("non-interrupting-conditional-start"),
+    replaceWith2("non-interrupting-signal-start"),
+    replaceWith2("non-interrupting-escalation-start")
+  ];
+  var SEQUENCE_FLOW2 = [
     {
-      label: "Task",
-      actionName: "task",
-      className: "bpmn-icon-task",
-      target: {
-        type: "bpmn:Task"
-      }
+      label: "Sequence flow",
+      actionName: "replace-with-sequence-flow",
+      className: "bpmn-icon-connection"
     },
     {
-      label: "User task",
-      actionName: "user-task",
-      className: "bpmn-icon-user",
-      target: {
-        type: "bpmn:UserTask"
-      }
+      label: "Default flow",
+      actionName: "replace-with-default-flow",
+      className: "bpmn-icon-default-flow"
     },
     {
-      label: "Service task",
-      actionName: "service-task",
-      className: "bpmn-icon-service",
-      target: {
-        type: "bpmn:ServiceTask"
-      }
-    },
-    {
-      label: "Send task",
-      actionName: "send-task",
-      className: "bpmn-icon-send",
-      target: {
-        type: "bpmn:SendTask"
-      },
-      rank: -1
-    },
-    {
-      label: "Receive task",
-      actionName: "receive-task",
-      className: "bpmn-icon-receive",
-      target: {
-        type: "bpmn:ReceiveTask"
-      },
-      rank: -1
-    },
-    {
-      label: "Manual task",
-      actionName: "manual-task",
-      className: "bpmn-icon-manual",
-      target: {
-        type: "bpmn:ManualTask"
-      },
-      rank: -1
-    },
-    {
-      label: "Business rule task",
-      actionName: "rule-task",
-      className: "bpmn-icon-business-rule",
-      target: {
-        type: "bpmn:BusinessRuleTask"
-      }
-    },
-    {
-      label: "Script task",
-      actionName: "script-task",
-      className: "bpmn-icon-script",
-      target: {
-        type: "bpmn:ScriptTask"
-      }
+      label: "Conditional flow",
+      actionName: "replace-with-conditional-flow",
+      className: "bpmn-icon-conditional-flow"
     }
-  ].map((option) => ({ ...option, group: TASK_GROUP }));
-  var DATA_OBJECTS = [
-    {
-      label: "Data store reference",
-      actionName: "data-store-reference",
-      className: "bpmn-icon-data-store",
-      target: {
-        type: "bpmn:DataStoreReference"
-      }
-    },
-    {
-      label: "Data object reference",
-      actionName: "data-object-reference",
-      className: "bpmn-icon-data-object",
-      target: {
-        type: "bpmn:DataObjectReference"
-      }
-    }
-  ].map((option) => ({ ...option, group: DATA_GROUP }));
+  ];
   var PARTICIPANT$1 = [
-    {
-      label: "Expanded pool/participant",
-      search: "Non-empty pool/participant",
-      actionName: "expanded-pool",
-      className: "bpmn-icon-participant",
-      target: {
-        type: "bpmn:Participant",
-        isExpanded: true
+    replaceWith2("expanded-pool"),
+    replaceWith2("collapsed-pool", {
+      label: function(element) {
+        var label = "Empty pool/participant";
+        if (element.children && element.children.length) {
+          label += " (removes content)";
+        }
+        return label;
       }
-    },
-    {
-      label: "Empty pool/participant",
-      search: "Collapsed pool/participant",
-      actionName: "collapsed-pool",
-      className: "bpmn-icon-lane",
-      target: {
-        type: "bpmn:Participant",
-        isExpanded: false
-      }
+    })
+  ];
+  var TYPED_EVENT2 = {
+    "bpmn:MessageEventDefinition": [
+      replaceWith2("message-start"),
+      replaceWith2("message-intermediate-catch"),
+      replaceWith2("message-intermediate-throw"),
+      replaceWith2("message-end")
+    ],
+    "bpmn:TimerEventDefinition": [
+      replaceWith2("timer-start"),
+      replaceWith2("timer-intermediate-catch")
+    ],
+    "bpmn:ConditionalEventDefinition": [
+      replaceWith2("conditional-start"),
+      replaceWith2("conditional-intermediate-catch")
+    ],
+    "bpmn:SignalEventDefinition": [
+      replaceWith2("signal-start"),
+      replaceWith2("signal-intermediate-catch"),
+      replaceWith2("signal-intermediate-throw"),
+      replaceWith2("signal-end")
+    ],
+    "bpmn:ErrorEventDefinition": [
+      replaceWith2("error-start"),
+      replaceWith2("error-end")
+    ],
+    "bpmn:EscalationEventDefinition": [
+      replaceWith2("escalation-start"),
+      replaceWith2("escalation-intermediate-throw"),
+      replaceWith2("escalation-end")
+    ],
+    "bpmn:CompensateEventDefinition": [
+      replaceWith2("compensation-start"),
+      replaceWith2("compensation-intermediate-throw"),
+      replaceWith2("compensation-end")
+    ]
+  };
+  var replaceOptions = /* @__PURE__ */ Object.freeze({
+    __proto__: null,
+    AD_HOC_SUBPROCESS_EXPANDED: AD_HOC_SUBPROCESS_EXPANDED2,
+    BOUNDARY_EVENT: BOUNDARY_EVENT2,
+    DATA_OBJECT_REFERENCE: DATA_OBJECT_REFERENCE2,
+    DATA_STORE_REFERENCE: DATA_STORE_REFERENCE2,
+    END_EVENT: END_EVENT2,
+    EVENT_SUB_PROCESS: EVENT_SUB_PROCESS2,
+    EVENT_SUB_PROCESS_START_EVENT: EVENT_SUB_PROCESS_START_EVENT2,
+    GATEWAY: GATEWAY$1,
+    INTERMEDIATE_EVENT: INTERMEDIATE_EVENT2,
+    PARTICIPANT: PARTICIPANT$1,
+    SEQUENCE_FLOW: SEQUENCE_FLOW2,
+    START_EVENT: START_EVENT2,
+    START_EVENT_SUB_PROCESS: START_EVENT_SUB_PROCESS2,
+    SUBPROCESS_EXPANDED: SUBPROCESS_EXPANDED2,
+    TASK: TASK$1,
+    TRANSACTION: TRANSACTION2,
+    TYPED_EVENT: TYPED_EVENT2
+  });
+  var createOption = (id, extra = {}) => {
+    const entry = PopupEntries2[id];
+    if (!entry) {
+      throw new Error("unknown popup entry <" + id + ">");
     }
-  ].map((option) => ({ ...option, group: PARTICIPANT_GROUP }));
-  var CREATE_OPTIONS = [
-    ...GATEWAY$1,
-    ...TASK$1,
-    ...SUBPROCESS,
+    return {
+      ...entry,
+      actionName: id,
+      ...extra
+    };
+  };
+  var EVENT_GROUP = { id: "events", name: "Events" };
+  var TASK_GROUP = { id: "tasks", name: "Tasks" };
+  var GATEWAY_GROUP = { id: "gateways", name: "Gateways" };
+  var SUBPROCESS_GROUP = { id: "subprocess", name: "Sub-processes" };
+  var DATA_GROUP = { id: "data", name: "Data" };
+  var PARTICIPANT_GROUP = { id: "participants", name: "Participants" };
+  var NONE_EVENTS = [
+    createOption("none-start-event", { group: EVENT_GROUP }),
+    createOption("none-intermediate-throwing", { group: EVENT_GROUP }),
+    createOption("none-boundary-event", { group: EVENT_GROUP }),
+    createOption("none-end-event", { group: EVENT_GROUP })
+  ];
+  var TYPED_START_EVENTS = [
+    createOption("message-start", { group: EVENT_GROUP }),
+    createOption("timer-start", { group: EVENT_GROUP }),
+    createOption("conditional-start", { group: EVENT_GROUP }),
+    createOption("signal-start", { group: EVENT_GROUP })
+  ];
+  var TYPED_NON_INTERRUPTING_START_EVENTS = [
+    createOption("non-interrupting-message-start", { group: EVENT_GROUP, actionName: "replace-with-non-interrupting-message-start", rank: -1 }),
+    createOption("non-interrupting-timer-start", { group: EVENT_GROUP, actionName: "replace-with-non-interrupting-timer-start", rank: -1 }),
+    createOption("non-interrupting-conditional-start", { group: EVENT_GROUP, actionName: "replace-with-non-interrupting-conditional-start", rank: -1 }),
+    createOption("non-interrupting-signal-start", { group: EVENT_GROUP, actionName: "replace-with-non-interrupting-signal-start", rank: -1 }),
+    createOption("non-interrupting-escalation-start", { group: EVENT_GROUP, actionName: "replace-with-non-interrupting-escalation-start", rank: -1 })
+  ];
+  var TYPED_INTERMEDIATE_EVENT = [
+    createOption("message-intermediate-catch", { group: EVENT_GROUP }),
+    createOption("message-intermediate-throw", { group: EVENT_GROUP }),
+    createOption("timer-intermediate-catch", { group: EVENT_GROUP }),
+    createOption("escalation-intermediate-throw", { group: EVENT_GROUP }),
+    createOption("conditional-intermediate-catch", { group: EVENT_GROUP }),
+    createOption("link-intermediate-catch", { group: EVENT_GROUP }),
+    createOption("link-intermediate-throw", { group: EVENT_GROUP }),
+    createOption("compensation-intermediate-throw", { group: EVENT_GROUP }),
+    createOption("signal-intermediate-catch", { group: EVENT_GROUP }),
+    createOption("signal-intermediate-throw", { group: EVENT_GROUP })
+  ];
+  var TYPED_BOUNDARY_EVENT = [
+    createOption("message-boundary", { group: EVENT_GROUP }),
+    createOption("timer-boundary", { group: EVENT_GROUP }),
+    createOption("escalation-boundary", { group: EVENT_GROUP }),
+    createOption("conditional-boundary", { group: EVENT_GROUP }),
+    createOption("error-boundary", { group: EVENT_GROUP }),
+    createOption("cancel-boundary", { group: EVENT_GROUP }),
+    createOption("signal-boundary", { group: EVENT_GROUP }),
+    createOption("compensation-boundary", { group: EVENT_GROUP }),
+    createOption("non-interrupting-message-boundary", { group: EVENT_GROUP }),
+    createOption("non-interrupting-timer-boundary", { group: EVENT_GROUP }),
+    createOption("non-interrupting-escalation-boundary", { group: EVENT_GROUP }),
+    createOption("non-interrupting-conditional-boundary", { group: EVENT_GROUP }),
+    createOption("non-interrupting-signal-boundary", { group: EVENT_GROUP })
+  ];
+  var TYPED_END_EVENT = [
+    createOption("message-end", { group: EVENT_GROUP }),
+    createOption("escalation-end", { group: EVENT_GROUP }),
+    createOption("error-end", { group: EVENT_GROUP }),
+    createOption("cancel-end", { group: EVENT_GROUP }),
+    createOption("compensation-end", { group: EVENT_GROUP }),
+    createOption("signal-end", { group: EVENT_GROUP }),
+    createOption("terminate-end", { group: EVENT_GROUP })
+  ];
+  var GATEWAY2 = [
+    createOption("exclusive-gateway", { group: GATEWAY_GROUP }),
+    createOption("parallel-gateway", { group: GATEWAY_GROUP }),
+    createOption("inclusive-gateway", { group: GATEWAY_GROUP, search: "or", rank: -1 }),
+    createOption("complex-gateway", { group: GATEWAY_GROUP, rank: -1 }),
+    createOption("event-based-gateway", { group: GATEWAY_GROUP })
+  ];
+  var SUBPROCESS = [
+    createOption("call-activity", { group: SUBPROCESS_GROUP }),
+    createOption("transaction", { group: SUBPROCESS_GROUP }),
+    createOption("event-subprocess", { group: SUBPROCESS_GROUP, search: "subprocess" }),
+    createOption("collapsed-subprocess", { group: SUBPROCESS_GROUP, search: "subprocess" }),
+    createOption("expanded-subprocess", { group: SUBPROCESS_GROUP, search: "subprocess" }),
+    createOption("collapsed-ad-hoc-subprocess", { group: SUBPROCESS_GROUP, search: "adhoc subprocess" }),
+    createOption("expanded-ad-hoc-subprocess", { group: SUBPROCESS_GROUP, search: "adhoc subprocess" })
+  ];
+  var TASK2 = [
+    createOption("task", { group: TASK_GROUP }),
+    createOption("user-task", { group: TASK_GROUP }),
+    createOption("service-task", { group: TASK_GROUP }),
+    createOption("send-task", { group: TASK_GROUP, rank: -1 }),
+    createOption("receive-task", { group: TASK_GROUP, rank: -1 }),
+    createOption("manual-task", { group: TASK_GROUP, rank: -1 }),
+    createOption("rule-task", { group: TASK_GROUP }),
+    createOption("script-task", { group: TASK_GROUP })
+  ];
+  var DATA_OBJECTS = [
+    createOption("data-store-reference", { group: DATA_GROUP }),
+    createOption("data-object-reference", { group: DATA_GROUP })
+  ];
+  var PARTICIPANT2 = [
+    createOption("expanded-pool", { group: PARTICIPANT_GROUP, search: "Non-empty pool/participant" }),
+    createOption("collapsed-pool", { group: PARTICIPANT_GROUP, search: "Collapsed pool/participant" })
+  ];
+  var ALL_EVENTS = [
     ...NONE_EVENTS,
     ...TYPED_START_EVENTS,
     ...TYPED_NON_INTERRUPTING_START_EVENTS,
     ...TYPED_INTERMEDIATE_EVENT,
-    ...TYPED_END_EVENT,
     ...TYPED_BOUNDARY_EVENT,
-    ...DATA_OBJECTS,
-    ...PARTICIPANT$1
+    ...TYPED_END_EVENT
   ];
+  var CREATE_OPTIONS = [
+    ...TASK2,
+    ...GATEWAY2,
+    ...SUBPROCESS,
+    ...ALL_EVENTS,
+    ...DATA_OBJECTS,
+    ...PARTICIPANT2
+  ];
+  function buildMenuEntries(options, config) {
+    const entries = {};
+    options.forEach((option) => {
+      if (!config.filter || config.filter(option)) {
+        entries[`${config.idPrefix}-${option.actionName}`] = toActionEntry(option, config);
+      }
+    });
+    return entries;
+  }
+  function toActionEntry(option, { translate: translate3, createAction }) {
+    return {
+      label: option.label && translate3(option.label),
+      className: option.className,
+      description: option.description && translate3(option.description),
+      group: option.group && { ...option.group, name: translate3(option.group.name) },
+      search: option.search,
+      rank: option.rank,
+      action: createAction(option)
+    };
+  }
   function AppendMenuProvider(elementFactory, popupMenu, create3, autoPlace, rules, mouse, translate3, modeling, selection) {
     this._elementFactory = elementFactory;
     this._popupMenu = popupMenu;
@@ -38957,57 +40188,31 @@ var __AutoNateBpmnJS__ = (() => {
     this._popupMenu.registerProvider("bpmn-append", this);
   };
   AppendMenuProvider.prototype.getPopupMenuEntries = function(element) {
-    const rules = this._rules;
-    const translate3 = this._translate;
-    const entries = {};
-    if (!rules.allowed("shape.append", { element })) {
-      return [];
+    if (!this._rules.allowed("shape.append", { element })) {
+      return {};
     }
-    const appendOptions = this._filterEntries(CREATE_OPTIONS);
-    appendOptions.forEach((option) => {
-      const {
-        actionName,
-        className,
-        label,
-        target,
-        description,
-        group,
-        search: search2,
-        rank
-      } = option;
-      entries[`append-${actionName}`] = {
-        label: label && translate3(label),
-        className,
-        description,
-        group: group && {
-          ...group,
-          name: translate3(group.name)
-        },
-        search: search2,
-        rank,
-        action: this._createEntryAction(element, target)
-      };
+    return buildMenuEntries(CREATE_OPTIONS, {
+      idPrefix: "append",
+      translate: this._translate,
+      filter: (option) => this._includeOption(option),
+      createAction: (option) => this._createEntryAction(element, option.target)
     });
-    return entries;
   };
-  AppendMenuProvider.prototype._filterEntries = function(entries) {
-    return entries.filter((option) => {
-      const target = option.target;
-      const {
-        type,
-        eventDefinitionType
-      } = target;
-      if ([
-        "bpmn:StartEvent",
-        "bpmn:Participant"
-      ].includes(type)) {
-        return false;
-      }
-      if (type === "bpmn:BoundaryEvent" && isUndefined$2(eventDefinitionType)) {
-        return false;
-      }
-      return true;
-    });
+  AppendMenuProvider.prototype._includeOption = function(option) {
+    const {
+      type,
+      eventDefinitionType
+    } = option.target;
+    if ([
+      "bpmn:StartEvent",
+      "bpmn:Participant"
+    ].includes(type)) {
+      return false;
+    }
+    if (type === "bpmn:BoundaryEvent" && isUndefined$2(eventDefinitionType)) {
+      return false;
+    }
+    return true;
   };
   AppendMenuProvider.prototype._createEntryAction = function(element, target) {
     const elementFactory = this._elementFactory;
@@ -39124,7 +40329,7 @@ var __AutoNateBpmnJS__ = (() => {
               });
               popupMenu.open(element2, "bpmn-append", position, {
                 title: translate3("Append element"),
-                width: 300,
+                width: "var(--bpmn-append-popup-width, 300px)",
                 search: true
               });
             }
@@ -39146,129 +40351,6 @@ var __AutoNateBpmnJS__ = (() => {
   function e4(e5, t4) {
     t4 && (e5.super_ = t4, e5.prototype = Object.create(t4.prototype, { constructor: { value: e5, enumerable: false, writable: true, configurable: true } }));
   }
-  var nativeToString$1 = Object.prototype.toString;
-  var nativeHasOwnProperty$1 = Object.prototype.hasOwnProperty;
-  function isUndefined$1(obj) {
-    return obj === void 0;
-  }
-  function isNil$1(obj) {
-    return obj == null;
-  }
-  function isArray$1(obj) {
-    return nativeToString$1.call(obj) === "[object Array]";
-  }
-  function isFunction$1(obj) {
-    const tag = nativeToString$1.call(obj);
-    return tag === "[object Function]" || tag === "[object AsyncFunction]" || tag === "[object GeneratorFunction]" || tag === "[object AsyncGeneratorFunction]" || tag === "[object Proxy]";
-  }
-  function has$1(target, key) {
-    return !isNil$1(target) && nativeHasOwnProperty$1.call(target, key);
-  }
-  function find2(collection, matcher) {
-    const matchFn = toMatcher2(matcher);
-    let match;
-    forEach$1(collection, function(val, key) {
-      if (matchFn(val, key)) {
-        match = val;
-        return false;
-      }
-    });
-    return match;
-  }
-  function forEach$1(collection, iterator) {
-    let val, result;
-    if (isUndefined$1(collection)) {
-      return;
-    }
-    const convertKey = isArray$1(collection) ? toNum$1 : identity$1;
-    for (let key in collection) {
-      if (has$1(collection, key)) {
-        val = collection[key];
-        result = iterator(val, convertKey(key));
-        if (result === false) {
-          return val;
-        }
-      }
-    }
-  }
-  function some2(collection, matcher) {
-    return !!find2(collection, matcher);
-  }
-  function toMatcher2(matcher) {
-    return isFunction$1(matcher) ? matcher : (e5) => {
-      return e5 === matcher;
-    };
-  }
-  function identity$1(arg) {
-    return arg;
-  }
-  function toNum$1(arg) {
-    return Number(arg);
-  }
-  function is3(element, type) {
-    var bo = getBusinessObject2(element);
-    return bo && typeof bo.$instanceOf === "function" && bo.$instanceOf(type);
-  }
-  function isAny2(element, types3) {
-    return some2(types3, function(t4) {
-      return is3(element, t4);
-    });
-  }
-  function getBusinessObject2(element) {
-    return element && element.businessObject || element;
-  }
-  function getDi2(element) {
-    return element && element.di;
-  }
-  var nativeToString2 = Object.prototype.toString;
-  var nativeHasOwnProperty2 = Object.prototype.hasOwnProperty;
-  function isUndefined3(obj) {
-    return obj === void 0;
-  }
-  function isNil2(obj) {
-    return obj == null;
-  }
-  function isArray4(obj) {
-    return nativeToString2.call(obj) === "[object Array]";
-  }
-  function isObject2(obj) {
-    return nativeToString2.call(obj) === "[object Object]";
-  }
-  function isNumber2(obj) {
-    return nativeToString2.call(obj) === "[object Number]";
-  }
-  function isFunction2(obj) {
-    const tag = nativeToString2.call(obj);
-    return tag === "[object Function]" || tag === "[object AsyncFunction]" || tag === "[object GeneratorFunction]" || tag === "[object AsyncGeneratorFunction]" || tag === "[object Proxy]";
-  }
-  function has2(target, key) {
-    return !isNil2(target) && nativeHasOwnProperty2.call(target, key);
-  }
-  function forEach2(collection, iterator) {
-    let val, result;
-    if (isUndefined3(collection)) {
-      return;
-    }
-    const convertKey = isArray4(collection) ? toNum2 : identity2;
-    for (let key in collection) {
-      if (has2(collection, key)) {
-        val = collection[key];
-        result = iterator(val, convertKey(key));
-        if (result === false) {
-          return val;
-        }
-      }
-    }
-  }
-  function identity2(arg) {
-    return arg;
-  }
-  function toNum2(arg) {
-    return Number(arg);
-  }
-  function isLabel2(value) {
-    return isObject2(value) && has2(value, "labelTarget");
-  }
   var DEFAULT_PRIORITY8 = 1e3;
   function CommandInterceptor2(eventBus) {
     this._eventBus = eventBus;
@@ -39280,14 +40362,14 @@ var __AutoNateBpmnJS__ = (() => {
     };
   }
   CommandInterceptor2.prototype.on = function(events, hook, priority, handlerFn, unwrap, that) {
-    if (isFunction2(hook) || isNumber2(hook)) {
+    if (isFunction$1(hook) || isNumber2(hook)) {
       that = unwrap;
       unwrap = handlerFn;
       handlerFn = priority;
       priority = hook;
       hook = null;
     }
-    if (isFunction2(priority)) {
+    if (isFunction$1(priority)) {
       that = unwrap;
       unwrap = handlerFn;
       handlerFn = priority;
@@ -39297,14 +40379,14 @@ var __AutoNateBpmnJS__ = (() => {
       that = unwrap;
       unwrap = false;
     }
-    if (!isFunction2(handlerFn)) {
+    if (!isFunction$1(handlerFn)) {
       throw new Error("handlerFn must be a function");
     }
-    if (!isArray4(events)) {
+    if (!isArray$1(events)) {
       events = [events];
     }
     var eventBus = this._eventBus;
-    forEach2(events, function(event2) {
+    forEach$1(events, function(event2) {
       var fullEvent = ["commandStack", event2, hook].filter(function(e5) {
         return e5;
       }).join(".");
@@ -39322,7 +40404,7 @@ var __AutoNateBpmnJS__ = (() => {
   CommandInterceptor2.prototype.reverted = createHook2("reverted");
   function createHook2(hook) {
     const hookFn = function(events, priority, handlerFn, unwrap, that) {
-      if (isFunction2(events) || isNumber2(events)) {
+      if (isFunction$1(events) || isNumber2(events)) {
         that = unwrap;
         unwrap = handlerFn;
         handlerFn = priority;
@@ -39380,6 +40462,9 @@ var __AutoNateBpmnJS__ = (() => {
       if (isConnection2(source)) {
         return false;
       }
+      if (businessObject.isForCompensation) {
+        return false;
+      }
       if (is3(source, "bpmn:IntermediateThrowEvent") && hasEventDefinition4(source, "bpmn:LinkEventDefinition")) {
         return false;
       }
@@ -39428,36 +40513,17 @@ var __AutoNateBpmnJS__ = (() => {
     this._popupMenu.registerProvider("bpmn-create", this);
   };
   CreateMenuProvider.prototype.getPopupMenuEntries = function() {
-    const entries = {};
-    CREATE_OPTIONS.forEach((option) => {
-      const {
-        actionName,
-        className,
-        label,
-        target,
-        description,
-        group,
-        search: search2,
-        rank
-      } = option;
-      const targetAction = this._createEntryAction(target);
-      entries[`create-${actionName}`] = {
-        label: label && this._translate(label),
-        className,
-        description,
-        group: group && {
-          ...group,
-          name: this._translate(group.name)
-        },
-        search: search2,
-        rank,
-        action: {
+    return buildMenuEntries(CREATE_OPTIONS, {
+      idPrefix: "create",
+      translate: this._translate,
+      createAction: (option) => {
+        const targetAction = this._createEntryAction(option.target);
+        return {
           click: targetAction,
           dragstart: targetAction
-        }
-      };
+        };
+      }
     });
-    return entries;
   };
   CreateMenuProvider.prototype._createEntryAction = function(target) {
     const create3 = this._create;
@@ -39478,34 +40544,6 @@ var __AutoNateBpmnJS__ = (() => {
       return create3.start(event2, newElement);
     };
   };
-  var componentEvent2 = {};
-  var hasRequiredComponentEvent2;
-  function requireComponentEvent2() {
-    if (hasRequiredComponentEvent2) return componentEvent2;
-    hasRequiredComponentEvent2 = 1;
-    var bind3, unbind2, prefix2;
-    function detect() {
-      bind3 = window.addEventListener ? "addEventListener" : "attachEvent";
-      unbind2 = window.removeEventListener ? "removeEventListener" : "detachEvent";
-      prefix2 = bind3 !== "addEventListener" ? "on" : "";
-    }
-    componentEvent2.bind = function(el, type, fn, capture) {
-      if (!bind3) detect();
-      el[bind3](prefix2 + type, fn, capture || false);
-      return fn;
-    };
-    componentEvent2.unbind = function(el, type, fn, capture) {
-      if (!unbind2) detect();
-      el[unbind2](prefix2 + type, fn, capture || false);
-      return fn;
-    };
-    return componentEvent2;
-  }
-  requireComponentEvent2();
-  function query2(selector, el) {
-    el = el || document;
-    return el.querySelector(selector);
-  }
   var LOWER_PRIORITY3 = 900;
   function CreatePaletteProvider(palette, translate3, popupMenu, canvas, mouse) {
     this._palette = palette;
@@ -39552,7 +40590,7 @@ var __AutoNateBpmnJS__ = (() => {
             const element2 = canvas.getRootElement();
             popupMenu.open(element2, "bpmn-create", position, {
               title: translate3("Create element"),
-              width: 300,
+              width: "var(--bpmn-create-popup-width, 300px)",
               search: true
             });
           }
@@ -39616,47 +40654,10 @@ var __AutoNateBpmnJS__ = (() => {
     ],
     createAppendEditorActions: ["type", CreateAppendEditorActions]
   };
-  var KEYS_COPY2 = ["c", "C"];
-  var KEYS_PASTE2 = ["v", "V"];
-  var KEYS_DUPLICATE2 = ["d", "D"];
-  var KEYS_CUT2 = ["x", "X"];
-  var KEYS_REDO2 = ["y", "Y"];
-  var KEYS_UNDO2 = ["z", "Z"];
-  function isCmd2(event2) {
-    if (event2.altKey) {
-      return false;
-    }
-    return event2.ctrlKey || event2.metaKey;
-  }
-  function isKey2(keys2, event2) {
-    keys2 = isArray4(keys2) ? keys2 : [keys2];
-    return keys2.indexOf(event2.key) !== -1 || keys2.indexOf(event2.code) !== -1;
-  }
-  function isShift2(event2) {
-    return event2.shiftKey;
-  }
-  function isCopy2(event2) {
-    return isCmd2(event2) && isKey2(KEYS_COPY2, event2);
-  }
-  function isPaste2(event2) {
-    return isCmd2(event2) && isKey2(KEYS_PASTE2, event2);
-  }
-  function isDuplicate2(event2) {
-    return isCmd2(event2) && isKey2(KEYS_DUPLICATE2, event2);
-  }
-  function isCut2(event2) {
-    return isCmd2(event2) && isKey2(KEYS_CUT2, event2);
-  }
-  function isUndo2(event2) {
-    return isCmd2(event2) && !isShift2(event2) && isKey2(KEYS_UNDO2, event2);
-  }
-  function isRedo2(event2) {
-    return isCmd2(event2) && (isKey2(KEYS_REDO2, event2) || isKey2(KEYS_UNDO2, event2) && isShift2(event2));
-  }
-  var LOW_PRIORITY28 = 500;
+  var LOW_PRIORITY30 = 500;
   function KeyboardBindings2(eventBus, keyboard) {
     var self2 = this;
-    eventBus.on("editorActions.init", LOW_PRIORITY28, function(event2) {
+    eventBus.on("editorActions.init", LOW_PRIORITY30, function(event2) {
       var editorActions = event2.editorActions;
       self2.registerBindings(keyboard, editorActions);
     });
@@ -39802,6 +40803,35 @@ var __AutoNateBpmnJS__ = (() => {
       KeyboardBindingsModule
     ]
   };
+  function templateToEntry(template, action, overrides = {}) {
+    const { icon = {}, category } = template;
+    const base = {
+      label: template.name,
+      description: template.description,
+      documentationRef: template.documentationRef,
+      imageUrl: icon.contents,
+      search: template.keywords,
+      ...overrides,
+      ...category && { group: category }
+    };
+    return buildEntry(base, template, action);
+  }
+  function buildEntry(entry, node2, action) {
+    if (!node2.steps?.length) {
+      return { ...entry, action: action(node2.presetId) };
+    }
+    const entries = node2.steps.reduce((entries2, step, index2) => {
+      const nextEntry = {
+        label: step.name,
+        description: step.description,
+        imageUrl: entry.imageUrl,
+        search: step.keywords
+      };
+      entries2[`step-${index2}`] = buildEntry(nextEntry, step, action);
+      return entries2;
+    }, {});
+    return { ...entry, entries };
+  }
   function ElementTemplatesAppendProvider(popupMenu, translate3, elementTemplates, autoPlace, create3, mouse, rules) {
     this._popupMenu = popupMenu;
     this._translate = translate3;
@@ -39835,29 +40865,43 @@ var __AutoNateBpmnJS__ = (() => {
     };
   };
   ElementTemplatesAppendProvider.prototype.getTemplateEntries = function(element, templates) {
-    const templateEntries = {};
-    templates.map((template) => {
-      const {
-        icon = {},
-        category,
-        keywords = []
-      } = template;
-      const entryId = `append.template-${template.id}`;
-      const defaultGroup = {
-        id: "templates",
-        name: this._translate("Templates")
+    const defaultGroup = {
+      id: "templates",
+      name: this._translate("Templates")
+    };
+    return templates.reduce((entries, template) => {
+      entries[`append.template-${template.id}`] = templateToEntry(
+        template,
+        this._getAction(element, template),
+        { group: defaultGroup }
+      );
+      return entries;
+    }, {});
+  };
+  ElementTemplatesAppendProvider.prototype._getAction = function(element, template) {
+    const elementTemplates = this._elementTemplates;
+    const autoPlace = this._autoPlace;
+    const create3 = this._create;
+    const mouse = this._mouse;
+    return (presetId) => {
+      const autoPlaceElement = () => {
+        const newElement = elementTemplates.createElement(template, { presetId });
+        autoPlace.append(element, newElement);
       };
-      templateEntries[entryId] = {
-        label: template.name,
-        description: template.description,
-        documentationRef: template.documentationRef,
-        search: keywords,
-        imageUrl: icon.contents,
-        group: category || defaultGroup,
-        action: this._getEntryAction(element, template)
+      const manualPlaceElement = (event2) => {
+        const newElement = elementTemplates.createElement(template, { presetId });
+        if (event2 instanceof KeyboardEvent) {
+          event2 = mouse.getLastMoveEvent();
+        }
+        return create3.start(event2, newElement, {
+          source: element
+        });
       };
-    });
-    return templateEntries;
+      return {
+        click: canAutoPlaceElement(template) ? autoPlaceElement : manualPlaceElement,
+        dragstart: manualPlaceElement
+      };
+    };
   };
   ElementTemplatesAppendProvider.prototype._filterTemplates = function(templates) {
     return templates.filter((template) => {
@@ -39877,25 +40921,6 @@ var __AutoNateBpmnJS__ = (() => {
       }
       return true;
     });
-  };
-  ElementTemplatesAppendProvider.prototype._getEntryAction = function(element, template) {
-    const autoPlaceElement = () => {
-      const newElement = this._elementTemplates.createElement(template);
-      this._autoPlace.append(element, newElement);
-    };
-    const manualPlaceElement = (event2) => {
-      const newElement = this._elementTemplates.createElement(template);
-      if (event2 instanceof KeyboardEvent) {
-        event2 = this._mouse.getLastMoveEvent();
-      }
-      return this._create.start(event2, newElement, {
-        source: element
-      });
-    };
-    return {
-      click: canAutoPlaceElement(template) ? autoPlaceElement : manualPlaceElement,
-      dragstart: manualPlaceElement
-    };
   };
   function canAutoPlaceElement(elementTemplate) {
     const {
@@ -39931,52 +40956,36 @@ var __AutoNateBpmnJS__ = (() => {
   };
   ElementTemplatesCreateProvider.prototype.getPopupMenuEntries = function(element) {
     return (entries) => {
-      assign3(entries, this.getTemplateEntries(element));
+      assign3(entries, this.getTemplateEntries());
       return entries;
     };
   };
   ElementTemplatesCreateProvider.prototype.getTemplateEntries = function() {
-    const templates = this._elementTemplates.getLatest();
-    const templateEntries = {};
-    templates.map((template) => {
-      const {
-        icon = {},
-        category,
-        keywords = []
-      } = template;
-      const entryId = `create.template-${template.id}`;
-      const defaultGroup = {
-        id: "templates",
-        name: this._translate("Templates")
-      };
-      templateEntries[entryId] = {
-        label: template.name,
-        description: template.description,
-        documentationRef: template.documentationRef,
-        imageUrl: icon.contents,
-        group: category || defaultGroup,
-        search: keywords,
-        action: {
-          click: this._getEntryAction(template),
-          dragstart: this._getEntryAction(template)
-        }
-      };
-    });
-    return templateEntries;
-  };
-  ElementTemplatesCreateProvider.prototype._getEntryAction = function(template) {
+    const elementTemplates = this._elementTemplates;
     const create3 = this._create;
     const popupMenu = this._popupMenu;
-    const elementTemplates = this._elementTemplates;
     const mouse = this._mouse;
-    return (event2) => {
-      popupMenu.close();
-      let newElement = elementTemplates.createElement(template);
-      if (event2 instanceof KeyboardEvent) {
-        event2 = mouse.getLastMoveEvent();
-      }
-      return create3.start(event2, newElement);
+    const defaultGroup = {
+      id: "templates",
+      name: this._translate("Templates")
     };
+    return this._elementTemplates.getLatest().reduce((entries, template) => {
+      const action = (presetId) => {
+        const startCreate = (event2) => {
+          popupMenu.close();
+          const newElement = elementTemplates.createElement(template, { presetId });
+          if (event2 instanceof KeyboardEvent) {
+            event2 = mouse.getLastMoveEvent();
+          }
+          return create3.start(event2, newElement);
+        };
+        return { click: startCreate, dragstart: startCreate };
+      };
+      entries[`create.template-${template.id}`] = templateToEntry(template, action, {
+        group: defaultGroup
+      });
+      return entries;
+    }, {});
   };
   function ElementTemplatesReplaceProvider(popupMenu, translate3, elementTemplates) {
     this._popupMenu = popupMenu;
@@ -39994,42 +41003,31 @@ var __AutoNateBpmnJS__ = (() => {
   };
   ElementTemplatesReplaceProvider.prototype.getPopupMenuEntries = function(element) {
     return (entries) => {
-      let entrySet = Object.entries(entries);
-      entrySet = [...entrySet, ...this.getTemplateEntries(element)];
-      return entrySet.reduce((entries2, [key, value]) => {
-        entries2[key] = value;
-        return entries2;
-      }, {});
+      assign3(entries, this.getTemplateEntries(element));
+      return entries;
     };
   };
   ElementTemplatesReplaceProvider.prototype.getTemplateEntries = function(element) {
-    const templates = this._getMatchingTemplates(element);
-    return templates.map((template) => {
-      const {
-        icon = {},
-        category,
-        keywords = []
-      } = template;
-      const entryId = `replace.template-${template.id}`;
-      const defaultGroup = {
-        id: "templates",
-        name: this._translate("Templates")
+    const elementTemplates = this._elementTemplates;
+    const defaultGroup = {
+      id: "templates",
+      name: this._translate("Templates")
+    };
+    return this._getMatchingTemplates(element).reduce((entries, template) => {
+      const action = (presetId) => () => {
+        elementTemplates.applyTemplate(element, template, { presetId });
       };
-      return [entryId, {
-        label: template.name,
-        description: template.description,
-        documentationRef: template.documentationRef,
-        imageUrl: icon.contents,
-        search: keywords,
-        group: category || defaultGroup,
-        action: () => {
-          this._elementTemplates.applyTemplate(element, template);
-        }
-      }];
-    });
+      entries[`replace.template-${template.id}`] = templateToEntry(template, action, {
+        group: defaultGroup
+      });
+      return entries;
+    }, {});
   };
   ElementTemplatesReplaceProvider.prototype._getMatchingTemplates = function(element) {
     return this._elementTemplates.getLatest(element).filter((template) => {
+      if (template.steps?.length) {
+        return true;
+      }
       return !isTemplateApplied(element, template);
     });
   };
@@ -40040,1164 +41038,6 @@ var __AutoNateBpmnJS__ = (() => {
     }
     return false;
   }
-  function isExpanded2(element, di) {
-    if (is3(element, "bpmn:CallActivity")) {
-      return false;
-    }
-    if (is3(element, "bpmn:SubProcess")) {
-      di = di || getDi2(element);
-      if (di && is3(di, "bpmndi:BPMNPlane")) {
-        return true;
-      }
-      return di && !!di.isExpanded;
-    }
-    if (is3(element, "bpmn:Participant")) {
-      return !!getBusinessObject2(element).processRef;
-    }
-    return true;
-  }
-  function isDifferentType2(element) {
-    return function(entry) {
-      var target = entry.target;
-      var businessObject = getBusinessObject2(element), eventDefinition = businessObject.eventDefinitions && businessObject.eventDefinitions[0];
-      var isTypeEqual = businessObject.$type === target.type;
-      var isEventDefinitionEqual = (eventDefinition && eventDefinition.$type) === target.eventDefinitionType;
-      var isTriggeredByEventEqual = (
-        // coherse to <false>
-        !!target.triggeredByEvent === !!businessObject.triggeredByEvent
-      );
-      var isExpandedEqual = target.isExpanded === void 0 || target.isExpanded === isExpanded2(element);
-      return !isTypeEqual || !isEventDefinitionEqual || !isTriggeredByEventEqual || !isExpandedEqual;
-    };
-  }
-  var START_EVENT2 = [
-    {
-      label: "Start event",
-      actionName: "replace-with-none-start",
-      className: "bpmn-icon-start-event-none",
-      target: {
-        type: "bpmn:StartEvent"
-      }
-    },
-    {
-      label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throwing",
-      className: "bpmn-icon-intermediate-event-none",
-      target: {
-        type: "bpmn:IntermediateThrowEvent"
-      }
-    },
-    {
-      label: "End event",
-      actionName: "replace-with-none-end",
-      className: "bpmn-icon-end-event-none",
-      target: {
-        type: "bpmn:EndEvent"
-      }
-    },
-    {
-      label: "Message start event",
-      actionName: "replace-with-message-start",
-      className: "bpmn-icon-start-event-message",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition"
-      }
-    },
-    {
-      label: "Timer start event",
-      actionName: "replace-with-timer-start",
-      className: "bpmn-icon-start-event-timer",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition"
-      }
-    },
-    {
-      label: "Conditional start event",
-      actionName: "replace-with-conditional-start",
-      className: "bpmn-icon-start-event-condition",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition"
-      }
-    },
-    {
-      label: "Signal start event",
-      actionName: "replace-with-signal-start",
-      className: "bpmn-icon-start-event-signal",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition"
-      }
-    }
-  ];
-  var START_EVENT_SUB_PROCESS2 = [
-    {
-      label: "Start event",
-      actionName: "replace-with-none-start",
-      className: "bpmn-icon-start-event-none",
-      target: {
-        type: "bpmn:StartEvent"
-      }
-    },
-    {
-      label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throwing",
-      className: "bpmn-icon-intermediate-event-none",
-      target: {
-        type: "bpmn:IntermediateThrowEvent"
-      }
-    },
-    {
-      label: "End event",
-      actionName: "replace-with-none-end",
-      className: "bpmn-icon-end-event-none",
-      target: {
-        type: "bpmn:EndEvent"
-      }
-    }
-  ];
-  var INTERMEDIATE_EVENT2 = [
-    {
-      label: "Start event",
-      actionName: "replace-with-none-start",
-      className: "bpmn-icon-start-event-none",
-      target: {
-        type: "bpmn:StartEvent"
-      }
-    },
-    {
-      label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-none",
-      target: {
-        type: "bpmn:IntermediateThrowEvent"
-      }
-    },
-    {
-      label: "End event",
-      actionName: "replace-with-none-end",
-      className: "bpmn-icon-end-event-none",
-      target: {
-        type: "bpmn:EndEvent"
-      }
-    },
-    {
-      label: "Message intermediate catch event",
-      actionName: "replace-with-message-intermediate-catch",
-      className: "bpmn-icon-intermediate-event-catch-message",
-      target: {
-        type: "bpmn:IntermediateCatchEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition"
-      }
-    },
-    {
-      label: "Message intermediate throw event",
-      actionName: "replace-with-message-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-throw-message",
-      target: {
-        type: "bpmn:IntermediateThrowEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition"
-      }
-    },
-    {
-      label: "Timer intermediate catch event",
-      actionName: "replace-with-timer-intermediate-catch",
-      className: "bpmn-icon-intermediate-event-catch-timer",
-      target: {
-        type: "bpmn:IntermediateCatchEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition"
-      }
-    },
-    {
-      label: "Escalation intermediate throw event",
-      actionName: "replace-with-escalation-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-throw-escalation",
-      target: {
-        type: "bpmn:IntermediateThrowEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition"
-      }
-    },
-    {
-      label: "Conditional intermediate catch event",
-      actionName: "replace-with-conditional-intermediate-catch",
-      className: "bpmn-icon-intermediate-event-catch-condition",
-      target: {
-        type: "bpmn:IntermediateCatchEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition"
-      }
-    },
-    {
-      label: "Link intermediate catch event",
-      actionName: "replace-with-link-intermediate-catch",
-      className: "bpmn-icon-intermediate-event-catch-link",
-      target: {
-        type: "bpmn:IntermediateCatchEvent",
-        eventDefinitionType: "bpmn:LinkEventDefinition",
-        eventDefinitionAttrs: {
-          name: ""
-        }
-      }
-    },
-    {
-      label: "Link intermediate throw event",
-      actionName: "replace-with-link-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-throw-link",
-      target: {
-        type: "bpmn:IntermediateThrowEvent",
-        eventDefinitionType: "bpmn:LinkEventDefinition",
-        eventDefinitionAttrs: {
-          name: ""
-        }
-      }
-    },
-    {
-      label: "Compensation intermediate throw event",
-      actionName: "replace-with-compensation-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-throw-compensation",
-      target: {
-        type: "bpmn:IntermediateThrowEvent",
-        eventDefinitionType: "bpmn:CompensateEventDefinition"
-      }
-    },
-    {
-      label: "Signal intermediate catch event",
-      actionName: "replace-with-signal-intermediate-catch",
-      className: "bpmn-icon-intermediate-event-catch-signal",
-      target: {
-        type: "bpmn:IntermediateCatchEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition"
-      }
-    },
-    {
-      label: "Signal intermediate throw event",
-      actionName: "replace-with-signal-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-throw-signal",
-      target: {
-        type: "bpmn:IntermediateThrowEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition"
-      }
-    }
-  ];
-  var END_EVENT2 = [
-    {
-      label: "Start event",
-      actionName: "replace-with-none-start",
-      className: "bpmn-icon-start-event-none",
-      target: {
-        type: "bpmn:StartEvent"
-      }
-    },
-    {
-      label: "Intermediate throw event",
-      actionName: "replace-with-none-intermediate-throw",
-      className: "bpmn-icon-intermediate-event-none",
-      target: {
-        type: "bpmn:IntermediateThrowEvent"
-      }
-    },
-    {
-      label: "End event",
-      actionName: "replace-with-none-end",
-      className: "bpmn-icon-end-event-none",
-      target: {
-        type: "bpmn:EndEvent"
-      }
-    },
-    {
-      label: "Message end event",
-      actionName: "replace-with-message-end",
-      className: "bpmn-icon-end-event-message",
-      target: {
-        type: "bpmn:EndEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition"
-      }
-    },
-    {
-      label: "Escalation end event",
-      actionName: "replace-with-escalation-end",
-      className: "bpmn-icon-end-event-escalation",
-      target: {
-        type: "bpmn:EndEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition"
-      }
-    },
-    {
-      label: "Error end event",
-      actionName: "replace-with-error-end",
-      className: "bpmn-icon-end-event-error",
-      target: {
-        type: "bpmn:EndEvent",
-        eventDefinitionType: "bpmn:ErrorEventDefinition"
-      }
-    },
-    {
-      label: "Cancel end event",
-      actionName: "replace-with-cancel-end",
-      className: "bpmn-icon-end-event-cancel",
-      target: {
-        type: "bpmn:EndEvent",
-        eventDefinitionType: "bpmn:CancelEventDefinition"
-      }
-    },
-    {
-      label: "Compensation end event",
-      actionName: "replace-with-compensation-end",
-      className: "bpmn-icon-end-event-compensation",
-      target: {
-        type: "bpmn:EndEvent",
-        eventDefinitionType: "bpmn:CompensateEventDefinition"
-      }
-    },
-    {
-      label: "Signal end event",
-      actionName: "replace-with-signal-end",
-      className: "bpmn-icon-end-event-signal",
-      target: {
-        type: "bpmn:EndEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition"
-      }
-    },
-    {
-      label: "Terminate end event",
-      actionName: "replace-with-terminate-end",
-      className: "bpmn-icon-end-event-terminate",
-      target: {
-        type: "bpmn:EndEvent",
-        eventDefinitionType: "bpmn:TerminateEventDefinition"
-      }
-    }
-  ];
-  var GATEWAY2 = [
-    {
-      label: "Exclusive gateway",
-      actionName: "replace-with-exclusive-gateway",
-      className: "bpmn-icon-gateway-xor",
-      target: {
-        type: "bpmn:ExclusiveGateway"
-      }
-    },
-    {
-      label: "Parallel gateway",
-      actionName: "replace-with-parallel-gateway",
-      className: "bpmn-icon-gateway-parallel",
-      target: {
-        type: "bpmn:ParallelGateway"
-      }
-    },
-    {
-      label: "Inclusive gateway",
-      actionName: "replace-with-inclusive-gateway",
-      className: "bpmn-icon-gateway-or",
-      target: {
-        type: "bpmn:InclusiveGateway"
-      }
-    },
-    {
-      label: "Complex gateway",
-      actionName: "replace-with-complex-gateway",
-      className: "bpmn-icon-gateway-complex",
-      target: {
-        type: "bpmn:ComplexGateway"
-      }
-    },
-    {
-      label: "Event-based gateway",
-      actionName: "replace-with-event-based-gateway",
-      className: "bpmn-icon-gateway-eventbased",
-      target: {
-        type: "bpmn:EventBasedGateway",
-        instantiate: false,
-        eventGatewayType: "Exclusive"
-      }
-    }
-    // Gateways deactivated until https://github.com/bpmn-io/bpmn-js/issues/194
-    // {
-    //   label: 'Event based instantiating Gateway',
-    //   actionName: 'replace-with-exclusive-event-based-gateway',
-    //   className: 'bpmn-icon-exclusive-event-based',
-    //   target: {
-    //     type: 'bpmn:EventBasedGateway'
-    //   },
-    //   options: {
-    //     businessObject: { instantiate: true, eventGatewayType: 'Exclusive' }
-    //   }
-    // },
-    // {
-    //   label: 'Parallel Event based instantiating Gateway',
-    //   actionName: 'replace-with-parallel-event-based-instantiate-gateway',
-    //   className: 'bpmn-icon-parallel-event-based-instantiate-gateway',
-    //   target: {
-    //     type: 'bpmn:EventBasedGateway'
-    //   },
-    //   options: {
-    //     businessObject: { instantiate: true, eventGatewayType: 'Parallel' }
-    //   }
-    // }
-  ];
-  var SUBPROCESS_EXPANDED2 = [
-    {
-      label: "Transaction",
-      actionName: "replace-with-transaction",
-      className: "bpmn-icon-transaction",
-      target: {
-        type: "bpmn:Transaction",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Event sub-process",
-      actionName: "replace-with-event-subprocess",
-      className: "bpmn-icon-event-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        triggeredByEvent: true,
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process",
-      actionName: "replace-with-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Sub-process (collapsed)",
-      actionName: "replace-with-collapsed-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: false
-      }
-    }
-  ];
-  var AD_HOC_SUBPROCESS_EXPANDED2 = [
-    {
-      label: "Sub-process",
-      actionName: "replace-with-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Transaction",
-      actionName: "replace-with-transaction",
-      className: "bpmn-icon-transaction",
-      target: {
-        type: "bpmn:Transaction",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Event sub-process",
-      actionName: "replace-with-event-subprocess",
-      className: "bpmn-icon-event-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        triggeredByEvent: true,
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (collapsed)",
-      actionName: "replace-with-collapsed-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: false
-      }
-    }
-  ];
-  var TRANSACTION2 = [
-    {
-      label: "Transaction",
-      actionName: "replace-with-transaction",
-      className: "bpmn-icon-transaction",
-      target: {
-        type: "bpmn:Transaction",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Sub-process",
-      actionName: "replace-with-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process",
-      actionName: "replace-with-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Event sub-process",
-      actionName: "replace-with-event-subprocess",
-      className: "bpmn-icon-event-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        triggeredByEvent: true,
-        isExpanded: true
-      }
-    }
-  ];
-  var EVENT_SUB_PROCESS2 = TRANSACTION2;
-  var TASK2 = [
-    {
-      label: "Task",
-      actionName: "replace-with-task",
-      className: "bpmn-icon-task",
-      target: {
-        type: "bpmn:Task"
-      }
-    },
-    {
-      label: "User task",
-      actionName: "replace-with-user-task",
-      className: "bpmn-icon-user",
-      target: {
-        type: "bpmn:UserTask"
-      }
-    },
-    {
-      label: "Service task",
-      actionName: "replace-with-service-task",
-      className: "bpmn-icon-service",
-      target: {
-        type: "bpmn:ServiceTask"
-      }
-    },
-    {
-      label: "Send task",
-      actionName: "replace-with-send-task",
-      className: "bpmn-icon-send",
-      target: {
-        type: "bpmn:SendTask"
-      }
-    },
-    {
-      label: "Receive task",
-      actionName: "replace-with-receive-task",
-      className: "bpmn-icon-receive",
-      target: {
-        type: "bpmn:ReceiveTask"
-      }
-    },
-    {
-      label: "Manual task",
-      actionName: "replace-with-manual-task",
-      className: "bpmn-icon-manual",
-      target: {
-        type: "bpmn:ManualTask"
-      }
-    },
-    {
-      label: "Business rule task",
-      actionName: "replace-with-rule-task",
-      className: "bpmn-icon-business-rule",
-      target: {
-        type: "bpmn:BusinessRuleTask"
-      }
-    },
-    {
-      label: "Script task",
-      actionName: "replace-with-script-task",
-      className: "bpmn-icon-script",
-      target: {
-        type: "bpmn:ScriptTask"
-      }
-    },
-    {
-      label: "Call activity",
-      actionName: "replace-with-call-activity",
-      className: "bpmn-icon-call-activity",
-      target: {
-        type: "bpmn:CallActivity"
-      }
-    },
-    {
-      label: "Sub-process (collapsed)",
-      actionName: "replace-with-collapsed-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: false
-      }
-    },
-    {
-      label: "Sub-process (expanded)",
-      actionName: "replace-with-expanded-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:SubProcess",
-        isExpanded: true
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (collapsed)",
-      actionName: "replace-with-collapsed-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-collapsed",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: false
-      }
-    },
-    {
-      label: "Ad-hoc sub-process (expanded)",
-      actionName: "replace-with-ad-hoc-subprocess",
-      className: "bpmn-icon-subprocess-expanded",
-      target: {
-        type: "bpmn:AdHocSubProcess",
-        isExpanded: true
-      }
-    }
-  ];
-  var DATA_OBJECT_REFERENCE2 = [
-    {
-      label: "Data store reference",
-      actionName: "replace-with-data-store-reference",
-      className: "bpmn-icon-data-store",
-      target: {
-        type: "bpmn:DataStoreReference"
-      }
-    }
-  ];
-  var DATA_STORE_REFERENCE2 = [
-    {
-      label: "Data object reference",
-      actionName: "replace-with-data-object-reference",
-      className: "bpmn-icon-data-object",
-      target: {
-        type: "bpmn:DataObjectReference"
-      }
-    }
-  ];
-  var BOUNDARY_EVENT2 = [
-    {
-      label: "Message boundary event",
-      actionName: "replace-with-message-boundary",
-      className: "bpmn-icon-intermediate-event-catch-message",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Timer boundary event",
-      actionName: "replace-with-timer-boundary",
-      className: "bpmn-icon-intermediate-event-catch-timer",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Escalation boundary event",
-      actionName: "replace-with-escalation-boundary",
-      className: "bpmn-icon-intermediate-event-catch-escalation",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Conditional boundary event",
-      actionName: "replace-with-conditional-boundary",
-      className: "bpmn-icon-intermediate-event-catch-condition",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Error boundary event",
-      actionName: "replace-with-error-boundary",
-      className: "bpmn-icon-intermediate-event-catch-error",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ErrorEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Cancel boundary event",
-      actionName: "replace-with-cancel-boundary",
-      className: "bpmn-icon-intermediate-event-catch-cancel",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:CancelEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Signal boundary event",
-      actionName: "replace-with-signal-boundary",
-      className: "bpmn-icon-intermediate-event-catch-signal",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Compensation boundary event",
-      actionName: "replace-with-compensation-boundary",
-      className: "bpmn-icon-intermediate-event-catch-compensation",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:CompensateEventDefinition",
-        cancelActivity: true
-      }
-    },
-    {
-      label: "Message boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-message-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-message",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Timer boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-timer-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-timer",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Escalation boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-escalation-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-escalation",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Conditional boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-conditional-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-condition",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        cancelActivity: false
-      }
-    },
-    {
-      label: "Signal boundary event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-signal-boundary",
-      className: "bpmn-icon-intermediate-event-catch-non-interrupting-signal",
-      target: {
-        type: "bpmn:BoundaryEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        cancelActivity: false
-      }
-    }
-  ];
-  var EVENT_SUB_PROCESS_START_EVENT2 = [
-    {
-      label: "Message start event",
-      actionName: "replace-with-message-start",
-      className: "bpmn-icon-start-event-message",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Timer start event",
-      actionName: "replace-with-timer-start",
-      className: "bpmn-icon-start-event-timer",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Conditional start event",
-      actionName: "replace-with-conditional-start",
-      className: "bpmn-icon-start-event-condition",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Signal start event",
-      actionName: "replace-with-signal-start",
-      className: "bpmn-icon-start-event-signal",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Error start event",
-      actionName: "replace-with-error-start",
-      className: "bpmn-icon-start-event-error",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ErrorEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Escalation start event",
-      actionName: "replace-with-escalation-start",
-      className: "bpmn-icon-start-event-escalation",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Compensation start event",
-      actionName: "replace-with-compensation-start",
-      className: "bpmn-icon-start-event-compensation",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:CompensateEventDefinition",
-        isInterrupting: true
-      }
-    },
-    {
-      label: "Message start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-message-start",
-      className: "bpmn-icon-start-event-non-interrupting-message",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:MessageEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Timer start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-timer-start",
-      className: "bpmn-icon-start-event-non-interrupting-timer",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:TimerEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Conditional start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-conditional-start",
-      className: "bpmn-icon-start-event-non-interrupting-condition",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:ConditionalEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Signal start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-signal-start",
-      className: "bpmn-icon-start-event-non-interrupting-signal",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:SignalEventDefinition",
-        isInterrupting: false
-      }
-    },
-    {
-      label: "Escalation start event (non-interrupting)",
-      actionName: "replace-with-non-interrupting-escalation-start",
-      className: "bpmn-icon-start-event-non-interrupting-escalation",
-      target: {
-        type: "bpmn:StartEvent",
-        eventDefinitionType: "bpmn:EscalationEventDefinition",
-        isInterrupting: false
-      }
-    }
-  ];
-  var SEQUENCE_FLOW2 = [
-    {
-      label: "Sequence flow",
-      actionName: "replace-with-sequence-flow",
-      className: "bpmn-icon-connection"
-    },
-    {
-      label: "Default flow",
-      actionName: "replace-with-default-flow",
-      className: "bpmn-icon-default-flow"
-    },
-    {
-      label: "Conditional flow",
-      actionName: "replace-with-conditional-flow",
-      className: "bpmn-icon-conditional-flow"
-    }
-  ];
-  var PARTICIPANT2 = [
-    {
-      label: "Expanded pool/participant",
-      actionName: "replace-with-expanded-pool",
-      className: "bpmn-icon-participant",
-      target: {
-        type: "bpmn:Participant",
-        isExpanded: true
-      }
-    },
-    {
-      label: function(element) {
-        var label = "Empty pool/participant";
-        if (element.children && element.children.length) {
-          label += " (removes content)";
-        }
-        return label;
-      },
-      actionName: "replace-with-collapsed-pool",
-      // TODO(@janstuemmel): maybe design new icon
-      className: "bpmn-icon-lane",
-      target: {
-        type: "bpmn:Participant",
-        isExpanded: false
-      }
-    }
-  ];
-  var TYPED_EVENT2 = {
-    "bpmn:MessageEventDefinition": [
-      {
-        label: "Message start event",
-        actionName: "replace-with-message-start",
-        className: "bpmn-icon-start-event-message",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition"
-        }
-      },
-      {
-        label: "Message intermediate catch event",
-        actionName: "replace-with-message-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-message",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition"
-        }
-      },
-      {
-        label: "Message intermediate throw event",
-        actionName: "replace-with-message-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-message",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition"
-        }
-      },
-      {
-        label: "Message end event",
-        actionName: "replace-with-message-end",
-        className: "bpmn-icon-end-event-message",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:MessageEventDefinition"
-        }
-      }
-    ],
-    "bpmn:TimerEventDefinition": [
-      {
-        label: "Timer start event",
-        actionName: "replace-with-timer-start",
-        className: "bpmn-icon-start-event-timer",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:TimerEventDefinition"
-        }
-      },
-      {
-        label: "Timer intermediate catch event",
-        actionName: "replace-with-timer-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-timer",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:TimerEventDefinition"
-        }
-      }
-    ],
-    "bpmn:ConditionalEventDefinition": [
-      {
-        label: "Conditional start event",
-        actionName: "replace-with-conditional-start",
-        className: "bpmn-icon-start-event-condition",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:ConditionalEventDefinition"
-        }
-      },
-      {
-        label: "Conditional intermediate catch event",
-        actionName: "replace-with-conditional-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-condition",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:ConditionalEventDefinition"
-        }
-      }
-    ],
-    "bpmn:SignalEventDefinition": [
-      {
-        label: "Signal start event",
-        actionName: "replace-with-signal-start",
-        className: "bpmn-icon-start-event-signal",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition"
-        }
-      },
-      {
-        label: "Signal intermediate catch event",
-        actionName: "replace-with-signal-intermediate-catch",
-        className: "bpmn-icon-intermediate-event-catch-signal",
-        target: {
-          type: "bpmn:IntermediateCatchEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition"
-        }
-      },
-      {
-        label: "Signal intermediate throw event",
-        actionName: "replace-with-signal-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-signal",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition"
-        }
-      },
-      {
-        label: "Signal end event",
-        actionName: "replace-with-signal-end",
-        className: "bpmn-icon-end-event-signal",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:SignalEventDefinition"
-        }
-      }
-    ],
-    "bpmn:ErrorEventDefinition": [
-      {
-        label: "Error start event",
-        actionName: "replace-with-error-start",
-        className: "bpmn-icon-start-event-error",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:ErrorEventDefinition"
-        }
-      },
-      {
-        label: "Error end event",
-        actionName: "replace-with-error-end",
-        className: "bpmn-icon-end-event-error",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:ErrorEventDefinition"
-        }
-      }
-    ],
-    "bpmn:EscalationEventDefinition": [
-      {
-        label: "Escalation start event",
-        actionName: "replace-with-escalation-start",
-        className: "bpmn-icon-start-event-escalation",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:EscalationEventDefinition"
-        }
-      },
-      {
-        label: "Escalation intermediate throw event",
-        actionName: "replace-with-escalation-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-escalation",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:EscalationEventDefinition"
-        }
-      },
-      {
-        label: "Escalation end event",
-        actionName: "replace-with-escalation-end",
-        className: "bpmn-icon-end-event-escalation",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:EscalationEventDefinition"
-        }
-      }
-    ],
-    "bpmn:CompensateEventDefinition": [
-      {
-        label: "Compensation start event",
-        actionName: "replace-with-compensation-start",
-        className: "bpmn-icon-start-event-compensation",
-        target: {
-          type: "bpmn:StartEvent",
-          eventDefinitionType: "bpmn:CompensateEventDefinition"
-        }
-      },
-      {
-        label: "Compensation intermediate throw event",
-        actionName: "replace-with-compensation-intermediate-throw",
-        className: "bpmn-icon-intermediate-event-throw-compensation",
-        target: {
-          type: "bpmn:IntermediateThrowEvent",
-          eventDefinitionType: "bpmn:CompensateEventDefinition"
-        }
-      },
-      {
-        label: "Compensation end event",
-        actionName: "replace-with-compensation-end",
-        className: "bpmn-icon-end-event-compensation",
-        target: {
-          type: "bpmn:EndEvent",
-          eventDefinitionType: "bpmn:CompensateEventDefinition"
-        }
-      }
-    ]
-  };
-  var replaceOptions = /* @__PURE__ */ Object.freeze({
-    __proto__: null,
-    AD_HOC_SUBPROCESS_EXPANDED: AD_HOC_SUBPROCESS_EXPANDED2,
-    BOUNDARY_EVENT: BOUNDARY_EVENT2,
-    DATA_OBJECT_REFERENCE: DATA_OBJECT_REFERENCE2,
-    DATA_STORE_REFERENCE: DATA_STORE_REFERENCE2,
-    END_EVENT: END_EVENT2,
-    EVENT_SUB_PROCESS: EVENT_SUB_PROCESS2,
-    EVENT_SUB_PROCESS_START_EVENT: EVENT_SUB_PROCESS_START_EVENT2,
-    GATEWAY: GATEWAY2,
-    INTERMEDIATE_EVENT: INTERMEDIATE_EVENT2,
-    PARTICIPANT: PARTICIPANT2,
-    SEQUENCE_FLOW: SEQUENCE_FLOW2,
-    START_EVENT: START_EVENT2,
-    START_EVENT_SUB_PROCESS: START_EVENT_SUB_PROCESS2,
-    SUBPROCESS_EXPANDED: SUBPROCESS_EXPANDED2,
-    TASK: TASK2,
-    TRANSACTION: TRANSACTION2,
-    TYPED_EVENT: TYPED_EVENT2
-  });
   var ALL_OPTIONS = Object.values(replaceOptions);
   function getReplaceOptionGroups() {
     return ALL_OPTIONS;
