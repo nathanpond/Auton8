@@ -68,11 +68,13 @@ public sealed class SystemHealthService(
     IOptions<DaprOptions> daprOptions,
     IOptions<NatsOptions> natsOptions,
     IOptions<FlowableOptions> flowableOptions,
+    IOptions<AutoNate.Web.Services.Yjs.YjsServerOptions> yjsOptions,
     ILogger<SystemHealthService> logger) : ISystemHealthProbe
 {
     private readonly DaprOptions _daprOptions = daprOptions.Value;
     private readonly NatsOptions _natsOptions = natsOptions.Value;
     private readonly FlowableOptions _flowableOptions = flowableOptions.Value;
+    private readonly AutoNate.Web.Services.Yjs.YjsServerOptions _yjsOptions = yjsOptions.Value;
 
     public async Task<SystemHealthReport> CheckAsync(CancellationToken cancellationToken = default)
     {
@@ -139,6 +141,10 @@ public sealed class SystemHealthService(
             cancellationToken);
         components.Add(schedulerComponent);
         connections.Add(schedulerConnection);
+
+        var (hocuspocusComponent, hocuspocusConnection) = await CheckHocuspocusAsync(cancellationToken);
+        components.Add(hocuspocusComponent);
+        connections.Add(hocuspocusConnection);
 
         return new SystemHealthReport(
             CheckedAtUtc: DateTimeOffset.UtcNow,
@@ -680,6 +686,72 @@ public sealed class SystemHealthService(
                 "dapr-sidecar", id, connectionLabel,
                 HealthStatus.Down, ex.Message, (int)stopwatch.ElapsedMilliseconds);
             return (component, connection);
+        }
+    }
+
+    // Every notes, pages, documents and diagram load rides on the Hocuspocus
+    // sidecar, and nothing here probed it — so a collab outage left the health
+    // page fully green while every Y.Doc load failed in the SPA, which is
+    // exactly the class of failure the 5 s poll exists to surface (#115).
+    //
+    // A TCP connect rather than a WebSocket handshake: Hocuspocus rejects an
+    // unauthenticated upgrade by design, so a handshake would need a minted
+    // ticket and would report "down" for an authorization result. Reachability
+    // is what distinguishes "sidecar is gone" from "sidecar is fine".
+    private async Task<(ComponentHealth, ConnectionHealth)> CheckHocuspocusAsync(
+        CancellationToken cancellationToken)
+    {
+        const string id = "hocuspocus";
+        const string name = "Hocuspocus (Yjs)";
+        const string connectionLabel = "Collaborative editing";
+
+        var wsUrl = _yjsOptions.HocuspocusWsUrl;
+        if (string.IsNullOrWhiteSpace(wsUrl))
+        {
+            return (
+                new ComponentHealth(id, name, "service", HealthStatus.Unknown,
+                    "YjsServer:HocuspocusWsUrl not configured", null, null),
+                new ConnectionHealth("autonate-web", id, connectionLabel,
+                    HealthStatus.Unknown, "YjsServer:HocuspocusWsUrl not configured", null));
+        }
+
+        if (!Uri.TryCreate(wsUrl, UriKind.Absolute, out var uri))
+        {
+            var message = $"YjsServer:HocuspocusWsUrl '{wsUrl}' is not an absolute URI";
+            return (
+                new ComponentHealth(id, name, "service", HealthStatus.Unknown, message, null, null),
+                new ConnectionHealth("autonate-web", id, connectionLabel,
+                    HealthStatus.Unknown, message, null));
+        }
+
+        var host = uri.Host;
+        var port = uri.IsDefaultPort
+            ? (uri.Scheme is "wss" or "https" ? 443 : 80)
+            : uri.Port;
+        var details = new Dictionary<string, string> { ["address"] = $"{host}:{port}" };
+
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            using var client = new TcpClient();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
+            await client.ConnectAsync(host, port, timeoutCts.Token);
+            stopwatch.Stop();
+            var latency = (int)stopwatch.ElapsedMilliseconds;
+            return (
+                new ComponentHealth(id, name, "service", HealthStatus.Up, "Reachable", details, latency),
+                new ConnectionHealth("autonate-web", id, connectionLabel, HealthStatus.Up, null, latency));
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            logger.LogWarning(ex, "Hocuspocus health probe failed.");
+            var latency = (int)stopwatch.ElapsedMilliseconds;
+            return (
+                new ComponentHealth(id, name, "service", HealthStatus.Down, ex.Message, details, latency),
+                new ConnectionHealth("autonate-web", id, connectionLabel,
+                    HealthStatus.Down, ex.Message, latency));
         }
     }
 

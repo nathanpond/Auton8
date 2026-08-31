@@ -3,7 +3,6 @@ using DataConnectorModel = AutoNate.Web.Persistence.Scaffolded.DataConnector;
 using DatasetModel = AutoNate.Web.Persistence.Scaffolded.Dataset;
 using SavedQueryModel = AutoNate.Web.Persistence.Scaffolded.SavedQuery;
 using PipelineModel = AutoNate.Web.Persistence.Scaffolded.Pipeline;
-using PipelineRunModel = AutoNate.Web.Persistence.Scaffolded.PipelineRun;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
@@ -11,7 +10,8 @@ namespace AutoNate.Web.Authorization.EntityTypes;
 // (docs/plans/2026-05-30-data-stores-implementation.md). Phase 1 lands
 // DataStore + DataConnector. Phase 2 adds Dataset. Phase 3 promotes
 // SavedQuery to the Query kind. Phase 4 adds Transformer + Analyzer.
-// Phase 5 adds Pipeline + PipelineRun.
+// Phase 5 adds Pipeline (PipelineRun was registered too, but no endpoint
+// ever authorized against it — see the Pipeline comment below; #24).
 public static class AnalyticsEntityTypes
 {
     public static IReadOnlyList<IEntityType> All => _all.Value;
@@ -20,7 +20,7 @@ public static class AnalyticsEntityTypes
         new IEntityType[]
         {
             DataStore!, DataConnector!, Dataset!, Query!, Transformer!, Analyzer!,
-            Pipeline!, PipelineRun!,
+            Pipeline!,
         });
 
     // Refresh is intentionally not on DataStore — refresh is a Dataset
@@ -66,8 +66,12 @@ public static class AnalyticsEntityTypes
         idClrType: typeof(Guid),
         actions: new[]
         {
+            // No Schedule: a dataset's cron lives in the same row as the rest
+            // of its definition and is edited through the same endpoint, so
+            // Edit is the gate. Advertising Schedule offered admins a grant
+            // that changed nothing (#24).
             Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
-            Actions.Refresh, Actions.Schedule
+            Actions.Refresh
         },
         tags: Array.Empty<string>());
 
@@ -122,10 +126,15 @@ public static class AnalyticsEntityTypes
         },
         tags: Array.Empty<string>());
 
-    // Pipeline = the DAG definition; PipelineRun = one execution. Run is
-    // gated separately from Edit so an operator can hand out execution
-    // rights without authoring rights. Schedule covers the schedule_cron
-    // edit path; Cancel terminates an in-flight run.
+    // Pipeline = the DAG definition. Run is gated separately from Edit so an
+    // operator can hand out execution rights without authoring rights, and
+    // Cancel terminates an in-flight run — which now actually gates the cancel
+    // endpoint rather than being advertised and ignored (#24).
+    //
+    // Schedule is gone for the same reason it went from Dataset: the cron
+    // rides on the pipeline row and is edited through the update endpoint, so
+    // Edit is the real gate. The PipelineRun kind is gone too — no endpoint
+    // ever authorized against it; runs are reached through their pipeline.
     public static EntityTypeDefinition Pipeline { get; } = new(
         kind: EntityKinds.Pipeline,
         clrType: typeof(PipelineModel),
@@ -133,14 +142,8 @@ public static class AnalyticsEntityTypes
         actions: new[]
         {
             Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
-            Actions.Run, Actions.Schedule, Actions.Cancel
+            Actions.Run, Actions.Cancel
         },
         tags: Array.Empty<string>());
 
-    public static EntityTypeDefinition PipelineRun { get; } = new(
-        kind: EntityKinds.PipelineRun,
-        clrType: typeof(PipelineRunModel),
-        idClrType: typeof(Guid),
-        actions: new[] { Actions.View, Actions.List, Actions.Cancel },
-        tags: Array.Empty<string>());
 }
