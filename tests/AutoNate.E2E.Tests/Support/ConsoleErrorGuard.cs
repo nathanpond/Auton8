@@ -50,9 +50,9 @@ public sealed class ConsoleErrorGuard : IAsyncDisposable
         // observes the textarea and sets its own height inside the callback
         // whenever the width changes (sidebar resize, viewport resize), so
         // the browser reports the loop as a window `error` event. It is not a
-        // JS exception and layout settles on the next frame. Tracked in the
-        // repo issue for the upstream Mantine bug; drop this entry once
-        // upstream defers the height write.
+        // JS exception and layout settles on the next frame. Tracked in #158;
+        // upstream: mantinedev/mantine#9161 (fix PR #9162). Drop this entry
+        // once a Mantine release includes the deferred height write.
         "ResizeObserver loop completed with undelivered notifications"
     ];
 
