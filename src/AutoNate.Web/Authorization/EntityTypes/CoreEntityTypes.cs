@@ -10,6 +10,8 @@ using ProjectModel = AutoNate.Web.Persistence.Scaffolded.Project;
 using CabinetModel = AutoNate.Web.Persistence.Scaffolded.Cabinet;
 using NotebookModel = AutoNate.Web.Persistence.Scaffolded.Notebook;
 using PageModel = AutoNate.Web.Persistence.Scaffolded.Page;
+using DocumentModel = AutoNate.Web.Persistence.Scaffolded.Document;
+using FolderModel = AutoNate.Web.Persistence.Scaffolded.Folder;
 
 namespace AutoNate.Web.Authorization.EntityTypes;
 
@@ -26,7 +28,7 @@ public static class CoreEntityTypes
             User!, Group!, Role!, RecordType!, Record!,
             WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
             Form!, ExternalConnection!, SystemIssue!, SiteConfig!,
-            Project!, Cabinet!, Notebook!, Page!
+            Project!, Cabinet!, Notebook!, Page!, Document!, Folder!
         });
 
     public static EntityTypeDefinition User { get; } = new(
@@ -236,5 +238,31 @@ public static class CoreEntityTypes
         clrType: typeof(PageModel),
         idClrType: typeof(Guid),
         actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
+        tags: Array.Empty<string>());
+
+    // Document and Folder are enforced on 22 routes and honoured by
+    // ContentAuthorizer's /document/… and /folder/… selectors, but were absent
+    // from this registry — which is what /api/admin/registry serves to the
+    // Grants admin picker. So grants the runtime *does* honour could not be
+    // discovered or authored from the standard page; the only way in was
+    // ContentPermissionOverrideEndpoints, which carried its own hardcoded
+    // action lists as a second source of truth (#25).
+    //
+    // The action lists here are those same lists, so the picker and the
+    // override endpoints agree by construction: Comment is document-only
+    // (folders hold no discussion), Create is folder-only (a folder is where a
+    // document gets created).
+    public static EntityTypeDefinition Document { get; } = new(
+        kind: EntityKinds.Document,
+        clrType: typeof(DocumentModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Comment, Actions.Edit },
+        tags: Array.Empty<string>());
+
+    public static EntityTypeDefinition Folder { get; } = new(
+        kind: EntityKinds.Folder,
+        clrType: typeof(FolderModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Edit, Actions.Create },
         tags: Array.Empty<string>());
 }
