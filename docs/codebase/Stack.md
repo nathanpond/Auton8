@@ -71,7 +71,7 @@ Every csproj under `src/`, `tests/`, `plugins/` inherits:
 | `dev` | `vite` | port 5173; proxies `/api`, `/account`, `/dapr`, `/bus-watcher`, `/files` and WS `/ws/bus-watcher`, `/ws/agent-model-default` to `ASPNETCORE_URL ?? http://localhost:5108` (`vite.config.ts`) |
 | `build` | `tsc -b && vite build` | output `dist/` with sourcemaps; MSBuild copies to `wwwroot/` when `BuildSpa=true` |
 | `type-check` | `tsc -b --noEmit` | |
-| `lint` | `eslint src --max-warnings=164 --report-unused-disable-directives` | the warning budget is a ratchet — new code must not add warnings, and the number comes down when warnings are removed |
+| `lint` | `eslint src --max-warnings=162 --report-unused-disable-directives` | the warning budget is a ratchet — new code must not add warnings, and the number comes down when warnings are removed |
 | `fetch:drawio` | `node scripts/fetch-drawio.mjs` | vendors the drawio webapp into `public/drawio/` (~2.8k files, excluded from Vite's watcher) |
 
 Key deps (caret ranges, see `package.json` for the full list): `react`/`react-dom` ^19.2.5, `@mantine/*` ^9.1.1, `mantine-datatable` ^8.3.13, `@mantine/form` + `mantine-form-zod-resolver` ^1.3.0 + `zod` ^4.3.6, `@tanstack/react-query` ^5.100, `react-router-dom` ^7.14, `axios` ^1.15 (single instance at `src/api/client.ts` with `baseURL: "/"`), `@blocknote/*` ^0.51, `@eigenpal/docx-editor-*` 1.0.3 (exact), `yjs` ^13.6.30 + `@hocuspocus/provider` ^4, `@xyflow/react` ^12, `@excalidraw/excalidraw` ^0.18, `@uiw/react-codemirror` ^4.25, `recharts` ^3.8, `@fortawesome/fontawesome-free` ^7.2 (the only icon set — no `bi-*`). `overrides` pins `@tiptap/core` to 3.23.4 to avoid duplicate cores.

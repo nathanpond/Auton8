@@ -24,6 +24,7 @@ import { CreateRecordTypeRequest, RecordType } from "@/types/records";
 import IconPicker from "@/components/IconPicker";
 import ColorPicker from "@/components/ColorPicker";
 import { DataTable } from "@/components/data-table/DataTable";
+import { ArchivedBadge } from "@/components/ArchivedBadge";
 
 const COLUMN_WIDTHS = ["10%", "26%", "30%", "18%", "10%", "6%"];
 
@@ -46,9 +47,12 @@ export default function RecordTypeList() {
         accessorKey: "name",
         header: "Name",
         cell: ({ row }) => (
-          <Anchor component={Link} to={`/record-types/${row.original.id}`} fw={600}>
-            {row.original.name}
-          </Anchor>
+          <>
+            <Anchor component={Link} to={`/record-types/${row.original.id}`} fw={600}>
+              {row.original.name}
+            </Anchor>
+            {row.original.isArchived && <ArchivedBadge />}
+          </>
         )
       },
       {
