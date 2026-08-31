@@ -163,18 +163,65 @@ public static class YjsEndpoints
             CancellationToken ct) =>
         {
             var log = loggerFactory.CreateLogger("YjsCommentEvent");
-            if (!Guid.TryParse(request.PageId, out var pageId) ||
-                string.IsNullOrWhiteSpace(request.ThreadId) ||
+            if (string.IsNullOrWhiteSpace(request.ThreadId) ||
                 string.IsNullOrWhiteSpace(request.EventType))
             {
-                return Results.BadRequest(new { error = "pageId, threadId, eventType required." });
+                return Results.BadRequest(new { error = "documentName (or pageId), threadId, eventType required." });
+            }
+
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+
+            // The SPA identifies the thread's home by Yjs document name
+            // (`page:<guid>` for the page body, `note:`/`napkin:`/`diagram:`
+            // for a note on the page) — the same identifier it minted the
+            // ticket with. Notes inherit page permissions (design D10), so
+            // resolve note docs to their parent page and authorize there;
+            // the note id rides along in the event payload. `pageId` stays
+            // accepted for callers that already know the page.
+            Guid pageId;
+            Guid? noteId = null;
+            string? documentName = null;
+            if (!string.IsNullOrWhiteSpace(request.DocumentName))
+            {
+                if (!TryParseDocumentName(request.DocumentName, out var kind, out var entityId))
+                    return Results.BadRequest(new { error = "Unrecognized document name." });
+
+                documentName = request.DocumentName;
+                if (kind == DocKinds.Page)
+                {
+                    pageId = entityId;
+                }
+                else if (IsNoteDocKind(kind))
+                {
+                    var note = await db.Notes.AsNoTracking()
+                        .Where(n => n.Id == entityId)
+                        .Select(n => new { n.PageId })
+                        .FirstOrDefaultAsync(ct);
+                    if (note is null) return Results.NotFound();
+                    pageId = note.PageId;
+                    noteId = entityId;
+                }
+                else
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = $"Comment threads are not supported on '{kind}:' documents."
+                    });
+                }
+            }
+            else if (Guid.TryParse(request.PageId, out var explicitPageId))
+            {
+                pageId = explicitPageId;
+            }
+            else
+            {
+                return Results.BadRequest(new { error = "documentName (or pageId), threadId, eventType required." });
             }
 
             var decision = await authorizer.AuthorizeAsync(
                 http.User, ContentKinds.Page, pageId, Actions.View, ct);
             if (!decision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-            await using var db = await dbFactory.CreateDbContextAsync(ct);
             var pageExists = await db.Pages.AsNoTracking().AnyAsync(p => p.Id == pageId, ct);
             if (!pageExists) return Results.NotFound();
 
@@ -200,6 +247,8 @@ public static class YjsEndpoints
                 resource: new
                 {
                     pageId,
+                    noteId,
+                    documentName,
                     threadId = request.ThreadId,
                     commentId = request.CommentId
                 },
@@ -784,11 +833,16 @@ public static class YjsEndpoints
     public sealed record YjsAuthRequest(string Token, string DocumentName);
     public sealed record YjsAuthResponse(Guid UserId, string DisplayName, string Role);
     public sealed record CommentEventRequest(
-        string PageId,
         string ThreadId,
-        string? CommentId,
         // "created" | "replied" | "resolved" | "reopened" | "deleted"
-        string EventType);
+        string EventType,
+        // Yjs document name the thread lives in: `page:<guid>` or a note
+        // doc (`note:`/`napkin:`/`diagram:`), resolved to its parent page.
+        // This is what the SPA sends (see lib/yjs/commentAudit.ts).
+        string? DocumentName = null,
+        // Alternative for callers that already know the page.
+        string? PageId = null,
+        string? CommentId = null);
 
     private sealed record TicketPayload(
         string DocumentName,
