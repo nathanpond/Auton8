@@ -144,7 +144,12 @@ public sealed class NotesTests : E2ETestBase
         await notebookRow.HoverAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Notebook options", Exact = true }).ClickAsync();
         await page.GetByText("Rename / edit", new() { Exact = true }).ClickAsync();
-        var notebookNameInput = page.GetByLabel("Notebook name");
+        // The field is now labelled by a visible <label>Name</label> inside a
+        // dialog titled "Edit notebook", rather than by an aria-label that
+        // overrode it. Scope to the dialog so "Name" stays unambiguous.
+        var notebookNameInput = page
+            .GetByRole(AriaRole.Dialog)
+            .GetByLabel("Name", new() { Exact = true });
         await notebookNameInput.FillAsync(renamed);
         await notebookNameInput.PressAsync("Enter");
 
@@ -357,6 +362,50 @@ public sealed class NotesTests : E2ETestBase
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
 
         return new NotesHierarchy(notebookName, pageTitle);
+    }
+
+    [Fact]
+    public async Task NotesDialog_IsARealDialog_WithALabelledFieldAndFocusReturn()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await page.GotoAsync("/projects");
+
+        // Open from the keyboard so focus return has somewhere real to go
+        // back to. Before the fix these dialogs were plain <div> overlays:
+        // no dialog role, no focus trap, no Escape, no focus return.
+        var trigger = page.GetByRole(AriaRole.Button, new() { Name = "Add project" });
+        await Assertions.Expect(trigger).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await trigger.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+
+        // 1. It announces as a dialog, and its accessible name comes from the
+        //    title — so a screen reader says which dialog opened.
+        var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "New project" });
+        await Assertions.Expect(dialog).ToBeVisibleAsync(new() { Timeout = 10_000 });
+
+        // 2. Focus moved into the dialog, onto the field it exists to fill.
+        var nameInput = page.GetByPlaceholder("Acme launch");
+        await Assertions.Expect(nameInput).ToBeFocusedAsync(new() { Timeout = 5_000 });
+
+        // 3. That field has a real <label for=…>. Asserting the wiring rather
+        //    than any particular wording: the old markup put a presentational
+        //    <div> beside an id-less <input>, which reads as "edit, blank".
+        var labelText = await nameInput.EvaluateAsync<string>(
+            @"el => {
+                const id = el.getAttribute('id');
+                if (!id) return '';
+                const label = document.querySelector(`label[for='${CSS.escape(id)}']`);
+                return label ? (label.textContent ?? '').trim() : '';
+            }");
+        Assert.False(string.IsNullOrWhiteSpace(labelText),
+            "The name field has no <label for> — screen readers announce it as unnamed.");
+
+        // 4. Escape dismisses, and focus goes back to the trigger instead of
+        //    being orphaned on <body>.
+        await page.Keyboard.PressAsync("Escape");
+        await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = 5_000 });
+        await Assertions.Expect(trigger).ToBeFocusedAsync(new() { Timeout = 5_000 });
     }
 
     private static async Task CreatePageAsync(IPage page, string notebookName, string pageTitle)

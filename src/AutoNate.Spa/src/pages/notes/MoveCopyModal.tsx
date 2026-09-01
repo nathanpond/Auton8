@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { TextInput } from "@mantine/core";
 import { ProjectTreePageDto, ProjectTreeResponse } from "@/api/content";
 import { useProjectTree } from "@/hooks/useContent";
+import { NotesModal, btnGhostStyle, btnPrimaryStyle } from "./NotesModal";
 import { notesTheme } from "./notesTheme";
 
 // Destination types selectable in the picker. Pages can re-parent under a
@@ -73,14 +75,6 @@ export function MoveCopyModal({
     return collectDescendants(treeQuery.data, itemId);
   }, [itemKind, itemId, treeQuery.data]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const title =
     (mode === "move" ? "Move " : "Copy ") +
     (itemKind === "page" ? "page" : "note") +
@@ -102,167 +96,36 @@ export function MoveCopyModal({
   }
 
   return (
-    <div
-      onClick={() => !busy && onClose()}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 220,
-        background: "rgba(32, 37, 42, 0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-        animation: "notesFadeIn 140ms ease"
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "min(560px, 100%)",
-          maxHeight: "80vh",
-          background: "#fff",
-          borderRadius: 6,
-          boxShadow: "0 22px 60px -12px rgba(0,0,0,0.35)",
-          fontFamily: "inherit",
-          display: "flex",
-          flexDirection: "column",
-          animation: "notesPopIn 180ms cubic-bezier(.2,.9,.3,1.2)"
-        }}
-      >
-        <div
+    <NotesModal
+      onClose={onClose}
+      title={
+        // minWidth:0 lets the long "Move page — <title>" string ellipsize
+        // inside the header flex row the way the old <h3> did.
+        <span
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "16px 18px",
-            borderBottom: `1px solid ${notesTheme.border}`,
-            flexShrink: 0
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap"
           }}
         >
+          {title}
+        </span>
+      }
+      icon={mode === "move" ? "fa-arrow-right" : "fa-copy"}
+      width="min(560px, 100%)"
+      busy={busy}
+      footer={
+        <>
           <div
             style={{
-              width: 32,
-              height: 32,
-              borderRadius: 6,
-              background: notesTheme.primary + "20",
-              color: notesTheme.primary,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 14,
-              flexShrink: 0
+              fontSize: 11.5,
+              color: notesTheme.muted,
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden"
             }}
           >
-            <i className={`fa ${mode === "move" ? "fa-arrow-right" : "fa-copy"}`} />
-          </div>
-          <h3
-            style={{
-              margin: 0,
-              fontSize: 14,
-              fontWeight: 700,
-              color: notesTheme.dark,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap"
-            }}
-          >
-            {title}
-          </h3>
-        </div>
-
-        <div style={{ padding: "12px 18px 0 18px", flexShrink: 0 }}>
-          <div style={{ fontSize: 12, color: notesTheme.muted, marginBottom: 8 }}>
-            {itemKind === "page"
-              ? "Pick a notebook or page in the same project."
-              : "Pick a page in the same project."}{" "}
-            You need contributor access to the destination.
-          </div>
-          <div style={{ position: "relative" }}>
-            <i
-              className="fa fa-magnifying-glass"
-              style={{
-                position: "absolute",
-                left: 9,
-                top: "50%",
-                transform: "translateY(-50%)",
-                color: notesTheme.muted,
-                fontSize: 10.5
-              }}
-            />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter destinations…"
-              style={{
-                width: "100%",
-                border: `1px solid ${notesTheme.border}`,
-                borderRadius: 4,
-                padding: "6px 10px 6px 26px",
-                fontSize: 11.5,
-                outline: "none",
-                fontFamily: "inherit",
-                background: "#fff",
-                boxSizing: "border-box"
-              }}
-            />
-          </div>
-        </div>
-
-        <div style={{ padding: "12px 8px 0 8px", overflowY: "auto", flex: 1, minHeight: 200 }}>
-          {treeQuery.isLoading && (
-            <div style={{ padding: 12, fontSize: 11.5, color: notesTheme.muted }}>
-              Loading project tree…
-            </div>
-          )}
-          {treeQuery.isError && (
-            <div style={{ padding: 12, fontSize: 11.5, color: notesTheme.danger }}>
-              Couldn&apos;t load the project tree.
-            </div>
-          )}
-          {treeQuery.data && (
-            <TreePicker
-              tree={treeQuery.data}
-              itemKind={itemKind}
-              excludedPageIds={excludedPageIds}
-              selected={selected}
-              onSelect={setSelected}
-              query={query.trim().toLowerCase()}
-            />
-          )}
-        </div>
-
-        {error && (
-          <div
-            style={{
-              margin: "12px 18px 0 18px",
-              padding: "8px 10px",
-              background: "#fee",
-              border: `1px solid ${notesTheme.danger}`,
-              borderRadius: 4,
-              color: notesTheme.danger,
-              fontSize: 12,
-              flexShrink: 0
-            }}
-          >
-            <i className="fa fa-triangle-exclamation" style={{ marginRight: 6 }} />
-            {error}
-          </div>
-        )}
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 8,
-            padding: "12px 16px",
-            borderTop: `1px solid ${notesTheme.border}`,
-            background: "#f8f9fa",
-            flexShrink: 0
-          }}
-        >
-          <div style={{ fontSize: 11.5, color: notesTheme.muted, flex: 1, minWidth: 0, overflow: "hidden" }}>
             {selected ? (
               <>
                 <i
@@ -282,15 +145,8 @@ export function MoveCopyModal({
             onClick={onClose}
             disabled={busy}
             style={{
-              background: "#fff",
-              border: `1px solid ${notesTheme.border}`,
-              borderRadius: 4,
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 700,
-              color: notesTheme.dark,
+              ...btnGhostStyle,
               cursor: busy ? "not-allowed" : "pointer",
-              fontFamily: "inherit",
               opacity: busy ? 0.6 : 1
             }}
           >
@@ -301,23 +157,109 @@ export function MoveCopyModal({
             onClick={() => selected && onConfirm(selected)}
             disabled={!canConfirm}
             style={{
-              background: notesTheme.primary,
-              border: `1px solid ${notesTheme.primary}`,
-              borderRadius: 4,
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 700,
-              color: "#fff",
-              fontFamily: "inherit",
+              ...btnPrimaryStyle,
               cursor: !canConfirm ? "not-allowed" : "pointer",
               opacity: !canConfirm ? 0.6 : 1
             }}
           >
             {busy ? "Working…" : verb}
           </button>
-        </div>
+        </>
+      }
+    >
+      <div style={{ fontSize: 12, color: notesTheme.muted, marginBottom: 8 }}>
+        {itemKind === "page"
+          ? "Pick a notebook or page in the same project."
+          : "Pick a page in the same project."}{" "}
+        You need contributor access to the destination.
       </div>
-    </div>
+
+      <TextInput
+        // No visible label in this design, so the filter gets an aria-label
+        // naming what it narrows — previously it announced as "edit, blank".
+        aria-label="Filter destinations"
+        // Focus opens here rather than on the close button: typing to narrow
+        // the tree is the first thing this dialog is for.
+        data-autofocus
+        value={query}
+        onChange={(e) => setQuery(e.currentTarget.value)}
+        placeholder="Filter destinations…"
+        leftSection={
+          <i
+            className="fa fa-magnifying-glass"
+            style={{ fontSize: 10.5, color: notesTheme.muted }}
+          />
+        }
+        leftSectionWidth={26}
+        leftSectionPointerEvents="none"
+        styles={{
+          input: {
+            border: `1px solid ${notesTheme.border}`,
+            borderRadius: 4,
+            padding: "6px 10px 6px 26px",
+            fontSize: 11.5,
+            fontFamily: "inherit",
+            color: notesTheme.dark,
+            background: "#fff",
+            minHeight: 0,
+            height: "auto"
+          }
+        }}
+      />
+
+      {/* The negative inline margin restores the list's original 8px gutter
+          under the shell body's 20px padding, and the explicit maxHeight
+          keeps the tree scrolling inside a bounded region instead of
+          stretching the dialog the way the old 80vh panel prevented. */}
+      <div
+        style={{
+          marginTop: 12,
+          marginInline: -20,
+          padding: "0 8px",
+          overflowY: "auto",
+          minHeight: 200,
+          maxHeight: "46vh"
+        }}
+      >
+        {treeQuery.isLoading && (
+          <div style={{ padding: 12, fontSize: 11.5, color: notesTheme.muted }}>
+            Loading project tree…
+          </div>
+        )}
+        {treeQuery.isError && (
+          <div style={{ padding: 12, fontSize: 11.5, color: notesTheme.danger }}>
+            Couldn&apos;t load the project tree.
+          </div>
+        )}
+        {treeQuery.data && (
+          <TreePicker
+            tree={treeQuery.data}
+            itemKind={itemKind}
+            excludedPageIds={excludedPageIds}
+            selected={selected}
+            onSelect={setSelected}
+            query={query.trim().toLowerCase()}
+          />
+        )}
+      </div>
+
+      {error && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "8px 10px",
+            background: "#fee",
+            border: `1px solid ${notesTheme.danger}`,
+            borderRadius: 4,
+            color: notesTheme.danger,
+            fontSize: 12
+          }}
+        >
+          <i className="fa fa-triangle-exclamation" style={{ marginRight: 6 }} />
+          {error}
+        </div>
+      )}
+    </NotesModal>
   );
 }
 
@@ -604,6 +546,9 @@ function DestRow({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      // The row's selected state was carried by background colour and a
+      // check glyph only; aria-pressed states it for a screen reader.
+      aria-pressed={selected}
       title={disabledHint}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}

@@ -80,51 +80,6 @@ export function SitewideChatbotSettings() {
 
 export { ExternalConnectionsPage as SitewideExternalConnections } from "./external-connections/ExternalConnectionsPage";
 
-export function SecurityManageUsers() {
-  return (
-    <Stub
-      title="Manage Users"
-      blurb="Create, update, and disable user accounts."
-    />
-  );
-}
-
-export function SecurityManageGroups() {
-  return (
-    <Stub
-      title="Manage Groups"
-      blurb="Organize users into groups for easier permission management."
-    />
-  );
-}
-
-export function SecurityManageRoles() {
-  return (
-    <Stub
-      title="Manage Roles"
-      blurb="Define named roles you can attach permissions to."
-    />
-  );
-}
-
-export function SecuritySetPermissions() {
-  return (
-    <Stub
-      title="Set Permissions"
-      blurb="Assign permissions to roles and configure their scopes."
-    />
-  );
-}
-
-export function SecurityPermissionChecker() {
-  return (
-    <Stub
-      title="Permission Checker"
-      blurb="Inspect why a user does or does not have a given permission."
-    />
-  );
-}
-
 export function FormsFormMappings() {
   return (
     <Stub

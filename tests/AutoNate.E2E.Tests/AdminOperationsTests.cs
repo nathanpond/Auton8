@@ -108,7 +108,7 @@ public sealed class AdminOperationsTests : E2ETestBase
         await Assertions.Expect(row).Not.ToBeVisibleAsync(new() { Timeout = 20_000 });
     }
 
-    [Fact(Skip = "Blocked by #172: appearance Save accepts edits, but reloading restores the default Site name instead of the saved value. This spec is that issue's acceptance test — un-skip it when #172 is fixed.")]
+    [Fact]
     public async Task Appearance_SiteNamePersistsAcrossReload()
     {
         await using var session = await NewSignedInAsAdminAsync();
@@ -122,7 +122,7 @@ public sealed class AdminOperationsTests : E2ETestBase
         try
         {
             await siteName.FillAsync(changed);
-            await page.GetByRole(AriaRole.Button, new() { Name = "Save changes" }).ClickAsync();
+            await SaveAppearanceAsync(page);
             await page.ReloadAsync();
             await Assertions.Expect(page.GetByLabel("Site name")).ToHaveValueAsync(changed);
         }
@@ -133,8 +133,21 @@ public sealed class AdminOperationsTests : E2ETestBase
             if (await siteName.InputValueAsync() != original)
             {
                 await siteName.FillAsync(original);
-                await page.GetByRole(AriaRole.Button, new() { Name = "Save changes" }).ClickAsync();
+                await SaveAppearanceAsync(page);
             }
         }
+    }
+
+    // Clicking "Save changes" only dispatches the PATCH. Reloading straight
+    // after the click races it: the navigation aborts the in-flight request
+    // and the value never reaches the database, which reads exactly like a
+    // silent save-and-revert (#172 was filed on that reading). Wait for the
+    // page's own success alert, which is the completion signal a user waits
+    // for too, so the spec also now asserts that saving reports success.
+    private static async Task SaveAppearanceAsync(IPage page)
+    {
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save changes" }).ClickAsync();
+        await Assertions.Expect(page.GetByText("Appearance settings saved."))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 }

@@ -106,6 +106,40 @@ public sealed class AgentSidebarTests : E2ETestBase
     }
 
     [Fact]
+    public async Task Sidebar_MovesFocusInOnOpen_AndBackToTheTriggerOnEscape()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        // Drive the whole thing from the keyboard — the point of #13 is that
+        // a mouse was previously the only way to reach the composer. Focus
+        // the header trigger and press Enter rather than clicking it.
+        var toggle = page.GetByLabel("Open AutoNate assistant");
+        await toggle.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
+        await toggle.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+
+        // 1. Focus moves into the panel, landing on the composer — the
+        //    control the user opened the assistant to use. Before the fix
+        //    focus stayed on the header button and the composer was only
+        //    reachable by tabbing blind through the rest of the page.
+        var composer = page.GetByPlaceholder("Ask the assistant about this page…");
+        await Assertions.Expect(composer).ToBeFocusedAsync(new() { Timeout = 10_000 });
+
+        // 2. Escape dismisses the panel from inside it.
+        await page.Keyboard.PressAsync("Escape");
+        await Assertions.Expect(page.GetByLabel("Close assistant"))
+            .Not.ToBeVisibleAsync(new() { Timeout = 5_000 });
+
+        // 3. Focus returns to whatever opened the panel instead of being
+        //    orphaned on <body>, so Tab resumes where the user left off.
+        //    The trigger's accessible name follows the open state, so after
+        //    closing it is the "Open …" label again.
+        await Assertions.Expect(page.GetByLabel("Open AutoNate assistant"))
+            .ToBeFocusedAsync(new() { Timeout = 5_000 });
+    }
+
+    [Fact]
     public async Task CmdK_OpensChatPaletteModal_FromAnyPage()
     {
         await using var session = await NewSignedInAsAdminAsync();

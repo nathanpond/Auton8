@@ -1,4 +1,12 @@
-import { useState } from "react";
+import { useId, useState } from "react";
+import { TextInput } from "@mantine/core";
+import {
+  NotesGroupLabel,
+  NotesModal,
+  btnGhostStyle,
+  btnPrimaryStyle,
+  notesInputStyles
+} from "./NotesModal";
 import { NOTE_KIND_META, WireNoteKind, notesTheme } from "./notesTheme";
 
 type Props = {
@@ -16,6 +24,7 @@ const DEFAULT_NAME: Record<WireNoteKind, string> = {
 export function NewNoteModal({ onClose, onCreate, submitting }: Props) {
   const [kind, setKind] = useState<WireNoteKind>("richtext");
   const [name, setName] = useState("");
+  const kindLabelId = useId();
 
   const submit = () => {
     const trimmed = name.trim();
@@ -24,126 +33,13 @@ export function NewNoteModal({ onClose, onCreate, submitting }: Props) {
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 200,
-        background: "rgba(32, 37, 42, 0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-        animation: "notesFadeIn 140ms ease"
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "min(640px, 100%)",
-          background: "#fff",
-          borderRadius: 6,
-          boxShadow: "0 22px 60px -12px rgba(0,0,0,0.35)",
-          display: "flex",
-          flexDirection: "column",
-          fontFamily: "inherit",
-          animation: "notesPopIn 180ms cubic-bezier(.2,.9,.3,1.2)"
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "14px 18px",
-            borderBottom: `1px solid ${notesTheme.border}`
-          }}
-        >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: 14,
-              fontWeight: 700,
-              color: notesTheme.dark,
-              display: "flex",
-              alignItems: "center",
-              gap: 8
-            }}
-          >
-            <i className="fa fa-file-circle-plus" style={{ color: notesTheme.primary }} />
-            New note
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              width: 28,
-              height: 28,
-              border: "none",
-              background: "transparent",
-              borderRadius: 3,
-              color: notesTheme.muted,
-              cursor: "pointer",
-              fontSize: 14
-            }}
-          >
-            <i className="fa fa-xmark" />
-          </button>
-        </div>
-
-        <div style={{ padding: 20 }}>
-          <Label>Type</Label>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 10,
-              marginBottom: 18
-            }}
-          >
-            {(["richtext", "drawing", "diagram"] as const).map((k) => (
-              <KindCard
-                key={k}
-                kindId={k}
-                active={kind === k}
-                onClick={() => setKind(k)}
-              />
-            ))}
-          </div>
-
-          <Label>Name</Label>
-          <input
-            value={name}
-            autoFocus
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-              if (e.key === "Escape") onClose();
-            }}
-            placeholder={DEFAULT_NAME[kind]}
-            style={{
-              width: "100%",
-              border: `1px solid ${notesTheme.border}`,
-              borderRadius: 4,
-              padding: "8px 12px",
-              fontSize: 13,
-              fontFamily: "inherit",
-              outline: "none"
-            }}
-          />
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            padding: "12px 16px",
-            borderTop: `1px solid ${notesTheme.border}`,
-            background: "#f8f9fa"
-          }}
-        >
+    <NotesModal
+      onClose={onClose}
+      title="New note"
+      icon="fa-file-circle-plus"
+      busy={submitting}
+      footer={
+        <>
           <button type="button" onClick={onClose} style={btnGhostStyle}>
             Cancel
           </button>
@@ -160,9 +56,41 @@ export function NewNoteModal({ onClose, onCreate, submitting }: Props) {
             <i className="fa fa-plus" style={{ fontSize: 10, marginRight: 6 }} />
             {submitting ? "Creating…" : "Create note"}
           </button>
-        </div>
+        </>
+      }
+    >
+      <NotesGroupLabel id={kindLabelId}>Type</NotesGroupLabel>
+      <div
+        role="group"
+        aria-labelledby={kindLabelId}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 10,
+          marginBottom: 18
+        }}
+      >
+        {(["richtext", "drawing", "diagram"] as const).map((k) => (
+          <KindCard key={k} kindId={k} active={kind === k} onClick={() => setKind(k)} />
+        ))}
       </div>
-    </div>
+
+      <TextInput
+        label="Name"
+        // Focus lands here rather than on the close button: naming the note is
+        // what the dialog is for, and the kind picker has a working default.
+        data-autofocus
+        value={name}
+        onChange={(e) => setName(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          // Escape is handled by the dialog itself; only Enter-to-submit is
+          // this field's business.
+          if (e.key === "Enter") submit();
+        }}
+        placeholder={DEFAULT_NAME[kind]}
+        styles={notesInputStyles}
+      />
+    </NotesModal>
   );
 }
 
@@ -180,6 +108,7 @@ function KindCard({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       style={{
         textAlign: "left",
         cursor: "pointer",
@@ -243,43 +172,3 @@ function KindCard({
     </button>
   );
 }
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 10.5,
-        fontWeight: 700,
-        color: notesTheme.muted,
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        marginBottom: 6
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const btnGhostStyle: React.CSSProperties = {
-  background: "#fff",
-  border: `1px solid ${notesTheme.border}`,
-  borderRadius: 4,
-  padding: "6px 14px",
-  fontSize: 12,
-  fontWeight: 700,
-  color: notesTheme.dark,
-  cursor: "pointer",
-  fontFamily: "inherit"
-};
-
-const btnPrimaryStyle: React.CSSProperties = {
-  background: notesTheme.primary,
-  border: `1px solid ${notesTheme.primary}`,
-  borderRadius: 4,
-  padding: "6px 14px",
-  fontSize: 12,
-  fontWeight: 700,
-  color: "#fff",
-  fontFamily: "inherit"
-};

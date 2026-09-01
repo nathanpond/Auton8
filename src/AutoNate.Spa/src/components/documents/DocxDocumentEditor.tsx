@@ -724,6 +724,76 @@ export default function DocxDocumentEditor({
     };
   }, []);
 
+  // Import finalize is driven by watching the editor's own document settle,
+  // not by docx-editor's `onChange` (#173).
+  //
+  // The finalize used to hang off `onChange`, on the assumption that the
+  // OOXML parse pass would surface as change events. It does not — the
+  // parse populates the view without the library ever calling that prop, so
+  // the debounce never armed, `onImportFinalized` never fired, the URL sat
+  // on `?import=1` forever and the document reloaded empty. Measured:
+  // `onEditorViewReady` fires (twice), `onChange` never does.
+  //
+  // Polling the view is deliberately dumber than any event and survives the
+  // library changing which events it emits. We wait for the parsed content
+  // to stop growing rather than firing on the first non-empty read, because
+  // a long document arrives across several transactions.
+  const IMPORT_SETTLE_INTERVAL_MS = 250;
+  const IMPORT_SETTLE_STABLE_TICKS = 2;
+  const IMPORT_SETTLE_TIMEOUT_MS = 20_000;
+
+  const scheduleImportFinalize = (view: EditorView) => {
+    if (!importMode || !onImportFinalized || finalizedRef.current) return;
+    if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+
+    const startedAt = Date.now();
+    let lastSize = -1;
+    let stableTicks = 0;
+
+    const tick = () => {
+      if (finalizedRef.current) return;
+      // The view can be torn down mid-poll (user navigates away).
+      if ((view as { docView?: unknown }).docView == null) return;
+
+      // An empty ProseMirror doc is one empty paragraph — content.size 2.
+      // Anything at or below that is "nothing parsed yet".
+      const size = view.state.doc.content.size;
+      if (size > 2 && size === lastSize) {
+        stableTicks += 1;
+      } else {
+        stableTicks = 0;
+        lastSize = size;
+      }
+
+      if (stableTicks >= IMPORT_SETTLE_STABLE_TICKS) {
+        finalizedRef.current = true;
+        try {
+          onImportFinalized(JSON.stringify(view.state.doc.toJSON()));
+        } catch (err) {
+          console.error("[import] finalize serialization failed", err);
+          finalizedRef.current = false;
+        }
+        return;
+      }
+
+      if (Date.now() - startedAt > IMPORT_SETTLE_TIMEOUT_MS) {
+        // Deliberately does NOT finalize. Committing an empty body here
+        // would clear `?import=1` and destroy the server-side stash, which
+        // is the one copy of the user's upload left. Leaving import mode
+        // in place keeps the stash, so a reload retries the parse.
+        console.error(
+          "[import] gave up waiting for parsed content to settle; " +
+            "the import stash is left intact so a reload can retry."
+        );
+        return;
+      }
+
+      finalizeTimerRef.current = setTimeout(tick, IMPORT_SETTLE_INTERVAL_MS);
+    };
+
+    finalizeTimerRef.current = setTimeout(tick, IMPORT_SETTLE_INTERVAL_MS);
+  };
+
   const insertBindingPlaceholder = (binding: DocumentBindingDto) => {
     const view = editorViewRef.current;
     if (!view) return;
@@ -851,23 +921,15 @@ export default function DocxDocumentEditor({
       // to capture the view so we can call `state.doc.toJSON()`; the
       // editor's own `onChange` returns a docx-editor Document, not PM
       // JSON, so we go through the view instead.
+      // Secondary kick only. docx-editor does not call this during the
+      // OOXML parse pass (see scheduleImportFinalize above), so the settle
+      // poll is what actually finalizes; this re-arms it if the library
+      // ever does emit a change first.
       onChange={
         importMode && onImportFinalized
           ? () => {
-              if (finalizedRef.current) return;
-              if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
-              finalizeTimerRef.current = setTimeout(() => {
-                const view = editorViewRef.current;
-                if (!view || finalizedRef.current) return;
-                finalizedRef.current = true;
-                try {
-                  const json = view.state.doc.toJSON();
-                  onImportFinalized(JSON.stringify(json));
-                } catch (err) {
-                  console.error("[import] finalize serialization failed", err);
-                  finalizedRef.current = false;
-                }
-              }, 500);
+              const view = editorViewRef.current;
+              if (view) scheduleImportFinalize(view);
             }
           : undefined
       }
@@ -1052,6 +1114,9 @@ export default function DocxDocumentEditor({
         if (editorViewRef.current === view) return;
         editorViewRef.current = view;
         makeAcceptRejectModeSafe(view);
+        // Import mode: start watching for the parse to settle. This is the
+        // trigger that actually fires — unlike onChange.
+        scheduleImportFinalize(view);
         // One-shot binding sync for the case where bindings were already
         // loaded before the view mounted. Deferred a tick so we don't
         // dispatch into docx-editor's mount transactions.
