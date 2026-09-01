@@ -541,9 +541,36 @@ public sealed class PrivilegeMutationEndpointTests
         Assert.Equal(0, stored.Priority);
     }
 
-    // Real behaviour, not the desired one: like the role-assignment store,
-    // EfCorePermissionGrantStore validates the principal kind but never that
-    // the principal exists, so a share can be written to an arbitrary GUID.
+    // #186 item 1: self-service sharing is for people and groups of people.
+    // The grant store's allowlist also contains `role` — correct for an admin
+    // using /api/admin/grants — but nothing narrowed it here, so anyone with
+    // Edit on a folder could attach a resource grant to a role, SuperAdmin
+    // included, through an endpoint meant for user/group sharing.
+    [Fact]
+    public async Task CreateOverride_ForARolePrincipal_IsRejectedAndWritesNoGrant()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync(EnforceConfig());
+        var (projectId, folderId) = await SeedFolderAsync(factory);
+        await AddProjectMemberAsync(factory, projectId, AdminUserId, ProjectRoleNames.Contributor);
+        var client = await SignedInClientAsync(factory);
+
+        var before = (await ListAllGrantsAsync(factory)).Count;
+
+        var resp = await client.PostAsJsonAsync(
+            $"/api/content/folders/{folderId}/permissions",
+            new { principalKind = EntityKinds.Role, principalId = SystemRoles.SuperAdminId.ToString(), action = "view" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Equal(before, (await ListAllGrantsAsync(factory)).Count);
+    }
+
+    // Deliberate, not an oversight (#186 item 2, assessed and left alone).
+    // EfCorePermissionGrantStore validates the principal kind but not that the
+    // principal exists, so privilege can be written against an id before it is
+    // created. That is how pre-provisioning works with an external IdP, where
+    // the local user row appears on first sign-in — adding an existence check
+    // would break granting ahead of someone's first login. Pinned so the
+    // behaviour is a choice on the record rather than an accident.
     [Fact]
     public async Task CreateOverride_ForAPrincipalThatDoesNotExist_StillWritesTheGrant()
     {

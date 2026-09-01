@@ -210,6 +210,17 @@ public static class DatasetEndpoints
 #pragma warning restore CA1304, CA1311
                 if (fileId is null)
                     return Results.NotFound(new { reason = $"File '{request.ScopePath}' not found." });
+
+                // `.keep` is the placeholder CreateFolderAsync writes to make an
+                // empty folder exist. Its StorageKey is "", which
+                // FileDataStoreService.ResolveAbsolutePath resolves to the
+                // datastores root *directory*, so the DownloadAsync below threw
+                // and — with no exception-handling middleware — the caller got a
+                // 500 carrying the exception text and stack (#184). The folder
+                // branch already filters it out; the file branch did not, and it
+                // is not a file anyone can preview.
+                if (string.Equals(filename, ".keep", StringComparison.OrdinalIgnoreCase))
+                    return Results.NotFound(new { reason = $"File '{request.ScopePath}' not found." });
             }
             else if (string.Equals(request.ScopeKind, DatasetFileScopeReader.ScopeFolder, StringComparison.OrdinalIgnoreCase))
             {

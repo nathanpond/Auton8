@@ -38,8 +38,26 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         _databaseName = databaseName;
     }
 
+    // Bounded pool per test database.
+    //
+    // Every test class builds its own database, so it also gets its own
+    // connection-string and therefore its own Npgsql pool — and the default
+    // maximum is 100 *per pool*. With xunit running classes in parallel that
+    // multiplies past Postgres's own max_connections (100 by default), and the
+    // suite fails with "53300: sorry, too many clients already" on whichever
+    // test happens to ask for connections at the wrong moment. It surfaced on
+    // CreateAsync_KeysAreSequentialUnderConcurrency, which opens twenty at
+    // once, but the cause was suite-wide rather than anything about that test.
+    //
+    // Ten is comfortably above what any single class needs concurrently; the
+    // twenty-way test simply queues for a free connection instead of opening a
+    // twenty-first. The idle settings return connections to the server quickly
+    // so a finished class stops holding any.
+    private const string PoolTuning =
+        "Maximum Pool Size=10;Connection Idle Lifetime=15;Connection Pruning Interval=5";
+
     public string ConnectionString =>
-        $"Host=localhost;Port=5432;Database={_databaseName};Username=autonate;Password={Password}";
+        $"Host=localhost;Port=5432;Database={_databaseName};Username=autonate;Password={Password};{PoolTuning}";
 
     public static async Task<PostgresTestDatabase> CreateAsync()
     {
@@ -441,8 +459,12 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         return new SimpleDbContextFactory(options);
     }
 
+    // Pooling off: these are short administrative connections to the
+    // maintenance database, one per create/drop. Pooling them would hold
+    // connections open against the same server budget the tuning above exists
+    // to protect.
     private static string AdminConnectionString(string databaseName) =>
-        $"Host=localhost;Port=5432;Database={databaseName};Username=autonate;Password={Password}";
+        $"Host=localhost;Port=5432;Database={databaseName};Username=autonate;Password={Password};Pooling=false";
 
     private sealed class SimpleDbContextFactory(DbContextOptions<AutoNateDbContext> options)
         : IDbContextFactory<AutoNateDbContext>

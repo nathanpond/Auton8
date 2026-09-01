@@ -274,11 +274,16 @@ public sealed class ContentDocumentBindingAndCommentEndpointTests
         var response = await h.Client.PostAsync(h.BindingsUrl() + "refresh-all", content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        // The zero-binding branch short-circuits with a DocumentBindingListResponse
-        // rather than a RefreshAllResponse, so only `items` is asserted here.
-        var body = await response.Content.ReadFromJsonAsync<BindingListResponse>();
-        Assert.NotNull(body);
-        Assert.Empty(body!.Items);
+        // #186 item 4: the zero-binding branch used to short-circuit with a
+        // DocumentBindingListResponse while every other path returned a
+        // RefreshAllResponse, so a client reading `failures.length` got
+        // undefined for a document with no bindings. Deserializing as the
+        // refresh shape is what proves the two agree now.
+        var refreshBody = await response.Content.ReadFromJsonAsync<RefreshAllBody>();
+        Assert.NotNull(refreshBody);
+        Assert.Empty(refreshBody!.Items);
+        Assert.Empty(refreshBody.Failures);
+
     }
 
     // ---------------------------------------------------------------
@@ -1157,4 +1162,8 @@ public sealed class ContentDocumentBindingAndCommentEndpointTests
             await _factory.DisposeAsync();
         }
     }
+    private sealed record RefreshAllBody(
+        List<JsonElement> Items,
+        List<JsonElement> Failures);
+
 }

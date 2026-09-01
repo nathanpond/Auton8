@@ -109,6 +109,25 @@ public static class ContentPermissionOverrideEndpoints
                     statusCode: StatusCodes.Status403Forbidden);
             }
 
+            // Self-service sharing is for people and groups of people.
+            //
+            // The store's allowlist also contains `role`, because an admin
+            // granting through /api/admin/grants legitimately targets roles —
+            // but nothing narrowed it here, so a folder or document editor
+            // could attach a resource grant to a role, SuperAdmin included,
+            // through an endpoint whose own header comment describes user/group
+            // sharing (#186). The route is reachable by anyone with Edit on the
+            // item, which is a much lower bar than administering roles.
+            if (!string.Equals(request.PrincipalKind, EntityKinds.User, StringComparison.Ordinal)
+                && !string.Equals(request.PrincipalKind, EntityKinds.Group, StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"principalKind must be '{EntityKinds.User}' or '{EntityKinds.Group}'. "
+                            + "Granting to a role is an administrative action — use /api/admin/grants."
+                });
+            }
+
             try
             {
                 var grant = await store.CreateAsync(

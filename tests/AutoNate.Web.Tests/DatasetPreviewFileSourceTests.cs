@@ -345,16 +345,15 @@ public sealed class DatasetPreviewFileSourceTests
         }
     }
 
-    // FINDING, asserted as-is: a folder's ".keep" placeholder row carries an
-    // empty storage_key, and the endpoint downloads the file before handing it
-    // to a parser. FileDataStoreService.ResolveAbsolutePath("") resolves to the
-    // datastores root DIRECTORY, so File.OpenRead throws and the request ends as
-    // an unhandled 500 with the exception text in the body. The folder branch
-    // filters ".keep" out; the file branch does not, and any caller holding
-    // dataset:create can address it by path. Reported alongside these tests —
-    // production code intentionally left untouched.
+    // A folder's ".keep" placeholder row carries an empty storage_key, and the
+    // endpoint downloads the file before handing it to a parser.
+    // FileDataStoreService.ResolveAbsolutePath("") resolves to the datastores
+    // root DIRECTORY, so File.OpenRead threw and — with no exception-handling
+    // middleware — the caller got a 500 carrying the exception text and stack.
+    // The folder branch already filtered ".keep" out; the file branch now does
+    // too, so it is simply not found (#184).
     [Fact]
-    public async Task PreviewFileSource_FolderPlaceholderKeepFile_Returns500()
+    public async Task PreviewFileSource_FolderPlaceholderKeepFile_ReturnsNotFound()
     {
         var dataRoot = NewDataRoot();
         try
@@ -366,7 +365,11 @@ public sealed class DatasetPreviewFileSourceTests
 
             var resp = await PreviewAsync(client, storeId, "file", "/empty/.keep", RawFileParser.KindName);
 
-            Assert.Equal(HttpStatusCode.InternalServerError, resp.StatusCode);
+            // #184: a clean 404, and nothing about the server in the body.
+            Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+            var body = await resp.Content.ReadAsStringAsync();
+            Assert.DoesNotContain("Exception", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("at AutoNate", body, StringComparison.Ordinal);
         }
         finally
         {
