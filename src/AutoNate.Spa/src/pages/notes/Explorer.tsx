@@ -704,8 +704,23 @@ function PageRow({
         withArrow
       >
         <div
+          // Same reason as the notebook row above: a div with onClick is
+          // unreachable by keyboard, and opening a page is the primary task of
+          // this module — a keyboard-only user could reach Notes and then not
+          // open a single note (WCAG 2.1.1 / 4.1.2, #10).
+          role="button"
+          tabIndex={0}
+          aria-label={`Open ${page.title}`}
           draggable={dropAllowed}
           onClick={(e) => {
+            e.stopPropagation();
+            onPagePick(page.id);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            // Let the row's own buttons (rename, options) handle their keys.
+            if (e.target !== e.currentTarget) return;
+            e.preventDefault();
             e.stopPropagation();
             onPagePick(page.id);
           }}

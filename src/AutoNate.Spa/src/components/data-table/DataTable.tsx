@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { KeyboardEvent as ReactKeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ActionIcon,
@@ -427,6 +427,36 @@ export function DataTable<T>(props: DataTableProps<T>) {
     [getRowClassName]
   );
 
+  // mantine-datatable renders onRowClick as a bare <tr onClick>: no tabIndex,
+  // no role, no key handler. Any table whose only way into a row is the row
+  // itself was therefore mouse-only — Notifications could not be opened at all
+  // without a pointer (WCAG 2.1.1 / 4.1.2, #12). customRowAttributes is the
+  // supported hook for putting real attributes on the <tr>, so rows become
+  // focusable buttons that answer Enter and Space, and getRowAriaLabel — which
+  // this wrapper used to accept and throw away — finally names them.
+  const rowAttributesAdapter = useMemo(
+    () =>
+      onRowClick
+        ? (record: T) => ({
+            tabIndex: 0,
+            // Deliberately NOT role="button": a <tr> must keep its row role or
+            // the table's structure stops being exposed at all, and browsers
+            // will not surface a row as a button anyway. Focusable + a name +
+            // Enter/Space is what makes it operable while staying a row.
+            "aria-label": getRowAriaLabel?.(record),
+            onKeyDown: (event: ReactKeyboardEvent<HTMLTableRowElement>) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              // Space scrolls the page by default, and both would otherwise
+              // also reach a focused control inside the row.
+              if (event.target !== event.currentTarget) return;
+              event.preventDefault();
+              onRowClick(record);
+            }
+          })
+        : undefined,
+    [onRowClick, getRowAriaLabel]
+  );
+
   return (
     <Stack gap="sm">
       <Group justify="space-between" gap="sm" wrap="wrap">
@@ -510,11 +540,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
         loadingText={loadingMessage}
         onRowClick={onRowClickAdapter}
         rowClassName={rowClassNameAdapter}
+        customRowAttributes={rowAttributesAdapter}
       />
-
-      {/* getRowAriaLabel is accepted for API parity; mantine-datatable doesn't
-          expose per-row aria props directly. Suppress unused-var by reading. */}
-      {getRowAriaLabel ? null : null}
     </Stack>
   );
 }

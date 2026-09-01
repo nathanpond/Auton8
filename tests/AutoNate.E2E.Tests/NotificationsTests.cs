@@ -50,6 +50,28 @@ public sealed class NotificationsTests : E2ETestBase
         await page.GotoAsync("/notifications");
         await Assertions.Expect(page.GetByText(pageTitle).First)
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // #12: DataTable forwarded onRowClick as a bare <tr onClick>, so a
+        // notification row had no tabIndex, no role and no key handler — and
+        // Notifications has no link or button in any cell, so a keyboard user
+        // could not open one at all. The row is now a focusable button that
+        // answers Enter, named by the getRowAriaLabel this page already passed.
+        // Attribute locator on purpose: the focusability and the label ARE the
+        // feature here. A role locator will not do — a <tr> computes its
+        // accessible name from its cells, so aria-label on the row is not
+        // exposed as its name, and the row must stay a row rather than become
+        // a button (that would break the table's structure).
+        var keyboardRow = page.Locator("tbody tr[tabindex='0'][aria-label^='Open ']").First;
+        await Assertions.Expect(keyboardRow).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await keyboardRow.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+        await Assertions.Expect(page).ToHaveURLAsync(
+            new System.Text.RegularExpressions.Regex(@"/notes/"), new() { Timeout = 15_000 });
+
+        await page.GoBackAsync();
+        await Assertions.Expect(page.GetByText(pageTitle).First)
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
         await page.GetByRole(AriaRole.Button, new() { Name = "Unread" }).ClickAsync();
         await Assertions.Expect(page.GetByTitle("Unread").First)
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
