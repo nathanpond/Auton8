@@ -1,6 +1,7 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
+using Npgsql;
 using AutoNate.Web.Persistence.Scaffolded;
 using AutoNate.Web.Services.Content;
 using AutoNate.Web.Services.Events;
@@ -130,7 +131,8 @@ public static class ContentDocumentCommentEndpoints
                 UpdatedAtUtc = now
             };
             db.DocumentComments.Add(comment);
-            await db.SaveChangesAsync(ct);
+            var createConflict = await TrySaveOrConflictAsync(db, documentId, ct);
+            if (createConflict is not null) return createConflict;
 
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
@@ -204,7 +206,8 @@ public static class ContentDocumentCommentEndpoints
                 UpdatedAtUtc = now
             };
             db.DocumentComments.Add(reply);
-            await db.SaveChangesAsync(ct);
+            var replyConflict = await TrySaveOrConflictAsync(db, documentId, ct);
+            if (replyConflict is not null) return replyConflict;
 
             await auditPublisher.PublishAsync(
                 ContentEventTopic.TopicName,
@@ -407,4 +410,36 @@ public static class ContentDocumentCommentEndpoints
         DateTime UpdatedAtUtc);
 
     public sealed record DocumentCommentListResponse(List<DocumentCommentDto> Items);
+
+    // The (document_id, number) collision check above is a TOCTOU: the unique
+    // index is real, so two browsers picking the same number can both pass the
+    // SELECT and one loses at INSERT. The code already called that out as "a
+    // real-world race we accept" — but with nothing catching DbUpdateException
+    // the loser got an unhandled 500 instead of the 409 the handler promises
+    // three lines earlier, and the client's retry logic keys off that 409
+    // (#186).
+    private static async Task<IResult?> TrySaveOrConflictAsync(
+        AutoNateDbContext db, Guid documentId, CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return null;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
+        {
+            // Same answer the pre-check gives, computed the same way, so a
+            // caller cannot tell which path produced it.
+            var nextFree = await db.DocumentComments.AsNoTracking()
+                .Where(c => c.DocumentId == documentId)
+                .Select(c => (int?)c.Number)
+                .MaxAsync(ct) ?? 0;
+            return Results.Conflict(new
+            {
+                error = "Comment number already exists for this document.",
+                suggestedNumber = nextFree + 1
+            });
+        }
+    }
+
 }

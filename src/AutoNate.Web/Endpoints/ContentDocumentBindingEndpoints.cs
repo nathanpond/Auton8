@@ -202,7 +202,13 @@ public static class ContentDocumentBindingEndpoints
                 .ToListAsync(ct);
             if (rows.Count == 0)
             {
-                return Results.Ok(new DocumentBindingListResponse([]));
+                // Same shape as every other path out of this handler. It used
+                // to return DocumentBindingListResponse here and
+                // RefreshAllResponse everywhere else, so a client reading
+                // `failures.length` got undefined for a document with no
+                // bindings — a crash on the one input that is guaranteed not
+                // to be interesting (#186).
+                return Results.Ok(new RefreshAllResponse([], []));
             }
 
             var actorId = http.GetActorId();

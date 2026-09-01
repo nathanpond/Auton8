@@ -104,7 +104,8 @@ public sealed class EfCorePermissionGrantStore(
         if (!AllowedPrincipalKinds.Contains(input.PrincipalKind))
         {
             throw new PermissionGrantValidationException(
-                $"principalKind must be '{EntityKinds.User}' or '{EntityKinds.Group}'.");
+                "principalKind must be one of: "
+                + string.Join(", ", AllowedPrincipalKinds.Order(StringComparer.Ordinal)) + ".");
         }
 
         var principalId = (input.PrincipalId ?? string.Empty).Trim();

@@ -244,8 +244,15 @@ public sealed class DocumentsTests : E2ETestBase
         var deleteDialog = page.GetByRole(AriaRole.Dialog);
         await deleteDialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
         await Assertions.Expect(deleteDialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+        // Count, not visibility. The folder name renders in more than one
+        // place while the delete is in flight (the tree node and the header
+        // above it), and Not.ToBeVisibleAsync on a locator that matches two
+        // elements is itself a strict-mode violation — the assertion fails on
+        // the ambiguity rather than on the folder still being there. Asking
+        // for zero matches says what this means and is unambiguous however
+        // many places the name appears.
         await Assertions.Expect(page.GetByText(renamedName, new() { Exact = true }))
-            .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+            .ToHaveCountAsync(0, new() { Timeout = 10_000 });
     }
 
     private static async Task CreateFolderAsync(IPage page, string folderName)

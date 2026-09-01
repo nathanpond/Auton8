@@ -467,16 +467,16 @@ public sealed class YjsEndpointTests
     //
     // POST /api/yjs/ticket resolves the note (and, on the `documents:` branch,
     // the document) row BEFORE it calls the authorizer, so it answers 404 for
-    // an id that does not exist and 403 for one that does. Any authenticated
-    // user with no grants at all can therefore probe note/document ids for
-    // existence. The `page:` branch does not have the problem — it authorizes
-    // first and returns 403 either way.
+    // The note and documents branches used to answer 404 for an id that does
+    // not exist and 403 for one that does, so any authenticated user with no
+    // grants could probe note/document ids for existence. The `page:` branch
+    // never had the problem — it authorizes first and returns 403 either way.
     //
-    // Fixing it means moving the existence lookups behind the authorization
-    // decision (or collapsing both outcomes onto 403). Flip the expectations
-    // here when that lands; see the report attached to #80.
+    // Fixed in #185 by moving the existence lookups behind the authorization
+    // decision, so the note and documents branches answer the way the page
+    // branch always did.
     [Fact]
-    public async Task Ticket_WithoutAnyGrant_StillDistinguishesExistingNotesFromMissingOnes()
+    public async Task Ticket_WithoutAnyGrant_AnswersIdenticallyForRealAndMissingNotes()
     {
         await using var ctx = await TestContext.CreateAsync(
             new Dictionary<string, string?>
@@ -495,9 +495,12 @@ public sealed class YjsEndpointTests
             "/api/yjs/ticket",
             JsonSerializer.Serialize(new { documentName = $"note:{Guid.NewGuid()}" }));
 
+        // #185: both are 403 now. A caller with no grants cannot tell a real
+        // note id from an invented one, which is the whole point — the 404 is
+        // reserved for someone who could have seen it.
         Assert.Equal(HttpStatusCode.Forbidden, existing.StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, absent.StatusCode);
-        Assert.NotEqual(existing.StatusCode, absent.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, absent.StatusCode);
+        Assert.Equal(existing.StatusCode, absent.StatusCode);
 
         // The page branch is the shape the note branch should have: identical
         // answers whether or not the page is real.

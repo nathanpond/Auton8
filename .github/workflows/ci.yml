@@ -79,9 +79,13 @@ jobs:
     runs-on: ubuntu-latest
     # For the SPA bundle only — see the download step below.
     needs: spa
-    # The suite is ~9 minutes locally; the ceiling is a hung fixture, not slow
-    # hardware, so it should be generous but finite.
-    timeout-minutes: 45
+    # The suite is ~12 minutes locally and ~40 on a CI runner — it grew from
+    # 1461 to 1648 tests over this stack, and the first master run was
+    # cancelled at exactly 45 minutes having spent 41 of them testing. The
+    # ceiling is meant to catch a hung fixture, not a slow runner, so it needs
+    # headroom above the real duration rather than a value the suite can drift
+    # into. Revisit if the suite approaches an hour.
+    timeout-minutes: 75
 
     services:
       # Matches infra/docker-compose.yml. The tests create and drop their own

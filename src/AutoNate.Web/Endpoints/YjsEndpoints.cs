@@ -65,8 +65,25 @@ public static class YjsEndpoints
             // D10) so note:/napkin:/diagram: docs look up the parent pageId
             // and authorize on Page. pagemeta: addresses the page directly.
             // documents: authorizes on the Document kind directly (Phase 3+).
+            // Existence is resolved here but only *disclosed* after the
+            // authorization check below (#185).
+            //
+            // The note and documents branches used to answer 404 for a missing
+            // row before authorizing, while an existing row the caller could
+            // not see answered 403 — so any signed-in user with no grants
+            // could tell a real note or document id from a made-up one, a GUID
+            // at a time. The page branch was already correct because it
+            // authorizes the requested id directly and the authorizer denies
+            // unknown ids the same way it denies forbidden ones.
+            //
+            // Deferring means an unauthorized caller gets 403 either way,
+            // while someone who *could* have seen the row still gets the
+            // informative 404. Same shape as the role-assignment revoke fix.
             Guid authResourceId;
             string authKind;
+            var targetExists = true;
+            string? noteKindMismatch = null;
+
             if (kind == DocKinds.Page || kind == DocKinds.PageMeta)
             {
                 authResourceId = entityId;
@@ -78,25 +95,33 @@ public static class YjsEndpoints
                     .Where(n => n.Id == entityId)
                     .Select(n => new { n.PageId, n.NoteKind })
                     .FirstOrDefaultAsync(ct);
-                if (note is null) return Results.NotFound();
-                var expected = ExpectedNoteKindForDocKind(kind);
-                if (!string.Equals(note.NoteKind, expected, StringComparison.Ordinal))
-                    return Results.BadRequest(new
+                if (note is null)
+                {
+                    // Authorize the requested id as a page: it does not exist,
+                    // so this denies for anyone without blanket access, which
+                    // is exactly the answer a missing row should give them.
+                    targetExists = false;
+                    authResourceId = entityId;
+                    authKind = ContentKinds.Page;
+                }
+                else
+                {
+                    var expected = ExpectedNoteKindForDocKind(kind);
+                    if (!string.Equals(note.NoteKind, expected, StringComparison.Ordinal))
                     {
-                        error = $"Document prefix '{kind}' requires note kind '{expected}', but note is '{note.NoteKind}'."
-                    });
-                authResourceId = note.PageId;
-                authKind = ContentKinds.Page;
+                        // Also deferred: a 400 here would confirm the note
+                        // exists to a caller who cannot see it.
+                        noteKindMismatch =
+                            $"Document prefix '{kind}' requires note kind '{expected}', but note is '{note.NoteKind}'.";
+                    }
+                    authResourceId = note.PageId;
+                    authKind = ContentKinds.Page;
+                }
             }
             else if (kind == DocKinds.Document)
             {
-                // Sanity: the document must exist before we hand out a ticket
-                // that lets the editor mount against it. The authorizer would
-                // otherwise reach the "no project ancestor" deny on a missing
-                // id and return 403, which masks the real cause.
-                var docExists = await db.Documents.AsNoTracking()
+                targetExists = await db.Documents.AsNoTracking()
                     .AnyAsync(d => d.Id == entityId, ct);
-                if (!docExists) return Results.NotFound();
                 authResourceId = entityId;
                 authKind = ContentKinds.Document;
             }
@@ -108,6 +133,10 @@ public static class YjsEndpoints
             var viewDecision = await authorizer.AuthorizeAsync(
                 http.User, authKind, authResourceId, Actions.View, ct);
             if (!viewDecision.IsAllowed) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+            if (!targetExists) return Results.NotFound();
+            if (noteKindMismatch is not null)
+                return Results.BadRequest(new { error = noteKindMismatch });
 
             // Edit determines role. Users with View but no Edit get a
             // ticket with role=viewer (read-only); Hocuspocus's auth hook
