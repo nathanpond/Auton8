@@ -128,10 +128,23 @@ public sealed class DatastoresDatabaseInitializer(
         // Roles are cluster-wide, so two hosts starting at once (the test
         // suite boots many in parallel against one Postgres) both hit the
         // same pg_authid tuple and the loser dies with "XX000: tuple
-        // concurrently updated". Serialize on a transaction-scoped advisory
-        // lock keyed by the role name; it releases with the commit, and
-        // hosts on other databases in the same cluster share the lock
-        // space, which is exactly what we want here.
+        // concurrently updated". The transaction-scoped advisory lock below
+        // is keyed by the role name and releases with the commit.
+        //
+        // It does NOT serialize hosts connected to different databases,
+        // despite what this comment used to claim: an advisory lock's tag
+        // includes the database oid, so two connections to different
+        // databases take different locks. Every host here connects to its own
+        // datastores database, which is exactly the case the lock was meant
+        // to cover — so the EXCEPTION clause, not the lock, is what actually
+        // makes this safe.
+        //
+        // Hence catching unique_violation as well as duplicate_object: when
+        // two CREATE ROLEs interleave inside the catalog insert the loser
+        // sees 23505 on pg_authid_rolname_index rather than 42710. Master CI
+        // failed on precisely that, in HealthEndpointEnforcementTests, which
+        // has nothing to do with roles — it was simply the test booting a
+        // host at the wrong moment.
         var quotedRole = QuoteIdentifier(role);
         var literalPassword = QuoteLiteral(password);
         var sql =
@@ -140,7 +153,7 @@ public sealed class DatastoresDatabaseInitializer(
             DO $$
             BEGIN
                 CREATE ROLE {{quotedRole}} LOGIN PASSWORD {{literalPassword}};
-            EXCEPTION WHEN duplicate_object THEN
+            EXCEPTION WHEN duplicate_object OR unique_violation THEN
                 ALTER ROLE {{quotedRole}} WITH LOGIN PASSWORD {{literalPassword}};
             END $$;
             """;
