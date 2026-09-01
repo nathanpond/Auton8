@@ -346,9 +346,18 @@ function SortableRow({
           <i className="fa fa-grip-vertical" />
         </UnstyledButton>
         <hr style={{ flex: 1, margin: 0 }} />
-        <Badge color="gray" variant="light" tt="uppercase">
-          separator
-        </Badge>
+        <UnstyledButton
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
+          aria-current={isSelected}
+          aria-label="Select separator"
+        >
+          <Badge color="gray" variant="light" tt="uppercase" style={{ cursor: "pointer" }}>
+            separator
+          </Badge>
+        </UnstyledButton>
         <Tooltip
           label={item.isVisible ? "Visible — click to hide" : "Hidden — click to show"}
           withArrow
@@ -358,6 +367,7 @@ function SortableRow({
             variant="subtle"
             color={item.isVisible ? "gray" : "yellow"}
             aria-pressed={item.isVisible}
+            aria-label="Toggle visibility"
             onClick={(e) => {
               e.stopPropagation();
               onToggleVisible();
@@ -368,6 +378,7 @@ function SortableRow({
         </Tooltip>
         <UnstyledButton
           title="Delete"
+          aria-label="Delete item"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
@@ -408,14 +419,21 @@ function SortableRow({
         <i className={`fa fa-chevron-${isCollapsed ? "right" : "down"}`} />
       </UnstyledButton>
       {item.icon && <i className={item.icon} style={{ color: "var(--mantine-color-dimmed)" }} />}
-      <span style={{ flex: 1 }}>
+      <UnstyledButton
+        style={{ flex: 1, textAlign: "left", color: "inherit" }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+        aria-current={isSelected}
+      >
         {item.displayName}
         {!item.isVisible && (
           <Badge color="yellow" variant="filled" ml={8}>
             hidden
           </Badge>
         )}
-      </span>
+      </UnstyledButton>
       <Badge color="gray" variant="light" tt="uppercase">
         {item.itemType}
       </Badge>
@@ -428,6 +446,7 @@ function SortableRow({
           variant="subtle"
           color={item.isVisible ? "gray" : "yellow"}
           aria-pressed={item.isVisible}
+          aria-label="Toggle visibility"
           onClick={(e) => {
             e.stopPropagation();
             onToggleVisible();
@@ -441,6 +460,7 @@ function SortableRow({
           size="sm"
           variant="subtle"
           color="gray"
+          aria-label="Edit item"
           onClick={(e) => {
             e.stopPropagation();
             onEdit();
@@ -454,6 +474,7 @@ function SortableRow({
           size="sm"
           variant="subtle"
           color="red"
+          aria-label="Delete item"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();

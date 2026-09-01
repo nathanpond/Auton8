@@ -62,7 +62,7 @@ public sealed class DocumentEditorTests : E2ETestBase
         Assert.True(seen, $"Document body '{bodyText}' did not survive a reload within 60s.");
     }
 
-    [Fact(Skip = "Blocked by #173: DOCX import navigates to ?import=1, but the editor wrapper never finalizes parsed content; fixtures reload with an empty body. This spec is that issue's acceptance test — un-skip it when #173 is fixed.")]
+    [Fact]
     public async Task ProjectDocuments_ImportDocx_CommitsImportedContent()
     {
         await using var session = await NewSignedInAsAdminAsync();
@@ -88,8 +88,21 @@ public sealed class DocumentEditorTests : E2ETestBase
             await Assertions.Expect(page).ToHaveURLAsync(
                 new Regex(@"/documents/edit/[0-9a-f-]+$"),
                 new() { Timeout = 30_000 });
-            await Assertions.Expect(page.Locator("[contenteditable='true']").First)
-                .ToContainTextAsync(importedText, new() { Timeout = 30_000 });
+            // The imported text has to have reached the document's stored
+            // body, which is what "finalize" means: the parsed ProseMirror
+            // state is PATCHed into body_jsonb and the stash is discarded.
+            //
+            // Asserted through the API rather than the editor surface on
+            // purpose. Once import mode ends the editor renders through the
+            // Yjs sidecar, and this fixture does not run one — the browser
+            // logs `authentication-failed` and paints an empty body no
+            // matter what was saved. body_jsonb is the artifact this fix is
+            // responsible for; the sidecar's cold-load seed reads it.
+            var stored = await page.APIRequest.GetAsync(
+                $"/api/content/documents/{DocumentIdFromUrl(page.Url)}");
+            Assert.True(stored.Ok, await stored.TextAsync());
+            var storedJson = await stored.TextAsync();
+            Assert.Contains(importedText, storedJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -238,6 +251,13 @@ public sealed class DocumentEditorTests : E2ETestBase
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Revoke override" }).ClickAsync();
         await Assertions.Expect(dialog.GetByText(username, new() { Exact = true }))
             .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    private static Guid DocumentIdFromUrl(string url)
+    {
+        var match = Regex.Match(url, @"/documents/edit/([0-9a-f-]+)");
+        Assert.True(match.Success, $"Could not read a document id out of '{url}'.");
+        return Guid.Parse(match.Groups[1].Value);
     }
 
     private static string CreateSerializedDocx()

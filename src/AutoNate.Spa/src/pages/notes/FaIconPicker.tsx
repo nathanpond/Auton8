@@ -112,6 +112,10 @@ export function FaIconPicker({ value, onChange }: Props) {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          // The visible label belongs to the picker as a whole (a group of
+          // buttons), so this search box carries its own name rather than
+          // borrowing one — otherwise it announces as "edit, blank" (#9).
+          aria-label="Search icons"
           placeholder="Search icons (e.g. 'gear', 'user', 'rocket')"
           style={{
             width: "100%",
@@ -167,6 +171,14 @@ export function FaIconPicker({ value, onChange }: Props) {
                   key={row.name}
                   type="button"
                   onClick={() => onChange(key)}
+                  // The glyph is decorative markup with no text, so without
+                  // this the button has no accessible name at all; `title`
+                  // alone is unreliable and invisible to touch users.
+                  aria-label={row.label}
+                  // Selection was signalled by border + background colour
+                  // only — nothing a screen reader or a colour-blind user
+                  // could perceive (#8, WCAG 1.4.1).
+                  aria-pressed={active}
                   title={`${row.label} (${key})`}
                   style={{
                     aspectRatio: "1 / 1",

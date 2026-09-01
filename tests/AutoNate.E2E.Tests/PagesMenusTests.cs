@@ -31,12 +31,12 @@ public sealed class PagesMenusTests : E2ETestBase
 
         await OpenStandaloneMenuAsync(page);
         var row = MenuRow(page, name);
-        await row.Locator("button").Nth(2).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Toggle visibility" }).ClickAsync();
         await Assertions.Expect(row.GetByText("hidden", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
-        await row.Locator("button").Nth(2).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Toggle visibility" }).ClickAsync();
 
-        await row.Locator("button").Nth(3).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Edit item" }).ClickAsync();
         var dialog = page.GetByRole(AriaRole.Dialog, new() { Name = "Edit menu item" });
         await dialog.GetByLabel("Display name").FillAsync(renamed);
         await dialog.GetByRole(AriaRole.Button, new() { Name = "Save and Close" }).ClickAsync();
@@ -50,7 +50,7 @@ public sealed class PagesMenusTests : E2ETestBase
         row = MenuRow(page, renamed);
         Task? acceptDialogTask = null;
         page.Dialog += (_, browserDialog) => acceptDialogTask = browserDialog.AcceptAsync();
-        await row.Locator("button").Nth(4).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Delete item" }).ClickAsync();
         if (acceptDialogTask is not null) await acceptDialogTask;
         await Assertions.Expect(row).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
     }
@@ -75,14 +75,14 @@ public sealed class PagesMenusTests : E2ETestBase
 
         await OpenStandaloneMenuAsync(page);
         var row = MenuRow(page, name);
-        await row.Locator("button").Nth(2).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Toggle visibility" }).ClickAsync();
         await Assertions.Expect(row.GetByText("hidden", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
-        await row.Locator("button").Nth(2).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Toggle visibility" }).ClickAsync();
 
         Task? acceptDialogTask = null;
         page.Dialog += (_, browserDialog) => acceptDialogTask = browserDialog.AcceptAsync();
-        await row.Locator("button").Nth(4).ClickAsync();
+        await row.GetByRole(AriaRole.Button, new() { Name = "Delete item" }).ClickAsync();
         if (acceptDialogTask is not null) await acceptDialogTask;
         await Assertions.Expect(row).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
     }
@@ -133,6 +133,42 @@ public sealed class PagesMenusTests : E2ETestBase
         await Assertions.Expect(page.GetByRole(AriaRole.Tab, new() { Name = name }))
             .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
         _ = menuId;
+    }
+
+    [Fact]
+    public async Task MenuTree_RowIsSelectableFromTheKeyboard()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var key = $"e2e-menu-{TestNames.ShortSlug()}";
+        var name = TestNames.Prefixed("menu-kbd");
+        var createMenu = await page.APIRequest.PostAsync("/api/admin/menus", new()
+        {
+            DataObject = new { key, name }
+        });
+        Assert.True(createMenu.Ok, await createMenu.TextAsync());
+        var itemName = TestNames.Prefixed("kbd-item");
+        _ = await CreateMenuItemAsync(page.APIRequest, key, itemName, "group");
+
+        await page.GotoAsync("/admin/config/pages-menus");
+        await page.GetByRole(AriaRole.Tab, new() { Name = name }).ClickAsync();
+
+        // The row label is a real button, so it has an accessible name and
+        // answers Enter. Before the fix the only click target was the bare
+        // <li>, and every nested control stopPropagation'd — so a keyboard
+        // user could expand, hide and delete rows but never select one.
+        var label = page.GetByRole(AriaRole.Button, new() { Name = itemName });
+        await Assertions.Expect(label).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(label).ToHaveAttributeAsync("aria-current", "false");
+
+        await label.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+
+        // Selection is now announced as well as coloured: aria-current makes
+        // the state available to a screen reader, which the background-colour
+        // swap alone never was.
+        await Assertions.Expect(label)
+            .ToHaveAttributeAsync("aria-current", "true", new() { Timeout = 5_000 });
     }
 
     private static async Task OpenStandaloneMenuAsync(IPage page)

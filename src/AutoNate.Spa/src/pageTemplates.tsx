@@ -36,11 +36,6 @@ import PluginDocumentation from "@/pages/admin/config/PluginDocumentation";
 import FormsList from "@/pages/admin/config/forms/FormsList";
 import {
   FormsFormMappings,
-  SecurityManageGroups,
-  SecurityManageRoles,
-  SecurityManageUsers,
-  SecurityPermissionChecker,
-  SecuritySetPermissions,
   SitewideChatbotSettings,
   SitewideExternalConnections,
   SitewideFeatures,
@@ -73,11 +68,18 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configEvents: <Events />,
   configSystemHealth: <SystemHealth />,
   configSystemIssues: <SystemIssues />,
-  configSecurityUsers: <SecurityManageUsers />,
-  configSecurityGroups: <SecurityManageGroups />,
-  configSecurityRoles: <SecurityManageRoles />,
-  configSecurityPermissions: <SecuritySetPermissions />,
-  configSecurityPermissionChecker: <SecurityPermissionChecker />,
+  // The Site Configuration → Security menu is seeded against these keys, and
+  // the seeded page_templates rows describe them as "mounted inside Site
+  // Config" — the intent was always the real screens. They rendered "coming
+  // soon" stubs instead, so the shipped user/role/permission admin was
+  // unreachable from the one place the seed points an admin at (#42). Same
+  // components as the manageUsers/adminRoles/… keys, mounted under the
+  // Site Config keys.
+  configSecurityUsers: <ManageUsers />,
+  configSecurityGroups: <AdminGroups />,
+  configSecurityRoles: <AdminRoles />,
+  configSecurityPermissions: <AdminGrants />,
+  configSecurityPermissionChecker: <AdminExplain />,
   configPlugins: <AdminPlugins />,
   configPluginDocumentation: <PluginDocumentation />,
   configProjections: <AdminProjections />,

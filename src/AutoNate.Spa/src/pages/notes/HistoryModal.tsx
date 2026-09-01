@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import type { CSSProperties } from "react";
 import {
   NoteVersionSummary,
   PageVersionSummary
 } from "@/api/content";
 import { useNoteVersions, usePageVersions } from "@/hooks/useContent";
+import { NotesModal } from "./NotesModal";
 import { notesTheme } from "./notesTheme";
 
 // Common shape over PageVersionSummary | NoteVersionSummary so the row
@@ -42,14 +43,6 @@ type Props =
     };
 
 export function HistoryModal(props: Props) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") props.onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [props]);
-
   const pageQuery = usePageVersions(
     props.kind === "page" ? props.pageId : null,
     props.kind === "page"
@@ -68,137 +61,79 @@ export function HistoryModal(props: Props) {
         );
 
   return (
-    <div
-      onClick={props.onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 220,
-        background: "rgba(32, 37, 42, 0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-        animation: "notesFadeIn 140ms ease"
-      }}
+    <NotesModal
+      onClose={props.onClose}
+      title={
+        <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <span>Revision history</span>
+          <span
+            style={{
+              fontSize: 11.5,
+              fontWeight: 400,
+              color: notesTheme.muted,
+              marginTop: 2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap"
+            }}
+          >
+            {props.currentTitle}
+          </span>
+        </span>
+      }
+      icon="fa-clock-rotate-left"
+      width="min(560px, 100%)"
     >
+      {/* The negative margin cancels the shell body's 20px padding so the
+          revision rows stay full-bleed (each row carries its own 18px
+          inset), and the explicit maxHeight keeps the list bounded the way
+          the old panel's 80vh cap did rather than growing the dialog. */}
       <div
-        onClick={(e) => e.stopPropagation()}
+        // Focus opens on the list, not the close button: browsing revisions
+        // is what the dialog is for, and Tab from here lands on the first
+        // revision row.
+        data-autofocus
+        tabIndex={-1}
         style={{
-          width: "min(560px, 100%)",
-          maxHeight: "80vh",
-          background: "#fff",
-          borderRadius: 6,
-          boxShadow: "0 22px 60px -12px rgba(0,0,0,0.35)",
-          fontFamily: "inherit",
-          animation: "notesPopIn 180ms cubic-bezier(.2,.9,.3,1.2)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden"
+          margin: -20,
+          padding: "4px 0",
+          maxHeight: "60vh",
+          overflowY: "auto",
+          outline: "none"
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "16px 18px",
-            borderBottom: `1px solid ${notesTheme.border}`,
-            flexShrink: 0
-          }}
-        >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 6,
-              background: notesTheme.primary + "20",
-              color: notesTheme.primary,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 14
-            }}
-          >
-            <i className="fa fa-clock-rotate-left" />
+        {isLoading && (
+          <div style={emptyStyle}>
+            <i className="fa fa-spinner fa-spin" style={{ marginRight: 6 }} />
+            Loading revisions…
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h3
-              style={{
-                margin: 0,
-                fontSize: 14,
-                fontWeight: 700,
-                color: notesTheme.dark
-              }}
-            >
-              Revision history
-            </h3>
-            <div
-              style={{
-                fontSize: 11.5,
-                color: notesTheme.muted,
-                marginTop: 2,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap"
-              }}
-            >
-              {props.currentTitle}
-            </div>
+        )}
+        {error && !isLoading && (
+          <div style={{ ...emptyStyle, color: notesTheme.danger }}>
+            <i className="fa fa-triangle-exclamation" style={{ marginRight: 6 }} />
+            Couldn&apos;t load revisions.
           </div>
-          <button
-            type="button"
-            onClick={props.onClose}
-            title="Close"
-            style={{
-              border: "none",
-              background: "transparent",
-              color: notesTheme.muted,
-              cursor: "pointer",
-              fontSize: 14,
-              width: 28,
-              height: 28,
-              borderRadius: 4
-            }}
-          >
-            <i className="fa fa-xmark" />
-          </button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
-          {isLoading && (
-            <div style={emptyStyle}>
-              <i className="fa fa-spinner fa-spin" style={{ marginRight: 6 }} />
-              Loading revisions…
-            </div>
-          )}
-          {error && !isLoading && (
-            <div style={{ ...emptyStyle, color: notesTheme.danger }}>
-              <i className="fa fa-triangle-exclamation" style={{ marginRight: 6 }} />
-              Couldn&apos;t load revisions.
-            </div>
-          )}
-          {!isLoading && !error && (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              <CurrentDraftRow updatedAtUtc={props.currentUpdatedAtUtc} />
-              {items.length === 0 ? (
-                <li style={emptyStyle}>No earlier revisions yet.</li>
-              ) : (
-                items.map((row) => (
-                  <RevisionRow
-                    key={row.id}
-                    row={row}
-                    onClick={() => {
-                      props.onSelect(row.versionNumber);
-                    }}
-                  />
-                ))
-              )}
-            </ul>
-          )}
-        </div>
+        )}
+        {!isLoading && !error && (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            <CurrentDraftRow updatedAtUtc={props.currentUpdatedAtUtc} />
+            {items.length === 0 ? (
+              <li style={emptyStyle}>No earlier revisions yet.</li>
+            ) : (
+              items.map((row) => (
+                <RevisionRow
+                  key={row.id}
+                  row={row}
+                  onClick={() => {
+                    props.onSelect(row.versionNumber);
+                  }}
+                />
+              ))
+            )}
+          </ul>
+        )}
       </div>
-    </div>
+    </NotesModal>
   );
 }
 
@@ -332,7 +267,9 @@ function RevisionRow({ row, onClick }: { row: Row; onClick: () => void }) {
 // banner) to return to it.
 function CurrentDraftRow({ updatedAtUtc }: { updatedAtUtc: string }) {
   return (
-    <li>
+    // aria-current exposes "this is where you are" programmatically; the
+    // highlight background alone said it only to sighted users.
+    <li aria-current="true">
       <div
         style={{
           width: "100%",
@@ -468,7 +405,7 @@ function formatDateTime(iso: string): string {
   }
 }
 
-const emptyStyle: React.CSSProperties = {
+const emptyStyle: CSSProperties = {
   padding: 28,
   textAlign: "center",
   fontSize: 12.5,

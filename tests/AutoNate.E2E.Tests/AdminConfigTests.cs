@@ -54,12 +54,11 @@ public sealed class AdminConfigTests : E2ETestBase
     }
 
     /// <summary>
-    /// Walks a representative subset of the real (non-stub) config section
-    /// routes and confirms each one mounts its expected h1 heading. The
-    /// stubs (Manage Users/Groups/Roles/etc. under <c>/admin/config/...</c>)
-    /// share the same `<Title order={1}>{stub.title}</Title>` shape but are
-    /// not interesting to walk one-by-one — they're covered en masse by the
-    /// route registration smoke (`AppShell` mounted + h1 visible).
+    /// Walks a representative subset of the config section routes and
+    /// confirms each one mounts its expected h1 heading. The Security
+    /// sections used to be stubs and are now the real admin pages — they get
+    /// their own theory below, which asserts on their content rather than a
+    /// heading shape any stub would also satisfy.
     /// </summary>
     [Theory]
     [InlineData("/admin/config/general", "General")]
@@ -82,6 +81,37 @@ public sealed class AdminConfigTests : E2ETestBase
         await Assertions.Expect(
             page.GetByRole(AriaRole.Heading, new() { Name = heading, Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
+    }
+
+    /// <summary>
+    /// The seeded Site Configuration → Security menu points at the
+    /// <c>configSecurity*</c> template keys. Those keys rendered "coming
+    /// soon" stubs while the real user/role/permission admin shipped under
+    /// separate keys, so the feature was unreachable from the one place the
+    /// seed sends an admin (#42). Each route now has to show content only
+    /// the real page renders — a heading assertion alone would not catch a
+    /// regression, since every stub rendered an h1 too.
+    /// </summary>
+    [Theory]
+    [InlineData("/admin/config/users", "Manage Users")]
+    [InlineData("/admin/config/groups", "All groups")]
+    [InlineData("/admin/config/roles", "All roles")]
+    [InlineData("/admin/config/permissions", "Add grant")]
+    [InlineData("/admin/config/permission-checker", "Query")]
+    public async Task AdminConfig_SecuritySections_MountTheRealAdminPages(
+        string path, string marker)
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+
+        await page.GotoAsync(path);
+
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Heading, new() { Name = marker, Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Assertions.Expect(
+            page.GetByText("This section is a stub. Functionality coming soon."))
+            .Not.ToBeVisibleAsync();
     }
 
     [Fact]

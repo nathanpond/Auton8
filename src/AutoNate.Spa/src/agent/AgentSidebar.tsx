@@ -308,6 +308,59 @@ export function AgentSidebar() {
     wasStreamingRef.current = stream.state.streaming;
   }, [stream.state.streaming]);
 
+  // Focus contract for opening and closing the assistant (#13).
+  //
+  // Deliberately NOT a FocusTrap. In push / under-header modes this panel is
+  // non-modal — the page behind it stays fully usable — so trapping Tab
+  // inside it would be a keyboard trap (WCAG 2.1.2) rather than a fix. What
+  // a non-modal panel owes the keyboard is the other three: focus moves in
+  // on open, Escape gets you out, and focus goes back where it came from.
+  //
+  // `openerRef` remembers whichever control opened the panel — the header
+  // trigger, the ⌘K palette, anything — instead of hunting for the trigger
+  // by selector, so focus returns to the right place however it was opened.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const sidebarDidMountRef = useRef(false);
+  useEffect(() => {
+    if (!sidebarDidMountRef.current) {
+      // First paint. `isOpen` is restored from localStorage, so the panel can
+      // already be open on load — the user has just arrived and the browser's
+      // own initial focus is correct. Stealing it here would drop a screen
+      // reader into the composer past the page they actually navigated to.
+      sidebarDidMountRef.current = true;
+      return;
+    }
+
+    if (isOpen) {
+      const active = document.activeElement;
+      openerRef.current = active instanceof HTMLElement ? active : null;
+      // After paint: the composer mounts in this same commit.
+      requestAnimationFrame(() => composerRef.current?.focus());
+      return;
+    }
+
+    const opener = openerRef.current;
+    openerRef.current = null;
+    // Only restore if closing actually orphaned the focus. If the user moved
+    // focus into the page and closed the panel from elsewhere, yanking focus
+    // back to the trigger would be its own bug.
+    if (document.activeElement === document.body || document.activeElement === null) {
+      opener?.focus();
+    }
+  }, [isOpen]);
+
+  // Escape closes. Bound to the panel rather than the document so it only
+  // fires while focus is inside: a modal opened from here (delete-chat)
+  // portals outside this subtree and keeps its own Escape.
+  const onSidebarKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close();
+    },
+    [close]
+  );
+
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     let id = conversationId;
@@ -354,6 +407,7 @@ export function AgentSidebar() {
   };
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the landmark is not the interactive thing; it hosts Escape-to-dismiss for the controls inside it, which is the documented pattern for a dismissible panel. A document-level listener instead would swallow Escape from the modals this panel opens, which portal outside this subtree.
     <aside
       className={[
         "agent-sidebar",
@@ -364,6 +418,11 @@ export function AgentSidebar() {
         .filter(Boolean)
         .join(" ")}
       aria-hidden={!isOpen}
+      // Names the complementary landmark so it is reachable by region, which
+      // is how a screen-reader user gets back to an open panel after Tab has
+      // moved on.
+      aria-label="AutoNate assistant"
+      onKeyDown={isOpen ? onSidebarKeyDown : undefined}
     >
       {isOpen && (
         <div
