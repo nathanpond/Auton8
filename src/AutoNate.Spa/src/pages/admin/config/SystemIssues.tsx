@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
@@ -11,17 +11,24 @@ import {
   Group,
   Modal,
   NativeSelect,
+  Paper,
   Stack,
   Text,
-  TextInput
+  TextInput,
+  Title,
+  Tooltip
 } from "@mantine/core";
+import { modals } from "@mantine/modals";
 import PageHeader from "@/components/PageHeader";
 import {
   SystemIssueCategory,
   SystemIssueModel,
   SystemIssueSeverity,
   SystemIssueState,
-  listSystemIssues
+  AuditDeadLetter,
+  listAuditDeadLetters,
+  listSystemIssues,
+  replayAuditDeadLetter
 } from "@/api/systemIssues";
 import {
   useAcknowledgeSystemIssue,
@@ -195,6 +202,8 @@ export default function SystemIssues() {
         }
       />
 
+      <AuditDeadLetterPanel />
+
       {selectedId && (
         <IssueDetailDrawer
           issue={detail.data ?? null}
@@ -203,6 +212,126 @@ export default function SystemIssues() {
         />
       )}
     </>
+  );
+}
+
+// Parked audit events (#44). The park remediator preserves an abandoned
+// audit_outbox row here "so forensics is still possible", but until now the
+// only way to read one was psql, and there was no way at all to put the event
+// back. Rendered below the issue table because a dead letter is the residue of
+// an issue that has already been remediated — it is follow-up work, not a new
+// alert.
+function AuditDeadLetterPanel() {
+  const [rows, setRows] = useState<AuditDeadLetter[]>([]);
+  const [total, setTotal] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await listAuditDeadLetters();
+      setRows(data.items);
+      setTotal(data.total);
+      setError(null);
+    } catch (err) {
+      // A viewer without SystemIssue:Remediate gets a 403 here. That is not
+      // an error worth shouting about on a page they can otherwise use, so
+      // the panel just stays hidden.
+      if (isAxiosError(err) && err.response?.status === 403) {
+        setRows([]);
+        setTotal(0);
+        setError(null);
+      } else {
+        setError(describeError(err));
+      }
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const confirmReplay = (row: AuditDeadLetter) => {
+    modals.openConfirmModal({
+      title: "Replay parked audit event",
+      children: (
+        <Text size="sm">
+          Put <Code>{row.eventType}</Code> back on the audit outbox for
+          delivery? Its retry count resets, so the dispatcher treats this as a
+          fresh attempt.
+        </Text>
+      ),
+      labels: { confirm: "Replay", cancel: "Cancel" },
+      onConfirm: () => {
+        setBusyId(row.id);
+        void (async () => {
+          try {
+            await replayAuditDeadLetter(row.id);
+            await refresh();
+          } catch (err) {
+            setError(describeError(err));
+          } finally {
+            setBusyId(null);
+          }
+        })();
+      }
+    });
+  };
+
+  // Nothing parked and nothing to say — stay out of the way.
+  if (!loaded || (rows.length === 0 && !error)) return null;
+
+  return (
+    <Paper withBorder radius="md" p="md" mt="lg">
+      <Group justify="space-between" mb="sm">
+        <Stack gap={2}>
+          <Title order={4}>Parked audit events</Title>
+          <Text size="sm" c="dimmed">
+            Audit events the dispatcher gave up on. The payload is preserved
+            here; replaying puts it back on the outbox.
+          </Text>
+        </Stack>
+        <Badge color="orange" variant="light">
+          {total}
+        </Badge>
+      </Group>
+
+      {error && (
+        <Alert color="red" variant="light" mb="sm">
+          {error}
+        </Alert>
+      )}
+
+      <Stack gap="xs">
+        {rows.map((row) => (
+          <Group key={row.id} justify="space-between" wrap="nowrap" align="flex-start">
+            <Box style={{ minWidth: 0 }}>
+              <Text fw={600} size="sm">
+                <Code>{row.eventType}</Code> on <Code>{row.topic}</Code>
+              </Text>
+              <Text size="xs" c="dimmed">
+                parked {new Date(row.parkedAtUtc).toLocaleString()} after{" "}
+                {row.attemptCount} attempt{row.attemptCount === 1 ? "" : "s"}
+                {row.lastError ? ` — ${row.lastError.slice(0, 120)}` : ""}
+              </Text>
+            </Box>
+            <Tooltip label="Re-queue this event for delivery">
+              <Button
+                size="xs"
+                variant="default"
+                disabled={busyId === row.id}
+                onClick={() => confirmReplay(row)}
+              >
+                Replay
+              </Button>
+            </Tooltip>
+          </Group>
+        ))}
+      </Stack>
+    </Paper>
   );
 }
 

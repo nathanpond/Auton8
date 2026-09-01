@@ -8,6 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="Deque.AxeCore.Playwright" Version="4.13.0" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
         <PackageReference Include="Microsoft.Playwright" Version="1.50.0" />
         <PackageReference Include="Npgsql" Version="9.0.3" />

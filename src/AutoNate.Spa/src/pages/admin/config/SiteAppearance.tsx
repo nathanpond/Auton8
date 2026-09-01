@@ -324,6 +324,11 @@ export default function SiteAppearancePage() {
               description="Drives Mantine's brand palette and the active states in the top bar."
               format="hex"
               withEyeDropper
+              // Mantine's eyedropper renders an icon-only button with no
+              // accessible name — 19 of them on this page, all announced as
+              // just "button". Naming it after the field it samples keeps
+              // them distinguishable in a screen reader's control list.
+              eyeDropperButtonProps={{ "aria-label": "Pick primary accent color from screen" }}
               value={currentDraft.primaryAccentColor}
               error={errors.primaryAccentColor}
               onChange={(value) => updateField("primaryAccentColor", value)}
@@ -422,6 +427,7 @@ function ColorSection({
             label={field.label}
             format="hex"
             withEyeDropper
+            eyeDropperButtonProps={{ "aria-label": `Pick ${field.label} color from screen` }}
             value={values[field.key]}
             error={errors[field.key]}
             onChange={(value) => onChange(field.key, value)}

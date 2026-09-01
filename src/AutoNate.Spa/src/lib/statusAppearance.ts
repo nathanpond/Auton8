@@ -1,4 +1,5 @@
 import { StatusAppearanceEntry } from "@/types/statusAppearance";
+import { DARK_TEXT, bestTextColorOn } from "@/lib/contrast";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -14,15 +15,20 @@ export function normalizeHex(value: string): string | null {
   return trimmed.toLowerCase();
 }
 
+// Text colour for a filled badge, pill or button (#14).
+//
+// This used to threshold YIQ brightness — (0.299R + 0.587G + 0.114B) > 160 —
+// which is a video-encoding measure with no defined relationship to contrast
+// ratio. For a mid-tone accent it chose white on a colour that computes far
+// below 4.5:1 (#00acac → white → 2.80:1), and the result feeds
+// --mantine-primary-color-contrast, so it was the text colour of every filled
+// primary button in the app, not just status pills.
+//
+// Now measured: whichever of black/white actually has the higher WCAG ratio.
 export function badgeTextColor(color: string): string {
   const normalized = normalizeHex(color);
-  if (!normalized) return "#111111";
-  const hex = normalized.slice(1);
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  const luminance = (0.299 * r) + (0.587 * g) + (0.114 * b);
-  return luminance > 160 ? "#111111" : "#ffffff";
+  if (!normalized) return DARK_TEXT;
+  return bestTextColorOn(normalized);
 }
 
 export function resolveStatusBadgeColor(

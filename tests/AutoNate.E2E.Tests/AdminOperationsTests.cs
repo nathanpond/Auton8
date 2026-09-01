@@ -138,6 +138,72 @@ public sealed class AdminOperationsTests : E2ETestBase
         }
     }
 
+    [Fact]
+    public async Task Appearance_ShippedDefaults_RaiseNoContrastAdvisory()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await page.GotoAsync("/admin/config/appearance");
+        await Assertions.Expect(page.GetByLabel("Site name"))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // The gate #40 asks for, aimed at the values a real install actually
+        // gets rather than at the SPA constant.
+        //
+        // Two accessible defaults had been corrected in the SPA's
+        // DEFAULT_SITE_APPEARANCE and never mirrored into the server-side seed
+        // that CreateDefaultEntity writes — so a fresh install still shipped a
+        // 2.07:1 sidebar heading and a 2.80:1 accent while the constant said
+        // otherwise. A check against the constant would have passed happily.
+        // This one reads the editor's own advisory, which is computed from
+        // whatever the database returned.
+        await Assertions.Expect(page.GetByText("Accessibility advisory"))
+            .Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
+    }
+
+    [Fact]
+    public async Task Appearance_PrimaryButtonText_TakesTheReadableColour()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        await page.GotoAsync("/admin/config/appearance");
+
+        // Exact, by role: the eyedropper button beside this field is named
+        // "Pick primary accent color from screen", which GetByLabel's
+        // substring match also picks up.
+        var accent = page.GetByRole(AriaRole.Textbox, new() { Name = "Primary accent", Exact = true });
+        await Assertions.Expect(accent).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // #00acac is the case that motivated #14: the old YIQ heuristic
+        // thresholded brightness at 160 and chose white, which computes to
+        // 2.80:1. Black is 6.74:1 on the same colour. The value feeds
+        // --mantine-primary-color-contrast, so it is the text colour of every
+        // filled primary button, not just status pills.
+        await accent.FillAsync("#00acac");
+
+        // The editor applies a live preview, so the token updates without a
+        // save — no need to mutate the site's real appearance to assert this.
+        await Assertions.Expect(page.Locator(":root")).ToBeVisibleAsync();
+        var contrastToken = await PollContrastTokenAsync(page, "#111111");
+        Assert.Equal("#111111", contrastToken);
+    }
+
+    // The token is written by an effect after the draft updates, so read it
+    // until it settles rather than assuming the first paint has it.
+    private static async Task<string> PollContrastTokenAsync(IPage page, string expected)
+    {
+        var last = string.Empty;
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            last = (await page.EvaluateAsync<string>(
+                "() => getComputedStyle(document.documentElement)" +
+                ".getPropertyValue('--mantine-primary-color-contrast').trim()")) ?? string.Empty;
+            if (string.Equals(last, expected, StringComparison.OrdinalIgnoreCase)) return last;
+            await page.WaitForTimeoutAsync(250);
+        }
+        return last;
+    }
+
     // Clicking "Save changes" only dispatches the PATCH. Reloading straight
     // after the click races it: the navigation aborts the in-flight request
     // and the value never reaches the database, which reads exactly like a

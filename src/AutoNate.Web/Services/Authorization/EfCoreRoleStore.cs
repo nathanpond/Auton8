@@ -10,7 +10,6 @@ namespace AutoNate.Web.Services.Authorization;
 
 public sealed class EfCoreRoleStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
-    AuthCacheBumper cacheBumper,
     IAuthorizer authorizer) : IRoleStore
 {
     public async Task<IReadOnlyList<Role>> ListAsync(CancellationToken cancellationToken = default)
@@ -83,7 +82,6 @@ public sealed class EfCoreRoleStore(
         };
         db.Roles.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return ToModel(entity);
     }
 
@@ -136,7 +134,6 @@ public sealed class EfCoreRoleStore(
             entity.UpdatedAtUtc = DateTime.UtcNow;
             entity.UpdatedBy = actorId;
             await db.SaveChangesAsync(cancellationToken);
-            await cacheBumper.BumpAsync(cancellationToken);
         }
 
         return ToModel(entity);
@@ -165,7 +162,6 @@ public sealed class EfCoreRoleStore(
 
         db.Roles.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return true;
     }
 

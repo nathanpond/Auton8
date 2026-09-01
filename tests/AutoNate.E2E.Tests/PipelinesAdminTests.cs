@@ -487,29 +487,32 @@ public sealed class PipelinesAdminTests : E2ETestBase
             main.GetByText("Failed", new() { Exact = true }).First)
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // Click the run row to expand step detail. The runs table uses
-        // onRowClick → setSelectedRunId; mantine-datatable rows are
-        // rendered as <tr role="row">. Picking by HasText on the
-        // unique pipeline name's run row would be fragile (the trigger
-        // kind / error message are localized), so we click the first
-        // row in the body.
-        var runsTable = main.Locator("table").First;
-        await runsTable.Locator("tbody tr").First.ClickAsync();
+        // Click the run row to expand step detail. The rows now carry a
+        // data-testid keyed on the run id, so this asks for "a run row"
+        // rather than "the first <tr> in the first <table>" — the old form
+        // silently retargeted if the table order or sort changed (#92).
+        await main.Locator("[data-testid^='pipeline-run-row-']").First.ClickAsync();
 
-        // The Steps panel mounts under the runs table. Wait for the
-        // single bad node's row to appear.
+        // The Steps panel mounts under the runs table. Wait for the single bad
+        // node's row to appear.
+        //
+        // Scoped to a step row rather than to the whole main region: the runs
+        // table carries the same text in its errorMessage column, so an
+        // unscoped match is ambiguous the moment both tables are on screen —
+        // a strict-mode violation rather than a wrong answer, and it only
+        // surfaced once CI rendered both at once.
         await Assertions.Expect(
-            main.GetByText("no-such-transformer-xyz", new() { Exact = false }))
+            main.Locator("[data-testid^='pipeline-run-step-']")
+                .Filter(new() { HasText = "no-such-transformer-xyz" })
+                .First)
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // The Logs column renders a badge with the entry count. Click
-        // the step row to expand the logs panel. Scope to the SECOND
-        // table on the page because the runs table also contains
-        // "no-such-transformer-xyz" in its errorMessage column — an
-        // unscoped Filter(HasText=...) would match the runs row too,
-        // and clicking it would toggle the run selection closed.
-        var stepsTable = main.Locator("table").Nth(1);
-        await stepsTable.Locator("tbody tr").First.ClickAsync();
+        // The Logs column renders a badge with the entry count. Click the
+        // step row to expand the logs panel. The step rows have their own
+        // testid prefix, so there is no need to reach for "the second table
+        // on the page" — the old form also risked matching the runs row,
+        // whose errorMessage column contains the same text.
+        await main.Locator("[data-testid^='pipeline-run-step-']").First.ClickAsync();
 
         // The Step logs panel mounts below the step table with
         // aria-label="Step logs" and renders one row per entry. We

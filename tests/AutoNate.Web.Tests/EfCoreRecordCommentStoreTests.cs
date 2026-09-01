@@ -100,7 +100,7 @@ public sealed class EfCoreRecordCommentStoreTests
 
         var revisions = await store.ListRevisionsAsync(c.Id);
         Assert.Empty(revisions);
-        Assert.Equal(c.BodyUpdatedAtUtc, same.BodyUpdatedAtUtc);
+        AssertSameStoredInstant(c.BodyUpdatedAtUtc, same.BodyUpdatedAtUtc);
     }
 
     [Fact]
@@ -169,7 +169,7 @@ public sealed class EfCoreRecordCommentStoreTests
         var first = await store.SoftDeleteAsync(c.Id, Alice);
         var second = await store.SoftDeleteAsync(c.Id, Alice);
 
-        Assert.Equal(first.DeletedAtUtc, second.DeletedAtUtc);
+        AssertSameStoredInstant(first.DeletedAtUtc, second.DeletedAtUtc);
         Assert.Equal(Alice, second.DeletedBy);
     }
 
@@ -198,4 +198,28 @@ public sealed class EfCoreRecordCommentStoreTests
         await Assert.ThrowsAsync<RecordCommentForbiddenException>(() =>
             store.SoftDeleteAsync(c.Id, Bob));
     }
+
+    // Compare at the precision Postgres actually keeps.
+    //
+    // These assertions pit a timestamp .NET generated (100-nanosecond ticks)
+    // against the same value after a round trip through `timestamptz`, which
+    // stores microseconds — so the two differ below a microsecond whenever
+    // the originating clock is fine-grained enough to notice. macOS usually
+    // hands out values that survive the truncation unchanged, Linux does not,
+    // which is why these passed locally for a long time and failed the first
+    // time CI ran them. What the tests mean is "the second call did not
+    // restamp this", and that question is only answerable at storage
+    // precision.
+    private static void AssertSameStoredInstant(DateTimeOffset? expected, DateTimeOffset? actual)
+    {
+        Assert.Equal(TruncateToMicroseconds(expected), TruncateToMicroseconds(actual));
+    }
+
+    private static DateTimeOffset? TruncateToMicroseconds(DateTimeOffset? value) =>
+        value is null
+            ? null
+            : new DateTimeOffset(
+                value.Value.Ticks - (value.Value.Ticks % (TimeSpan.TicksPerMillisecond / 1000)),
+                value.Value.Offset);
+
 }

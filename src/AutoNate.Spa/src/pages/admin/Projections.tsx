@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Badge, Button, Code, Group, Table, Text, Tooltip } from "@mantine/core";
+import { Alert, Badge, Button, Code, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { modals } from "@mantine/modals";
 import PageHeader from "@/components/PageHeader";
 import {
   ProjectionHealthSnapshot,
@@ -7,6 +8,7 @@ import {
   pauseProjection,
   resumeProjection,
   rebuildProjection,
+  resetFeedWatermark,
 } from "@/api/projections";
 
 // Admin view of every registered projection's runtime health, with
@@ -58,6 +60,28 @@ export default function Projections() {
       }
     },
     [refresh]
+  );
+
+  // Destructive enough to confirm: clearing a watermark makes the feed
+  // re-observe its whole history, which on a busy feed is a long and
+  // expensive replay.
+  const confirmResetWatermark = useCallback(
+    (projectionName: string, feedName: string) => {
+      modals.openConfirmModal({
+        title: "Reset feed watermark",
+        children: (
+          <Text size="sm">
+            Clear the watermark for <Code>{feedName}</Code>? The feed will
+            re-observe from the beginning, which replays its entire history.
+          </Text>
+        ),
+        labels: { confirm: "Reset watermark", cancel: "Cancel" },
+        confirmProps: { color: "orange" },
+        onConfirm: () =>
+          void runAction(projectionName, () => resetFeedWatermark(feedName))
+      });
+    },
+    [runAction]
   );
 
   return (
@@ -133,17 +157,32 @@ export default function Projections() {
                         none observed
                       </Text>
                     ) : (
-                      <Tooltip
-                        label={p.feeds
-                          .map((f) => `${f.feedName}: ${f.eventsObservedTotal.toLocaleString()}`)
-                          .join("\n")}
-                        multiline
-                        withinPortal
-                      >
-                        <Text size="sm" c="dimmed" style={{ cursor: "help" }}>
-                          {p.feeds.length} feed{p.feeds.length === 1 ? "" : "s"}
-                        </Text>
-                      </Tooltip>
+                      // Each feed is listed rather than collapsed into a
+                      // hover-only count, because the watermark reset acts on
+                      // one feed and an operator has to be able to say which
+                      // (#47). Reset was documented in
+                      // docs/projection-framework/operations.md as the recovery
+                      // step for a corrupted cache but had no button at all.
+                      <Stack gap={4}>
+                        {p.feeds.map((f) => (
+                          <Group key={f.feedName} gap="xs" wrap="nowrap">
+                            <Text size="sm" c="dimmed">
+                              {f.feedName}: {f.eventsObservedTotal.toLocaleString()}
+                            </Text>
+                            <Tooltip label="Clear this feed's watermark so it re-observes from the beginning">
+                              <Button
+                                size="compact-xs"
+                                variant="subtle"
+                                color="orange"
+                                disabled={isBusy}
+                                onClick={() => confirmResetWatermark(p.name, f.feedName)}
+                              >
+                                Reset watermark
+                              </Button>
+                            </Tooltip>
+                          </Group>
+                        ))}
+                      </Stack>
                     )}
                   </Table.Td>
                   <Table.Td>

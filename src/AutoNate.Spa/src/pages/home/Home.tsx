@@ -45,7 +45,10 @@ export default function Home() {
             copy="Inspect active and completed workflow runs"
           />
           <StatCard
-            color="orange"
+            // Not Mantine's orange scale: even orange.9 (#d9480f) is 4.30:1
+            // against white, just under the 4.5:1 these labels need. This is
+            // the same hue, dark enough to pass at 6.26:1.
+            color="#a83e00"
             icon="fa-tower-broadcast"
             title="EVENT STREAM"
             big="Bus Watcher"
@@ -96,20 +99,29 @@ type StatProps = {
 };
 
 function StatCard({ color, icon, title, big, copy }: StatProps) {
+  // A Mantine palette key gets the .9 shade — the lighter fills measured
+  // below 4.5:1 against the white text. A raw hex is used as-is, for the one
+  // hue whose darkest Mantine shade still does not clear the threshold.
+  const fill = color.startsWith("#") ? color : `${color}.9`;
   return (
-    <Card padding="lg" radius="md" bg={`${color}.7`} c="white" style={{ overflow: "hidden" }}>
+    // .9 rather than .7: white text on the lighter fills measured below
+    // 4.5:1 on every card (axe flagged all four). The darker shade keeps the
+    // colour identity and clears the threshold.
+    <Card padding="lg" radius="md" bg={fill} c="white" style={{ overflow: "hidden" }}>
       <Group align="flex-start" wrap="nowrap" gap="md">
-        <ThemeIcon variant="white" color={`${color}.7`} size={48} radius="md">
+        <ThemeIcon variant="white" color={fill} size={48} radius="md">
           <i className={`fa ${icon} fa-fw`} style={{ fontSize: 24 }} />
         </ThemeIcon>
         <Stack gap={4} style={{ minWidth: 0 }}>
-          <Text size="xs" fw={700} style={{ letterSpacing: 0.5, opacity: 0.85 }}>
+          {/* No opacity: white at 0.85 over these card fills measures below
+              4.5:1. Size and weight already carry the hierarchy. */}
+          <Text size="xs" fw={700} style={{ letterSpacing: 0.5 }}>
             {title}
           </Text>
           <Text fw={700} size="xl" lh={1.2}>
             {big}
           </Text>
-          <Text size="sm" style={{ opacity: 0.85 }}>
+          <Text size="sm">
             {copy}
           </Text>
         </Stack>

@@ -1,5 +1,4 @@
 using AutoNate.Web.Authorization;
-using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models.Notifications;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Notifications;
@@ -90,7 +89,6 @@ public sealed class CriticalIssueNotifierTests
                 .AddLogging()
                 .AddDbContextFactory<AutoNate.Web.Persistence.AutoNateDbContext>(opts =>
                     opts.UseNpgsql(db.ConnectionString))
-                .AddScoped<AuthCacheBumper>()
                 .AddScoped<IRoleAssignmentStore, EfCoreRoleAssignmentStore>()
                 .AddSingleton(recording)
                 .AddScoped<INotificationStore>(sp => sp.GetRequiredService<RecordingNotificationStore>())

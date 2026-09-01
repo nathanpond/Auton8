@@ -1,0 +1,319 @@
+name: CI
+
+# Every other test finding in the register is unenforced without this: nothing
+# stopped a PR that deleted assertions, skipped a suite, or broke the auth
+# enforcement tests (#79). The suites already existed and were green — they
+# just only ever ran on one machine.
+#
+# Three jobs rather than one, so a red build says *what* broke without reading
+# a log: the SPA gates are seconds, the backend suite is minutes, and E2E needs
+# a browser download. They run in parallel; e2e depends on spa only because it
+# needs the built assets.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call:
+
+# A second push to the same PR cancels the first. These suites take ~15
+# minutes; without this a busy branch queues runs it no longer cares about.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  # The fixtures default to these and read the env var so a rotated local
+  # secret does not require editing the test project. Kept explicit here so
+  # the workflow does not silently depend on a default.
+  AUTONATE_POSTGRES_PASSWORD: Your_password123!
+
+jobs:
+  spa:
+    name: SPA (lint, typecheck, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: src/AutoNate.Spa/package-lock.json
+
+      - name: Install
+        working-directory: src/AutoNate.Spa
+        run: npm ci
+
+      # `npm run lint` carries the warning ratchet (--max-warnings) and the
+      # jsx-a11y error gate, so a new accessibility regression fails here.
+      - name: Lint
+        working-directory: src/AutoNate.Spa
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: src/AutoNate.Spa
+        run: npx tsc -b
+
+      - name: Build
+        working-directory: src/AutoNate.Spa
+        run: npm run build
+
+      # Vite writes to src/AutoNate.Spa/dist; the MSBuild BuildSpa target is
+      # what normally mirrors it into AutoNate.Web/wwwroot. The backend job
+      # needs those assets (see its download step) and there is no reason to
+      # build the same bundle twice.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spa-dist
+          path: src/AutoNate.Spa/dist
+          retention-days: 1
+
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    # For the SPA bundle only — see the download step below.
+    needs: spa
+    # The suite is ~9 minutes locally; the ceiling is a hung fixture, not slow
+    # hardware, so it should be generous but finite.
+    timeout-minutes: 45
+
+    services:
+      # Matches infra/docker-compose.yml. The tests create and drop their own
+      # databases against this instance, so no init scripts are needed — the
+      # E2E fixture replays infra/postgres/init/02-*.sql itself.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: autonate
+          POSTGRES_PASSWORD: Your_password123!
+          POSTGRES_DB: flowable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autonate -d flowable"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Start NATS with JetStream
+        # Not a service container: those cannot pass a `command`, and NATS only
+        # enables JetStream when started with --jetstream. The app's
+        # NatsStreamProvisioner asserts the streams it needs on boot, so the
+        # bootstrap script the compose stack runs is not needed here.
+        run: |
+          docker run -d --name autonate-ci-nats \
+            -p 4222:4222 -p 8222:8222 \
+            nats:2.12-alpine --jetstream --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then
+              echo "NATS ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "NATS did not become healthy"; docker logs autonate-ci-nats; exit 1
+
+      # Several backend tests need the SPA bundle in wwwroot/, for two
+      # different reasons:
+      #
+      #   * Program.cs wires the static-file pipeline, the SPA fallback and
+      #     the /api 404 guard inside `if (Directory.Exists(WebRootPath))`,
+      #     because in Debug the SPA is served by Vite and the directory is
+      #     normally absent. Without it `Unknown_api_path_returns_404_not_spa_index`
+      #     sees no `no-store` header.
+      #   * Tests that sign in follow the post-login redirect to "/", which is
+      #     served by MapFallbackToFile("index.html"). An empty directory is
+      #     not enough — the redirect lands on a 404 and the login assertion
+      #     fails (DataStoreListFilteringTests).
+      #
+      # Both reproduced locally, first with the directory moved aside and then
+      # with it emptied, which is what separated the two causes.
+      - uses: actions/download-artifact@v4
+        with:
+          name: spa-dist
+          path: src/AutoNate.Web/wwwroot
+
+      - name: Restore
+        run: dotnet restore
+
+      # Deliberately not `-warnaserror`: the tree currently carries a handful
+      # of analyzer warnings (CA1512, S6667) in code this workflow does not
+      # own. Turning them fatal here would make CI red on arrival, which is
+      # how a gate gets disabled. Clearing them is its own task; this job
+      # enforces the tests.
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Test
+        run: dotnet test tests/AutoNate.Web.Tests --no-build --logger "console;verbosity=minimal"
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    # Not an artifact dependency any more — just don't spend 20 minutes on
+    # browser tests when lint or typecheck already failed.
+    needs: spa
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: autonate
+          POSTGRES_PASSWORD: Your_password123!
+          POSTGRES_DB: flowable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autonate -d flowable"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # The fixture launches the app under test with `-p:BuildSpa=true`, which
+      # shells out to `npm run build` and mirrors dist/ into wwwroot — it also
+      # deletes wwwroot first, so passing the spa job's bundle through as an
+      # artifact would be thrown away. Node is needed here even though this job
+      # runs no npm step of its own.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: src/AutoNate.Spa/package-lock.json
+
+      - name: Install SPA dependencies
+        working-directory: src/AutoNate.Spa
+        run: npm ci
+
+      - name: Start NATS with JetStream
+        # Not a service container: those cannot pass a `command`, and NATS only
+        # enables JetStream when started with --jetstream. The app's
+        # NatsStreamProvisioner asserts the streams it needs on boot, so the
+        # bootstrap script the compose stack runs is not needed here.
+        run: |
+          docker run -d --name autonate-ci-nats \
+            -p 4222:4222 -p 8222:8222 \
+            nats:2.12-alpine --jetstream --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8222/healthz >/dev/null; then
+              echo "NATS ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "NATS did not become healthy"; docker logs autonate-ci-nats; exit 1
+
+      # The plugin-lifecycle spec uploads plugins/HelloPlugin/dist/HelloPlugin.zip,
+      # which the plugin project's ZipPluginPackage target produces on build.
+      # Nothing else in the solution depends on it, so it has to be asked for
+      # explicitly or the upload fails with DirectoryNotFound.
+      - name: Build the sample plugin package
+        run: dotnet build plugins/HelloPlugin
+
+      # The document and notes editors connect to the Hocuspocus sidecar on
+      # :1234. Without it every editor spec fails — not on its own assertion
+      # but on ConsoleErrorGuard, which turns the browser's repeated
+      # "WebSocket connection to ws://localhost:1234/ failed" into a failure.
+      # That dependency was only ever satisfied by the local compose stack, so
+      # it never had to be written down until CI ran the suite on a clean
+      # machine.
+      #
+      # AUTONATE_WEB_URL is required for the sidecar to boot but cannot be set
+      # correctly: the fixture starts the app under test on a random port. It
+      # points at the conventional dev port, which nothing is listening on, so
+      # the webhook callbacks fail — exactly as they do locally, where that
+      # port holds a dev app backed by a different database. What these specs
+      # need is a listener on :1234, so the browser stops logging
+      # ERR_CONNECTION_REFUSED and ConsoleErrorGuard stops failing them.
+      - name: Start the Hocuspocus sidecar
+        run: |
+          docker build -t autonate-hocuspocus services/hocuspocus
+          docker run -d --name autonate-ci-hocuspocus --network host \
+            -e HOCUSPOCUS_PORT=1234 \
+            -e AUTONATE_WEB_URL=http://127.0.0.1:5108 \
+            -e POSTGRES_HOST=127.0.0.1 \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_DB=AutoNate \
+            -e POSTGRES_USER=autonate \
+            -e POSTGRES_PASSWORD='Your_password123!' \
+            -e YJS_INTERNAL_SHARED_SECRET=dev-only-yjs-internal-secret-change-me \
+            autonate-hocuspocus
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 1234; then echo "Hocuspocus ready"; exit 0; fi
+            sleep 2
+          done
+          echo "Hocuspocus did not open :1234"; docker logs autonate-ci-hocuspocus; exit 1
+
+      - name: Build
+        run: dotnet build tests/AutoNate.E2E.Tests
+
+      # The Playwright .NET package ships this script next to the built test
+      # assembly; it installs the browser binaries the fixture launches.
+      - name: Install Playwright browsers
+        run: pwsh tests/AutoNate.E2E.Tests/bin/Debug/net10.0/playwright.ps1 install --with-deps chromium
+
+      # Excludes the specs that need services this job does not host: the
+      # Flowable engine (workflow execution and studio) and the Dapr sidecar
+      # (the bus-event log). They are traited rather than named, so a new
+      # Flowable-dependent spec is excluded automatically instead of turning
+      # the job red until someone updates a list here.
+      #
+      # This is a real coverage gap, not a cleanup: 155 of 163 specs run.
+      # Standing up Flowable — a Spring Boot service built from source — and
+      # Dapr in CI is its own piece of work, tracked on #79. Until then the
+      # full suite remains the local and pre-release gate.
+      - name: Test
+        run: |
+          dotnet test tests/AutoNate.E2E.Tests --no-build \
+            --filter "RequiresService!=Flowable&RequiresService!=Dapr" \
+            --logger "console;verbosity=minimal"
+
+      # A failed selector is close to unreadable without the page. Playwright
+      # writes traces/screenshots under the test output when a spec fails.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-artifacts
+          path: |
+            tests/AutoNate.E2E.Tests/bin/Debug/net10.0/playwright-traces
+            tests/AutoNate.E2E.Tests/bin/Debug/net10.0/test-results
+          retention-days: 7
+          if-no-files-found: ignore

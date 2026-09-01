@@ -98,6 +98,88 @@ public sealed class ProjectionFrameworkPhase4Tests
     }
 
     [Fact]
+    public async Task Every_registered_projection_can_be_rebuilt()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        // The failure this guards against was uniform: BackfillRunner resolves
+        // IProjectionBackfillSource<TSource> and throws when none is
+        // registered, which the endpoint maps to 400 — so Rebuild was broken
+        // for every projection at once, and the recovery path in
+        // docs/projection-framework/operations.md did not work (#112).
+        //
+        // Driving the real list rather than a hardcoded set means adding a
+        // projection without a backfill source fails here rather than in
+        // production.
+        var snapshots = await client.GetFromJsonAsync<JsonElement>("/api/admin/projections/");
+        var names = snapshots.EnumerateArray()
+            .Select(p => p.GetProperty("name").GetString()!)
+            .ToArray();
+        Assert.NotEmpty(names);
+
+        foreach (var name in names)
+        {
+            var resp = await client.PostAsync(
+                $"/api/admin/projections/{Uri.EscapeDataString(name)}/rebuild", content: null);
+            var body = await resp.Content.ReadAsStringAsync();
+            Assert.True(resp.StatusCode == HttpStatusCode.OK,
+                $"Rebuild of '{name}' returned {(int)resp.StatusCode}: {body}");
+        }
+    }
+
+    [Fact]
+    public async Task Admin_reset_watermark_clears_the_feed_row()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        // Seed a watermark through the store the feeds themselves use, so
+        // this exercises the same row a real replay would read.
+        var feedName = $"e2e-feed-{Guid.NewGuid():N}";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IProjectionWatermarkStore>();
+            await store.SetAsync(feedName, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.NotNull(await store.GetAsync(feedName, CancellationToken.None));
+        }
+
+        var resp = await client.PostAsync(
+            $"/api/admin/projections/feeds/{Uri.EscapeDataString(feedName)}/reset-watermark",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("ok").GetBoolean());
+
+        // The watermark is actually gone, which is what makes the feed
+        // re-observe from the beginning — the documented recovery step.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IProjectionWatermarkStore>();
+            Assert.Null(await store.GetAsync(feedName, CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    public async Task Admin_reset_watermark_reports_no_row_for_unknown_feed()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        // 200 with ok:false rather than 404 — the endpoint's contract is
+        // "the watermark is not there any more", which is already true.
+        var resp = await client.PostAsync(
+            $"/api/admin/projections/feeds/{Uri.EscapeDataString($"missing-{Guid.NewGuid():N}")}/reset-watermark",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
     public async Task Admin_rebuild_returns_404_for_unknown_projection()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
@@ -106,6 +188,54 @@ public sealed class ProjectionFrameworkPhase4Tests
 
         var resp = await client.PostAsync("/api/admin/projections/no-such-projection/rebuild", content: null);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Rollup_backfill_recomputes_buckets_older_than_the_feed_window()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        _ = factory.CreateClient();
+
+        using var scope = factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AutoNateDbContext>>();
+
+        // A record created well outside RecentDayWindow. The polling feed only
+        // ever recomputes the recent window, so this bucket is exactly what a
+        // rebuild exists to repair — and what returned 400 before #112.
+        var typeId = Guid.NewGuid();
+        var actor = Guid.NewGuid();
+        var oldDay = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-400));
+        var oldTimestamp = new DateTime(oldDay.Year, oldDay.Month, oldDay.Day, 12, 0, 0, DateTimeKind.Utc);
+        var shortCode = $"BF{Guid.NewGuid():N}"[..10];
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO record_types (id, short_code, name, created_at_utc, created_by,
+                                          updated_at_utc, updated_by)
+                VALUES ({typeId}, {shortCode}, 'backfill probe', {oldTimestamp}, {actor},
+                        {oldTimestamp}, {actor})
+                """);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO records (id, record_type_id, key, key_number, name,
+                                     created_at_utc, created_by, updated_at_utc, updated_by)
+                VALUES ({Guid.NewGuid()}, {typeId}, {$"{shortCode}-1"}, 1, 'probe',
+                        {oldTimestamp}, {actor}, {oldTimestamp}, {actor})
+                """);
+        }
+
+        var runner = scope.ServiceProvider.GetRequiredService<BackfillRunner>();
+        var written = await runner.RunAsync(
+            "records.record_activity_rollup_cache", cancellationToken: CancellationToken.None);
+        Assert.True(written > 0, "Backfill wrote no rows.");
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var row = await db.RecordActivityRollupCache.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.RecordTypeId == typeId && r.BucketDay == oldDay);
+            Assert.NotNull(row);
+            Assert.Equal(1, row!.RecordsCreated);
+        }
     }
 
     [Fact]

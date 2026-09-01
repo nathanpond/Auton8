@@ -351,6 +351,13 @@ builder.Services.AddScoped<IInstanceAuthorizer, WorkflowExecutionInstanceAuthori
 builder.Services.AddScoped<IInstanceAuthorizer, FormInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, UserInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, ExternalConnectionInstanceAuthorizer>();
+// These five had selector compilers (above) but no instance handler, so every
+// RequirePermission endpoint for them denied everyone but super-admins.
+builder.Services.AddScoped<IInstanceAuthorizer, DataStoreInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, DataConnectorInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, DatasetInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, SavedQueryInstanceAuthorizer>();
+builder.Services.AddScoped<IInstanceAuthorizer, PipelineInstanceAuthorizer>();
 
 builder.Services.AddScoped<IAuthorizer, Authorizer>();
 // Content hierarchy — separate authorization path (project-role baseline +
@@ -386,7 +393,6 @@ builder.Services.AddOptions<AutoNate.Web.Services.Content.DocumentImportOptions>
     .BindConfiguration("DocumentImports");
 builder.Services.AddSingleton<AutoNate.Web.Services.Content.IDocumentImportStorage,
     AutoNate.Web.Services.Content.FilesystemDocumentImportStorage>();
-builder.Services.AddScoped<AuthCacheBumper>();
 builder.Services.AddScoped<EntityEdgeReconciler>();
 builder.Services.AddScoped<IRoleStore, EfCoreRoleStore>();
 builder.Services.AddScoped<IGroupStore, EfCoreGroupStore>();
@@ -1005,6 +1011,21 @@ AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
 AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
     .AddChangeFeed<AutoNate.Web.Models.FlowableHistoricActivityEvent,
         AutoNate.Web.Services.Flowable.Cache.FlowableHistoryPollingFeed>(builder.Services);
+// Backfill sources for the same four projections (#112). Without these,
+// BackfillRunner throws and the admin Rebuild button 400s for every
+// projection — the documented recovery path for a corrupted cache.
+builder.Services.AddScoped<
+    AutoNate.Web.Services.Projections.IProjectionBackfillSource<AutoNate.Web.Models.WorkflowExecutionSummary>,
+    AutoNate.Web.Services.Flowable.Cache.FlowableExecutionBackfillSource>();
+builder.Services.AddScoped<
+    AutoNate.Web.Services.Projections.IProjectionBackfillSource<AutoNate.Web.Models.FlowableTaskSummary>,
+    AutoNate.Web.Services.Flowable.Cache.FlowableTaskBackfillSource>();
+builder.Services.AddScoped<
+    AutoNate.Web.Services.Projections.IProjectionBackfillSource<AutoNate.Web.Services.Flowable.Cache.FlowableInstanceVariables>,
+    AutoNate.Web.Services.Flowable.Cache.FlowableVariableBackfillSource>();
+builder.Services.AddScoped<
+    AutoNate.Web.Services.Projections.IProjectionBackfillSource<AutoNate.Web.Models.FlowableHistoricActivityEvent>,
+    AutoNate.Web.Services.Flowable.Cache.FlowableHistoryBackfillSource>();
 
 // Internal-aggregate projection — first non-Flowable consumer of the
 // projection framework. Demonstrates the reusability that motivated lifting
@@ -1017,6 +1038,9 @@ AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
 AutoNate.Web.Services.Projections.ProjectionServiceCollectionExtensions
     .AddChangeFeed<AutoNate.Web.Services.Records.Rollups.RecordActivityRollupSnapshot,
         AutoNate.Web.Services.Records.Rollups.RecordActivityRollupFeed>(builder.Services);
+builder.Services.AddScoped<
+    AutoNate.Web.Services.Projections.IProjectionBackfillSource<AutoNate.Web.Services.Records.Rollups.RecordActivityRollupSnapshot>,
+    AutoNate.Web.Services.Records.Rollups.RecordActivityRollupBackfillSource>();
 builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.IFlowableReadThrough,
     AutoNate.Web.Services.Flowable.Cache.FlowableReadThrough>();
 builder.Services.AddSingleton<AutoNate.Web.Services.Flowable.Cache.WorkflowCacheRetentionService>();

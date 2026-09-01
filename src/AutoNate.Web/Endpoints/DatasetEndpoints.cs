@@ -1,4 +1,5 @@
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.DataStores;
@@ -148,6 +149,8 @@ public static class DatasetEndpoints
             IDbContextFactory<AutoNateDbContext> dbContextFactory,
             IFileDataStoreService fileService,
             DatasetFileParserRegistry parserRegistry,
+            IAuthorizer authorizer,
+            HttpContext http,
             CancellationToken ct) =>
         {
             if (request is null) return Results.BadRequest();
@@ -165,6 +168,31 @@ public static class DatasetEndpoints
                 .SingleOrDefaultAsync(ct);
             if (datastoreKind is null)
                 return Results.BadRequest(new { reason = $"Data store '{request.DataStoreId}' not found." });
+
+            // Authorize the *datastore* being read, not just the dataset the
+            // caller intends to create (#183).
+            //
+            // The route gate is RequireKindPermission(Dataset, Create), and
+            // that was the only check. The handler then read an arbitrary file
+            // out of an arbitrary store named in the request body, so a caller
+            // with dataset:create and no datastore grants at all — one who
+            // gets an empty list from GET /api/datastores and 403 from every
+            // /api/datastores/{id}/… route — could still name any store and
+            // read back its file's column names, and through type inference
+            // the shape of its values. One feature's permission bypassed
+            // another's.
+            //
+            // The same (DataStore, View) pair GET /api/datastores/{id}/files
+            // declares, so the two agree by construction.
+            var storeDecision = await authorizer.AuthorizeAsync(
+                http.User,
+                Actions.View,
+                new EntityRef(EntityKinds.DataStore, request.DataStoreId.ToString()),
+                ct);
+            if (!storeDecision.IsAllowed)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
             if ((DataStoreKind)datastoreKind.Value != DataStoreKind.FileType)
                 return Results.BadRequest(new { reason = "Data store is not a Files-type store." });
 

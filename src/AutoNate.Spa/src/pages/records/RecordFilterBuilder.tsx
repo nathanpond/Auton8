@@ -84,6 +84,10 @@ export default function RecordFilterBuilder({ fields, initialFilters, onApply, o
             <NativeSelect
               size="xs"
               style={{ maxWidth: "14rem" }}
+              // The three controls in a filter row had no accessible names, so
+              // a screen reader announced "combo box" three times over and a
+              // test had nothing to ask for but position.
+              aria-label={`Filter ${i + 1} field`}
               value={clause.fieldKey}
               onChange={(e) => {
                 const nextField =
@@ -100,6 +104,7 @@ export default function RecordFilterBuilder({ fields, initialFilters, onApply, o
             <NativeSelect
               size="xs"
               style={{ maxWidth: "8rem" }}
+              aria-label={`Filter ${i + 1} operator`}
               value={clause.op}
               onChange={(e) =>
                 updateClause(i, { op: e.currentTarget.value as FilterOperatorWire })
@@ -109,6 +114,7 @@ export default function RecordFilterBuilder({ fields, initialFilters, onApply, o
             <Box style={{ flex: 1 }}>
               <ClauseValueInput
                 field={field}
+                label={`Filter ${i + 1} value`}
                 value={clause.value}
                 onChange={(v) => updateClause(i, { value: v })}
               />
@@ -161,10 +167,14 @@ export default function RecordFilterBuilder({ fields, initialFilters, onApply, o
  */
 function ClauseValueInput({
   field,
+  label,
   value,
   onChange
 }: {
   field: RecordTypeField;
+  // Named by the caller so every branch below carries the same accessible
+  // name regardless of which control the field's type renders.
+  label: string;
   value: unknown;
   onChange: (v: unknown) => void;
 }) {
@@ -173,6 +183,7 @@ function ClauseValueInput({
       return (
         <NativeSelect
           size="xs"
+          aria-label={label}
           value={value === true ? "true" : value === false ? "false" : ""}
           onChange={(e) => onChange(e.currentTarget.value === "true")}
           data={[
@@ -185,6 +196,7 @@ function ClauseValueInput({
       return (
         <TextInput
           size="xs"
+          aria-label={label}
           type="number"
           value={value === null || value === undefined ? "" : String(value)}
           onChange={(e) =>
@@ -197,6 +209,7 @@ function ClauseValueInput({
       return (
         <TextInput
           size="xs"
+          aria-label={label}
           type={variant === "datetime" ? "datetime-local" : "date"}
           value={(value as string | null) ?? ""}
           onChange={(e) => onChange(e.currentTarget.value || null)}
@@ -208,6 +221,7 @@ function ClauseValueInput({
       return (
         <NativeSelect
           size="xs"
+          aria-label={label}
           value={(value as string | null) ?? ""}
           onChange={(e) => onChange(e.currentTarget.value || null)}
           data={[
@@ -221,6 +235,7 @@ function ClauseValueInput({
       return (
         <TextInput
           size="xs"
+          aria-label={label}
           type={field.dataType === "email" ? "email" : "text"}
           value={(value as string | null) ?? ""}
           onChange={(e) => onChange(e.currentTarget.value)}

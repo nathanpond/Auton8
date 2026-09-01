@@ -114,5 +114,55 @@ export default [
       // currently at zero.
       "eslint-comments/require-description": ["error", { ignore: [] }]
     }
+  },
+
+  // ── Accessibility ratchet (#40) ─────────────────────────────────────────
+  //
+  // The rules above are warnings inside a total budget, so a new violation is
+  // free until the budget runs out — which makes every 508 fix a thing that
+  // can silently regress. This block re-declares the same rules as ERRORS for
+  // the directories that are already clean, so those areas cannot go
+  // backwards while the remaining backlog is worked through.
+  //
+  // Adding a directory here is the ratchet: fix a directory's warnings, move
+  // it into this list, and it stays fixed. The list below was derived by
+  // running eslint and taking every directory with zero jsx-a11y warnings —
+  // not by aspiration, so `npm run lint` passes the moment it lands.
+  //
+  // Remaining (deliberately absent): src/pages/notes, src/pages/documents,
+  // src/pages/admin, src/components/documents, src/agent, src/shell,
+  // src/pages/workflow*, src/pages/dashboard, and three single-file cases in
+  // src/components. Most are keyboard-interaction findings on editor
+  // surfaces, which need real interaction design rather than a lint fix.
+  {
+    files: [
+      "src/components/data-table/**/*.{ts,tsx}",
+      "src/pages/records/**/*.{ts,tsx}",
+      "src/pages/notifications/**/*.{ts,tsx}",
+      "src/pages/query/**/*.{ts,tsx}",
+      "src/pages/forms/**/*.{ts,tsx}",
+      "src/pages/manage-users/**/*.{ts,tsx}",
+      "src/pages/user-profile/**/*.{ts,tsx}",
+      "src/pages/login/**/*.{ts,tsx}",
+      "src/pages/home/**/*.{ts,tsx}",
+      "src/widgets/**/*.{ts,tsx}",
+      "src/menus/**/*.{ts,tsx}",
+      "src/providers/**/*.{ts,tsx}",
+      "src/routes/**/*.{ts,tsx}",
+      "src/preferences/**/*.{ts,tsx}",
+      "src/hooks/**/*.{ts,tsx}",
+      "src/lib/**/*.{ts,tsx}"
+    ],
+    rules: {
+      "jsx-a11y/alt-text": "error",
+      "jsx-a11y/anchor-has-content": "error",
+      "jsx-a11y/anchor-is-valid": "error",
+      "jsx-a11y/click-events-have-key-events": "error",
+      "jsx-a11y/label-has-associated-control": "error",
+      "jsx-a11y/no-static-element-interactions": "error",
+      "jsx-a11y/no-noninteractive-element-interactions": "error",
+      "jsx-a11y/no-noninteractive-tabindex": "error",
+      "jsx-a11y/no-autofocus": "error"
+    }
   }
 ];

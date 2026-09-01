@@ -91,6 +91,11 @@ type DataTableProps<T> = {
 
   onRowClick?: (row: T) => void;
   getRowAriaLabel?: (row: T) => string;
+  // Stable per-row handle for E2E. Specs previously reached these rows
+  // positionally (`table` → `tbody tr` → `.First`), which couples them to DOM
+  // structure and row ordering (#92) — a sort-order change silently retargets
+  // the assertion instead of failing it.
+  getRowTestId?: (row: T) => string | undefined;
   getRowClassName?: (row: T) => string | undefined;
 
   emptyMessage?: string;
@@ -202,6 +207,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     resetPaginationKey,
     onRowClick,
     getRowAriaLabel,
+    getRowTestId,
     getRowClassName,
     emptyMessage = "No records found.",
     loadingMessage = "Loading…",
@@ -436,25 +442,45 @@ export function DataTable<T>(props: DataTableProps<T>) {
   // this wrapper used to accept and throw away — finally names them.
   const rowAttributesAdapter = useMemo(
     () =>
-      onRowClick
-        ? (record: T) => ({
-            tabIndex: 0,
-            // Deliberately NOT role="button": a <tr> must keep its row role or
-            // the table's structure stops being exposed at all, and browsers
-            // will not surface a row as a button anyway. Focusable + a name +
-            // Enter/Space is what makes it operable while staying a row.
-            "aria-label": getRowAriaLabel?.(record),
-            onKeyDown: (event: ReactKeyboardEvent<HTMLTableRowElement>) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              // Space scrolls the page by default, and both would otherwise
-              // also reach a focused control inside the row.
-              if (event.target !== event.currentTarget) return;
-              event.preventDefault();
-              onRowClick(record);
+      onRowClick || getRowTestId || getRowAriaLabel
+        ? (record: T) => {
+            const attrs: Record<string, unknown> = {};
+
+            // A stable per-row handle for E2E. Specs previously reached rows
+            // positionally (`table` -> `tbody tr` -> `.First`), which couples
+            // them to DOM structure and row ordering (#92).
+            const testId = getRowTestId?.(record);
+            if (testId) attrs["data-testid"] = testId;
+
+            const label = getRowAriaLabel?.(record);
+            if (label) attrs["aria-label"] = label;
+
+            // Keyboard operability for click-to-open rows. mantine-datatable
+            // renders onRowClick as a bare <tr onClick>: no tabIndex, no key
+            // handler. Any table whose only way into a row is the row itself
+            // was mouse-only — Notifications could not be opened without a
+            // pointer at all (WCAG 2.1.1 / 4.1.2, #12).
+            if (onRowClick) {
+              attrs["tabIndex"] = 0;
+              // Deliberately NOT role="button": a <tr> must keep its row role
+              // or the table's structure stops being exposed at all, and
+              // browsers will not surface a row as a button anyway. Focusable
+              // + a name + Enter/Space is what makes it operable while
+              // staying a row.
+              attrs["onKeyDown"] = (event: ReactKeyboardEvent<HTMLTableRowElement>) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                // Space scrolls the page by default, and both would otherwise
+                // also reach a focused control inside the row.
+                if (event.target !== event.currentTarget) return;
+                event.preventDefault();
+                onRowClick(record);
+              };
             }
-          })
+
+            return attrs;
+          }
         : undefined,
-    [onRowClick, getRowAriaLabel]
+    [onRowClick, getRowAriaLabel, getRowTestId]
   );
 
   return (
@@ -542,6 +568,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
         rowClassName={rowClassNameAdapter}
         customRowAttributes={rowAttributesAdapter}
       />
+
     </Stack>
   );
 }
@@ -581,7 +608,14 @@ function FilterTab({
         <Badge
           size="xs"
           variant={active ? "white" : "default"}
-          color={active ? "gray" : "gray"}
+          color="gray"
+          // Explicit label colour rather than the variant's default. The
+          // `default` variant renders a dimmed grey label on a near-white
+          // ground, which at this size is body text under WCAG and measured
+          // below 4.5:1 — axe caught it on the notifications filter tabs once
+          // a count reached double digits. gray-9 is ~15:1 on either the
+          // white or the light ground, so this holds for both variants.
+          styles={{ label: { color: "var(--mantine-color-gray-9)" } }}
         >
           {count}
         </Badge>

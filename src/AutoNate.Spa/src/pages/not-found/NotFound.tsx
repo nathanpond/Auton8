@@ -9,7 +9,9 @@ export default function NotFound() {
           404
         </Title>
         <Text size="lg">We couldn&apos;t find the page you were looking for.</Text>
-        <Button component={Link} to="/home" color="green" size="md">
+        {/* green.9 rather than the default green shade: white on the
+            lighter fill measures below 4.5:1. */}
+        <Button component={Link} to="/home" color="green.9" size="md">
           Go Home
         </Button>
       </Stack>
