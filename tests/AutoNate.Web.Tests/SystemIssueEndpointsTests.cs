@@ -33,6 +33,80 @@ public sealed class SystemIssueEndpointsTests
     }
 
     [Fact]
+    public async Task DeadLetters_are_listed_and_replayed_back_onto_the_outbox()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await client.GetAsync("/api/auth/me");
+
+        // Park a row the way AuditOutboxDeadLetterParkRemediator does.
+        var topic = $"e2e.deadletter.{Guid.NewGuid():N}";
+        // Parameterized rather than inlined: a literal '{' inside an
+        // interpolated raw string would need $$-quoting to survive.
+        const string payload = "{\"probe\":true}";
+        var dbFactory = factory.Services
+            .GetRequiredService<IDbContextFactory<AutoNate.Web.Persistence.AutoNateDbContext>>();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO audit_outbox_dead_letters (
+                    original_outbox_id, topic, event_type, payload_json,
+                    original_created_at_utc, attempt_count, last_error, parked_reason)
+                VALUES (4242, {topic}, 'e2e.event', {payload},
+                        NOW(), 5, 'boom', 'parked by test')
+                """);
+        }
+
+        var list = await client.GetFromJsonAsync<DeadLetterList>("/api/system-issues/dead-letters");
+        Assert.NotNull(list);
+        var parked = Assert.Single(list!.Items, i => i.Topic == topic);
+        Assert.Equal(5, parked.AttemptCount);
+        // The payload is carried through — reading it is the whole point of
+        // preserving the row.
+        Assert.Contains("probe", parked.PayloadJson, StringComparison.Ordinal);
+
+        var replay = await client.PostAsync(
+            $"/api/system-issues/dead-letters/{parked.Id}/replay", content: null);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var replayed = await replay.Content.ReadFromJsonAsync<ReplayResponse>();
+        Assert.True(replayed!.Ok);
+
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            // Back on the outbox for the dispatcher, with its retry budget
+            // reset — this is a fresh delivery, not a continuation.
+            var queued = await db.Database
+                .SqlQuery<int>($"""
+                    SELECT attempt_count AS "Value" FROM audit_outbox
+                    WHERE topic = {topic}
+                    """)
+                .ToArrayAsync();
+            Assert.Equal(0, Assert.Single(queued));
+
+            // And gone from the dead-letter table, so a second click cannot
+            // enqueue the same event twice.
+            var remaining = await db.Database
+                .SqlQuery<int>($"""
+                    SELECT COUNT(*)::int AS "Value" FROM audit_outbox_dead_letters
+                    WHERE topic = {topic}
+                    """)
+                .SingleAsync();
+            Assert.Equal(0, remaining);
+        }
+
+        // Replaying it again is a 404, not a duplicate enqueue.
+        var again = await client.PostAsync(
+            $"/api/system-issues/dead-letters/{parked.Id}/replay", content: null);
+        Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
+    }
+
+    private sealed record DeadLetterList(DeadLetterItem[] Items, int Total);
+
+    private sealed record DeadLetterItem(long Id, string Topic, string PayloadJson, int AttemptCount);
+
+    private sealed record ReplayResponse(bool Ok, string Message, long? NewOutboxId);
+
+    [Fact]
     public async Task Get_returns_404_for_missing_issue()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();

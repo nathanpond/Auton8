@@ -1,5 +1,7 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Authorization.Evaluator;
+using Microsoft.Extensions.Options;
 using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Events;
 
@@ -155,9 +157,66 @@ public static class RoleEndpoints
             CreateAssignmentRequest request,
             HttpContext http,
             IRoleAssignmentStore store,
+            IAuthorizer authorizer,
+            IOptions<AutoNate.Web.Authorization.AuthorizationOptions> authOptions,
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
+            // role:assign used to be transitively equivalent to super-admin.
+            // Nothing here restricted *which* role could be handed out or to
+            // whom, and Authorizer re-reads role assignments per request — so
+            // a holder of `assign` on `/role/*` could grant themselves
+            // SuperAdmin and be one on the very next request.
+            //
+            // Two guards, both scoped to closing that path rather than
+            // redesigning delegation:
+            //
+            //   1. Only a super-admin may hand out SuperAdmin. Otherwise the
+            //      most privileged role in the system is delegable by someone
+            //      who was only trusted to manage role membership.
+            //   2. Nobody may assign a role to themselves unless they are a
+            //      super-admin. Self-assignment is how a limited grant turns
+            //      into an unlimited one; assigning to *others* stays open, so
+            //      ordinary delegation is unaffected.
+            //
+            // Two colluding assigners can still escalate each other. That is
+            // the standard separation-of-duties trade-off and is a deliberate
+            // stopping point: the general rule ("you may only delegate
+            // permissions you already hold") needs a role-subset comparison
+            // that does not exist here yet.
+            // Only under full enforcement. Every other decision point
+            // short-circuits to allow when authorization is disabled or still
+            // in read-only rollout, and a guard that denies where the rest of
+            // the system allows would make this endpoint the odd one out —
+            // and would break the staged "filter reads first, then enforce
+            // writes" rollout the options exist to support. There is no
+            // escalation to prevent while nothing is being enforced.
+            var options = authOptions.Value;
+            var enforcing = options.Enabled
+                && options.Enforcement == AuthorizationEnforcement.Full;
+            var capabilities = enforcing
+                ? await authorizer.GetCapabilitiesAsync(http.User, ct)
+                : null;
+            if (enforcing && capabilities is { IsSuperAdmin: false })
+            {
+                if (id == SystemRoles.SuperAdminId)
+                {
+                    return Results.Json(
+                        new { error = "Only a super-admin can assign the SuperAdmin role." },
+                        statusCode: StatusCodes.Status403Forbidden);
+                }
+
+                var actorId = http.GetActorId();
+                if (string.Equals(request.PrincipalKind, EntityKinds.User, StringComparison.OrdinalIgnoreCase)
+                    && Guid.TryParse(request.PrincipalId, out var principalId)
+                    && principalId == actorId)
+                {
+                    return Results.Json(
+                        new { error = "You cannot assign a role to yourself." },
+                        statusCode: StatusCodes.Status403Forbidden);
+                }
+            }
+
             try
             {
                 var assignment = await store.AssignAsync(

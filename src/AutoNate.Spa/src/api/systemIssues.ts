@@ -104,3 +104,37 @@ export function reportMenuRenderFailure(menuItemId: string): void {
       reportedMenuItemIds.delete(menuItemId);
     });
 }
+
+// Audit dead letters (#44). AuditOutboxDeadLetterParkRemediator moves an
+// abandoned audit_outbox row here so its payload survives, but nothing read
+// the table — an operator could only reach a dropped audit event with psql.
+export type AuditDeadLetter = {
+  id: number;
+  originalOutboxId: number;
+  topic: string;
+  eventType: string;
+  payloadJson: string;
+  originalCreatedAtUtc: string;
+  attemptCount: number;
+  lastError: string | null;
+  parkedAtUtc: string;
+  parkedReason: string;
+};
+
+export type AuditDeadLetterListResponse = { items: AuditDeadLetter[]; total: number };
+
+export async function listAuditDeadLetters(
+  signal?: AbortSignal
+): Promise<AuditDeadLetterListResponse> {
+  const { data } = await api.get<AuditDeadLetterListResponse>(
+    "/api/system-issues/dead-letters", { signal });
+  return data;
+}
+
+export async function replayAuditDeadLetter(
+  id: number
+): Promise<{ ok: boolean; message: string; newOutboxId: number | null }> {
+  const { data } = await api.post<{ ok: boolean; message: string; newOutboxId: number | null }>(
+    `/api/system-issues/dead-letters/${id}/replay`);
+  return data;
+}

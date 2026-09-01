@@ -222,6 +222,46 @@ public sealed class ApiSeeder
     }
 
     /// <summary>
+    /// Adds a typed schema field to a record type via
+    /// <c>POST /api/record-types/{id}/fields</c>.
+    ///
+    /// The record seeder deliberately creates schema-less types, which is all
+    /// most specs need — but it meant no journey could exercise typed values,
+    /// typed filters or the column picker, and E2E-061/062 sat BLOCKED on
+    /// exactly this gap. <paramref name="config"/> is raw JSON so option
+    /// fields can carry their choice list without this helper growing a
+    /// per-type overload.
+    /// </summary>
+    public async Task<Guid> AddRecordTypeFieldAsync(
+        Guid recordTypeId,
+        string fieldKey,
+        string displayName,
+        string dataType,
+        string configJson = "{}",
+        bool isRequired = false,
+        int sortOrder = 0)
+    {
+        using var config = System.Text.Json.JsonDocument.Parse(configJson);
+        var response = await _request.PostAsync(
+            $"/api/record-types/{recordTypeId}/fields",
+            new APIRequestContextOptions
+            {
+                DataObject = new
+                {
+                    fieldKey,
+                    displayName,
+                    dataType,
+                    config = config.RootElement,
+                    isRequired,
+                    sortOrder
+                }
+            });
+        await EnsureSuccessAsync(response, $"create '{dataType}' field '{fieldKey}'");
+        var json = await response.JsonAsync();
+        return json!.Value.GetProperty("id").GetGuid();
+    }
+
+    /// <summary>
     /// Creates a content project via <c>POST /api/content/projects</c>. Any
     /// signed-in user can create one; the caller becomes the Owner in the
     /// same transaction so the project is immediately scoped + writeable.

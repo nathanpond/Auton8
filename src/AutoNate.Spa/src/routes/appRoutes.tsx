@@ -13,6 +13,7 @@ import RecordDetail from "@/pages/records/RecordDetail";
 import EdgeTypeList from "@/pages/edge-types/EdgeTypeList";
 import EdgeTypeEditor from "@/pages/edge-types/EdgeTypeEditor";
 import ConfigLayout from "@/pages/admin/config/ConfigLayout";
+import PermissionRoute from "@/shell/PermissionRoute";
 import { ConfigIndex } from "@/pages/admin/config/sections";
 import FormEditor from "@/pages/admin/config/forms/FormEditor";
 import { lazy, Suspense } from "react";
@@ -230,7 +231,15 @@ export const APP_ROUTES: AppRoute[] = [
   // works whether reached through the site-config menu or directly.
   {
     path: "admin/config",
-    element: protect(<ConfigLayout />),
+    // Site Configuration is gated on siteconfig:view server-side (every
+    // endpoint under /api/admin/* declares it), so the shell asks for the
+    // same thing rather than rendering an admin surface whose every request
+    // will 403 (#85).
+    element: protect(
+      <PermissionRoute kind="siteconfig" action="view">
+        <ConfigLayout />
+      </PermissionRoute>
+    ),
     children: [
       { index: true, element: <ConfigIndex /> },
       ...CONFIG_TEMPLATE_ANCHORS.map((a) => ({

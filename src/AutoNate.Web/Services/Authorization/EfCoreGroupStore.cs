@@ -11,7 +11,6 @@ namespace AutoNate.Web.Services.Authorization;
 
 public sealed class EfCoreGroupStore(
     IDbContextFactory<AutoNateDbContext> dbContextFactory,
-    AuthCacheBumper cacheBumper,
     IAuthorizer authorizer) : IGroupStore
 {
     public async Task<IReadOnlyList<Group>> ListAsync(bool includeArchived, CancellationToken cancellationToken = default)
@@ -81,7 +80,6 @@ public sealed class EfCoreGroupStore(
         };
         db.Groups.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return ToModel(entity);
     }
 
@@ -129,7 +127,6 @@ public sealed class EfCoreGroupStore(
             entity.UpdatedAtUtc = DateTime.UtcNow;
             entity.UpdatedBy = actorId;
             await db.SaveChangesAsync(cancellationToken);
-            await cacheBumper.BumpAsync(cancellationToken);
         }
 
         return ToModel(entity);
@@ -150,7 +147,6 @@ public sealed class EfCoreGroupStore(
         entity.UpdatedAtUtc = DateTime.UtcNow;
         entity.UpdatedBy = actorId;
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return ToModel(entity);
     }
 
@@ -165,7 +161,6 @@ public sealed class EfCoreGroupStore(
 
         db.Groups.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return true;
     }
 
@@ -215,7 +210,6 @@ public sealed class EfCoreGroupStore(
             AddedBy = actorId
         });
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return true;
     }
 
@@ -231,7 +225,6 @@ public sealed class EfCoreGroupStore(
 
         db.GroupMembers.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return true;
     }
 

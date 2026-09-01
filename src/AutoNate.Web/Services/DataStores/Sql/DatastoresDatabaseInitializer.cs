@@ -78,8 +78,33 @@ public sealed class DatastoresDatabaseInitializer(
         // identifier is operator-supplied via config, not request data.
         var quoted = QuoteIdentifier(targetDatabase);
         await using var create = new NpgsqlCommand($"CREATE DATABASE {quoted}", conn);
-        await create.ExecuteNonQueryAsync(cancellationToken);
-        log.LogInformation("Created datastores DB '{Name}'.", targetDatabase);
+        try
+        {
+            await create.ExecuteNonQueryAsync(cancellationToken);
+            log.LogInformation("Created datastores DB '{Name}'.", targetDatabase);
+        }
+        catch (PostgresException ex) when (ex.SqlState is "42P04" or "23505")
+        {
+            // Someone else created it between the probe above and this
+            // statement. The probe-then-create is a TOCTOU by construction —
+            // CREATE DATABASE cannot run in a transaction and there is no
+            // IF NOT EXISTS — so the only question is whether losing the race
+            // is fatal. It is not: the database exists, which is all this
+            // method promises.
+            //
+            // 42P04 is "database already exists"; 23505 on
+            // pg_database_datname_index is the same collision surfacing as a
+            // catalog unique-violation when two creates interleave inside the
+            // catalog insert. Both mean the same thing here.
+            //
+            // Real for any deployment that starts two instances at once — a
+            // rolling deploy, or a scaled-out replica set — where today one of
+            // them would fail startup. It first showed up as a flaky test,
+            // because the suite boots many apps in parallel.
+            log.LogInformation(
+                "Datastores DB '{Name}' was created concurrently by another instance.",
+                targetDatabase);
+        }
     }
 
     private async Task EnsureWriterRoleAsync(

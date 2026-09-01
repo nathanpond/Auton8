@@ -1,7 +1,6 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Edges;
 using AutoNate.Web.Authorization.EndpointFilters;
-using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
 using AutoNate.Web.Services.Auth;
@@ -287,7 +286,6 @@ public static class UserEndpoints
             HttpContext http,
             IDbContextFactory<AutoNateDbContext> dbFactory,
             IEntityEdgeWriter writer,
-            AuthCacheBumper bumper,
             IAuditEventPublisher auditPublisher,
             CancellationToken ct) =>
         {
@@ -324,7 +322,6 @@ public static class UserEndpoints
             }
 
             await db.SaveChangesAsync(ct);
-            await bumper.BumpAsync(ct);
             await auditPublisher.PublishAsync(
                 IamEventTopic.TopicName,
                 request.SupervisorUserId is null

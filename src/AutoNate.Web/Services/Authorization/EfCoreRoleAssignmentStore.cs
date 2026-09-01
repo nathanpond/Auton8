@@ -1,6 +1,5 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
-using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Models.Authorization;
 using AutoNate.Web.Persistence;
@@ -10,8 +9,7 @@ using RoleAssignmentEntity = AutoNate.Web.Persistence.Scaffolded.RoleAssignment;
 namespace AutoNate.Web.Services.Authorization;
 
 public sealed class EfCoreRoleAssignmentStore(
-    IDbContextFactory<AutoNateDbContext> dbContextFactory,
-    AuthCacheBumper cacheBumper) : IRoleAssignmentStore
+    IDbContextFactory<AutoNateDbContext> dbContextFactory) : IRoleAssignmentStore
 {
     private static readonly HashSet<string> AllowedPrincipalKinds =
         new(StringComparer.Ordinal) { EntityKinds.User, EntityKinds.Group };
@@ -125,8 +123,16 @@ public sealed class EfCoreRoleAssignmentStore(
         };
         db.RoleAssignments.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return ToModel(entity);
+    }
+
+    public async Task<RoleAssignment?> GetAsync(
+        Guid assignmentId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.RoleAssignments.AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == assignmentId, cancellationToken);
+        return entity is null ? null : ToModel(entity);
     }
 
     public async Task<bool> RevokeAsync(Guid assignmentId, CancellationToken cancellationToken = default)
@@ -140,7 +146,6 @@ public sealed class EfCoreRoleAssignmentStore(
 
         db.RoleAssignments.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return true;
     }
 

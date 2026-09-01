@@ -49,3 +49,14 @@ export async function rebuildProjection(name: string): Promise<ProjectionActionR
     `/api/admin/projections/${encodeURIComponent(name)}/rebuild`);
   return data;
 }
+
+// Watermark reset is per FEED, not per projection: the watermark row keyed by
+// feed name is what a replay reads, so clearing it makes the feed re-observe
+// from the beginning. Documented in docs/projection-framework/operations.md as
+// the recovery step for a corrupted or retention-truncated cache; it had no
+// caller outside that doc's curl example (#47).
+export async function resetFeedWatermark(feedName: string): Promise<ProjectionActionResult> {
+  const { data } = await api.post<ProjectionActionResult>(
+    `/api/admin/projections/feeds/${encodeURIComponent(feedName)}/reset-watermark`);
+  return data;
+}

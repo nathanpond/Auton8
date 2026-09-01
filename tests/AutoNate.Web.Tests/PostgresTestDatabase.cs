@@ -234,23 +234,22 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
     public static IEntityEdgeWriter CreateEdgeWriter() => new EntityEdgeWriter();
 
-    private AuthCacheBumper CreateBumper() => new(CreateDbContextFactory());
 
     public EfCoreRoleStore CreateRoleStore() => CreateRoleStore(authorizationEnabled: false);
 
     public EfCoreRoleStore CreateRoleStore(bool authorizationEnabled, string enforcement = AuthorizationEnforcement.Off) =>
-        new(CreateDbContextFactory(), CreateBumper(), CreateAuthorizer(authorizationEnabled, enforcement));
+        new(CreateDbContextFactory(), CreateAuthorizer(authorizationEnabled, enforcement));
 
     public EfCoreGroupStore CreateGroupStore() => CreateGroupStore(authorizationEnabled: false);
 
     public EfCoreGroupStore CreateGroupStore(bool authorizationEnabled, string enforcement = AuthorizationEnforcement.Off) =>
-        new(CreateDbContextFactory(), CreateBumper(), CreateAuthorizer(authorizationEnabled, enforcement));
+        new(CreateDbContextFactory(), CreateAuthorizer(authorizationEnabled, enforcement));
 
     public EfCoreRoleAssignmentStore CreateRoleAssignmentStore() =>
-        new(CreateDbContextFactory(), CreateBumper());
+        new(CreateDbContextFactory());
 
     public EfCorePermissionGrantStore CreatePermissionGrantStore() =>
-        new(CreateDbContextFactory(), CreateBumper());
+        new(CreateDbContextFactory());
 
     public IAuthorizer CreateAuthorizer(
         bool enabled,
@@ -369,12 +368,33 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
     private async Task InitializeAsync()
     {
-        await using (var adminConnection = new NpgsqlConnection(AdminConnectionString("postgres")))
+        // Retry the create on 23505.
+        //
+        // The name is a fresh GUID, so this is never an actual name clash:
+        // PostgreSQL inserts into pg_database without holding a lock that
+        // serialises concurrent creates, and two CREATE DATABASE statements
+        // running at the same moment can both fail the unique index on
+        // datname. Every test class here builds its own database, so a run
+        // with enough parallelism hits it — rare on a developer machine,
+        // reproducible on CI, which is where it first appeared.
+        for (var attempt = 1; ; attempt++)
         {
-            await adminConnection.OpenAsync();
-            await using var createDatabaseCommand = adminConnection.CreateCommand();
-            createDatabaseCommand.CommandText = $"create database \"{_databaseName}\";";
-            await createDatabaseCommand.ExecuteNonQueryAsync();
+            try
+            {
+                await using var adminConnection =
+                    new NpgsqlConnection(AdminConnectionString("postgres"));
+                await adminConnection.OpenAsync();
+                await using var createDatabaseCommand = adminConnection.CreateCommand();
+                createDatabaseCommand.CommandText = $"create database \"{_databaseName}\";";
+                await createDatabaseCommand.ExecuteNonQueryAsync();
+                break;
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505" && attempt < 5)
+            {
+                // Back off a little so the colliding creates don't line up
+                // again on the retry.
+                await Task.Delay(TimeSpan.FromMilliseconds(100 * attempt));
+            }
         }
 
         var bootstrapScripts = new[]

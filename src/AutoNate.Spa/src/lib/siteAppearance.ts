@@ -1,5 +1,12 @@
 import { SiteAppearance, SiteAppearanceLogoMode } from "@/types/siteAppearance";
 import { badgeTextColor } from "@/lib/statusAppearance";
+import {
+  Rgb,
+  bestTextContrastOn,
+  contrastRatio,
+  parseHexColor as parseHex,
+  relativeLuminance
+} from "@/lib/contrast";
 import { generateColors } from "@mantine/colors-generator";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -52,12 +59,6 @@ export const DEFAULT_SITE_APPEARANCE: SiteAppearance = {
 };
 
 type PartialSiteAppearance = Partial<SiteAppearance> | null | undefined;
-
-type Rgb = {
-  r: number;
-  g: number;
-  b: number;
-};
 
 export function normalizeHex(value: string): string | null {
   const trimmed = value.trim();
@@ -318,6 +319,25 @@ const CONTRAST_CHECKS: ContrastCheck[] = [
 
 export function checkContrastWarnings(appearance: SiteAppearance): ContrastWarning[] {
   const warnings: ContrastWarning[] = [];
+
+  // Filled primary buttons and status pills take their text colour from
+  // badgeTextColor, which now returns the better of black/white rather than a
+  // YIQ guess (#14). For some accents neither reaches 4.5:1 — that is a
+  // property of the accent, not something the text colour can fix, so the
+  // admin has to be told rather than shipped an unreadable button.
+  const accentText = bestTextContrastOn(appearance.primaryAccentColor);
+  if (accentText > 0 && accentText < 4.5) {
+    warnings.push({
+      fieldKey: "primaryAccentColor",
+      pairLabel: "Text on filled primary buttons",
+      fgKey: "primaryAccentColor",
+      bgKey: "primaryAccentColor",
+      ratio: accentText,
+      required: 4.5,
+      reason: "text"
+    });
+  }
+
   for (const check of CONTRAST_CHECKS) {
     const fg = parseHex(appearance[check.fgKey] as string);
     const bg = parseHex(appearance[check.bgKey] as string);
@@ -336,14 +356,6 @@ export function checkContrastWarnings(appearance: SiteAppearance): ContrastWarni
     }
   }
   return warnings;
-}
-
-function contrastRatio(a: Rgb, b: Rgb): number {
-  const lA = relativeLuminance(a);
-  const lB = relativeLuminance(b);
-  const lighter = Math.max(lA, lB);
-  const darker = Math.min(lA, lB);
-  return (lighter + 0.05) / (darker + 0.05);
 }
 
 export function areSiteAppearancesEqual(a: SiteAppearance, b: SiteAppearance): boolean {
@@ -451,14 +463,6 @@ export function inferColorScheme(surfaceBg: string): "light" | "dark" {
   return lum < 0.4 ? "dark" : "light";
 }
 
-function relativeLuminance(rgb: Rgb): number {
-  const channel = (c: number) => {
-    const v = c / 255;
-    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
-}
-
 function normalizeRequiredText(value: string | null | undefined, fallback: string): string {
   const trimmed = (value ?? "").trim();
   return trimmed || fallback;
@@ -475,17 +479,6 @@ function normalizeLogoMode(value: SiteAppearanceLogoMode | string | null | undef
 
 function normalizeHexOrDefault(value: string | null | undefined, fallback: string): string {
   return normalizeHex(value ?? "") ?? fallback;
-}
-
-function parseHex(value: string): Rgb | null {
-  const normalized = normalizeHex(value);
-  if (!normalized) return null;
-  const hex = normalized.slice(1);
-  return {
-    r: parseInt(hex.slice(0, 2), 16),
-    g: parseInt(hex.slice(2, 4), 16),
-    b: parseInt(hex.slice(4, 6), 16)
-  };
 }
 
 function mixHex(color: string, target: string, ratio: number): string {

@@ -411,15 +411,12 @@ internal static class DatabaseSchemaInitializer
         CREATE UNIQUE INDEX IF NOT EXISTS uq_role_assignments_triple
             ON role_assignments (role_id, principal_kind, principal_id);
 
-        CREATE TABLE IF NOT EXISTS auth_cache_version (
-            id INT PRIMARY KEY DEFAULT 1,
-            version BIGINT NOT NULL DEFAULT 1,
-            bumped_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        INSERT INTO auth_cache_version (id, version, bumped_at_utc)
-        VALUES (1, 1, NOW())
-        ON CONFLICT (id) DO NOTHING;
+        -- auth_cache_version is gone (#43). It was bumped on every grant,
+        -- role and group mutation for a process-wide auth cache that was
+        -- never built: Authorizer is registered scoped, so its grant and
+        -- SQL-filter caches live and die inside one request and cannot go
+        -- stale across a mutation. Nothing ever SELECTed the version.
+        DROP TABLE IF EXISTS auth_cache_version;
 
         CREATE TABLE IF NOT EXISTS auth_seed_state (
             key TEXT PRIMARY KEY,
@@ -901,11 +898,11 @@ internal static class DatabaseSchemaInitializer
                 VALUES (
                     appearance_id, 'Auto Nate', 'icon', NULL, 'fa fa-robot', 'Auto Nate',
                     'Sign in to continue to the automation dashboard',
-                    '/spa/assets/img/login-bg/login-bg-17.jpg', '#00acac',
+                    '/spa/assets/img/login-bg/login-bg-17.jpg', '#008080',
                     '#ffffff', '#212529', '#20252a', '#a6aaac',
                     '#20252a', '#ffffff', '#20252a', '#ffffff',
                     '#ffffff', '#6c757d', '#212529', '#f1f3f5',
-                    '#212529', '#212529', '#ffffff', '#adb5bd',
+                    '#212529', '#212529', '#ffffff', '#5c636a',
                     '#ffffff', '#dee2e6', '#212529', '#6c757d',
                     '#ced4da', '#ffffff', '#ffffff', '#ffffff', '#495057',
                     '#6c757d', '#f1f3f5', '#212529',
@@ -920,6 +917,29 @@ internal static class DatabaseSchemaInitializer
                 secondary_button_hover_text_color = COALESCE(secondary_button_hover_text_color, '#212529'),
                 surface_dimmed_color = COALESCE(surface_dimmed_color, '#6c757d')
             WHERE id = appearance_id;
+
+            -- Two shipped defaults failed WCAG and were corrected in the
+            -- SPA's DEFAULT_SITE_APPEARANCE without this seed being updated,
+            -- so every install still carried the failing values (#40):
+            --   sidebar_section_color #adb5bd = 2.07:1 on the white sidebar
+            --     (needs 4.5:1 — 0.78rem bold uppercase is not "large text")
+            --   primary_accent_color #00acac  = 2.80:1 on the white surface
+            --     (needs 3.0:1 as a UI component)
+            -- Guarded on the exact old defaults so an admin's deliberate
+            -- choice of either colour is left alone.
+            UPDATE site_appearance_settings
+            SET sidebar_section_color = '#5c636a',
+                updated_at_utc = NOW(),
+                updated_by = seed_actor
+            WHERE id = appearance_id
+              AND sidebar_section_color = '#adb5bd';
+
+            UPDATE site_appearance_settings
+            SET primary_accent_color = '#008080',
+                updated_at_utc = NOW(),
+                updated_by = seed_actor
+            WHERE id = appearance_id
+              AND primary_accent_color = '#00acac';
 
             UPDATE site_appearance_settings
             SET top_menu_bg = '#20252a',
@@ -1020,8 +1040,6 @@ internal static class DatabaseSchemaInitializer
                 VALUES (g, site_id, NULL, 1, 'Sitewide Configuration', 'fa fa-sliders', 'group', '{{}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), site_id, g, 0, 'General', 'fa fa-gear', 'template', '{{"templateKey":"configGeneral"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
-                INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
-                VALUES (gen_random_uuid(), site_id, g, 1, 'Features', 'fa fa-toggle-on', 'template', '{{"templateKey":"configFeatures"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
                 VALUES (gen_random_uuid(), site_id, g, 2, 'Appearance', 'fa fa-palette', 'template', '{{"templateKey":"configAppearance"}}'::jsonb, TRUE, TRUE, NOW(), NOW());
                 INSERT INTO menu_items (id, menu_id, parent_id, sort_order, display_name, icon, item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
@@ -1618,6 +1636,34 @@ internal static class DatabaseSchemaInitializer
             WHERE menu_id = icon_menu_id
               AND (config->>'path' = '/admin/plugins'
                    OR config->>'templateKey' = 'adminPlugins');
+        END $$;
+        """;
+
+    // The seeded "Features" item pointed at configFeatures, and
+    // SettingGroup.Features has no settings defined — so the nav item led to
+    // a form reading "No settings in this group yet." (#48). Removing the
+    // seeded row rather than the template: the group is a declared extension
+    // point (SiteSettingsRegistry's own "adding a new feature flag"
+    // instructions name it), so the page and route stay available for
+    // whoever adds the first flag. What is wrong today is only that the
+    // navigation promises something that is not there.
+    //
+    // Idempotent: a DELETE matching nothing is a no-op on later startups.
+    private const string EmptyFeaturesMenuRemovalSql =
+        """
+        DO $$
+        DECLARE
+            site_menu_id UUID;
+        BEGIN
+            SELECT id INTO site_menu_id FROM menus WHERE key = 'site-config' LIMIT 1;
+            IF site_menu_id IS NULL THEN
+                RETURN;
+            END IF;
+
+            DELETE FROM menu_items
+            WHERE menu_id = site_menu_id
+              AND is_system = TRUE
+              AND config->>'templateKey' = 'configFeatures';
         END $$;
         """;
 
@@ -3808,6 +3854,7 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesThumbnailSeedSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsIconMenuRemovalSql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(EmptyFeaturesMenuRemovalSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(PluginsSiteConfigMenuSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemIssuesSql, cancellationToken);

@@ -1,6 +1,5 @@
 using System.Text.Json;
 using AutoNate.Web.Authorization;
-using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.Selectors;
 using AutoNate.Web.Models.Authorization;
 using AutoNate.Web.Persistence;
@@ -10,8 +9,7 @@ using PermissionGrantEntity = AutoNate.Web.Persistence.Scaffolded.PermissionGran
 namespace AutoNate.Web.Services.Authorization;
 
 public sealed class EfCorePermissionGrantStore(
-    IDbContextFactory<AutoNateDbContext> dbContextFactory,
-    AuthCacheBumper cacheBumper) : IPermissionGrantStore
+    IDbContextFactory<AutoNateDbContext> dbContextFactory) : IPermissionGrantStore
 {
     private static readonly HashSet<string> AllowedPrincipalKinds =
         new(StringComparer.Ordinal) { EntityKinds.User, EntityKinds.Group, EntityKinds.Role };
@@ -165,7 +163,6 @@ public sealed class EfCorePermissionGrantStore(
         };
         db.PermissionGrants.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return ToModel(entity);
     }
 
@@ -177,7 +174,6 @@ public sealed class EfCorePermissionGrantStore(
 
         db.PermissionGrants.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
-        await cacheBumper.BumpAsync(cancellationToken);
         return true;
     }
 

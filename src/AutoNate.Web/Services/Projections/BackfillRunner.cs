@@ -55,7 +55,14 @@ public sealed class BackfillRunner
         int chunkSize,
         CancellationToken cancellationToken)
     {
-        var source = _services.GetService<IProjectionBackfillSource<TSource>>();
+        // Resolve the source inside a scope. BackfillRunner is itself
+        // resolved from the request scope, but _services is the root provider,
+        // and a backfill source legitimately depends on scoped services (an
+        // HTTP client, a DbContext) — resolving those from the root throws
+        // "Cannot resolve scoped service ... from root provider". The scope
+        // lives for the whole enumeration because the source streams from it.
+        await using var scope = _services.CreateAsyncScope();
+        var source = scope.ServiceProvider.GetService<IProjectionBackfillSource<TSource>>();
         if (source is null)
         {
             throw new InvalidOperationException(

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Box, Modal, ScrollArea, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { Badge, Box, Modal, ScrollArea, Text, TextInput, UnstyledButton, VisuallyHidden } from "@mantine/core";
 import { AgentConversation } from "./types";
 import { listConversations } from "./api";
 import { KNOWN_PAGE_KEYS, pageKeyCrumb, pageKeyLabel } from "./pageLabels";
@@ -136,7 +136,13 @@ export function ChatPaletteModal({ open, initialQuery, onClose, onPick }: Props)
       }}
       overlayProps={{ backgroundOpacity: 0.45, blur: 2 }}
       transitionProps={{ transition: "pop", duration: 160 }}
-      aria-label="Find a chat"
+      // The name has to reach the dialog, not the wrapper. Passing
+      // `aria-label` to <Modal> lands it on the root <div>, which has no role
+      // — and aria-label is prohibited on a generic element, so axe flags it
+      // and screen readers ignore it. A Modal.Title is what Mantine wires
+      // `aria-labelledby` to; VisuallyHidden keeps the palette's chrome-free
+      // look while still naming it.
+      title={<VisuallyHidden>Find a chat</VisuallyHidden>}
     >
       <div className="chat-palette" onKeyDown={onKeyDown}>
         <div className="chat-palette__head">

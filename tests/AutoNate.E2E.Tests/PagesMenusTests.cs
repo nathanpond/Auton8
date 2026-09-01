@@ -26,8 +26,11 @@ public sealed class PagesMenusTests : E2ETestBase
         });
 
         await page.GotoAsync(path);
+        // 30s, not 15: a dynamic JSX page is transformed in the browser on
+        // first view, and a cold CI runner exceeded 15s doing it. The same
+        // ceiling the lazy-chunk assertions elsewhere use.
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = originalMarker }))
-            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         await OpenStandaloneMenuAsync(page);
         var row = MenuRow(page, name);
@@ -43,8 +46,11 @@ public sealed class PagesMenusTests : E2ETestBase
         await Assertions.Expect(dialog).Not.ToBeVisibleAsync(new() { Timeout = 10_000 });
 
         await page.GotoAsync(path);
+        // 30s, not 15: a dynamic JSX page is transformed in the browser on
+        // first view, and a cold CI runner exceeded 15s doing it. The same
+        // ceiling the lazy-chunk assertions elsewhere use.
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = originalMarker }))
-            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         await OpenStandaloneMenuAsync(page);
         row = MenuRow(page, renamed);

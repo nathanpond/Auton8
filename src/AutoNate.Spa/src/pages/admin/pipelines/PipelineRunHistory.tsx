@@ -315,6 +315,10 @@ export default function PipelineRunHistory() {
           emptyMessage="No runs yet."
           loadingMessage="Loading runs…"
           onRowClick={(row) => setSelectedRunId(row.id)}
+          // Stable handle for E2E, which previously clicked "the first row in
+          // the body" because no semantic one existed (#92).
+          getRowTestId={(row) => `pipeline-run-row-${row.id}`}
+          getRowAriaLabel={(row) => `Run ${row.id}`}
         />
       </Box>
 
@@ -332,6 +336,8 @@ export default function PipelineRunHistory() {
                 columnWidths={STEP_COLUMN_WIDTHS}
                 emptyMessage="No steps recorded."
                 loadingMessage="Loading step detail…"
+                getRowTestId={(row) => `pipeline-run-step-${row.id}`}
+                getRowAriaLabel={(row) => `Step ${row.nodeKey}`}
                 onRowClick={(row) =>
                   setSelectedStepId((current) => (current === row.id ? null : row.id))
                 }

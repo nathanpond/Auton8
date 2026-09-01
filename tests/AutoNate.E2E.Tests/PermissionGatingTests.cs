@@ -174,6 +174,104 @@ public sealed class PermissionGatingTests : E2ETestBase
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
     }
 
+    // E2E-044. Site Configuration used to render its whole shell for anyone
+    // signed in: a user with no grants could deep-link to /admin/config and
+    // get the nav, headings and empty tables while every API call behind them
+    // returned 403. The backend held, so this was an affordance defect — the
+    // page looked broken rather than forbidden.
+    [Fact]
+    public async Task LimitedUser_DeepLinkingIntoAdminConfig_SeesNoAccessNotTheShell()
+    {
+        var (_, username, password) = await MintLimitedUserAsync();
+
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
+
+        await page.GotoAsync("/admin/config/general");
+
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Heading, new() { Name = "You don't have access to this area" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // The shell itself must not mount. "Site Configuration" is the
+        // ConfigLayout heading, so its absence is what proves the guard ran
+        // before the admin surface rendered rather than alongside it.
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Heading, new() { Name = "Site Configuration" }))
+            .Not.ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task AfterGrantingSiteConfigView_LimitedUser_ReachesAdminConfig()
+    {
+        await using var adminSession = await NewSignedInAsAdminAsync();
+        var adminSeeder = new ApiSeeder(adminSession.Page.APIRequest);
+
+        var (userId, username, password) = await MintLimitedUserAsync();
+
+        // Same (kind, action) the config endpoints declare server-side, so the
+        // guard cannot drift from what the API actually enforces.
+        await adminSeeder.GrantAsync(
+            principalKind: "user",
+            principalId: userId,
+            action: "view",
+            selectorString: "/siteconfig/*");
+
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
+
+        await page.GotoAsync("/admin/config/general");
+
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Heading, new() { Name = "General", Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Heading, new() { Name = "You don't have access to this area" }))
+            .Not.ToBeVisibleAsync();
+    }
+
+    // E2E-045. RecordDetail rendered its delete action unconditionally, so a
+    // user without record:delete was offered a button whose every click ended
+    // in a 403 — indistinguishable, from the user's side, from a broken app.
+    [Fact]
+    public async Task LimitedUser_RecordDetail_DeleteActionAbsentUntilGranted()
+    {
+        await using var adminSession = await NewSignedInAsAdminAsync();
+        var adminSeeder = new ApiSeeder(adminSession.Page.APIRequest);
+
+        var recordType = await adminSeeder.CreateRecordTypeAsync(
+            TestNames.ShortCode(), TestNames.Prefixed("gated-type"));
+        var record = await adminSeeder.CreateRecordAsync(recordType.Id, TestNames.Prefixed("gated"));
+
+        var (userId, username, password) = await MintLimitedUserAsync();
+        // View only — enough to open the record, not to delete it.
+        await adminSeeder.GrantAsync(
+            principalKind: "user", principalId: userId,
+            action: "view", selectorString: "/recordtype/*");
+        await adminSeeder.GrantAsync(
+            principalKind: "user", principalId: userId,
+            action: "view", selectorString: "/record/*");
+
+        await using var session = await NewSignedInAsAsync(username, password);
+        var page = session.Page;
+        await page.GotoAsync($"/record/{record.Key}");
+
+        await Assertions.Expect(page.GetByText(record.Key).First)
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Delete" }))
+            .Not.ToBeVisibleAsync();
+
+        // Granting delete makes the affordance appear, which is what proves
+        // the absence above was the permission check and not a mis-locator.
+        await adminSeeder.GrantAsync(
+            principalKind: "user", principalId: userId,
+            action: "delete", selectorString: "/record/*");
+
+        await page.ReloadAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Delete" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+    }
+
     [Fact]
     public async Task LimitedUser_DocumentOverrideGrantAndRevoke_ChangesVisibility()
     {

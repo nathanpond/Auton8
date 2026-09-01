@@ -149,7 +149,12 @@ public static partial class SiteAppearanceEndpoints
             LogoText = "Auto Nate",
             LoginTagline = "Sign in to continue to the automation dashboard",
             LoginCoverImageUrl = "/spa/assets/img/login-bg/login-bg-17.jpg",
-            PrimaryAccentColor = "#00acac",
+            // Kept in step with DEFAULT_SITE_APPEARANCE in the SPA's
+            // lib/siteAppearance.ts. #00acac measures 2.80:1 against a white
+            // surface, below the 3.0:1 a UI component needs; #008080 is
+            // 4.77:1. The SPA constant was corrected but this seed was not,
+            // so every fresh install still got the failing value.
+            PrimaryAccentColor = "#008080",
             HeaderBg = "#ffffff",
             HeaderColor = "#212529",
             TopMenuBg = "#20252a",
@@ -165,7 +170,11 @@ public static partial class SiteAppearanceEndpoints
             SidebarActiveColor = "#212529",
             SidebarIconColor = "#212529",
             SidebarSubmenuBg = "#ffffff",
-            SidebarSectionColor = "#adb5bd",
+            // #adb5bd on the white sidebar is 2.07:1 against a 4.5:1
+            // requirement (0.78rem bold uppercase is not WCAG "large text").
+            // #5c636a is 6.09:1 and still reads as a heading. Same drift as
+            // PrimaryAccentColor above — fixed in the SPA default, missed here.
+            SidebarSectionColor = "#5c636a",
             SurfaceBg = "#ffffff",
             SurfaceSecondaryBg = "#dee2e6",
             SurfaceTextColor = "#212529",

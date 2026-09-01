@@ -29,6 +29,7 @@ import {
   useWatchStatus
 } from "@/hooks/useRecords";
 import { useRecordTypeFields, useRecordTypes } from "@/hooks/useRecordTypes";
+import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
 import { useInvalidateOnChannels } from "@/hooks/useInvalidateOnChannels";
 import "./fields/renderers";
 import CommentsPanel from "./CommentsPanel";
@@ -59,6 +60,20 @@ export default function RecordDetail() {
   const [tab, setTab] = useState<Tab>("details");
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  // The delete affordance used to render unconditionally (#85). The backend
+  // gate held — the API refused the call — but offering a button that always
+  // fails is its own defect: the user cannot tell "not allowed" from "broken",
+  // and it reads as an invitation to try. Instance-level check because the
+  // backend gates this on the specific record, not the kind.
+  const deleteCheck = useMemo(
+    () => (record ? [{ kind: "record", action: "delete", id: record.id }] : []),
+    [record]
+  );
+  const { data: deletePermissions } = usePermissionChecks(deleteCheck);
+  const canDelete =
+    deleteCheck.length > 0 &&
+    (deletePermissions?.get(permissionKey(deleteCheck[0])) ?? false);
 
   // Live updates: when this specific record changes upstream, invalidate the
   // detail/by-key/history queries so the view refreshes without a manual
@@ -157,17 +172,19 @@ export default function RecordDetail() {
                 <i className={`fa ${isWatching ? "fa-eye-slash" : "fa-eye"}`} />
               </ActionIcon>
             </Tooltip>
-            <Tooltip label="Delete" withArrow>
-              <ActionIcon
-                size="lg"
-                variant="subtle"
-                color="red"
-                aria-label="Delete"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <i className="fa fa-trash" />
-              </ActionIcon>
-            </Tooltip>
+            {canDelete && (
+              <Tooltip label="Delete" withArrow>
+                <ActionIcon
+                  size="lg"
+                  variant="subtle"
+                  color="red"
+                  aria-label="Delete"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <i className="fa fa-trash" />
+                </ActionIcon>
+              </Tooltip>
+            )}
           </Group>
         }
       />
