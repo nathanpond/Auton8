@@ -308,6 +308,30 @@ public sealed class NotesTests : E2ETestBase
         await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
     }
 
+    // #10: page rows in the Notes explorer were <div onClick> with no
+    // tabIndex, role or key handler and no alternate link, so a keyboard-only
+    // user could reach Notes and then not open a single page — the module's
+    // primary task was unreachable (WCAG 2.1.1 / 4.1.2).
+    [Fact]
+    public async Task NotesExplorer_PageRow_OpensWithTheKeyboard()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var page = session.Page;
+        var hierarchy = await CreateHierarchyAsync(page);
+
+        var row = page.GetByRole(AriaRole.Button, new() { Name = $"Open {hierarchy.PageTitle}" }).First;
+        await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        await row.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+
+        // Opening the page puts its title in the editor pane heading.
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Heading, new() { Name = hierarchy.PageTitle }).First)
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
+    }
+
     private static async Task<NotesHierarchy> CreateHierarchyAsync(IPage page)
     {
         var projectName = TestNames.Prefixed("notes-project");
