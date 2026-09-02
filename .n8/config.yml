@@ -3,7 +3,7 @@ stack: dotnet            # ASP.NET Core (net10.0) host + React 19/Vite/TypeScrip
 initialized: 2026-08-30
 wiki: enabled            # enabled at the 0.1 public flip (2026-09-02)
 repo: nathanpond/Auton8
-visibility: public
+visibility: private   # flipped public 2026-09-02 and reverted within minutes — see decisions.md (pull refs still carry pre-rewrite history)
 default_branch: master   # n8SDLC docs say `main`; this repo uses `master` — skills should target the default branch, not the literal name
 context7: installed
 security_findings: advisories  # public repo: an open sev:high issue advertises an exploit against

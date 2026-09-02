@@ -18,6 +18,13 @@ always acceptable.
 
 **Security findings do not go in issues.** See [SECURITY.md](SECURITY.md).
 
+**`#N` in an old commit message is not an issue in this repository.** The
+project moved repositories on 2026-09-02 (see
+[docs/history/](docs/history/README.md) for why), and issue numbers were not
+preserved. References in commits written before that date point at the archived
+register, not at the current one — and may coincide with a different, real
+issue here.
+
 ## Proposing a change
 
 For anything beyond an obvious fix, **open an issue before writing code.** Not
