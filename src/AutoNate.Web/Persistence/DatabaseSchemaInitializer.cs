@@ -4091,6 +4091,14 @@ internal static class DatabaseSchemaInitializer
 
         await GuardAgainstNewerSchemaAsync(dbContext, cancellationToken);
 
+        // First, and before every other batch: they all assume these tables
+        // exist. WorkflowVersioningSql immediately below opens with
+        // `ALTER TABLE workflow_models`, which fails on a database where
+        // nothing has created it.
+        await ApplyStepAsync(
+            dbContext, applied, "BaseSchemaSql", ReadBaseSchemaSql(), cancellationToken,
+            bypassFormatting: true);
+
         await ApplyStepAsync(dbContext, applied, nameof(WorkflowVersioningSql), WorkflowVersioningSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(WorkflowDefaultVariablesSql), WorkflowDefaultVariablesSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(WorkflowExecutionErrorsSql), WorkflowExecutionErrorsSql, cancellationToken);
@@ -4190,6 +4198,29 @@ internal static class DatabaseSchemaInitializer
     }
 
 
+
+    /// <summary>The base schema, read from the embedded resource.</summary>
+    /// <remarks>
+    /// The single copy in the repository. Both test fixtures read the same
+    /// resource, so what they set up and what the application applies cannot
+    /// diverge — which they could when this was a file on disk that one fixture
+    /// read by path and another had build-copied into its output.
+    /// </remarks>
+    internal static string ReadBaseSchemaSql()
+    {
+        const string ResourceName = "AutoNate.Web.Persistence.Sql.BaseSchema.sql";
+
+        var assembly = typeof(DatabaseSchemaInitializer).Assembly;
+        using var stream = assembly.GetManifestResourceStream(ResourceName)
+            ?? throw new InvalidOperationException(
+                $"Embedded resource '{ResourceName}' was not found in {assembly.GetName().Name}. "
+                + "The base schema is required to initialise a database; check the EmbeddedResource "
+                + "item in AutoNate.Web.csproj.");
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     /// <summary>The product version, used to stamp ledger rows.</summary>
     /// <remarks>
     /// Read from the assembly's informational version, which
@@ -4245,7 +4276,8 @@ internal static class DatabaseSchemaInitializer
         HashSet<string> applied,
         string stepName,
         string sql,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool bypassFormatting = false)
     {
         // A batch that consults auth_seed_state carries its own re-run gate, and
         // that gate — not this ledger — owns when it may run again. Skipping it
@@ -4267,15 +4299,45 @@ internal static class DatabaseSchemaInitializer
             return;
         }
 
-        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+        // Two execution paths, and the difference is load-bearing.
+        //
+        // EF's ExecuteSqlRawAsync runs the SQL through string.Format first.
+        // The inline batches in this file are written FOR that: there are 34
+        // occurrences of `'{{}}'::jsonb`, doubled so the format pass collapses
+        // them to `{}`. Executing those without the format pass sends `{{}}`
+        // to Postgres and fails with `22P02: invalid input syntax for type
+        // json`.
+        //
+        // The base schema is the opposite. It is an external .sql file that
+        // must stay valid SQL on its own — it is read by tooling and by
+        // people, not just by C# — so it contains single braces, and putting
+        // it through string.Format fails with "Failure to parse near offset
+        // 4891. Expected an ASCII digit."
+        //
+        // Hence the flag. Both directions were observed as failures before
+        // this comment existed; neither is theoretical.
+        if (bypassFormatting)
+        {
+            var connection = dbContext.Database.GetDbConnection();
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                await dbContext.Database.OpenConnectionAsync(cancellationToken);
+            }
+
+            await using var batch = connection.CreateCommand();
+            batch.CommandText = sql;
+            batch.CommandTimeout = 0;
+            await batch.ExecuteNonQueryAsync(cancellationToken);
+        }
+        else
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+        }
 
         await dbContext.Database.ExecuteSqlRawAsync(
-            """
-            INSERT INTO schema_versions (step_name, app_version, applied_at_utc)
-            VALUES ({0}, {1}, NOW())
-            ON CONFLICT (step_name) DO NOTHING;
-            """.Replace("{0}", $"'{stepName.Replace("'", "''")}'")
-               .Replace("{1}", $"'{AppVersion.Replace("'", "''")}'"),
+            "INSERT INTO schema_versions (step_name, app_version, applied_at_utc) "
+            + "VALUES ({0}, {1}, NOW()) ON CONFLICT (step_name) DO NOTHING;",
+            [stepName, AppVersion],
             cancellationToken);
 
         applied.Add(stepName);

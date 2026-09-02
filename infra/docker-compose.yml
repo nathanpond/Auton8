@@ -15,6 +15,12 @@ services:
       - "127.0.0.1:${AUTONATE_POSTGRES_PORT:-5432}:5432"
     volumes:
       - ./mounts/postgres/data:/var/lib/postgresql/data
+      # Only 01-create-autonate-db.sql lives here now, and the asymmetry is
+      # deliberate: creating the database is the one thing the application
+      # cannot do from a connection to that database. Everything else — the
+      # base schema and every migration after it — is applied by
+      # DatabaseSchemaInitializer.EnsureAsync from inside the app, so an empty
+      # database is all this mount has to produce.
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]

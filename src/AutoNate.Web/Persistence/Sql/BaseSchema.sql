@@ -1,11 +1,15 @@
--- The docker-entrypoint runs every file in /docker-entrypoint-initdb.d/
--- through psql connected to POSTGRES_DB, which is `flowable` in our
--- compose file. Without this `\c`, every CREATE TABLE below lands in the
--- flowable DB instead of AutoNate. 01-create-autonate-db.sql already
--- created the AutoNate database; switch to it before defining its schema.
--- AutoNateE2EFixture executes this script through Npgsql against the
--- target DB directly, so the meta-command is a no-op there.
-\c "AutoNate"
+-- Auton8's base schema: the foundational tables every later batch in
+-- DatabaseSchemaInitializer assumes already exist.
+--
+-- THE single copy. It is an embedded resource of AutoNate.Web, applied by
+-- EnsureAsync as its first step, and read from that same resource by both test
+-- fixtures. It used to live in infra/postgres/init/ and be mounted into the
+-- Postgres container's entrypoint, which meant the application could not
+-- initialise an empty database on its own and left three consumers keeping one
+-- file in step by hand.
+--
+-- No psql meta-commands. This is executed through Npgsql against a connection
+-- already pointed at the target database; a `\c` here would be a syntax error.
 
 CREATE TABLE IF NOT EXISTS local_users (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

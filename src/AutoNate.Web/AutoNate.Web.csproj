@@ -25,6 +25,14 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <!-- The base schema, applied by DatabaseSchemaInitializer.EnsureAsync as
+           its first step. Embedded rather than copied to disk so there is
+           exactly one copy: the app and both test fixtures read these same
+           bytes, and no build-copied duplicate can drift from it. -->
+      <EmbeddedResource Include="Persistence\Sql\BaseSchema.sql" />
+    </ItemGroup>
+
+    <ItemGroup>
       <InternalsVisibleTo Include="AutoNate.Web.Tests" />
     </ItemGroup>
 

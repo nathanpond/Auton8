@@ -467,13 +467,12 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
         var bootstrapScripts = new[]
         {
-            // The on-disk schema file is the same one psql ingests at compose
-            // bootstrap; it carries a `\c "AutoNate"` meta-command on line 8
-            // to ensure CREATE TABLEs land in the right database. Npgsql does
-            // not speak psql meta-commands, so we strip any line that starts
-            // with a backslash — same trick AutoNateE2EFixture uses.
-            StripPsqlMetaCommands(
-                await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Sql", "02-create-autonate-app-schema.sql")))
+            // The base schema, read from the same embedded resource the
+            // application applies. Not a build-copied file: a duplicate in
+            // bin/ can drift, and this fixture setting up different bytes than
+            // EnsureAsync applies is exactly the divergence the single-source
+            // move exists to prevent.
+            DatabaseSchemaInitializer.ReadBaseSchemaSql()
         };
 
         await using var databaseConnection = new NpgsqlConnection(ConnectionString);
@@ -485,19 +484,6 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             bootstrapCommand.CommandText = bootstrapScript;
             await bootstrapCommand.ExecuteNonQueryAsync();
         }
-    }
-
-    private static string StripPsqlMetaCommands(string sql)
-    {
-        var lines = sql.Split('\n');
-        for (var i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].TrimStart().StartsWith('\\'))
-            {
-                lines[i] = string.Empty;
-            }
-        }
-        return string.Join('\n', lines);
     }
 
     public IDbContextFactory<AutoNateDbContext> CreateDbContextFactory()

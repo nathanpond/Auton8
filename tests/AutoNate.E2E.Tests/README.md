@@ -53,8 +53,8 @@ Each fixture run:
 2. `DROP DATABASE IF EXISTS "AutoNate_E2E" WITH (FORCE);` then
    `CREATE DATABASE "AutoNate_E2E";` — so the run starts clean even if a
    previous run crashed.
-3. Replays `infra/postgres/init/02-create-autonate-app-schema.sql` against the
-   new database. That script creates the foundational schema (including
+3. Leaves the schema to the application. `DatabaseSchemaInitializer.EnsureAsync`
+   applies the base schema and everything after it from inside the app.
    `local_users`) and seeds the **only** built-in account:
    - `admin` / `admin` — super-admin. There is **no `user1`**; the dev seed has
      never included one. To exercise limited-permission behavior, tests create
