@@ -28,7 +28,7 @@ public sealed class AgentSidebarTests : E2ETestBase
         // The header trigger announces itself via aria-label. Previously the
         // tests grepped for a `.agent-toggle` class, which the Mantine
         // migration deleted.
-        var toggle = page.GetByLabel("Open AutoNate assistant");
+        var toggle = page.GetByLabel("Open Auton8 assistant");
         await toggle.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
 
         // Before the click the close button shouldn't be visible (the
@@ -78,7 +78,7 @@ public sealed class AgentSidebarTests : E2ETestBase
     {
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-        await page.GetByLabel("Open AutoNate assistant").ClickAsync();
+        await page.GetByLabel("Open Auton8 assistant").ClickAsync();
 
         // The composer placeholder differs by conversation state
         // (AgentSidebar.tsx:507-509): on a fresh open with no active
@@ -96,7 +96,7 @@ public sealed class AgentSidebarTests : E2ETestBase
     {
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
-        await page.GetByLabel("Open AutoNate assistant").ClickAsync();
+        await page.GetByLabel("Open Auton8 assistant").ClickAsync();
 
         // The resize handle (AgentSidebar.tsx:373) is a separator with
         // aria-label="Resize chatbot" — only mounted on the open sidebar
@@ -114,7 +114,7 @@ public sealed class AgentSidebarTests : E2ETestBase
         // Drive the whole thing from the keyboard — the point of #13 is that
         // a mouse was previously the only way to reach the composer. Focus
         // the header trigger and press Enter rather than clicking it.
-        var toggle = page.GetByLabel("Open AutoNate assistant");
+        var toggle = page.GetByLabel("Open Auton8 assistant");
         await toggle.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
         await toggle.FocusAsync();
         await page.Keyboard.PressAsync("Enter");
@@ -135,7 +135,7 @@ public sealed class AgentSidebarTests : E2ETestBase
         //    orphaned on <body>, so Tab resumes where the user left off.
         //    The trigger's accessible name follows the open state, so after
         //    closing it is the "Open …" label again.
-        await Assertions.Expect(page.GetByLabel("Open AutoNate assistant"))
+        await Assertions.Expect(page.GetByLabel("Open Auton8 assistant"))
             .ToBeFocusedAsync(new() { Timeout = 5_000 });
     }
 

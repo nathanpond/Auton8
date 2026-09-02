@@ -444,7 +444,7 @@ export default function WorkflowStudio() {
         rawCronOverride: couldNotParse,
         rawCronText: cron,
         parseError: couldNotParse
-          ? "AutoNate doesn't recognize this cron expression. The picker is locked — edit the raw cron below or clear it to start fresh."
+          ? "Auton8 doesn't recognize this cron expression. The picker is locked — edit the raw cron below or clear it to start fresh."
           : null
       });
       setSignalStartEditor(null);
@@ -1052,7 +1052,7 @@ export default function WorkflowStudio() {
         <Stack gap={4}>
           <Title order={1}>Workflow Studio</Title>
           <Text size="sm" c="dimmed" maw={720}>
-            Select a saved workflow model, edit it in the browser, save drafts to AutoNate, publish
+            Select a saved workflow model, edit it in the browser, save drafts to Auton8, publish
             to Flowable, and start new executions from the current model.
           </Text>
         </Stack>
@@ -2031,7 +2031,7 @@ function CreateWorkflowModal({
     >
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          Name the new workflow model. AutoNate will create a blank draft in the database and load
+          Name the new workflow model. Auton8 will create a blank draft in the database and load
           it into the modeler.
         </Text>
         <TextInput
@@ -2075,7 +2075,7 @@ function ScriptTaskModal({
     <Modal opened onClose={onClose} title="Script Task" size="xl">
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          Edit the selected BPMN script task. AutoNate saves the JavaScript body inline in the
+          Edit the selected BPMN script task. Auton8 saves the JavaScript body inline in the
           BPMN XML and validates it before save or publish.
         </Text>
 
@@ -2235,7 +2235,7 @@ function SignalStartEventModal({
     <Modal opened onClose={onClose} title="Signal Start Event" size="lg">
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          Configure a Dapr pub/sub event that starts this workflow. AutoNate listens on the
+          Configure a Dapr pub/sub event that starts this workflow. Auton8 listens on the
           configured Topic and starts a new instance when an incoming message&apos;s{" "}
           <Code>eventType</Code> field matches the Event Type. The full payload is exposed to the
           workflow as a process variable named <Code>eventData</Code> (a JSON string —
@@ -3044,7 +3044,7 @@ function ServiceTaskModal({
     <Modal opened onClose={onClose} title="Service Task" size="lg">
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          Run a predefined AutoNate routine when the workflow reaches this step. The behavior
+          Run a predefined Auton8 routine when the workflow reaches this step. The behavior
           receives every process variable plus execution metadata, and may write process variables
           back for downstream steps to branch on.
         </Text>
@@ -3074,7 +3074,7 @@ function ServiceTaskModal({
             <option value="behavior">Behavior</option>
           </select>
           <p className="workflow-modal-note">
-            Behavior runs a curated routine inside AutoNate. More service-task types (HTTP webhook,
+            Behavior runs a curated routine inside Auton8. More service-task types (HTTP webhook,
             etc.) will appear here as they ship.
           </p>
         </label>
@@ -3831,7 +3831,7 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
     <Modal opened onClose={onClose} title="Supported BPMN Types" size="xl">
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          The full set of BPMN 2.0 node types the AutoNate workflow studio can model and execute
+          The full set of BPMN 2.0 node types the Auton8 workflow studio can model and execute
           today, alongside what is on the roadmap.
         </Text>
 

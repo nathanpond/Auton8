@@ -274,7 +274,7 @@ export default function DataStoresPage() {
       </Group>
 
       <Text c="dimmed">
-        Files and SQL tables stored inside AutoNate. Files-type stores hold any uploads behind a folder
+        Files and SQL tables stored inside Auton8. Files-type stores hold any uploads behind a folder
         tree; SQL-type stores back per-datastore schemas in the <code>autonate_datastores</code> cluster
         DB and accept CSV ingest.
       </Text>

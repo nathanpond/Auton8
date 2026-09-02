@@ -61,7 +61,8 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // Build a fresh `AutoNate_E2E` database before the app starts so the
         // app's `DatabaseSchemaInitializer.EnsureAsync` (Program.cs) runs
         // against a known-good baseline and finishes the schema (roles, menus,
-        // sample project, SuperAdmin backfill on the seeded admin row).
+        // sample project) and creates the bootstrap administrator from the
+        // Bootstrap__* variables set in StartAppAsync.
         _testConnString = await BootstrapTestDatabaseAsync(repoRoot);
 
         BaseUrl = await StartAppAsync(repoRoot);
@@ -166,6 +167,16 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // working `AutoNate`. ASP.NET Core's configuration provider maps the
         // double-underscore form to `ConnectionStrings:Default`.
         info.Environment["ConnectionStrings__Default"] = _testConnString;
+        // The `admin`/`admin` account SignInAsSuperAdminAsync drives the login
+        // form with. It used to come from a hardcoded INSERT in the init SQL
+        // that this fixture replays, hash and salt committed to the repository;
+        // the app now creates it at startup from these variables, so the test
+        // credential lives in test code. The id is pinned to the value the
+        // seed used because suites assert against it.
+        info.Environment["Bootstrap__AdminUsername"] = "admin";
+        info.Environment["Bootstrap__AdminPassword"] = "admin";
+        info.Environment["Bootstrap__AdminEmail"] = "admin@localhost";
+        info.Environment["Bootstrap__AdminUserId"] = "11111111-1111-1111-1111-111111111111";
 
         _appProcess = new Process { StartInfo = info };
 
@@ -262,10 +273,13 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     /// <summary>
     /// Creates a fresh `AutoNate_E2E` database and replays
     /// `infra/postgres/init/02-create-autonate-app-schema.sql` against it so
-    /// the seeded `admin`/`admin` row + foundational tables exist before the
-    /// app boots. The app's `DatabaseSchemaInitializer.EnsureAsync` then runs
-    /// the rest (lockout columns, roles, menus, sample project, SuperAdmin
-    /// backfill) idempotently against the new database.
+    /// the foundational tables exist before the app boots. The app's
+    /// `DatabaseSchemaInitializer.EnsureAsync` then runs the rest (lockout
+    /// columns, roles, menus, sample project) idempotently against the new
+    /// database, and creates the `admin`/`admin` account this fixture signs in
+    /// with from the Bootstrap__* variables StartAppAsync sets. That script no
+    /// longer seeds any user — it used to ship one with its password hash
+    /// committed.
     ///
     /// Why we do this work ourselves rather than relying on the docker
     /// entrypoint init: the compose file sets `POSTGRES_DB=flowable`, so the

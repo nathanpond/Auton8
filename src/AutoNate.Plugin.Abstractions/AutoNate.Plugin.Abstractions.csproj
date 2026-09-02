@@ -4,6 +4,32 @@
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
+
+        <!-- Pinned, and deliberately NOT tracking the product version in
+             Directory.Build.props.
+
+             This assembly is the plugin ABI. A plugin compiles against it and
+             ships without it (Private=false, see plugins/Directory.Build.props)
+             so the host's copy defines type identity across the
+             AssemblyLoadContext boundary. The reference the plugin's DLL
+             carries names a version, so moving this number changes the
+             assembly identity that every already-built third-party plugin asks
+             for, and the host can no longer satisfy it.
+
+             The failure is worth describing because it does not look like a
+             binding failure: enable returns 400 with
+             "Type 'X' not found in 'X.dll'", as though the plugin were built
+             wrong. Setting <Version>0.1.0</Version> at the repo root did
+             exactly this to the sample plugin, and the same would have
+             happened to anyone else's.
+
+             1.0.0.0 is the value this assembly has always had (the SDK default
+             when no version is set), so pinning it here keeps every existing
+             plugin loading. Change it only for a genuinely breaking ABI
+             change, as a deliberate act. FileVersion and InformationalVersion
+             still follow the product version, so the DLL on disk reports
+             something useful. -->
+        <AssemblyVersion>1.0.0.0</AssemblyVersion>
     </PropertyGroup>
 
     <ItemGroup>

@@ -896,9 +896,9 @@ internal static class DatabaseSchemaInitializer
                     created_at_utc, created_by,
                     updated_at_utc, updated_by)
                 VALUES (
-                    appearance_id, 'Auto Nate', 'icon', NULL, 'fa fa-robot', 'Auto Nate',
+                    appearance_id, 'Auton8', 'icon', NULL, 'fa fa-robot', 'Auton8',
                     'Sign in to continue to the automation dashboard',
-                    '/spa/assets/img/login-bg/login-bg-17.jpg', '#008080',
+                    '/assets/img/login-bg/space.jpg', '#008080',
                     '#ffffff', '#212529', '#20252a', '#a6aaac',
                     '#20252a', '#ffffff', '#20252a', '#ffffff',
                     '#ffffff', '#6c757d', '#212529', '#f1f3f5',
@@ -1375,9 +1375,13 @@ internal static class DatabaseSchemaInitializer
               (gen_random_uuid(), 'configSecurityPermissions', 'Set Permissions (Site Config)', 'Set permissions mounted inside Site Config.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configSecurityPermissionChecker', 'Permission Checker (Site Config)', 'Effective-permission checker.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configPlugins', 'Manage Plugins (Site Config)', 'Plugin management mounted inside Site Config.', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How AutoNate plugins work and the patterns for working within them.', TRUE, NOW(), NOW()),
+              (gen_random_uuid(), 'configPluginDocumentation', 'Plugin Documentation', 'How Auton8 plugins work and the patterns for working within them.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configForms', 'Forms (Site Config)', 'Define and manage form definitions.', TRUE, NOW(), NOW()),
-              (gen_random_uuid(), 'configFormMappings', 'Form Mappings (Site Config)', 'Map forms to record types and fields.', TRUE, NOW(), NOW()),
+              -- is_enabled FALSE: the component behind this key was a "coming soon"
+              -- stub and has been removed, so the key resolves to NotFound. Kept as a
+              -- disabled row rather than deleted so the path and key survive for a
+              -- real implementation, and so the picker cannot offer a dead page.
+              (gen_random_uuid(), 'configFormMappings', 'Form Mappings (Site Config)', 'Map forms to record types and fields.', FALSE, NOW(), NOW()),
               (gen_random_uuid(), 'configChatbotSettings', 'Chatbot Settings (Site Config)', 'Configure agent capabilities; applies to the next message.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'configChatbotModels', 'Chatbot Models (Site Config)', 'LLM model catalogue used by external connections and the agent loop.', TRUE, NOW(), NOW()),
               (gen_random_uuid(), 'dashboard', 'Dashboard', 'User-customizable dashboard with draggable, resizable widgets (data tables and charts).', TRUE, NOW(), NOW()),
@@ -1565,11 +1569,25 @@ internal static class DatabaseSchemaInitializer
             ON plugins (code)
             WHERE code IS NOT NULL;
 
+        -- Check-then-act on pg_roles is not safe here, and this is the same
+        -- defect #192 fixed for the datastores writer role.
+        --
+        -- Roles are cluster-wide: pg_roles is a shared catalog and CREATE ROLE
+        -- takes no lock that serialises concurrent creates. Two hosts starting
+        -- at the same moment both see "not exists" and both issue CREATE, and
+        -- the loser fails with 23505 on pg_authid_rolname_index. Each one owns
+        -- a *different* database, so an advisory lock would not help either --
+        -- pg_advisory_xact_lock's tag includes the database oid. Catching the
+        -- error is what actually makes this safe.
+        --
+        -- Rare on a developer machine, reproducible on CI, which is where it
+        -- turned up: one test in a 1666-test run, in a suite that had just
+        -- passed locally.
         DO $$
         BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'plg_readers') THEN
-                CREATE ROLE plg_readers NOLOGIN;
-            END IF;
+            CREATE ROLE plg_readers NOLOGIN;
+        EXCEPTION WHEN duplicate_object OR unique_violation THEN
+            NULL;
         END $$;
 
         GRANT USAGE ON SCHEMA public TO plg_readers;
@@ -2104,13 +2122,94 @@ internal static class DatabaseSchemaInitializer
                             'Form Mappings', 'fa fa-arrow-right-arrow-left',
                             'template',
                             '{{"templateKey":"configFormMappings","path":"/admin/config/form-mappings"}}'::jsonb,
-                            TRUE, TRUE, NOW(), NOW()
+                            -- is_visible FALSE: same reason as the page_templates
+                            -- row. The seed still creates it so an administrator
+                            -- can switch it on the day the page is real.
+                            FALSE, TRUE, NOW(), NOW()
                         );
                     END IF;
                 END IF;
 
                 INSERT INTO auth_seed_state (key, applied_at_utc)
                 VALUES ('site_config_forms_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+
+            -- Retire the Form Mappings stub on installs seeded before it was
+            -- disabled above. The guards above are IF NOT EXISTS, so they will
+            -- not revisit a row that already exists; without this, every
+            -- existing deployment keeps a visible nav item pointing at a
+            -- template key the SPA no longer registers.
+            --
+            -- Guarded on is_system so an item an administrator has taken over
+            -- is left alone, and one-shot via auth_seed_state so switching it
+            -- back on is not undone by the next restart.
+            -- Rename Auto Nate -> Auton8 on installs seeded before the rename.
+            --
+            -- The seed rows are guarded by IF NOT EXISTS, so they will not
+            -- revisit an existing install: without this, every deployment that
+            -- has already run keeps the old name in the header, the login page
+            -- and the browser tab, while a fresh one shows the new one. That
+            -- drift is exactly what left the accent colour disagreeing between
+            -- the SPA default and the seed.
+            --
+            -- Guarded on the old value, per column, so an administrator who has
+            -- set their own site name or logo text keeps it. site_name and
+            -- logo_text are updated independently because an install may have
+            -- customised one and not the other.
+            -- One-shot, like every other migration here. Guarding on the old
+            -- value alone would still be *correct* on each boot, but it would
+            -- also mean an administrator who deliberately sets the site name
+            -- back to 'Auto Nate' has it renamed again by the next restart.
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'rebrand_auton8_v1') THEN
+                UPDATE site_appearance_settings
+                SET site_name = 'Auton8'
+                WHERE site_name = 'Auto Nate';
+
+                UPDATE site_appearance_settings
+                SET logo_text = 'Auton8'
+                WHERE logo_text = 'Auto Nate';
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('rebrand_auton8_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+
+            -- Repoint installs seeded with the old login cover URL.
+            --
+            -- The seed pointed at '/spa/assets/img/login-bg/login-bg-17.jpg'.
+            -- Nothing serves a '/spa' request path — static files are served at
+            -- the root — so that URL 404'd on every install that took the
+            -- default, and the SPA-side default disagreed with it. The image it
+            -- named has also been removed: it carried the filename of a paid
+            -- theme's demo asset, and this repository is going public.
+            --
+            -- Guarded on the exact old value so an administrator's own choice
+            -- of cover image is never overwritten.
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'login_cover_url_fix_v1') THEN
+                UPDATE site_appearance_settings
+                SET login_cover_image_url = '/assets/img/login-bg/space.jpg'
+                WHERE login_cover_image_url = '/spa/assets/img/login-bg/login-bg-17.jpg';
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('login_cover_url_fix_v1', NOW())
+                ON CONFLICT (key) DO NOTHING;
+            END IF;
+
+            IF NOT EXISTS (SELECT 1 FROM auth_seed_state WHERE key = 'retire_form_mappings_stub_v1') THEN
+                UPDATE menu_items
+                SET is_visible = FALSE, updated_at_utc = NOW()
+                WHERE item_type = 'template'
+                  AND is_system = TRUE
+                  AND is_visible = TRUE
+                  AND config->>'templateKey' = 'configFormMappings';
+
+                UPDATE page_templates
+                SET is_enabled = FALSE, updated_at_utc = NOW()
+                WHERE key = 'configFormMappings' AND is_enabled = TRUE;
+
+                INSERT INTO auth_seed_state (key, applied_at_utc)
+                VALUES ('retire_form_mappings_stub_v1', NOW())
                 ON CONFLICT (key) DO NOTHING;
             END IF;
         END $$;
@@ -3838,6 +3937,19 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(RecordsCommentsSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordWatchesSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(AuthorizationSchemaSql, cancellationToken);
+
+        // Before the seeds, not after them.
+        //
+        // DocumentsMenuItemSeedSql and ContentSampleProjectSeedSql both pick
+        // the oldest local_users row as the actor they attribute their seeded
+        // rows to, and both `RETURN` silently when there is none. That was
+        // invisible while the init script seeded `admin`; with the seed gone,
+        // running the bootstrap after them left a fresh install with no
+        // Documents nav item and no sample project, and nothing failed to say
+        // so. It has to run after AuthorizationSchemaSql (which creates
+        // role_assignments, where the SuperAdmin grant lands) and before the
+        // first seed that needs an actor.
+        await EnsureBootstrapAdminAsync(scope.ServiceProvider, dbContext, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordEdgeBackfillSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(RecordEdgeShadowBackfillSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(EntityEdgeHotIndexesSql, cancellationToken);
@@ -3898,6 +4010,8 @@ internal static class DatabaseSchemaInitializer
         await dbContext.Database.ExecuteSqlRawAsync(CodeTransformersSchemaSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(DataMainMenuSeedSql, cancellationToken);
 
+        // Before the SuperAdmin backfill on purpose: on a first boot the
+        // account created here is the one that needs to come up administrable.
         var authOptions = scope.ServiceProvider
             .GetService<IOptions<AuthorizationOptions>>()?.Value
             ?? new AuthorizationOptions();
@@ -3910,4 +4024,104 @@ internal static class DatabaseSchemaInitializer
         // taken back off plg_readers (#62).
         await dbContext.Database.ExecuteSqlRawAsync(PluginReaderLockdownSql, cancellationToken);
     }
+
+    // Creates the first administrator on an otherwise empty install.
+    //
+    // Runs only while `local_users` has no rows, so it cannot touch an
+    // existing deployment, and only when both a username and a password are
+    // configured. An operator who configures neither gets a loud message
+    // naming the two settings rather than a default account — the whole point
+    // of replacing the committed `admin`/`admin` seed is that no credential
+    // ships in the repository.
+    private static async Task EnsureBootstrapAdminAsync(
+        IServiceProvider services,
+        AutoNateDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger("BootstrapAdmin");
+
+        var anyUser = await dbContext.Database
+            .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM local_users LIMIT 1")
+            .ToArrayAsync(cancellationToken);
+        if (anyUser.Length > 0) return;
+
+        var options = services.GetService<IOptions<BootstrapAdminOptions>>()?.Value
+            ?? new BootstrapAdminOptions();
+
+        if (!options.IsConfigured)
+        {
+            logger?.LogWarning(
+                "No users exist and no bootstrap administrator is configured, so nobody can sign in. "
+                + "Set {Section}__AdminUsername and {Section}__AdminPassword and restart to create the "
+                + "first administrator.",
+                BootstrapAdminOptions.SectionName,
+                BootstrapAdminOptions.SectionName);
+            return;
+        }
+
+        var (hash, salt) = Services.Auth.PasswordHasher.HashPassword(options.AdminPassword!);
+        var userId = options.AdminUserId ?? Guid.NewGuid();
+        var email = string.IsNullOrWhiteSpace(options.AdminEmail)
+            ? $"{options.AdminUsername}@localhost"
+            : options.AdminEmail;
+
+        // ON CONFLICT DO NOTHING rather than a bare INSERT: two instances
+        // starting against the same empty database would otherwise race the
+        // emptiness check, and the loser would fail startup on the username
+        // unique index. Same shape as the CREATE DATABASE / CREATE ROLE races.
+        await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO local_users (
+                username, password_hash, password_salt, email,
+                first_name, last_name, user_id, created_date, last_login_date, idp_key)
+            VALUES (
+                {options.AdminUsername}, {hash}, {salt}, {email},
+                'Admin', 'User', {userId}, NOW(), NULL, 'local-admin')
+            ON CONFLICT (username) DO NOTHING;
+            """, cancellationToken);
+
+        if (!options.GrantSuperAdmin)
+        {
+            logger?.LogInformation(
+                "Created the bootstrap administrator '{Username}' without SuperAdmin, as configured.",
+                options.AdminUsername);
+            return;
+        }
+
+        // Grant SuperAdmin to this account specifically.
+        //
+        // Until now the only thing that made the first admin privileged was
+        // Authorization:AssignSuperAdminToAllExistingUsers, whose backfill
+        // grants SuperAdmin to *every* row in local_users the first time it
+        // runs. That is right for a greenfield install with one user and wrong
+        // for an existing deployment upgrading into this version, where it
+        // promotes the entire user table at once. Granting the account we just
+        // created means the flag is no longer load-bearing and ships false.
+        //
+        // NOT EXISTS mirrors the backfill's own guard, so the two cannot
+        // produce a duplicate assignment if both run.
+        await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO role_assignments (
+                id, role_id, principal_kind, principal_id,
+                scope_string, scope_ast, created_at_utc, created_by)
+            SELECT
+                gen_random_uuid(),
+                '00000000-0000-0000-0000-000000000001'::uuid,
+                'user',
+                {userId}::text,
+                NULL, NULL, NOW(),
+                '00000000-0000-0000-0000-000000000000'::uuid
+            WHERE NOT EXISTS (
+                SELECT 1 FROM role_assignments r
+                WHERE r.role_id = '00000000-0000-0000-0000-000000000001'::uuid
+                  AND r.principal_kind = 'user'
+                  AND r.principal_id = {userId}::text
+            );
+            """, cancellationToken);
+
+        logger?.LogInformation(
+            "Created the bootstrap administrator '{Username}' and granted it SuperAdmin. "
+            + "Change this password after first sign-in.",
+            options.AdminUsername);
+    }
+
 }

@@ -447,31 +447,16 @@ CREATE TABLE IF NOT EXISTS permission_grants (
 CREATE INDEX IF NOT EXISTS ix_permission_grants_principal
     ON permission_grants (principal_kind, principal_id);
 
-INSERT INTO local_users (
-    username,
-    password_hash,
-    password_salt,
-    email,
-    first_name,
-    last_name,
-    user_id,
-    created_date,
-    last_login_date,
-    idp_key
-)
-VALUES (
-    'admin',
-    'ItdHztyrstpGA82U3e+0MtFcTVZq5N1jW5YvNtRvMTw=',
-    '041Gg5Nyee8Xo8ge595Jyw==',
-    'admin@localhost',
-    'Admin',
-    'User',
-    '11111111-1111-1111-1111-111111111111',
-    NOW(),
-    NULL,
-    'local-admin'
-)
-ON CONFLICT (username) DO NOTHING;
+-- No user is seeded here.
+--
+-- This used to INSERT `admin` with its password_hash AND password_salt
+-- committed to the repository, ungated by environment. Combined with
+-- Authorization:AssignSuperAdminToAllExistingUsers, every install that ran
+-- this script came up with a super-admin whose password was public.
+--
+-- The first administrator is now created by the application at startup, only
+-- while local_users is empty and only from configured credentials --
+-- see BootstrapAdminOptions and DatabaseSchemaInitializer.EnsureBootstrapAdminAsync.
 
 -- =============================================================================
 -- Site menus & dynamic pages
@@ -643,9 +628,9 @@ BEGIN
             created_at_utc, created_by,
             updated_at_utc, updated_by)
         VALUES (
-            appearance_id, 'Auto Nate', 'icon', NULL, 'fa fa-robot', 'Auto Nate',
+            appearance_id, 'Auton8', 'icon', NULL, 'fa fa-robot', 'Auton8',
             'Sign in to continue to the automation dashboard',
-            '/spa/assets/img/login-bg/login-bg-17.jpg', '#00acac',
+            '/assets/img/login-bg/space.jpg', '#00acac',
             '#ffffff', '#212529', '#20252a', '#a6aaac',
             '#20252a', '#ffffff', '#20252a', '#ffffff',
             '#ffffff', '#6c757d', '#212529', '#f1f3f5',

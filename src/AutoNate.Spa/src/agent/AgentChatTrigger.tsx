@@ -20,7 +20,7 @@ export default function AgentChatTrigger() {
   return (
     <UnstyledButton
       aria-pressed={isOpen}
-      aria-label={isOpen ? "Close AutoNate assistant" : "Open AutoNate assistant"}
+      aria-label={isOpen ? "Close Auton8 assistant" : "Open Auton8 assistant"}
       title={isOpen ? "Close assistant" : "Ask the assistant"}
       onClick={() => toggle()}
       style={headerIconButtonStyle}

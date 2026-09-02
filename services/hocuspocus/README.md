@@ -1,6 +1,6 @@
-# AutoNate Hocuspocus sidecar
+# Auton8 Hocuspocus sidecar
 
-Yjs sync server for the AutoNate SPA's BlockNote editors. Runs as a Node
+Yjs sync server for the Auton8 SPA's BlockNote editors. Runs as a Node
 container alongside the .NET app, NATS, Flowable, etc. (see
 `infra/docker-compose.yml`).
 
@@ -11,7 +11,7 @@ container alongside the .NET app, NATS, Flowable, etc. (see
 - **Authenticates** every incoming WebSocket connection by calling back to
   `.NET POST /internal/yjs-auth` with the browser-supplied ticket. .NET
   remains the sole owner of permission decisions — Hocuspocus never reads
-  AutoNate's auth tables itself.
+  Auton8's auth tables itself.
 - **Mirrors** changes to .NET via `POST /internal/yjs-webhook` after each
   debounced save. .NET writes the materialized BlockNote JSON into
   `page.body_jsonb` / `note.content_jsonb` so the existing read paths

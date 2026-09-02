@@ -5,7 +5,7 @@ import { useEffect } from "react";
 // (typically a static string).
 //
 // Why: SiteAppearanceProvider sets the title once to the site name; without
-// a per-page hook every browser tab / history entry is just "AutoNate",
+// a per-page hook every browser tab / history entry is just "Auton8",
 // invisible to screen-reader users navigating between pages (WCAG 2.4.2).
 // Sites can pass `appendSiteName: true` to get the conventional
 // "Page · Site" pattern.

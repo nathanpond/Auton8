@@ -105,7 +105,7 @@ export default function SavedQueryShareModal({ savedQuery, opened, onClose }: Pr
     <Modal opened={opened} onClose={onClose} title={`Share "${savedQuery?.name ?? ""}"`} size="lg" centered>
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          Generate a link that runs this query for anyone who visits the URL — no AutoNate account
+          Generate a link that runs this query for anyone who visits the URL — no Auton8 account
           required. The query executes under your identity, so the result rows reflect what you
           can see, not what the visitor can see. Revoke any link at any time.
         </Text>

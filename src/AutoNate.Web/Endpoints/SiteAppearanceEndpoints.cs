@@ -142,13 +142,13 @@ public static partial class SiteAppearanceEndpoints
         new()
         {
             Id = SettingsId,
-            SiteName = "Auto Nate",
+            SiteName = "Auton8",
             LogoMode = "icon",
             LogoImageUrl = null,
             LogoIcon = "fa fa-robot",
-            LogoText = "Auto Nate",
+            LogoText = "Auton8",
             LoginTagline = "Sign in to continue to the automation dashboard",
-            LoginCoverImageUrl = "/spa/assets/img/login-bg/login-bg-17.jpg",
+            LoginCoverImageUrl = "/assets/img/login-bg/space.jpg",
             // Kept in step with DEFAULT_SITE_APPEARANCE in the SPA's
             // lib/siteAppearance.ts. #00acac measures 2.80:1 against a white
             // surface, below the 3.0:1 a UI component needs; #008080 is

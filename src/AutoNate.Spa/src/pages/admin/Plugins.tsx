@@ -153,7 +153,7 @@ export default function Plugins() {
     <>
       <PageHeader
         title="Plugins"
-        description="Runtime-loaded plugins that extend AutoNate via hooks. Upload, enable, disable, or delete here."
+        description="Runtime-loaded plugins that extend Auton8 via hooks. Upload, enable, disable, or delete here."
       />
 
       {error && (

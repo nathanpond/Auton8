@@ -60,7 +60,7 @@ export default function BusWatcher() {
 
   const startupWarning =
     daprStatus && !daprStatus.available
-      ? "The web app is running without a reachable Dapr sidecar, so workflow pub/sub events will not arrive here. Start AutoNate with `make app-dapr` or a Rider run configuration that launches the app through Dapr."
+      ? "The web app is running without a reachable Dapr sidecar, so workflow pub/sub events will not arrive here. Start Auton8 with `make app-dapr` or a Rider run configuration that launches the app through Dapr."
       : null;
 
   const clearLog = () => setEntries([]);

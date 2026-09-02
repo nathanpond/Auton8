@@ -421,7 +421,7 @@ export function AgentSidebar() {
       // Names the complementary landmark so it is reachable by region, which
       // is how a screen-reader user gets back to an open panel after Tab has
       // moved on.
-      aria-label="AutoNate assistant"
+      aria-label="Auton8 assistant"
       onKeyDown={isOpen ? onSidebarKeyDown : undefined}
     >
       {isOpen && (

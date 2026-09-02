@@ -298,7 +298,7 @@ function SqlPanel({ storeId }: { storeId: string }) {
           <Box>
             <Text fw={500}>CSV ingest</Text>
             <Text size="sm" c="dimmed">
-              Drop a CSV; AutoNate infers a Postgres column schema from a sample of rows,
+              Drop a CSV; Auton8 infers a Postgres column schema from a sample of rows,
               you confirm the table name and types, and the rows land in this datastore&apos;s
               per-store schema in <code>autonate_datastores</code>.
             </Text>

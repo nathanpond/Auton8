@@ -59,11 +59,61 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     public string ConnectionString =>
         $"Host=localhost;Port=5432;Database={_databaseName};Username=autonate;Password={Password};{PoolTuning}";
 
-    public static async Task<PostgresTestDatabase> CreateAsync()
+    // The `admin` account most suites expect to find.
+    //
+    // It used to arrive from the init script replayed in InitializeAsync,
+    // which shipped the row with its password_hash and password_salt committed
+    // to the repository. That seed is gone; the application now creates its
+    // first administrator at startup from configuration. Tests that boot the
+    // host get theirs that way — see AutoNateWebApplicationFactory — but the
+    // many suites that talk to the database directly never start a host, so
+    // the row has to come from somewhere. Here, in test code, is the right
+    // somewhere: the credential is a test fixture, not a product default.
+    //
+    // The id is pinned to the value the old seed used because roughly twenty
+    // suites assert against it.
+    public static readonly Guid SeededAdminUserId =
+        Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+    public const string SeededAdminUsername = "admin";
+    public const string SeededAdminPassword = "admin";
+
+    public static async Task<PostgresTestDatabase> CreateAsync(bool seedLocalAdmin = true)
     {
         var database = new PostgresTestDatabase($"autonate_test_{Guid.NewGuid():N}");
         await database.InitializeAsync();
+        if (seedLocalAdmin)
+        {
+            await database.SeedLocalAdminAsync();
+        }
         return database;
+    }
+
+    // Hashed rather than pasted: a stored hash in the tree is what the removed
+    // seed got wrong, and there is no reason to reintroduce one even in test
+    // code. Suites that sign in as admin/admin still work, because this uses
+    // the same hasher the login path verifies with.
+    private async Task SeedLocalAdminAsync()
+    {
+        var (hash, salt) = PasswordHasher.HashPassword(SeededAdminPassword);
+
+        await using var connection = new NpgsqlConnection(ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO local_users (
+                username, password_hash, password_salt, email,
+                first_name, last_name, user_id, created_date, last_login_date, idp_key)
+            VALUES (
+                @username, @hash, @salt, 'admin@localhost',
+                'Admin', 'User', @userId, NOW(), NULL, 'local-admin')
+            ON CONFLICT (username) DO NOTHING;
+            """;
+        command.Parameters.AddWithValue("username", SeededAdminUsername);
+        command.Parameters.AddWithValue("hash", hash);
+        command.Parameters.AddWithValue("salt", salt);
+        command.Parameters.AddWithValue("userId", SeededAdminUserId);
+        await command.ExecuteNonQueryAsync();
     }
 
     public EfCoreLocalUserStore CreateLocalUserStore() => new(CreateDbContextFactory());
@@ -465,6 +515,12 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     // to protect.
     private static string AdminConnectionString(string databaseName) =>
         $"Host=localhost;Port=5432;Database={databaseName};Username=autonate;Password={Password};Pooling=false";
+
+    // Same string, for tests that need a server-level connection of their own
+    // (RoleCreationRaceTests races CREATE ROLE, which is cluster-wide and so
+    // belongs to no single test database).
+    internal static string AdminConnectionStringFor(string databaseName) =>
+        AdminConnectionString(databaseName);
 
     private sealed class SimpleDbContextFactory(DbContextOptions<AutoNateDbContext> options)
         : IDbContextFactory<AutoNateDbContext>

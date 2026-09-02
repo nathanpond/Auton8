@@ -8,7 +8,7 @@ export default function PluginDocumentation() {
     <>
       <PageHeader
         title="Plugin Documentation"
-        description="How AutoNate plugins work, what the host gives them, and the patterns to use when building one."
+        description="How Auton8 plugins work, what the host gives them, and the patterns to use when building one."
       />
 
       <Stack gap="md">
@@ -38,7 +38,7 @@ export default function PluginDocumentation() {
 
       <Section id="what-is-a-plugin" title="What a plugin is">
         <p>
-          A plugin is a self-contained .NET class library that AutoNate loads at
+          A plugin is a self-contained .NET class library that Auton8 loads at
           runtime and lets extend the host without modifying the application.
           Each plugin runs inside its own collectible <code>AssemblyLoadContext</code>{" "}
           so its dependencies stay isolated from other plugins, and it talks to
@@ -340,7 +340,7 @@ context.Hooks.AddActionAsync("autonate.something.happened", priority: 100,
         <ul>
           <li>
             A <strong>per-plugin schema</strong>{" "}
-            <code>plg_&lt;code&gt;</code> in the AutoNate database.
+            <code>plg_&lt;code&gt;</code> in the Auton8 database.
           </li>
           <li>
             A <strong>per-plugin LOGIN role</strong>{" "}

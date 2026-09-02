@@ -368,7 +368,7 @@ public static class EventCatalog
             ]),
         new(
             "Record",
-            "Lifecycle events for AutoNate records — emitted by the record store after each create / update / archive transaction commits.",
+            "Lifecycle events for Auton8 records — emitted by the record store after each create / update / archive transaction commits.",
             RecordPayloadFields,
             [
                 new EventCatalogEntry(
