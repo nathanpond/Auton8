@@ -10,6 +10,23 @@ security_findings: advisories  # public repo: an open sev:high issue advertises 
                               # running deployments. Draft advisories stay maintainer-only until
                               # published. The 26 closed security issues predate the flip and were
                               # all closed as fixed, so they stay as a public register.
+deployment:
+  dev: local Docker Compose stack (infra/docker-compose.yml) + `make app`; the app runs on the host with a Dapr sidecar
+  stage: none — dev only for v1.0 (owner's call, 2026-09-02)
+  production: none yet. v1.0 ships a release artifact others run; hosting is a post-1.0 decision
+  notes: >-
+    "Eventually anywhere." Docker Compose is the supported target for v1.0.
+    Kubernetes and cloud PaaS are deliberately post-1.0 epics, not v1.0 scope.
+ci:
+  provider: github-actions
+  on_pr: [spa-lint, spa-typecheck, spa-build, backend-tests, e2e]
+  release: not yet automated — no deployment pipeline in v1.0 scope
+  notes: >-
+    E2E runs 155 of 163 specs; the 8 excluded need Flowable and Dapr, which the
+    runner does not host. The owner did NOT select closing that gap as part of
+    "CI up to snuff" — the chosen bar is quality gates, faster feedback, and
+    making use of what a public repo unlocks (CodeQL, Semgrep, FsCheck).
+
 areas: [api, spa, plugins, services, flowable, infra, ci, docs, tests]
 # area:api      → src/AutoNate.Web (ASP.NET Core host: endpoints, persistence, authorization, hooks)
 # area:spa      → src/AutoNate.Spa (React 19 + Mantine v9 SPA)

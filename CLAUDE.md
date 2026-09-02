@@ -51,4 +51,35 @@ This project is managed by the n8SDLC workflow (GitHub Issues = the plan; `/n8-s
 1. Append an `## Ad-hoc` entry to `.n8/decisions.md` (format documented in that file's header) naming the change, the why, and the milestones/issues likely affected.
 2. Tell the user which future milestones may now have stale plans and suggest running `/n8-replan`.
 
+### Project invariants
+
+Load-bearing constraints. No story may breach one without an explicit
+conversation; `/n8-exec` treats an apparent breach as a blocker, and
+`/n8-audit` checks the honor-system ones and hunts weakened guards. Amending an
+invariant is a user decision — log it as an `## Ad-hoc` entry in
+`.n8/decisions.md`.
+
+1. **No credential ever ships in the repository.** Configuring nothing creates
+   nothing — no default password, no seeded user. *(test-enforced:
+   `BootstrapAdminTests`)*
+2. **The plugin ABI's assembly identity is pinned.**
+   `AutoNate.Plugin.Abstractions` stays `AssemblyVersion 1.0.0.0`; it must not
+   follow the product version. Moving it breaks every already-built
+   third-party plugin, and the symptom is a misleading "type not found".
+   *(test-enforced: `PluginAbiVersionTests`)*
+3. **Every endpoint carries an explicit authorization decision.** A route with
+   no gate fails the suite, and so does a gate wired to the wrong
+   `(kind, action)`. *(test-enforced: `AuthorizationGatePresenceTests`,
+   `KindGateEnforcementTests`)*
+4. **The do-not-rename identifiers stay put** — the DataProtection purposes,
+   the `.docx` binding markers, the BPMN namespace and delegate expression, the
+   schema and database names, and the plugin ABI type names. Renaming any of
+   them destroys existing data. See the Naming section above for the list.
+   *(honor-system — a guard test is planned in the CI milestone)*
+
+Two more guards exist and should not be weakened, though they are not on the
+list above: the jsx-a11y error gate in `npm run lint`, and
+`RoleCreationRaceTests`, which pins that cluster-wide object creation never
+check-then-acts.
+
 Whole-codebase audits run via `/n8-audit`; the AutoNate-specific checklists (security, authorization, performance + hot-path inventory, stability, cleanup, 508) live in `.n8/memory/audit-*.md` and replace the former `/audit` project skills.
