@@ -7,7 +7,12 @@ services:
       POSTGRES_PASSWORD: ${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
       POSTGRES_DB: flowable
     ports:
-      - "${AUTONATE_POSTGRES_PORT:-5432}:5432"
+      # Loopback-only, like NATS below. This is the local development stack:
+      # it ships known credentials, so binding it on every interface puts a
+      # writable database on the network of whatever cafe or office the laptop
+      # is on. Containers reach it as `postgres:5432` over the compose network,
+      # which is unaffected.
+      - "127.0.0.1:${AUTONATE_POSTGRES_PORT:-5432}:5432"
     volumes:
       - ./mounts/postgres/data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -48,7 +53,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
       TZ: ${AUTONATE_FLOWABLE_TZ:-America/New_York}
     ports:
-      - "${AUTONATE_FLOWABLE_PORT:-8080}:8080"
+      - "127.0.0.1:${AUTONATE_FLOWABLE_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "8080"]
       interval: 10s
@@ -103,7 +108,7 @@ services:
     container_name: autonate-redis
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${AUTONATE_REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${AUTONATE_REDIS_PORT:-6379}:6379"
     volumes:
       - ./mounts/redis/data:/data
     healthcheck:
@@ -154,14 +159,14 @@ services:
     container_name: autonate-dapr-placement
     command: ["./placement", "--port", "50006"]
     ports:
-      - "50006:50006"
+      - "127.0.0.1:50006:50006"
 
   dapr-scheduler:
     image: daprio/scheduler:1.17.5
     container_name: autonate-dapr-scheduler
     command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
     ports:
-      - "50007:50007"
+      - "127.0.0.1:50007:50007"
     user: root
     volumes:
       - ./mounts/dapr-scheduler/data:/data
@@ -192,7 +197,7 @@ services:
       AUTONATE_WEB_URL: ${AUTONATE_WEB_URL:-http://host.docker.internal:5108}
       YJS_INTERNAL_SHARED_SECRET: ${YJS_INTERNAL_SHARED_SECRET:-dev-only-yjs-internal-secret-change-me}
     ports:
-      - "${AUTONATE_HOCUSPOCUS_PORT:-1234}:1234"
+      - "127.0.0.1:${AUTONATE_HOCUSPOCUS_PORT:-1234}:1234"
     extra_hosts:
       # Needed on Linux hosts so host.docker.internal resolves; harmless
       # on macOS / Docker Desktop where the entry is provided by default.
@@ -238,7 +243,7 @@ services:
     profiles:
       - dashboard
     ports:
-      - "${AUTONATE_DAPR_DASHBOARD_PORT:-8081}:8080"
+      - "127.0.0.1:${AUTONATE_DAPR_DASHBOARD_PORT:-8081}:8080"
     volumes:
       - ./mounts/dapr-dashboard/components:/components:ro
     depends_on:

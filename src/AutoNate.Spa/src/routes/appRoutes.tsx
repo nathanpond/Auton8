@@ -54,7 +54,7 @@ export type AppRoute = {
   children?: AppRoute[];
   // Document title for this route, without the site name — useRouteDocumentTitle
   // appends that. Screen-reader users orient by title on navigation, and every
-  // tab and history entry read "AutoNate" before this existed (WCAG 2.4.2,
+  // tab and history entry read "Auton8" before this existed (WCAG 2.4.2,
   // 508 §502 — #18). Titles live here rather than in each page so a new route
   // is one line, not a page edit that is easy to forget.
   title?: string;
@@ -95,7 +95,11 @@ const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] 
   { path: "plugins/documentation", templateKey: "configPluginDocumentation" },
   { path: "projections", templateKey: "configProjections" },
   { path: "forms", templateKey: "configForms" },
-  { path: "form-mappings", templateKey: "configFormMappings" },
+  // No "form-mappings" row: the page behind configFormMappings was a "coming
+  // soon" stub and has been removed. Mounting it here would render an empty
+  // ProtectedRoute (template() indexes PAGE_TEMPLATES, and a miss is undefined
+  // rather than a type error), so the path is left to fall through to
+  // NotFound. The seeded pages/page_templates rows keep the key reserved.
   { path: "chatbot-settings", templateKey: "configChatbotSettings" },
   { path: "chatbot-models", templateKey: "configChatbotModels" }
 ];

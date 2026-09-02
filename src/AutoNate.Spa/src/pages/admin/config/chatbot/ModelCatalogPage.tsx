@@ -285,7 +285,7 @@ export default function ModelCatalogPage() {
         title="Models"
         description={
           <>
-            The catalogue of LLM models AutoNate can use. The agent loop reads context windows from
+            The catalogue of LLM models Auton8 can use. The agent loop reads context windows from
             this table to size history-trimming and summarization. The &quot;default&quot; model
             (per provider) is what chatbot conversations use when no explicit model is pinned. The
             &quot;available&quot; flag controls whether the agent can pick a model for autonomous

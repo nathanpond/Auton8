@@ -295,7 +295,7 @@ export default function DataConnectorsPage() {
       </Group>
 
       <Text c="dimmed">
-        Outbound integrations that pull data into AutoNate from external systems on a schedule.
+        Outbound integrations that pull data into Auton8 from external systems on a schedule.
         Built-in kinds: <Code>rest</Code> (REST API with bearer / basic / api-key auth) and{" "}
         <Code>smb</Code> (Samba network share — wire integration ships separately).
       </Text>

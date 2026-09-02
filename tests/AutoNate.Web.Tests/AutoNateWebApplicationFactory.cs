@@ -14,14 +14,17 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
 {
     private readonly PostgresTestDatabase _database;
     private readonly IReadOnlyDictionary<string, string?> _extraConfig;
+    private readonly bool _ownsDatabase;
 
     private AutoNateWebApplicationFactory(
         PostgresTestDatabase database,
         IReadOnlyDictionary<string, string?>? extraConfig,
-        string? webRoot)
+        string? webRoot,
+        bool ownsDatabase = true)
     {
         _webRoot = webRoot;
         _database = database;
+        _ownsDatabase = ownsDatabase;
         _extraConfig = extraConfig ?? new Dictionary<string, string?>();
         // Skip the startup Dapr probe — it would block the host from starting in tests.
         Environment.SetEnvironmentVariable("AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR", "true");
@@ -31,9 +34,24 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
         IReadOnlyDictionary<string, string?>? extraConfig = null,
         string? webRoot = null)
     {
-        var database = await PostgresTestDatabase.CreateAsync();
+        // seedLocalAdmin: false — this factory boots the real host, so the
+        // application's own first-admin bootstrap creates the account from the
+        // Bootstrap:* settings below. Seeding it here as well would leave
+        // local_users non-empty, the bootstrap would correctly skip, and the
+        // suites that exercise it would be testing the fixture instead.
+        var database = await PostgresTestDatabase.CreateAsync(seedLocalAdmin: false);
         return new AutoNateWebApplicationFactory(database, extraConfig, webRoot);
     }
+
+    // A second host over a database another factory already created and still
+    // owns — the shape of an application restart. The caller's factory drops the
+    // database; this one must not, or the first factory's disposal fails against
+    // a database that is already gone.
+    public static AutoNateWebApplicationFactory CreateOn(
+        PostgresTestDatabase database,
+        IReadOnlyDictionary<string, string?>? extraConfig = null,
+        string? webRoot = null)
+        => new(database, extraConfig, webRoot, ownsDatabase: false);
 
     // When set, the host boots with a real WebRootPath so Program.cs wires the
     // static-file / SPA-fallback pipeline (it is skipped when wwwroot/ is absent,
@@ -68,6 +86,22 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
                 // are reachable on GET requests without simulating a manual login.
                 ["DevelopmentAutoLogin:Enabled"] = "true",
                 ["DevelopmentAutoLogin:Username"] = "admin",
+                // The `admin` row the line above logs in as. It used to arrive
+                // from a hardcoded INSERT in the init SQL, with its hash and
+                // salt committed to the repository; it is now created at
+                // startup from these settings, so the only place the test
+                // credential exists is test code. The id is pinned because ~20
+                // suites assert against this exact GUID.
+                ["Bootstrap:AdminUsername"] = "admin",
+                ["Bootstrap:AdminPassword"] = "admin",
+                ["Bootstrap:AdminEmail"] = "admin@localhost",
+                ["Bootstrap:AdminUserId"] = "11111111-1111-1111-1111-111111111111",
+                // No SuperAdmin, matching the removed seed's behaviour with
+                // AssignSuperAdminToAllExistingUsers off. The enforcement
+                // suites grant this principal one narrow permission and assert
+                // 403 elsewhere; as a SuperAdmin it would pass all of them
+                // vacuously. Tests needing privilege grant it explicitly.
+                ["Bootstrap:GrantSuperAdmin"] = "false",
                 // Flowable is not exercised by these tests, but the options binding
                 // requires a section to exist.
                 ["Flowable:BaseUrl"] = "http://localhost/flowable",
@@ -126,6 +160,9 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
-        await _database.DisposeAsync();
+        if (_ownsDatabase)
+        {
+            await _database.DisposeAsync();
+        }
     }
 }

@@ -1,4 +1,4 @@
-# AutoNate Executor Sidecar
+# Auton8 Executor Sidecar
 
 Phase 6 of the Data Stores & Analytics Pipeline plan (`docs/plans/2026-05-30-data-stores-implementation.md`).
 

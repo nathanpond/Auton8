@@ -293,6 +293,12 @@ builder.Services.AddSingleton<
 builder.Services.AddOptions<AutoNate.Web.Authorization.AuthorizationOptions>()
     .BindConfiguration(AutoNate.Web.Authorization.AuthorizationOptions.SectionName)
     .ValidateOnStart();
+// The first administrator on an empty install. Bound through the normal
+// configuration providers so an env var, user-secrets, or a mounted secret
+// file all work; nothing is created unless it is supplied. Replaces the
+// `admin`/`admin` row that used to ship with its hash committed.
+builder.Services.AddOptions<AutoNate.Web.Persistence.BootstrapAdminOptions>()
+    .BindConfiguration(AutoNate.Web.Persistence.BootstrapAdminOptions.SectionName);
 foreach (var entityType in CoreEntityTypes.All)
 {
     builder.Services.AddSingleton<IEntityType>(entityType);

@@ -1,6 +1,25 @@
-# AutoNate
+# Auton8
 
 ASP.NET Core backend with a React 19 + Vite + TypeScript SPA at `src/AutoNate.Spa/`.
+
+## Naming
+
+The product is **Auton8**; the code is **AutoNate**. User-facing strings say
+Auton8 — site name, page copy, the assistant's own identity, document titles.
+Internal identifiers stay AutoNate: namespaces, assembly and project names,
+`AutoNateDbContext`, `AUTONATE_*` environment variables, `X-AutoNate-*`
+headers, localStorage keys, the `autonate_datastores` schema and `AutoNate`
+database, the `autonate.web` event `sourceAppId`, the plugin ABI
+(`IAutoNatePlugin`, `AutoNate.Plugin.Abstractions`), the `.docx` markers
+`AUTONATE_BINDING` / `AUTONATE_TABLE_BINDING`, the BPMN namespace
+`http://autonate.dev/workflows` and `${autonateBehaviorDelegate}`, and the
+DataProtection purposes `AutoNate.ExternalConnections.v1` /
+`AutoNate.Plugins.RolePassword.v1`.
+
+That split is deliberate. Renaming the DataProtection purposes makes every
+stored provider secret undecryptable; renaming the `.docx` markers orphans
+every bound document; renaming the plugin ABI breaks third-party plugins. Do
+not "tidy" them. When adding a user-facing string, write Auton8.
 
 ## Mantine v9
 

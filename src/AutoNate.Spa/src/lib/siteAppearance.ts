@@ -12,11 +12,11 @@ import { generateColors } from "@mantine/colors-generator";
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 export const DEFAULT_SITE_APPEARANCE: SiteAppearance = {
-  siteName: "Auto Nate",
+  siteName: "Auton8",
   logoMode: "icon",
   logoImageUrl: null,
   logoIcon: "fa fa-robot",
-  logoText: "Auto Nate",
+  logoText: "Auton8",
   loginTagline: "Sign in to continue to the automation dashboard",
   loginCoverImageUrl: "/assets/img/login-bg/space.jpg",
   // Darkened from the original #00acac (which computed 2.78:1 against #fff

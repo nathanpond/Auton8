@@ -158,7 +158,7 @@ export default function WorkflowExecutions() {
           kind: "success",
           message: deleted === 0
             ? "There were no executions to delete."
-            : `Deleted ${deleted} execution${deleted === 1 ? "" : "s"} from AutoNate and Flowable.`
+            : `Deleted ${deleted} execution${deleted === 1 ? "" : "s"} from Auton8 and Flowable.`
         });
       } else if (pendingAction.kind === "delete") {
         const { execution } = pendingAction;
@@ -413,7 +413,7 @@ export default function WorkflowExecutions() {
               onClick={requestDeleteAll}
               loading={deleteAllExecutions.isPending}
               disabled={executions.length === 0}
-              title="Delete every execution from AutoNate and Flowable"
+              title="Delete every execution from Auton8 and Flowable"
             >
               Delete All Executions
             </Button>
@@ -468,7 +468,7 @@ export default function WorkflowExecutions() {
               message={
                 <p style={{ margin: 0 }}>
                   Permanently delete <strong>every workflow execution</strong>{" "}
-                  in the system? This removes all runs from AutoNate and
+                  in the system? This removes all runs from Auton8 and
                   Flowable — running and historical, including variables and
                   tasks. Workflow models stay published.
                 </p>
@@ -491,7 +491,7 @@ export default function WorkflowExecutions() {
               pendingAction.kind === "delete" ? (
                 <p style={{ margin: 0 }}>
                   Permanently delete workflow execution{" "}
-                  <strong>{label}</strong>? This removes it from AutoNate and
+                  <strong>{label}</strong>? This removes it from Auton8 and
                   Flowable — the run, its history, variables, and tasks will
                   all be gone.
                 </p>

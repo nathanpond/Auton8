@@ -6,7 +6,7 @@ import { APP_ROUTES, AppRoute } from "@/routes/appRoutes";
 //
 // Before this, SiteAppearanceProvider set the title once to the site name and
 // only four pages (all admin datastores) ever overrode it, so every tab,
-// history entry and window-switcher row read "AutoNate". Screen-reader users
+// history entry and window-switcher row read "Auton8". Screen-reader users
 // orient by title on navigation, which made every destination
 // indistinguishable — WCAG 2.4.2 (Page Titled) and 508 §502 (#18).
 //

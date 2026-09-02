@@ -28,7 +28,7 @@ public sealed class AgentConversationTests : E2ETestBase
         Assert.True(rename.Ok, await rename.TextAsync());
 
         await page.GotoAsync("/query");
-        await page.GetByLabel("Open AutoNate assistant").ClickAsync();
+        await page.GetByLabel("Open Auton8 assistant").ClickAsync();
         await page.GetByPlaceholder("Search chats…").FillAsync(title);
         await page.GetByText(title, new() { Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByText("Loaded from", new() { Exact = true }))

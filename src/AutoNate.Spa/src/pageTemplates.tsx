@@ -35,7 +35,6 @@ import SystemIssues from "@/pages/admin/config/SystemIssues";
 import PluginDocumentation from "@/pages/admin/config/PluginDocumentation";
 import FormsList from "@/pages/admin/config/forms/FormsList";
 import {
-  FormsFormMappings,
   SitewideChatbotSettings,
   SitewideExternalConnections,
   SitewideFeatures,
@@ -84,7 +83,6 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configPluginDocumentation: <PluginDocumentation />,
   configProjections: <AdminProjections />,
   configForms: <FormsList />,
-  configFormMappings: <FormsFormMappings />,
   configChatbotSettings: <SitewideChatbotSettings />,
   configChatbotModels: <ModelCatalogPage />,
   dataStores: <DataStoresPage />,

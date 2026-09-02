@@ -83,8 +83,8 @@ type ColorFieldConfig = {
 };
 
 const BRANDING_FIELDS: TextFieldConfig[] = [
-  { key: "siteName", label: "Site name", placeholder: "Auto Nate" },
-  { key: "logoText", label: "Brand text", placeholder: "Auto Nate" },
+  { key: "siteName", label: "Site name", placeholder: "Auton8" },
+  { key: "logoText", label: "Brand text", placeholder: "Auton8" },
   { key: "logoIcon", label: "Logo icon class", placeholder: "fa fa-robot", optional: true },
   {
     key: "logoImageUrl",

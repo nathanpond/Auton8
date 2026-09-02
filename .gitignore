@@ -74,3 +74,17 @@ src/AutoNate.Web/data/
 # test fixture dirs are still tracked.
 /*.png
 
+
+# Credential-shaped files. `.env` is already ignored above; these cover the
+# per-environment variants and the key/certificate formats that a deployment
+# experiment tends to drop in the working tree. Push protection catches
+# recognisable API tokens once the repo is public, but it does not recognise
+# a private key sitting in a file, so this is the layer that does.
+.env.local
+.env.*.local
+secrets.json
+*.pem
+*.pfx
+*.p12
+*.key
+*.jks

@@ -322,8 +322,8 @@ function CategoryContent({
 }: CategoryContentProps) {
   const description =
     cat.id === "chatbot"
-      ? "Control how the AutoNate chatbot appears and behaves across the product."
-      : "Workspace-level preferences that apply across AutoNate.";
+      ? "Control how the Auton8 chatbot appears and behaves across the product."
+      : "Workspace-level preferences that apply across Auton8.";
   return (
     <div className="pref-content">
       <header className="pref-content-header">

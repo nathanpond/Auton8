@@ -19,6 +19,14 @@
            down there; the rest run at default severity. -->
 
     <PropertyGroup>
+        <!-- Single source of the product version for every assembly under
+             /src and /tests. 0.x: it runs and it is tested, but interfaces
+             move and there is no upgrade-compatibility promise between 0.x
+             releases. Keep in step with src/AutoNate.Spa/package.json. -->
+        <Version>0.1.0</Version>
+    </PropertyGroup>
+
+    <PropertyGroup>
         <!-- Built-in .NET analyzers. The SDK auto-includes NetAnalyzers
              since .NET 5; pinning AnalysisLevel makes the rule selection
              explicit and stable across SDK upgrades. EnforceCodeStyleInBuild

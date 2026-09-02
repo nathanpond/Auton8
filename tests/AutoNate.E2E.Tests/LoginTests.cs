@@ -23,7 +23,7 @@ public sealed class LoginTests : E2ETestBase
         // proves the SPA is mounted with an authenticated session, not just
         // that the server set a cookie.
         Assert.Matches("/home", page.Url);
-        await page.GetByRole(AriaRole.Heading, new() { Name = "Automation Dashboard" })
+        await page.GetByRole(AriaRole.Heading, new() { Name = "Home", Exact = true, Level = 1 })
             .WaitForAsync(new() { Timeout = 15_000 });
 
         // Belt-and-braces: confirm the cookie is actually accepted by the API.

@@ -1,31 +1,5 @@
-import { Box, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Box, Paper, Stack, Text, Title } from "@mantine/core";
 import SiteSettingsForm from "./SiteSettingsForm";
-
-type StubProps = {
-  title: string;
-  blurb: string;
-};
-
-function Stub({ title, blurb }: StubProps) {
-  return (
-    <Box py="md">
-      <Stack gap="lg">
-        <Stack gap={4}>
-          <Title order={1}>{title}</Title>
-          <Text size="sm" c="dimmed">
-            {blurb}
-          </Text>
-        </Stack>
-        <Paper withBorder radius="md" p="md">
-          <Group gap="xs" c="dimmed">
-            <i className="fa fa-screwdriver-wrench" />
-            <Text size="sm">This section is a stub. Functionality coming soon.</Text>
-          </Group>
-        </Paper>
-      </Stack>
-    </Box>
-  );
-}
 
 export function ConfigIndex() {
   return (
@@ -79,12 +53,3 @@ export function SitewideChatbotSettings() {
 }
 
 export { ExternalConnectionsPage as SitewideExternalConnections } from "./external-connections/ExternalConnectionsPage";
-
-export function FormsFormMappings() {
-  return (
-    <Stub
-      title="Form Mappings"
-      blurb="Map forms to record types and fields."
-    />
-  );
-}

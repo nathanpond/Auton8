@@ -464,7 +464,7 @@ public static partial class WorkflowBpmnXml
     public static string NormalizeWorkflowName(string? workflowName)
     {
         var trimmed = workflowName?.Trim();
-        return string.IsNullOrWhiteSpace(trimmed) ? "AutoNate Workflow" : trimmed;
+        return string.IsNullOrWhiteSpace(trimmed) ? "Auton8 Workflow" : trimmed;
     }
 
     public static string NormalizeProcessKey(string? processKey)
@@ -486,7 +486,7 @@ public static partial class WorkflowBpmnXml
 
     public static string BuildDefaultWorkflowName()
     {
-        return $"AutoNate Workflow {DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
+        return $"Auton8 Workflow {DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
     }
 
     public static string BuildDefaultProcessKey()

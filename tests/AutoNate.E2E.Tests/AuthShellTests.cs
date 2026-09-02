@@ -118,7 +118,7 @@ public sealed class AuthShellTests : E2ETestBase
         Assert.Matches("/home", page.Url);
 
         await Assertions.Expect(
-            page.GetByRole(AriaRole.Heading, new() { Name = "Automation Dashboard" }))
+            page.GetByRole(AriaRole.Heading, new() { Name = "Home", Exact = true, Level = 1 }))
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
 
         var meResponse = await page.APIRequest.GetAsync("/api/auth/me");
