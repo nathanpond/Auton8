@@ -1,7 +1,7 @@
 version: 1
 stack: dotnet            # ASP.NET Core (net10.0) host + React 19/Vite/TypeScript SPA + Node sidecars
 initialized: 2026-08-30
-wiki: enabled            # enabled at the 0.1 public flip (2026-09-02)
+wiki: enabled            # seeded 2026-09-02 with the codebase map; docs/codebase/ removed so there is one copy
 repo: nathanpond/Auton8
 visibility: public       # public since 2026-09-02, in a fresh repository — see decisions.md
 default_branch: master   # n8SDLC docs say `main`; this repo uses `master` — skills should target the default branch, not the literal name

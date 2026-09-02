@@ -73,8 +73,8 @@ Then open http://localhost:5108 and sign in with the credentials you just set.
 - [Contributing](CONTRIBUTING.md) — how work is planned here and what a good
   change looks like
 - [Security](SECURITY.md) — how to report a vulnerability privately
-- [Codebase map](docs/codebase/) — generated architecture, conventions and
-  concerns notes
+- [Codebase map](https://github.com/nathanpond/Auton8/wiki) — architecture,
+  structure, conventions, testing and known concerns, in the wiki
 
 ## A note on the name
 
