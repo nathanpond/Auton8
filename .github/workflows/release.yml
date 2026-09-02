@@ -86,6 +86,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # OCI repository names must be lowercase and this repository is
+      # `nathanpond/Auton8`. docker/metadata-action lowercases silently, so the
+      # push works while anything using the raw ${{ github.repository }}
+      # fails — which is precisely what happened to the verify step on the
+      # first release run: four images published successfully and four
+      # verifications failed with "repository name must be lowercase".
+      - name: Lowercase the image base
+        id: base
+        run: echo "image=${REGISTRY}/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+
       # arm64 is built under emulation. Both platforms matter: most
       # self-hosters are amd64, and the maintainer runs Apple Silicon — so
       # publishing amd64 alone would mean never running locally what ships.
@@ -102,7 +112,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
+          images: ${{ steps.base.outputs.image }}
           # The exact version and nothing else. No `latest`, no floating major
           # or minor: a 0.x project makes no upgrade-compatibility promise, so
           # a moving tag would let a routine `docker compose pull` carry an
@@ -134,7 +144,7 @@ jobs:
       - name: Attest provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
+          subject-name: ${{ steps.base.outputs.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
@@ -146,7 +156,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh attestation verify \
-            "oci://${REGISTRY}/${GITHUB_REPOSITORY}/${{ matrix.image }}@${{ steps.build.outputs.digest }}" \
+            "oci://${{ steps.base.outputs.image }}@${{ steps.build.outputs.digest }}" \
             --repo "$GITHUB_REPOSITORY"
 
       - name: Report
@@ -156,13 +166,13 @@ jobs:
           printf '%s\n' \
             "### ${{ matrix.image }}" \
             "" \
-            "- reference: \`${REGISTRY}/${GITHUB_REPOSITORY}/${{ matrix.image }}:${{ needs.validate.outputs.version }}\`" \
+            "- reference: \`${{ steps.base.outputs.image }}:${{ needs.validate.outputs.version }}\`" \
             "- digest: \`${{ steps.build.outputs.digest }}\`" \
             "- platforms: linux/amd64, linux/arm64" \
             "" \
             "Verify:" \
             "" \
             "\`\`\`" \
-            "gh attestation verify oci://${REGISTRY}/${GITHUB_REPOSITORY}/${{ matrix.image }}@${{ steps.build.outputs.digest }} --repo ${GITHUB_REPOSITORY}" \
+            "gh attestation verify oci://${{ steps.base.outputs.image }}@${{ steps.build.outputs.digest }} --repo ${GITHUB_REPOSITORY}" \
             "\`\`\`" \
             >> "$GITHUB_STEP_SUMMARY"

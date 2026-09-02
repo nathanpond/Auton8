@@ -82,6 +82,22 @@ public sealed class ReleaseWorkflowTests
     }
 
     [Fact]
+    public void Image_references_are_lowercased()
+    {
+        // OCI repository names must be lowercase and this repository is
+        // `nathanpond/Auton8`. docker/metadata-action lowercases silently, so
+        // the push succeeds while anything using the raw github.repository
+        // fails — which is what happened on the first release run: four images
+        // published and four verifications failed with "repository name must
+        // be lowercase". Nothing downstream of the push may use the raw value.
+        var workflow = Workflow();
+
+        Assert.Contains("tr '[:upper:]' '[:lower:]'", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("${{ github.repository }}/", workflow);
+        Assert.DoesNotContain("${GITHUB_REPOSITORY}/", workflow);
+    }
+
+    [Fact]
     public void The_attestation_is_verified_in_the_same_run()
     {
         // An attestation that does not verify is worth less than none: it
