@@ -60,7 +60,7 @@ public sealed class ChatProviderResolver : IChatProviderResolver
         // The connection's baseUrl is operator-supplied metadata and the
         // provider puts the decrypted key on every request built from it, so
         // it is allowlisted here — at the boundary where untrusted metadata
-        // becomes a destination — rather than in the provider (#61).
+        // becomes a destination — rather than in the provider (archived-61).
         var baseUrl = TryReadString(revealed.Metadata, "baseUrl");
 
         return revealed.Kind switch

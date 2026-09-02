@@ -8,9 +8,9 @@ import type { PythonJob, PythonWorkerMessage } from "./pythonProtocol.js";
 // survives into the next request. The parent owns the deadline: it raises
 // SIGINT through the shared interrupt buffer and hard-terminates the
 // thread if the script does not stop, which is the only way to stop
-// blocking WASM. Both are #58.
+// blocking WASM. Both are archived-58.
 //
-// Sandbox hardening (#161): Pyodide's `js` module is bound to
+// Sandbox hardening (archived-161): Pyodide's `js` module is bound to
 // `jsglobals`, which we make an empty object so `js.process`, `js.eval`,
 // `js.fetch`… do not exist; `pyodide_js` is unregistered (its
 // `loadPackage(url)` is a real network fetch and `FS.mount(NODEFS)` is the
@@ -20,7 +20,7 @@ import type { PythonJob, PythonWorkerMessage } from "./pythonProtocol.js";
 
 const MiB = 1024 * 1024;
 
-// Memory limit (#58). Pyodide's linear memory is a WebAssembly.Memory
+// Memory limit (archived-58). Pyodide's linear memory is a WebAssembly.Memory
 // that Emscripten grows on demand; refusing the grow makes malloc fail and
 // surfaces in Python as a plain MemoryError, leaving the interpreter
 // usable. The cap is baseline-after-load + request.memoryMb so the
@@ -53,7 +53,7 @@ function formatError(err: unknown): string {
 
 function wrapper(job: PythonJob): string {
   // `__inputs_json` / `__config_json` are set on the Python globals by the
-  // worker (never spliced into source — #64). Entry-point check runs in a
+  // worker (never spliced into source — archived-64). Entry-point check runs in a
   // fresh interpreter, so "defined by a previous author" cannot happen.
   const entry =
     job.kind === "transformer"
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   const py = await loadPyodide({
     stdout: () => undefined,
     stderr: () => undefined,
-    // Empty `js` module: no host globals reachable from Python (#161).
+    // Empty `js` module: no host globals reachable from Python (archived-161).
     jsglobals: Object.create(null),
     // Fixed fake environment — the default copies bits of the host's.
     env: { HOME: "/home/pyodide", LANG: "en_US.UTF-8", PATH: "/" },

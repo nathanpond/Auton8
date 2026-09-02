@@ -13,7 +13,7 @@ namespace AutoNate.Web.Services.Agent.Skills;
 // project.
 //
 // IWorkflowModelStore does not gate by actor, so both tools authorize
-// explicitly and mirror the HTTP routes over the same store exactly (#19):
+// explicitly and mirror the HTTP routes over the same store exactly (archived-19):
 // GET /api/workflows/ is RequireKindPermission(WorkflowModel, View), and
 // GET /api/workflows/{id} is RequirePermission(WorkflowModel, View, "id").
 // Without this, asking the chatbot to explain a workflow returned the full

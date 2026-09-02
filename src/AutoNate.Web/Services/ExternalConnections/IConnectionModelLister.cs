@@ -59,7 +59,7 @@ public sealed class ConnectionModelLister : IConnectionModelLister
     private async Task<ListModelsResult> ListAnthropicAsync(ListModelsInput input, CancellationToken cancellationToken)
     {
         var http = _httpClientFactory.CreateClient("agent.anthropic");
-        // Allowlisted before the key is attached (#61).
+        // Allowlisted before the key is attached (archived-61).
         var baseUrl = _baseUrlPolicy.Resolve(input.Kind, input.BaseUrl, "https://api.anthropic.com");
 
         // Anthropic paginates with `after_id`; max page size 1000. A single
@@ -109,7 +109,7 @@ public sealed class ConnectionModelLister : IConnectionModelLister
     private async Task<ListModelsResult> ListOpenAIAsync(ListModelsInput input, CancellationToken cancellationToken)
     {
         var http = _httpClientFactory.CreateClient("agent.openai");
-        // Allowlisted before the key is attached (#61).
+        // Allowlisted before the key is attached (archived-61).
         var baseUrl = _baseUrlPolicy.Resolve(input.Kind, input.BaseUrl, "https://api.openai.com");
 
         using var req = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUrl, "/v1/models"));

@@ -270,7 +270,7 @@ public static class DataStoreEndpoints
         }).RequirePermission(EntityKinds.DataStore, Actions.Edit)
           // Datastore files are the one surface that legitimately accepts a
           // very large body, so the raised ceiling lives here rather than
-          // globally (#67). Program.cs keeps the global limit modest.
+          // globally (archived-67). Program.cs keeps the global limit modest.
           .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(1_073_741_824))
           .DisableAntiforgery();
 
@@ -311,7 +311,7 @@ public static class DataStoreEndpoints
                 // inline rendering today, but same-origin text/html or
                 // image/svg+xml bytes are one refactor away from stored XSS,
                 // so downgrade the executable types and tell the browser not
-                // to sniff — the same treatment page attachments get (#65).
+                // to sniff — the same treatment page attachments get (archived-65).
                 http.Response.Headers["X-Content-Type-Options"] = "nosniff";
                 return Results.File(
                     content,
@@ -772,7 +772,7 @@ public static class DataStoreEndpoints
             {
                 // ex.MessageText is Postgres' own error detail — table and
                 // column names, constraint text, sometimes values. Keep it in
-                // the log and give the caller a correlation id instead (#68).
+                // the log and give the caller a correlation id instead (archived-68).
                 var errorId = Guid.NewGuid().ToString("N")[..12];
                 var logger = loggerFactory.CreateLogger("AutoNate.Web.Endpoints.DataStoreEndpoints");
                 logger.LogWarning(ex,

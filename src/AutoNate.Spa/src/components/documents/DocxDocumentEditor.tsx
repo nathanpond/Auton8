@@ -725,7 +725,7 @@ export default function DocxDocumentEditor({
   }, []);
 
   // Import finalize is driven by watching the editor's own document settle,
-  // not by docx-editor's `onChange` (#173).
+  // not by docx-editor's `onChange` (archived-173).
   //
   // The finalize used to hang off `onChange`, on the assumption that the
   // OOXML parse pass would surface as change events. It does not — the

@@ -207,7 +207,7 @@ public static class ContentDocumentBindingEndpoints
                 // RefreshAllResponse everywhere else, so a client reading
                 // `failures.length` got undefined for a document with no
                 // bindings — a crash on the one input that is guaranteed not
-                // to be interesting (#186).
+                // to be interesting (archived-186).
                 return Results.Ok(new RefreshAllResponse([], []));
             }
 

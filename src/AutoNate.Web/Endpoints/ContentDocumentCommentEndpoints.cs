@@ -417,7 +417,7 @@ public static class ContentDocumentCommentEndpoints
     // real-world race we accept" — but with nothing catching DbUpdateException
     // the loser got an unhandled 500 instead of the 409 the handler promises
     // three lines earlier, and the client's retry logic keys off that 409
-    // (#186).
+    // (archived-186).
     private static async Task<IResult?> TrySaveOrConflictAsync(
         AutoNateDbContext db, Guid documentId, CancellationToken ct)
     {

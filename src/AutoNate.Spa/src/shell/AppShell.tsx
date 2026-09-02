@@ -14,11 +14,11 @@ import "./shell.css";
 
 export default function AppShell() {
   const isScrollable = usePageIsScrollable();
-  // One place that keeps document.title in step with the route (#18).
+  // One place that keeps document.title in step with the route (archived-18).
   const { effectiveAppearance } = useSiteAppearance();
   useRouteDocumentTitle(effectiveAppearance.siteName);
   // Focus the main region on navigation so a screen reader announces the new
-  // page and Tab resumes inside it rather than back in the header (#15).
+  // page and Tab resumes inside it rather than back in the header (archived-15).
   useRouteFocus();
   return (
     <UserPreferencesProvider>

@@ -45,7 +45,7 @@ public sealed class QueryTests : E2ETestBase
     [Fact]
     public async Task QueryPage_DeleteSavedQuery_RemovesItFromTheCombobox()
     {
-        // Audit fix #8 — `deleteSavedQuery` was unreachable from the SPA
+        // Audit fix archived-8 — `deleteSavedQuery` was unreachable from the SPA
         // until this commit. Save → load → Delete is the only path that
         // surfaces the new toolbar button (it's gated on
         // `selectedQuery && canUpdateSelected`), so the test walks
@@ -111,7 +111,7 @@ public sealed class QueryTests : E2ETestBase
     [Fact]
     public async Task QueryPage_IssueShareLink_LandsOnPublicSharedQueryPage()
     {
-        // Audit fix #9 — share links used to point at
+        // Audit fix archived-9 — share links used to point at
         // /api/public/queries/share/{token}, dropping recipients on raw
         // JSON. The new /q/{token} route is an unauthenticated SPA page
         // that calls the same backend endpoint and renders rows in a
@@ -155,7 +155,7 @@ public sealed class QueryTests : E2ETestBase
         // After issuance the modal renders the URL as an Anchor inside a
         // teal "Copy this link now" alert. Pull the href off it — the
         // backend's BuildShareUrl now returns /q/{rawToken} after audit
-        // fix #9 (was /api/public/queries/share/{...}).
+        // fix archived-9 (was /api/public/queries/share/{...}).
         var shareLink = shareDialog.GetByRole(AriaRole.Link).First;
         await Assertions.Expect(shareLink).ToBeVisibleAsync(new() { Timeout = 15_000 });
         var href = await shareLink.GetAttributeAsync("href");

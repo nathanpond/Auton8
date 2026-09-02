@@ -5,7 +5,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Authorization;
 
-// Regression coverage for #59: authorization used to default to
+// Regression coverage for archived-59: authorization used to default to
 // Enabled=false / Enforcement=off with nothing validating it, so a deployment
 // that simply omitted the keys ran with every permission check returning allow.
 public sealed class AuthorizationOptionsValidatorTests

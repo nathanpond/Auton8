@@ -10,7 +10,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Authorization;
 
-// #21: GET /api/content/locator/{n} resolved a sequential long to
+// archived-21: GET /api/content/locator/{n} resolved a sequential long to
 // (kind, id, ancestor chain) with no authorization at all, so
 // `for i in 1..N` handed any signed-in user a complete map of the tenant's
 // content tree — including entities every other endpoint would 404 — plus the

@@ -42,7 +42,7 @@ export default function Router() {
         }
       />
 
-      {/* Public share recipient surface (audit fix #9). NOT wrapped in
+      {/* Public share recipient surface (audit fix archived-9). NOT wrapped in
           ProtectedRoute — anonymous recipients land here via a link
           pasted into Slack / email / a wiki page. The page calls the
           /api/public/queries/share/{token} endpoint which authenticates

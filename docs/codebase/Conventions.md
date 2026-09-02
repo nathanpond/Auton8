@@ -307,7 +307,7 @@ Multi-file wiring recipes live in `.claude/skills/`: `add-permission-gate`, `add
 
 - Vite + React 19 + TypeScript `strict: true`, `moduleResolution: bundler`, path alias `@/* → ./src/*` (`src/AutoNate.Spa/tsconfig.app.json`). Import app code via `@/…`, never relative `../../`.
 - Scripts (`src/AutoNate.Spa/package.json:6-12`): `npm run dev`, `npm run build` (= `tsc -b && vite build`), `npm run type-check`, `npm run lint` (= `eslint src --max-warnings=110 --report-unused-disable-directives`).
-- **Warning ratchet:** `--max-warnings=110` is the current count; it may only go **down**. If your change adds warnings, fix them; if it removes some, lower the number in the same commit (999 → 411 in `8674f2fb`; 411 → 164 when #118 escaped 234 JSX entities and dropped 13 unused disable directives). `--report-unused-disable-directives` is part of the script so a directive that stops being needed fails lint instead of lingering, and `eslint-comments/require-description` is an **error**: every `eslint-disable` must carry a `-- reason` saying why it is safe, because a bare `exhaustive-deps` disable is indistinguishable from a stale-closure bug someone silenced (#32).
+- **Warning ratchet:** `--max-warnings=110` is the current count; it may only go **down**. If your change adds warnings, fix them; if it removes some, lower the number in the same commit (999 → 411 in `8674f2fb`; 411 → 164 when archived-118 escaped 234 JSX entities and dropped 13 unused disable directives). `--report-unused-disable-directives` is part of the script so a directive that stops being needed fails lint instead of lingering, and `eslint-comments/require-description` is an **error**: every `eslint-disable` must carry a `-- reason` saying why it is safe, because a bare `exhaustive-deps` disable is indistinguishable from a stale-closure bug someone silenced (archived-32).
 - ESLint flat config (`src/AutoNate.Spa/eslint.config.js`): `react-hooks/rules-of-hooks` is an **error** (`:59`), `react-hooks/exhaustive-deps` warn (`:60`); jsx-a11y recommended at warn (`:89-97`); `@typescript-eslint/no-explicit-any` off (`:80`); unused vars warn with `_`-prefix escape (`:81`). Real-bug rules stay errors — a lint error blocks; a warning counts against the ratchet.
 - No unit-test runner in the SPA (no vitest/jest in `package.json`); SPA behaviour is verified by Playwright E2E (see `Testing.md`).
 
@@ -527,7 +527,7 @@ A grep-only "zero importers" verdict is not evidence (multi-line destructured im
   Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_…
   ```
-- Issue linkage: `Refs #N` in the body (`01f0f174`: `Refs #7-#93 (audit findings filed 2026-08-31)`). Never `Fixes`/`Closes` in commits — closing keywords are silent no-ops off the default branch and belong in the PR body (n8-exec `SKILL.md:34`).
+- Issue linkage: `Refs #N` in the body (`01f0f174`: `Refs archived-7-archived-93 (audit findings filed 2026-08-31)`). Never `Fixes`/`Closes` in commits — closing keywords are silent no-ops off the default branch and belong in the PR body (n8-exec `SKILL.md:34`).
 
 ### 4.2 Branches and PRs
 
@@ -537,4 +537,4 @@ A grep-only "zero importers" verdict is not evidence (multi-line destructured im
 - Any change that deviates from what planned issues assume (library, provider, architecture, scope, an invariant) gets an `## Ad-hoc — <date>` entry in `.n8/decisions.md` and a `/n8-replan` suggestion to the user (`CLAUDE.md:29-33`). Format is in that file's header.
 - Plans predating n8SDLC live in `docs/plans/YYYY-MM-DD-kebab.md` as historical context; don't add new ones unless asked (auto-memory `reference_plan_location.md`).
 - Whole-codebase audits run via `/n8-audit` with checklists in `.n8/memory/audit-*.md`; a "dead code" claim needs a trial delete before filing (`.n8/memory/audit-conventions.md`).
-- CI runs in `.github/workflows/ci.yml` (three jobs: SPA lint/typecheck/build, backend tests, Playwright E2E), added for issue #79 after this map was generated. The equivalent local gate before merge is `dotnet build AutoNate.sln && (cd src/AutoNate.Spa && npm run lint && npm run build) && dotnet test AutoNate.sln` (`README.md:96-101`).
+- CI runs in `.github/workflows/ci.yml` (three jobs: SPA lint/typecheck/build, backend tests, Playwright E2E), added for issue archived-79 after this map was generated. The equivalent local gate before merge is `dotnet build AutoNate.sln && (cd src/AutoNate.Spa && npm run lint && npm run build) && dotnet test AutoNate.sln` (`README.md:96-101`).

@@ -23,7 +23,7 @@ public sealed class MiscPagesTests : E2ETestBase
 {
     public MiscPagesTests(AutoNateE2EFixture fixture) : base(fixture) { }
 
-    // #18: only four admin datastore pages set a document title; every other
+    // archived-18: only four admin datastore pages set a document title; every other
 
     // tab, history entry and window-switcher row read the bare site name, so
 

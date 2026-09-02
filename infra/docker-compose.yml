@@ -132,7 +132,7 @@ services:
       # the Docker host queue work on `pipeline-code-run.>` (the executor runs
       # it), subscribe to the audit-event and workflow-signal streams, and read
       # JetStream state on 8222 — the HTTP callbacks have a shared-secret
-      # boundary, NATS has none (#66). Containers still reach it as
+      # boundary, NATS has none (archived-66). Containers still reach it as
       # `nats:4222` over the compose network, which is unaffected.
       - "127.0.0.1:4222:4222"
       - "127.0.0.1:8222:8222"
@@ -209,13 +209,13 @@ services:
     # CodeNodeRequests on `pipeline-code-run.<runId>.<nodeId>`
     # (Services/Pipelines/Execution/JetStreamCodeNodeRunner.cs) and this
     # container answers on the reply subject. Without it every code node in a
-    # pipeline times out after 30 s (#114).
+    # pipeline times out after 30 s (archived-114).
     build:
       context: ../services/executor
       dockerfile: Dockerfile
     container_name: autonate-executor
     # Same rationale as hocuspocus: process supervision only. The sidecar
-    # exits on NATS reconnect exhaustion (#69) and should simply come back.
+    # exits on NATS reconnect exhaustion (archived-69) and should simply come back.
     restart: unless-stopped
     depends_on:
       nats:

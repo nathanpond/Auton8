@@ -134,7 +134,7 @@ public sealed class PluginRuntime
             // drop the reference without unloading, so each failed Enable — and
             // PluginEnableFailureDetector actively prompts the admin to retry —
             // leaked one for the process lifetime and blocked re-uploading a
-            // fixed build over the same folder (#70).
+            // fixed build over the same folder (archived-70).
             var retained = false;
             try
             {

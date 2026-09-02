@@ -21,14 +21,14 @@ public sealed class BusWatcherStreamService(ILogger<BusWatcherStreamService> log
 
     private readonly ILogger<BusWatcherStreamService> _logger = logger;
     // The token is part of the delegate so PublishAsync can forward it. Before
-    // #76 the signature had nowhere to put it, so a subscriber could not be
+    // archived-76 the signature had nowhere to put it, so a subscriber could not be
     // cancelled even though Dapr's MessageHandlingPolicy gives the whole
     // dispatch a 30 s budget and redelivers past it.
     private readonly ConcurrentDictionary<Guid, Func<BusWatcherMessage, CancellationToken, Task>> _messageSubscribers = new();
 
     public async Task PublishAsync(BusWatcherMessage message, CancellationToken cancellationToken)
     {
-        // Debug, not Information: this is per-message on a hot path (#76).
+        // Debug, not Information: this is per-message on a hot path (archived-76).
         _logger.LogDebug(
             "BusWatcher publishing message for topic {Topic} to {SubscriberCount} in-process subscribers.",
             message.Topic,

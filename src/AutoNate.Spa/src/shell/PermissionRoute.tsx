@@ -13,7 +13,7 @@ type Props = {
   children: ReactElement;
 };
 
-// Route-level permission guard (#85).
+// Route-level permission guard (archived-85).
 //
 // ProtectedRoute answers "are you signed in?" and nothing else, so a user with
 // no grants could deep-link into an admin shell and get the full chrome — nav,

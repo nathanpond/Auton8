@@ -28,7 +28,7 @@ public sealed class EntityRegistryTests
         Assert.Contains(EntityKinds.SiteConfig, kinds);
         Assert.Contains(EntityKinds.Project, kinds);
         Assert.Contains(EntityKinds.Cabinet, kinds);
-        // Document and Folder joined the registry with #25 — they were enforced
+        // Document and Folder joined the registry with archived-25 — they were enforced
         // on 22 routes and honoured by ContentAuthorizer's selectors, but the
         // Grants admin picker could not offer them because /api/admin/registry
         // is built from this list.

@@ -7,9 +7,9 @@ using Xunit.Abstractions;
 
 namespace AutoNate.E2E.Tests;
 
-// Automated WCAG scan over the pages a signed-in user actually lives on (#40).
+// Automated WCAG scan over the pages a signed-in user actually lives on (archived-40).
 //
-// This is the permanent version of the 508 findings fixed by hand in #7–#17:
+// This is the permanent version of the 508 findings fixed by hand in archived-7–archived-17:
 // eslint catches markup patterns in source, axe catches what the rendered DOM
 // actually exposes — a colour pair that fails, a control with no accessible
 // name, a landmark that never got labelled. Neither substitutes for the

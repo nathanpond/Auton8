@@ -3,7 +3,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
-// #48: the Site Configuration menu seeded a "Features" item pointing at the
+// archived-48: the Site Configuration menu seeded a "Features" item pointing at the
 // configFeatures template, but SettingGroup.Features has no settings defined,
 // so the item led to a form that reads "No settings in this group yet."
 //

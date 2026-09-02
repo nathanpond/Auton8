@@ -1,7 +1,7 @@
 import type { onAuthenticatePayload } from "@hocuspocus/server";
 
 // Cross-service calls to the .NET host get an explicit budget; undici's
-// default is 300 s, which is indistinguishable from a hang (#75).
+// default is 300 s, which is indistinguishable from a hang (archived-75).
 const AUTONATE_FETCH_TIMEOUT_MS = 5_000;
 
 export interface AuthConfig {
@@ -32,7 +32,7 @@ export function createAuthHook(config: AuthConfig) {
       // host is up but wedged, every new document connection sits here for
       // five minutes holding an open WebSocket and a pending fetch, and a
       // refresh storm accumulates hundreds of them. The .NET side sets
-      // explicit per-dependency budgets the same way (#75).
+      // explicit per-dependency budgets the same way (archived-75).
       signal: AbortSignal.timeout(AUTONATE_FETCH_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",

@@ -359,7 +359,7 @@ public static class PageAttachmentEndpoints
     // Content-Disposition: attachment when embedded via <iframe>, <object>,
     // <embed>, or <img> (SVG). On download these are forced to
     // application/octet-stream.
-    // Shared with the datastore download so the two cannot drift (#65).
+    // Shared with the datastore download so the two cannot drift (archived-65).
     private static string SanitizeResponseContentType(string? contentType) =>
         ResponseContentTypes.Sanitize(contentType);
 

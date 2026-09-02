@@ -114,7 +114,7 @@ export function FaIconPicker({ value, onChange }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           // The visible label belongs to the picker as a whole (a group of
           // buttons), so this search box carries its own name rather than
-          // borrowing one — otherwise it announces as "edit, blank" (#9).
+          // borrowing one — otherwise it announces as "edit, blank" (archived-9).
           aria-label="Search icons"
           placeholder="Search icons (e.g. 'gear', 'user', 'rocket')"
           style={{
@@ -177,7 +177,7 @@ export function FaIconPicker({ value, onChange }: Props) {
                   aria-label={row.label}
                   // Selection was signalled by border + background colour
                   // only — nothing a screen reader or a colour-blind user
-                  // could perceive (#8, WCAG 1.4.1).
+                  // could perceive (archived-8, WCAG 1.4.1).
                   aria-pressed={active}
                   title={`${row.label} (${key})`}
                   style={{

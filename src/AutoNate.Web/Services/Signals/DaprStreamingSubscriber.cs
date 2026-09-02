@@ -253,7 +253,7 @@ public sealed class DaprStreamingSubscriber(
 
             // Start draining both pipes before waiting: a child that writes
             // more than the ~64 KB pipe buffer blocks on write while we block
-            // on exit, and neither side moves again (#73).
+            // on exit, and neither side moves again (archived-73).
             var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
             var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
 
@@ -267,7 +267,7 @@ public sealed class DaprStreamingSubscriber(
                 // our wrapper — the script and anything it spawned keep
                 // running, and RestartCooldown re-fires every two minutes, so
                 // without this the watchdog accumulates orphaned bash/daprd
-                // children indefinitely while pub/sub stays broken (#73).
+                // children indefinitely while pub/sub stays broken (archived-73).
                 try
                 {
                     process.Kill(entireProcessTree: true);

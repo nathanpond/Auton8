@@ -41,7 +41,7 @@ export const DEFAULT_SITE_APPEARANCE: SiteAppearance = {
   sidebarSubmenuBg: "#ffffff",
   // #adb5bd was 2.07:1 on the white sidebar — the SITE / SECURITY group
   // headings that make a 30-item admin nav navigable were effectively
-  // invisible to low-vision users (WCAG 1.4.3, #7). #5c636a is 6.09:1 and
+  // invisible to low-vision users (WCAG 1.4.3, archived-7). #5c636a is 6.09:1 and
   // still reads as a muted heading rather than body text.
   sidebarSectionColor: "#5c636a",
   surfaceBg: "#ffffff",
@@ -310,7 +310,7 @@ const CONTRAST_CHECKS: ContrastCheck[] = [
   { fgKey: "sidebarActiveColor", bgKey: "sidebarActiveBg", pairLabel: "Active sidebar link", required: 4.5, reason: "text" },
   // 0.78rem bold uppercase is not WCAG "large text", so this needs the full
   // 4.5:1. Omitting the pair is why the default shipped at 2.07:1 without the
-  // admin editor ever warning (#7).
+  // admin editor ever warning (archived-7).
   { fgKey: "sidebarSectionColor", bgKey: "sidebarBg", pairLabel: "Sidebar section heading", required: 4.5, reason: "text" },
   // UI components (3:1): the primary accent has to register against the
   // surface bg as a button / focus ring boundary.
@@ -322,7 +322,7 @@ export function checkContrastWarnings(appearance: SiteAppearance): ContrastWarni
 
   // Filled primary buttons and status pills take their text colour from
   // badgeTextColor, which now returns the better of black/white rather than a
-  // YIQ guess (#14). For some accents neither reaches 4.5:1 — that is a
+  // YIQ guess (archived-14). For some accents neither reaches 4.5:1 — that is a
   // property of the accent, not something the text colour can fix, so the
   // admin has to be told rather than shipped an unreadable button.
   const accentText = bestTextContrastOn(appearance.primaryAccentColor);

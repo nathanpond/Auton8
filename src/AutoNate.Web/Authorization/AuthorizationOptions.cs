@@ -7,7 +7,7 @@ public sealed class AuthorizationOptions
     // Fail closed. Every deployment that does not say otherwise enforces
     // grants; `AuthorizationOptionsValidator` additionally refuses to start
     // outside Development unless these two are explicitly on, so an operator
-    // cannot silently ship an open system by omitting configuration (#59).
+    // cannot silently ship an open system by omitting configuration (archived-59).
     public bool Enabled { get; set; } = true;
 
     // One of AuthorizationEnforcement.{Off,ReadOnly,Full}. Compared with

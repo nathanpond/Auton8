@@ -15,7 +15,7 @@ export function normalizeHex(value: string): string | null {
   return trimmed.toLowerCase();
 }
 
-// Text colour for a filled badge, pill or button (#14).
+// Text colour for a filled badge, pill or button (archived-14).
 //
 // This used to threshold YIQ brightness — (0.299R + 0.587G + 0.114B) > 160 —
 // which is a video-encoding measure with no defined relationship to contrast

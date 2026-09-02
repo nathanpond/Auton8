@@ -285,7 +285,7 @@ builder.Services.AddSingleton<AutoNate.Web.Persistence.IDatabaseInitializer,
     AutoNate.Web.Persistence.PrimaryDatabaseInitializer>();
 // Authorization posture is fail-closed by default and validated at start-up:
 // a deployment cannot end up with grants ignored by simply omitting these keys
-// (#59). Mirrors the CallbackSharedSecret / InternalSharedSecret validators
+// (archived-59). Mirrors the CallbackSharedSecret / InternalSharedSecret validators
 // below. Development stays free to run with enforcement off.
 builder.Services.AddSingleton<
     Microsoft.Extensions.Options.IValidateOptions<AutoNate.Web.Authorization.AuthorizationOptions>>(
@@ -656,7 +656,7 @@ builder.Services.AddScoped<IAgentSkill, ManageRecordTypesSkill>();
 // the per-turn ChatRequest when chatbot.internetAccessEnabled is off.
 builder.Services.AddScoped<IAgentSkill, WebFetchSkill>();
 builder.Services.AddSingleton<IDnsResolver, SystemDnsResolver>();
-// Outbound-URL guards for user-supplied destinations (#60, #61). The DNS/
+// Outbound-URL guards for user-supplied destinations (archived-60, archived-61). The DNS/
 // private-address guard is for open-ended destinations (the REST data
 // connector); the base-URL policy is the allowlist used wherever a stored
 // provider credential is about to be sent somewhere.
@@ -951,7 +951,7 @@ builder.Services.AddHttpClient(); // DaprApplicationEventPublisher needs IHttpCl
 // transaction holding FOR UPDATE locks on the batch. On the unnamed client's
 // 100 s default, a sidecar that accepts TCP but stalls could hold that
 // transaction open for hours across a 100-row batch — idle in transaction,
-// autovacuum's xmin horizon pinned database-wide (#71). Five seconds is far
+// autovacuum's xmin horizon pinned database-wide (archived-71). Five seconds is far
 // beyond a healthy local publish and bounds the whole batch to ~8 minutes
 // worst case.
 builder.Services.AddHttpClient(
@@ -960,7 +960,7 @@ builder.Services.AddHttpClient(
 // Global request-body ceiling. This is deliberately modest: JSON routes need
 // kilobytes and the plugin upload route caps itself at Plugins:MaxUploadBytes
 // (50 MB by default), so a 1 GiB global limit removed the cheapest defence
-// against a body that expands in managed memory downstream (#67). Routes that
+// against a body that expands in managed memory downstream (archived-67). Routes that
 // genuinely accept large uploads — datastore files — raise it per route with
 // RequestSizeLimit / IHttpMaxRequestBodySizeFeature.
 const long GlobalMaxRequestBodyBytes = 64L * 1024 * 1024;
@@ -1069,14 +1069,14 @@ var app = builder.Build();
 // Reading .Value here runs AuthorizationOptionsValidator before any database
 // or hosted-service work, so a fail-open posture — or an Enforcement value the
 // evaluator would silently read as "not full" — crashes start-up with the
-// offending key named rather than serving an open system (#59). ValidateOnStart
+// offending key named rather than serving an open system (archived-59). ValidateOnStart
 // covers the same ground if this line ever moves.
 var authPosture = app.Services
     .GetRequiredService<Microsoft.Extensions.Options.IOptions<AutoNate.Web.Authorization.AuthorizationOptions>>()
     .Value;
 
 // Fail-open-ish authorization flags that are legitimate but should never be
-// left on silently in a real environment (#59). Neither is a refusal: DryRun is
+// left on silently in a real environment (archived-59). Neither is a refusal: DryRun is
 // the documented staged-rollout tool, and the SuperAdmin backfill is the only
 // thing that grants a greenfield install its first admin.
 if (!app.Environment.IsDevelopment())
@@ -1670,7 +1670,7 @@ if (Directory.Exists(app.Environment.WebRootPath))
     // returns false for a missing value. Without this explicit root fallback
     // GET / is a bare 404 while /home and every deep link serve the shell —
     // which is exactly how the E2E suite broke (SignInAsync starts at "/").
-    // Regression guard: SpaRootFallbackTests. Refs #132.
+    // Regression guard: SpaRootFallbackTests. Refs archived-132.
     app.MapFallbackToFile("/", "index.html");
 }
 

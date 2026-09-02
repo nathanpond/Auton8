@@ -188,7 +188,7 @@ public static class SystemIssueEndpoints
         }).RequireKindPermission(EntityKinds.SystemIssue, Actions.Remediate)
           .DisableAntiforgery();
 
-        // Dead-letter register (#44). AuditOutboxDeadLetterParkRemediator
+        // Dead-letter register (archived-44). AuditOutboxDeadLetterParkRemediator
         // moves abandoned audit_outbox rows into audit_outbox_dead_letters so
         // "forensics is still possible" — but nothing read the table, so the
         // self-healing story ended in a place only psql could reach.

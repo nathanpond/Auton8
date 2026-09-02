@@ -111,7 +111,7 @@ export default function Login() {
         >
           {/* role="alert" so a failed sign-in is announced. Without it the
               user is left on a form that appears to have done nothing —
-              the error renders silently (WCAG 3.3.1 / 4.1.3, #17). */}
+              the error renders silently (WCAG 3.3.1 / 4.1.3, archived-17). */}
           <Alert color="red" variant="filled" radius="md" role="alert">
             {error === "locked"
               ? "This account is locked after too many failed sign-in attempts. Contact an administrator to unlock it."
@@ -152,7 +152,7 @@ export default function Login() {
                 mid-form, past the brand and heading that say which site they
                 are signing in to, and it is the whole of jsx-a11y's
                 no-autofocus warning here. The form is two fields — Tab
-                reaches them immediately (#17). */}
+                reaches them immediately (archived-17). */}
             <TextInput
               label="Username"
               placeholder="Username"

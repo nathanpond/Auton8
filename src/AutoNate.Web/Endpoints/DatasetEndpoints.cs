@@ -170,7 +170,7 @@ public static class DatasetEndpoints
                 return Results.BadRequest(new { reason = $"Data store '{request.DataStoreId}' not found." });
 
             // Authorize the *datastore* being read, not just the dataset the
-            // caller intends to create (#183).
+            // caller intends to create (archived-183).
             //
             // The route gate is RequireKindPermission(Dataset, Create), and
             // that was the only check. The handler then read an arbitrary file
@@ -216,7 +216,7 @@ public static class DatasetEndpoints
                 // FileDataStoreService.ResolveAbsolutePath resolves to the
                 // datastores root *directory*, so the DownloadAsync below threw
                 // and — with no exception-handling middleware — the caller got a
-                // 500 carrying the exception text and stack (#184). The folder
+                // 500 carrying the exception text and stack (archived-184). The folder
                 // branch already filters it out; the file branch did not, and it
                 // is not a file anyone can preview.
                 if (string.Equals(filename, ".keep", StringComparison.OrdinalIgnoreCase))

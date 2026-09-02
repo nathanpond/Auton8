@@ -24,7 +24,7 @@ internal sealed class NatsConnectionProvider(IOptions<NatsOptions> options) : IN
     public async Task<INatsConnection> GetAsync(CancellationToken cancellationToken = default)
     {
         // Volatile so the fast path can't observe a partially-published
-        // NatsConnection written by another thread inside the gate (#78);
+        // NatsConnection written by another thread inside the gate (archived-78);
         // AgentModelCatalog.GetOrLoad uses the same shape.
         var existing = Volatile.Read(ref _connection);
         if (IsUsable(existing)) return existing!;
@@ -47,7 +47,7 @@ internal sealed class NatsConnectionProvider(IOptions<NatsOptions> options) : IN
             var conn = new NatsConnection(new NatsOpts { Url = _options.Url ?? string.Empty });
             // NatsConnection.ConnectAsync takes no CancellationToken in this
             // NATS.Net version, so honour the caller's token around it rather
-            // than letting a hung connect ignore it entirely (#78).
+            // than letting a hung connect ignore it entirely (archived-78).
             await conn.ConnectAsync().AsTask().WaitAsync(cancellationToken);
             Volatile.Write(ref _connection, conn);
             return conn;

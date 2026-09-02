@@ -57,7 +57,7 @@ public sealed class AgentConversationTests : E2ETestBase
         // The UI click has to be what deleted it. This line used to issue an
         // unconditional API DELETE before the assertions below, so they passed
         // whether or not the button did anything — the only test of the delete
-        // affordance could not fail (#84). Now it asserts the server already
+        // affordance could not fail (archived-84). Now it asserts the server already
         // has no such conversation, and deletes nothing itself.
         var afterDelete = await PollForDeletionAsync(page, conversationId);
         Assert.Equal(404, afterDelete);

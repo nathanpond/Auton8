@@ -116,7 +116,7 @@ public static class DataConnectorEndpoints
 
         // Fetch a small sample of rows from the connector without
         // persisting any state. The audit's "no fetch data preview surface"
-        // gap (#6) — previously authors had to point a Dataset at the
+        // gap (archived-6) — previously authors had to point a Dataset at the
         // connector and wait for a refresh tick to know if the config was
         // pulling anything. Uses a buffered sink that throws a sentinel
         // exception once the cap is reached so handlers that streamingly
@@ -156,7 +156,7 @@ public static class DataConnectorEndpoints
                 // but the raw text carries internal hostnames, connection-
                 // string fragments and driver detail, which is reconnaissance
                 // for anyone holding DataConnector:Connect. Log the detail
-                // against a correlation id and hand back only the id (#68).
+                // against a correlation id and hand back only the id (archived-68).
                 var errorId = Guid.NewGuid().ToString("N")[..12];
                 loggerFactory
                     .CreateLogger("AutoNate.Web.Endpoints.DataConnectorEndpoints")

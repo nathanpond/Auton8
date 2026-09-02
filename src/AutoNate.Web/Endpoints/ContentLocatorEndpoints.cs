@@ -151,7 +151,7 @@ public static class ContentLocatorEndpoints
             // complete map of the tenant's content tree — kind, GUID and
             // ancestor chain for every project, cabinet, notebook, page and
             // note — to any signed-in user, handing them the ids to feed
-            // other endpoints (#21). Every hit is authorized before it is
+            // other endpoints (archived-21). Every hit is authorized before it is
             // returned, and a denial is the same NotFound an unknown locator
             // gets, so the endpoint reveals neither content nor existence.
             async Task<bool> CanViewAsync(string kind, Guid id) =>

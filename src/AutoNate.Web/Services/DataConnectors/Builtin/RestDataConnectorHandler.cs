@@ -97,7 +97,7 @@ public sealed class RestDataConnectorHandler(
     // ({"url": "", "authMode": "none"} — DataConnectorsPage.tsx), while
     // System.Text.Json binds case-sensitively by default. Without this every
     // UI-authored REST connector deserialized to an empty Url and failed with
-    // "config is missing Url", which reads as operator error (#165).
+    // "config is missing Url", which reads as operator error (archived-165).
     private static readonly JsonSerializerOptions ConfigJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -118,7 +118,7 @@ public sealed class RestDataConnectorHandler(
 
     // The connector URL is user-supplied config, and the reply body is parsed
     // into rows the caller sees, so an unguarded fetch reads cloud-metadata
-    // credentials and internal-only APIs straight out through the app (#60).
+    // credentials and internal-only APIs straight out through the app (archived-60).
     // The set of legitimate destinations is open-ended here — calling
     // third-party APIs is the whole feature — so this is the private-address
     // guard rather than an allowlist. Runs before any socket opens.

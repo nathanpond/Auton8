@@ -234,7 +234,7 @@ public sealed class NotesTests : E2ETestBase
             .ToBeVisibleAsync(new() { Timeout = 10_000 });
     }
 
-    // Regression for #151: the comment-audit proxy POSTs the Yjs document
+    // Regression for archived-151: the comment-audit proxy POSTs the Yjs document
     // name (`note:<guid>` here), which the endpoint used to reject with 400,
     // so no comment ever reached the content.events bus. Drives BlockNote's
     // real "Add comment" flow on a richtext note and asserts the round-trip.
@@ -286,7 +286,7 @@ public sealed class NotesTests : E2ETestBase
 
     // Coverage for the Excalidraw bundle. The drawing note is the only surface
     // that loads @excalidraw/excalidraw and its mermaid/nanoid chain, and it
-    // had no test at all — which mattered when #37 forced patched nanoid
+    // had no test at all — which mattered when archived-37 forced patched nanoid
     // versions underneath it. ConsoleErrorGuard makes this a real check: a
     // module that fails to initialise shows up as a page error.
     [Fact]
@@ -313,7 +313,7 @@ public sealed class NotesTests : E2ETestBase
         await Assertions.Expect(page.GetByRole(AriaRole.Alert)).Not.ToBeVisibleAsync();
     }
 
-    // #10: page rows in the Notes explorer were <div onClick> with no
+    // archived-10: page rows in the Notes explorer were <div onClick> with no
     // tabIndex, role or key handler and no alternate link, so a keyboard-only
     // user could reach Notes and then not open a single page — the module's
     // primary task was unreachable (WCAG 2.1.1 / 4.1.2).

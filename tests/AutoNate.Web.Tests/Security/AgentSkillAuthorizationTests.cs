@@ -12,7 +12,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Security;
 
-// #19 / #20: two agent skills read gated entities through stores that do not
+// archived-19 / archived-20: two agent skills read gated entities through stores that do not
 // gate by actor, so a user the REST API answers with 403 could read the same
 // data by asking the chatbot — full BPMN for every workflow model, and system
 // issues whose FactsJson carries verbatim production exception text.
@@ -21,7 +21,7 @@ namespace AutoNate.Web.Tests.Security;
 // refused *before* the read, not that the data is filtered afterwards.
 public sealed class AgentSkillAuthorizationTests
 {
-    // ---- #19 explain-workflow -------------------------------------------
+    // ---- archived-19 explain-workflow -------------------------------------------
 
     [Fact]
     public async Task explain_workflow_denies_without_a_workflowmodel_view_grant()
@@ -87,7 +87,7 @@ public sealed class AgentSkillAuthorizationTests
         Assert.Equal(Message(missing), Message(denied));
     }
 
-    // ---- #20 analyze-system-issue ---------------------------------------
+    // ---- archived-20 analyze-system-issue ---------------------------------------
 
     [Fact]
     public async Task list_system_issues_denies_without_a_systemissue_view_grant()
@@ -132,7 +132,7 @@ public sealed class AgentSkillAuthorizationTests
 
     // Every skill in the assembly must be classified here. A new skill fails
     // this test until its author states how it is gated — which is the whole
-    // point: #19 and #20 were both "nobody noticed this one reads gated data".
+    // point: archived-19 and archived-20 were both "nobody noticed this one reads gated data".
     private static readonly Dictionary<string, SkillGate> ExpectedGates = new(StringComparer.Ordinal)
     {
         // Consult IAuthorizer directly.
@@ -202,7 +202,7 @@ public sealed class AgentSkillAuthorizationTests
 
     // The regression guard proper: a skill classified as authorizer-gated must
     // still consult an authorizer. Deleting the guard from ExplainWorkflowSkill
-    // or AnalyzeSystemIssueSkill — the exact shape of #19 and #20 — fails here.
+    // or AnalyzeSystemIssueSkill — the exact shape of archived-19 and archived-20 — fails here.
     //
     // This reads the source rather than reflecting, deliberately: an IL scan
     // silently under-reports (it missed the notes skills, which authorize

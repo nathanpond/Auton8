@@ -247,7 +247,7 @@ export default function DatasetsPage() {
     }
   });
 
-  // Audit fix #13 — Edit modal. Separate from the create modal because
+  // Audit fix archived-13 — Edit modal. Separate from the create modal because
   // the backend's UpdateDatasetRequest accepts only Name / Description /
   // RefreshCron (mode / source / columns are locked once the cache
   // table / virtual view exists). Reusing the create modal would mean

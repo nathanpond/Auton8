@@ -21,7 +21,7 @@ namespace AutoNate.Web.Endpoints;
 // resolved against the *requested* kind via MapKindToEntityKind — a row
 // can be an analyzer, and gating everything on Transformer meant
 // `analyzer:*` grants were never enforced while a Transformer:Run grant
-// conferred authoring rights (#23). Row-level access is still owner-only
+// conferred authoring rights (archived-23). Row-level access is still owner-only
 // at the store boundary in v1; the kind-level check runs first.
 public static class CodeTransformerEndpoints
 {
@@ -46,7 +46,7 @@ public static class CodeTransformerEndpoints
             if (row is null) return Results.NotFound();
             // The response carries the full Python/JS body, including for rows
             // flagged IsUnsafe, so it needs View on the row's own kind. A
-            // denial is a NotFound so holding a GUID reveals nothing (#22).
+            // denial is a NotFound so holding a GUID reveals nothing (archived-22).
             if (!await CanAsync(authorizer, http, row.Kind, Actions.View, ct))
             {
                 return Results.NotFound();
@@ -67,7 +67,7 @@ public static class CodeTransformerEndpoints
             var actorId = http.GetActorId();
             if (actorId == Guid.Empty) return Results.Unauthorized();
             // Authoring right on the kind actually being created — not
-            // Transformer:Run, which is an execution grant (#23).
+            // Transformer:Run, which is an execution grant (archived-23).
             if (!await CanAsync(authorizer, http, request.Kind, Actions.Create, ct))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -279,7 +279,7 @@ public static class CodeTransformerEndpoints
 
     // Kind-level check against the row's / request's own kind. Every gate in
     // this file goes through here so a transformer grant can never be read as
-    // an analyzer grant, or vice versa (#23).
+    // an analyzer grant, or vice versa (archived-23).
     private static async Task<bool> CanAsync(
         IAuthorizer authorizer, HttpContext http, string codeKind, string action, CancellationToken ct)
     {

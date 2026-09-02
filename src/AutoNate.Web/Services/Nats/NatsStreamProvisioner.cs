@@ -94,7 +94,7 @@ public sealed class NatsStreamProvisioner(
         // a stream. It is core request/reply between JetStreamCodeNodeRunner and
         // the services/executor queue subscriber; capturing it in a stream made
         // JetStream answer every request with a PubAck before the sidecar could
-        // reply (#141). See LegacyStreamsToRemove.
+        // reply (archived-141). See LegacyStreamsToRemove.
     ];
 
     // Streams that previous versions of the app provisioned but no longer
@@ -105,7 +105,7 @@ public sealed class NatsStreamProvisioner(
     private static readonly string[] LegacyStreamsToRemove =
     [
         "autonate-records",
-        // Captured `pipeline-code-run.>` and shadowed executor replies (#141).
+        // Captured `pipeline-code-run.>` and shadowed executor replies (archived-141).
         "pipeline-code-runs"
     ];
 

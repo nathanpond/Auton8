@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 namespace AutoNate.Web.Services.ExternalConnections;
 
 /// <summary>
-/// Decides which host a provider credential may be sent to (#61).
+/// Decides which host a provider credential may be sent to (archived-61).
 /// </summary>
 /// <remarks>
 /// The <c>baseUrl</c> on an external connection is operator-supplied metadata

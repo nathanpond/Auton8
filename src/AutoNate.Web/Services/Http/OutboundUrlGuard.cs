@@ -16,7 +16,7 @@ namespace AutoNate.Web.Services.Http;
 /// <remarks>
 /// Use this where the set of legitimate destinations is open-ended and an
 /// allowlist is therefore impossible — the REST data connector exists to call
-/// arbitrary third-party APIs (#60). Where the legitimate hosts <i>are</i>
+/// arbitrary third-party APIs (archived-60). Where the legitimate hosts <i>are</i>
 /// known, prefer <c>IProviderBaseUrlPolicy</c>: an allowlist is strictly
 /// stronger, because it does not depend on classifying an address correctly.
 ///
@@ -125,7 +125,7 @@ public sealed class OutboundUrlGuard : IOutboundUrlGuard
 
 /// <summary>
 /// Address classification shared by every outbound guard. Single copy on
-/// purpose — this used to live on <c>WebFetchSkill</c>, and #60 was partly a
+/// purpose — this used to live on <c>WebFetchSkill</c>, and archived-60 was partly a
 /// consequence of it not being reachable from anywhere else.
 /// </summary>
 public static class OutboundAddressRules

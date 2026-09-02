@@ -25,7 +25,7 @@ public partial class PipelineRunStep
 
     public string? ErrorMessage { get; set; }
 
-    // JSONB array of step log entries (audit fix #11). The orchestrator
+    // JSONB array of step log entries (audit fix archived-11). The orchestrator
     // accumulates entries during execution and writes them on step
     // completion; on a fresh row the EF default `"[]"` matches the DB
     // default so an unread step is safely empty.

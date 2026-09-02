@@ -3,7 +3,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Security;
 
-// #62: every per-plugin LOGIN role inherits plg_readers, and plg_readers was
+// archived-62: every per-plugin LOGIN role inherits plg_readers, and plg_readers was
 // granted SELECT on ALL TABLES IN SCHEMA public (plus default privileges for
 // future tables). Reading app tables is a documented plugin capability
 // (IPluginDataAccess), but "app tables" was never meant to include password

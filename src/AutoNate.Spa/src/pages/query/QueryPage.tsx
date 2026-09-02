@@ -395,7 +395,7 @@ export default function QueryPage() {
   });
 
   // Delete mutation — gated to the owner of the loaded saved query.
-  // Audit fix #8: the only mutations reachable from this page before
+  // Audit fix archived-8: the only mutations reachable from this page before
   // were save / update / share, so a user could rename or share a saved
   // query but never remove one. On success we clear the selection so
   // the editor doesn't keep pointing at a row that no longer exists.

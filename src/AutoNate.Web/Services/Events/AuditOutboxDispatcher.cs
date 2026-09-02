@@ -45,7 +45,7 @@ public sealed class AuditOutboxDispatcher(
     ILogger<AuditOutboxDispatcher> logger) : BackgroundService
 {
     // Named so the timeout below is attached to *this* caller rather than to
-    // the shared unnamed client every other consumer also resolves (#71).
+    // the shared unnamed client every other consumer also resolves (archived-71).
     public const string HttpClientName = "audit-outbox";
 
     private readonly DaprOptions _daprOptions = daprOptions.Value;

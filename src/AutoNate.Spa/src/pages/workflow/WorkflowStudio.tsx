@@ -2188,7 +2188,7 @@ function SignalStartEventModal({
     // Composite key is topic + eventType joined by U+0000, which cannot occur
     // in either value — a plain concatenation would collide ("ab"+"c" vs
     // "a"+"bc"). It was previously a *literal* NUL byte in this file, which
-    // made grep classify all 3,900 lines as binary and skip them (#116); the
+    // made grep classify all 3,900 lines as binary and skip them (archived-116); the
     // escape keeps the exact same runtime key without that.
     for (const category of catalog?.categories ?? []) {
       for (const evt of category.events) {

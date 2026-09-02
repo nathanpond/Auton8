@@ -7,7 +7,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Authorization;
 
-// #45: PUT /api/records/{id}/assignees carries
+// archived-45: PUT /api/records/{id}/assignees carries
 // RequirePermission(Record, Assign) but has no caller outside its own test —
 // the SPA changes assignees through PATCH /api/records/{id}, which was gated
 // on Edit alone. So Record:Assign could be granted or denied with no

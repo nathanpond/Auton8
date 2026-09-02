@@ -13,7 +13,7 @@ namespace AutoNate.Web.Endpoints;
 /// stored XSS against the session cookie.
 ///
 /// Page attachments have always done this; the datastore file download did not,
-/// which is #65. Shared here so the two cannot drift — a new download route
+/// which is archived-65. Shared here so the two cannot drift — a new download route
 /// should reach for this rather than reinvent the list.
 /// </remarks>
 public static class ResponseContentTypes

@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AutoNate.Web.Services.Records.Rollups;
 
-// Full historical recompute of the record-activity rollup (#112).
+// Full historical recompute of the record-activity rollup (archived-112).
 //
 // RecordActivityRollupFeed recomputes only the last RecentDayWindow days on
 // each tick, and its comment already promised that "the full historical

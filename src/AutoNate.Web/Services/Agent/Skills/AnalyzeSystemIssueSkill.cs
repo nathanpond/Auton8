@@ -15,7 +15,7 @@ namespace AutoNate.Web.Services.Agent.Skills;
 // tools take the same kind-level gate the REST surface uses —
 // RequireKindPermission(SystemIssue, View) on SystemIssueEndpoints. Without
 // it a non-admin read production stack traces and failing ids through chat
-// while GET /api/system-issues answered them 403 (#20).
+// while GET /api/system-issues answered them 403 (archived-20).
 public sealed class AnalyzeSystemIssueSkill : IAgentSkill
 {
     public string Name => "analyze-system-issue";

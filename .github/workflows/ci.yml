@@ -2,7 +2,7 @@ name: CI
 
 # Every other test finding in the register is unenforced without this: nothing
 # stopped a PR that deleted assertions, skipped a suite, or broke the auth
-# enforcement tests (#79). The suites already existed and were green — they
+# enforcement tests (archived-79). The suites already existed and were green — they
 # just only ever ran on one machine.
 #
 # Three jobs rather than one, so a red build says *what* broke without reading
@@ -302,7 +302,7 @@ jobs:
       #
       # This is a real coverage gap, not a cleanup: 155 of 163 specs run.
       # Standing up Flowable — a Spring Boot service built from source — and
-      # Dapr in CI is its own piece of work, tracked on #79. Until then the
+      # Dapr in CI is its own piece of work, tracked on archived-79. Until then the
       # full suite remains the local and pre-release gate.
       - name: Test
         run: |

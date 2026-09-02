@@ -49,7 +49,7 @@ public sealed class WebSearchProviderResolver : IWebSearchProviderResolver
         if (!revealed.Kind.StartsWith(KindPrefix, StringComparison.Ordinal)) return null;
 
         // Allowlisted at the boundary: the Tavily key rides on every search
-        // request built from this base URL (#61).
+        // request built from this base URL (archived-61).
         var baseUrl = TryReadString(revealed.Metadata, "baseUrl");
 
         return revealed.Kind switch

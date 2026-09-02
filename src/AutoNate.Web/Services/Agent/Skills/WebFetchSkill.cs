@@ -230,7 +230,7 @@ public sealed class WebFetchSkill : IAgentSkill
 
     // Kept as the skill's public surface (its tests pin this name), but the
     // rules live in one place now — OutboundAddressRules — so the REST data
-    // connector's guard and this one cannot drift apart (#60).
+    // connector's guard and this one cannot drift apart (archived-60).
     public static bool IsBlockedAddress(IPAddress address) =>
         AutoNate.Web.Services.Http.OutboundAddressRules.IsBlocked(address);
 

@@ -16,7 +16,7 @@ using Xunit;
 namespace AutoNate.Web.Tests.Pipelines;
 
 /// <summary>
-/// Regression guard for #141. Runs against the real NATS in the test infra
+/// Regression guard for archived-141. Runs against the real NATS in the test infra
 /// (same server the app provisions streams on). A throw-away JetStream stream
 /// captures <c>pipeline-code-run.&gt;</c> so the server answers every request
 /// with a PubAck first — the exact condition that made the old

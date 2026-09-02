@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useRef } from "react";
 import { Modal } from "@mantine/core";
 import { notesTheme } from "./notesTheme";
 
-// Shared dialog shell for every Notes modal (#8).
+// Shared dialog shell for every Notes modal (archived-8).
 //
 // The twelve Notes dialogs were each a hand-rolled `<div onClick={onClose}>`
 // overlay wrapping a `<div onClick={stopPropagation}>` panel. That renders no
@@ -148,7 +148,7 @@ export function NotesModal({
 
 // Field styling shared by the Notes dialogs. Passed to Mantine inputs via
 // `styles`, so the label is a real <label htmlFor> wired to the control
-// (#9) while still looking like the prototype's uppercase micro-label.
+// (archived-9) while still looking like the prototype's uppercase micro-label.
 // Previously `Label` rendered a bare <div> next to an unlabelled <input>,
 // and screen readers announced the field as "edit, blank".
 export const notesInputStyles = {

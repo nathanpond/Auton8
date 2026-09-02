@@ -230,7 +230,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // "Now listening" only proves Kestrel is up. Every spec starts at "/"
         // (SignInAsync), so if the host isn't serving the SPA shell there the
         // whole run degrades into N identical 30 s element timeouts with no
-        // clue why (that is precisely how #132 presented: a route-constraint
+        // clue why (that is precisely how archived-132 presented: a route-constraint
         // change made "/" a bare 404 while deep links still worked). Probe it
         // once here and fail with the app's output instead.
         await AssertSpaShellServedAsync(baseUrl, stdoutBuffer, stderrBuffer);

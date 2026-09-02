@@ -3,12 +3,12 @@ using System.IO.Compression;
 namespace AutoNate.Web.Plugins;
 
 /// <summary>
-/// Extracts a plugin archive with a cap on the bytes actually written (#63).
+/// Extracts a plugin archive with a cap on the bytes actually written (archived-63).
 /// </summary>
 /// <remarks>
 /// <see cref="PluginUploadValidator"/> sums <c>ZipArchiveEntry.Length</c>, which
 /// comes from the zip's central directory and is therefore uploader-controlled.
-/// #63 proposed forging it small to slip a bomb past that gate; measured, that
+/// archived-63 proposed forging it small to slip a bomb past that gate; measured, that
 /// does not work on .NET, because <see cref="ZipArchive"/> truncates each entry
 /// stream at the declared size — understating it yields fewer bytes, not more
 /// (pinned by PluginZipExtractorTests).

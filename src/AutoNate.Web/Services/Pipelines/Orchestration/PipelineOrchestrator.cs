@@ -79,7 +79,7 @@ public sealed class PipelineOrchestrator(
                 }
                 var stepRow = await runStore.CreateStepAsync(runId, node.Id, node.Kind, cancellationToken);
                 await runStore.MarkStepStartedAsync(stepRow.Id, DateTime.UtcNow, cancellationToken);
-                // Audit fix #11 — per-step log buffer. Orchestrator captures
+                // Audit fix archived-11 — per-step log buffer. Orchestrator captures
                 // boundary entries at start / success / fail / cancel; the
                 // SPA renders these inline below the step row so users see
                 // more than just status + rowCount + errorMessage on a

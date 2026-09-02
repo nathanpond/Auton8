@@ -9,7 +9,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Security;
 
-// #60: `POST /api/dataconnectors/{id}/preview` fetched the connector's
+// archived-60: `POST /api/dataconnectors/{id}/preview` fetched the connector's
 // configured URL with no guard and returned the parsed body as rows, so a user
 // with DataConnector:Create + Connect could read cloud instance credentials and
 // internal-only services through the app.
@@ -98,7 +98,7 @@ public sealed class RestDataConnectorSsrfTests
         Assert.Equal("alpha", sink.Rows[0]["name"]);
     }
 
-    // #165: the handler bound ConfigJson case-sensitively while the SPA writes
+    // archived-165: the handler bound ConfigJson case-sensitively while the SPA writes
     // and documents camelCase, so every UI-authored REST connector resolved to
     // an empty Url and failed with "config is missing Url" — the built-in
     // connector could not be configured through its own admin page.
@@ -147,7 +147,7 @@ public sealed class RestDataConnectorSsrfTests
 
     // camelCase, i.e. exactly what the SPA writes
     // ({"url": "", "authMode": "none"} — DataConnectorsPage.tsx). It only
-    // binds since #165; before that these tests had to use PascalCase, which
+    // binds since archived-165; before that these tests had to use PascalCase, which
     // meant they never exercised a config shape any real connector had.
     private static DataConnector Connector(string url) => new()
     {

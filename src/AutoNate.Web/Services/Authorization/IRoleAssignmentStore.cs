@@ -39,7 +39,7 @@ public interface IRoleAssignmentStore
         CancellationToken cancellationToken = default);
 
     // Needed so the revoke endpoint can authorize against the role the
-    // assignment actually names (#182). Without it the route could only be
+    // assignment actually names (archived-182). Without it the route could only be
     // gated kind-level, which cannot tell one role from another.
     Task<RoleAssignment?> GetAsync(Guid assignmentId, CancellationToken cancellationToken = default);
 

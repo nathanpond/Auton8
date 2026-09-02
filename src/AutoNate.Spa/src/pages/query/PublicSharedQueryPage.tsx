@@ -23,7 +23,7 @@ import {
 } from "@/api/publicQueries";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 
-// Public share recipient surface (audit fix #9). Mounted OUTSIDE the
+// Public share recipient surface (audit fix archived-9). Mounted OUTSIDE the
 // AppShell so anonymous recipients land on a clean page with no nav
 // chrome — the URL is bookmarkable and pasteable into Slack / email
 // without auth. The token comes from the path; declared `:param` values

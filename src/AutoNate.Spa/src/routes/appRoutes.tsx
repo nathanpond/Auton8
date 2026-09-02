@@ -238,7 +238,7 @@ export const APP_ROUTES: AppRoute[] = [
     // Site Configuration is gated on siteconfig:view server-side (every
     // endpoint under /api/admin/* declares it), so the shell asks for the
     // same thing rather than rendering an admin surface whose every request
-    // will 403 (#85).
+    // will 403 (archived-85).
     element: protect(
       <PermissionRoute kind="siteconfig" action="view">
         <ConfigLayout />

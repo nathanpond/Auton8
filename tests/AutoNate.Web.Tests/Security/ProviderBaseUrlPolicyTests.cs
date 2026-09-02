@@ -4,7 +4,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Security;
 
-// #61: an external connection's `baseUrl` is operator-supplied metadata that
+// archived-61: an external connection's `baseUrl` is operator-supplied metadata that
 // ends up on every request carrying the decrypted provider key, so pointing a
 // connection at an attacker's host handed them the credential.
 public sealed class ProviderBaseUrlPolicyTests

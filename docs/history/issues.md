@@ -13,7 +13,7 @@
 
 ---
 
-## #7 — SiteAppearance: default sidebarSectionColor #adb5bd fails contrast at 2.07:1 and is not in CONTRAST_CHECKS
+## archived-7 — SiteAppearance: default sidebarSectionColor #adb5bd fails contrast at 2.07:1 and is not in CONTRAST_CHECKS
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -43,7 +43,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:hi
 
 ---
 
-## #8 — Notes: twelve hand-rolled modals have no dialog role, focus trap, or focus return
+## archived-8 — Notes: twelve hand-rolled modals have no dialog role, focus trap, or focus return
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -77,7 +77,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:hi
 
 ---
 
-## #9 — Notes modals: raw <input> labelled by a presentational <div> has no accessible name
+## archived-9 — Notes modals: raw <input> labelled by a presentational <div> has no accessible name
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -112,7 +112,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:hi
 
 ---
 
-## #10 — Notes Explorer: page, notebook and cabinet rows are clickable <div>s with no keyboard path
+## archived-10 — Notes Explorer: page, notebook and cabinet rows are clickable <div>s with no keyboard path
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -146,7 +146,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:hi
 
 ---
 
-## #11 — MenuTreeEditor: menu rows are <li onClick>; selecting an item to edit is mouse-only
+## archived-11 — MenuTreeEditor: menu rows are <li onClick>; selecting an item to edit is mouse-only
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -181,7 +181,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:hi
 
 ---
 
-## #12 — DataTable: onRowClick rows have no keyboard affordance; Notifications rows cannot be opened without a mouse
+## archived-12 — DataTable: onRowClick rows have no keyboard affordance; Notifications rows cannot be opened without a mouse
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -215,7 +215,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:hi
 
 ---
 
-## #13 — AgentSidebar: no focus on open, no focus return on close, Escape does not dismiss
+## archived-13 — AgentSidebar: no focus on open, no focus return on close, Escape does not dismiss
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -251,7 +251,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:hi
 
 ---
 
-## #14 — badgeTextColor picks button/pill text by YIQ brightness, not WCAG luminance — feeds --mantine-primary-color-contrast
+## archived-14 — badgeTextColor picks button/pill text by YIQ brightness, not WCAG luminance — feeds --mantine-primary-color-contrast
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -281,7 +281,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:me
 
 ---
 
-## #15 — No route-change focus management: SPA navigation leaves focus on the consumed nav link
+## archived-15 — No route-change focus management: SPA navigation leaves focus on the consumed nav link
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -314,7 +314,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:me
 
 ---
 
-## #16 — Archived rows are distinguished by colour alone (.row-archived)
+## archived-16 — Archived rows are distinguished by colour alone (.row-archived)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -345,7 +345,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:me
 
 ---
 
-## #17 — Login: sign-in error Alert has no role="alert" and both inputs autoFocus
+## archived-17 — Login: sign-in error Alert has no role="alert" and both inputs autoFocus
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -377,7 +377,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:me
 
 ---
 
-## #18 — Only the datastores pages set a per-route document title; everything else reads "AutoNate"
+## archived-18 — Only the datastores pages set a per-route document title; everything else reads "AutoNate"
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -407,7 +407,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:lo
 
 ---
 
-## #19 — explain_workflow agent skill returns full BPMN of every workflow model with no WorkflowModel:View check
+## archived-19 — explain_workflow agent skill returns full BPMN of every workflow model with no WorkflowModel:View check
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -440,12 +440,12 @@ _Found by `/n8-audit authorization` on 2026-08-30. Severity per the n8SDLC rubri
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Fixed on `master` via #167.
+Fixed on `master` via archived-167.
 
 **Evidence**
 - `AgentSkillAuthorizationTests` 11/11. The denial paths wire stores that **throw if touched**, so the refusal is proven to happen *before* the read rather than as post-filtering. Includes a test that a denial and a genuine miss are worded identically, so `explain_workflow` can't enumerate workflow ids.
 - Red check: deleting the guard from `ExplainWorkflowSkill` fails four tests, including the permanent gate — the guard is real, not decorative.
-- Full `AutoNate.Web.Tests` **1432 passed / 1 failed** (the failure is #163's known intermittent flake, previously reproduced on `master` unchanged), full E2E **141 passed / 0 failed / 2 skipped**.
+- Full `AutoNate.Web.Tests` **1432 passed / 1 failed** (the failure is archived-163's known intermittent flake, previously reproduced on `master` unchanged), full E2E **141 passed / 0 failed / 2 skipped**.
 
 **The permanent part:** every `IAgentSkill` is now classified as `Authorizer`, `GatedStore`, `ActorScopedStore` or `NoGatedData`. A new skill fails the test until classified; one classified `Authorizer` fails if the call is removed. Recorded in `docs/codebase/Architecture.md`.
 
@@ -455,7 +455,7 @@ Two corrections found while classifying, worth keeping: `LookupRecordsSkill`/`Ma
 
 ---
 
-## #20 — list/get_system_issue agent skills expose administrative issues (with exception text) to non-admins
+## archived-20 — list/get_system_issue agent skills expose administrative issues (with exception text) to non-admins
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -485,12 +485,12 @@ _Found by `/n8-audit authorization` on 2026-08-30. Severity per the n8SDLC rubri
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Fixed on `master` via #167.
+Fixed on `master` via archived-167.
 
 **Evidence**
 - `AgentSkillAuthorizationTests` 11/11. The denial paths wire stores that **throw if touched**, so the refusal is proven to happen *before* the read rather than as post-filtering. Includes a test that a denial and a genuine miss are worded identically, so `explain_workflow` can't enumerate workflow ids.
 - Red check: deleting the guard from `ExplainWorkflowSkill` fails four tests, including the permanent gate — the guard is real, not decorative.
-- Full `AutoNate.Web.Tests` **1432 passed / 1 failed** (the failure is #163's known intermittent flake, previously reproduced on `master` unchanged), full E2E **141 passed / 0 failed / 2 skipped**.
+- Full `AutoNate.Web.Tests` **1432 passed / 1 failed** (the failure is archived-163's known intermittent flake, previously reproduced on `master` unchanged), full E2E **141 passed / 0 failed / 2 skipped**.
 
 **The permanent part:** every `IAgentSkill` is now classified as `Authorizer`, `GatedStore`, `ActorScopedStore` or `NoGatedData`. A new skill fails the test until classified; one classified `Authorizer` fails if the call is removed. Recorded in `docs/codebase/Architecture.md`.
 
@@ -500,7 +500,7 @@ Two corrections found while classifying, worth keeping: `LookupRecordsSkill`/`Ma
 
 ---
 
-## #21 — GET /api/content/locators/{n} enumerates the whole content tree to any signed-in user; OpenToAuthenticated rationale is false
+## archived-21 — GET /api/content/locators/{n} enumerates the whole content tree to any signed-in user; OpenToAuthenticated rationale is false
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -533,7 +533,7 @@ _Found by `/n8-audit authorization` on 2026-08-30. Severity per the n8SDLC rubri
 
 ---
 
-## #22 — GET /api/code-transformers/{id} returns transformer source to any authenticated user; AuthorizedInHandler marks a handler with no check
+## archived-22 — GET /api/code-transformers/{id} returns transformer source to any authenticated user; AuthorizedInHandler marks a handler with no check
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -566,7 +566,7 @@ _Found by `/n8-audit authorization` on 2026-08-30. Severity per the n8SDLC rubri
 
 ---
 
-## #23 — POST /api/code-transformers gates on (Transformer, Run) regardless of requested kind — a run grant confers authoring rights
+## archived-23 — POST /api/code-transformers gates on (Transformer, Run) regardless of requested kind — a run grant confers authoring rights
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -599,7 +599,7 @@ _Found by `/n8-audit authorization` on 2026-08-30. Severity per the n8SDLC rubri
 
 ---
 
-## #24 — Dataset/Pipeline `schedule`, Pipeline `cancel` and the entire PipelineRun kind are grantable but inert
+## archived-24 — Dataset/Pipeline `schedule`, Pipeline `cancel` and the entire PipelineRun kind are grantable but inert
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -630,7 +630,7 @@ _Found by `/n8-audit authorization` on 2026-08-30. Severity per the n8SDLC rubri
 
 ---
 
-## #25 — `document` and `folder` kinds are enforced on 22 routes but absent from the entity registry, so grants can't be authored from the Grants page
+## archived-25 — `document` and `folder` kinds are enforced on 22 routes but absent from the entity registry, so grants can't be authored from the Grants page
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -662,7 +662,7 @@ _Found by `/n8-audit authorization` on 2026-08-30. Severity per the n8SDLC rubri
 
 ---
 
-## #26 — add-permission-gate skill tells you to use `usePermissionPrefetch`, which does not exist
+## archived-26 — add-permission-gate skill tells you to use `usePermissionPrefetch`, which does not exist
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -691,7 +691,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #27 — plugin-creator skill omits four live IPluginContext surfaces (AgentSkills, Connectors, Transformers, Analyzers)
+## archived-27 — plugin-creator skill omits four live IPluginContext surfaces (AgentSkills, Connectors, Transformers, Analyzers)
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -718,7 +718,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #28 — add-record-event-type skill says there are four RecordEventEnvelope emit sites; there are six, and publishing now goes through the outbox
+## archived-28 — add-record-event-type skill says there are four RecordEventEnvelope emit sites; there are six, and publishing now goes through the outbox
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -745,7 +745,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #29 — CodeTransformerEndpoints header comment points at AnalyzerEndpoints.cs, which does not exist
+## archived-29 — CodeTransformerEndpoints header comment points at AnalyzerEndpoints.cs, which does not exist
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -775,7 +775,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #30 — Dead SPA module (trial-delete verified): pages/notes/CabinetMenu.tsx
+## archived-30 — Dead SPA module (trial-delete verified): pages/notes/CabinetMenu.tsx
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -802,7 +802,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #31 — Dead SPA module (trial-delete verified): pages/dynamic-page/jsxBindings.ts
+## archived-31 — Dead SPA module (trial-delete verified): pages/dynamic-page/jsxBindings.ts
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -829,7 +829,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #32 — 22 of 23 eslint-disable comments in the SPA carry no reason
+## archived-32 — 22 of 23 eslint-disable comments in the SPA carry no reason
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -856,7 +856,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #33 — Phase-numbered test files (ProjectionFrameworkPhase2/3Tests, Phase7DocumentImportTests) name delivery phases, not behaviour
+## archived-33 — Phase-numbered test files (ProjectionFrameworkPhase2/3Tests, Phase7DocumentImportTests) name delivery phases, not behaviour
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -883,7 +883,7 @@ _Found by `/n8-audit cleanup` on 2026-08-30. Severity per the n8SDLC rubric: `se
 
 ---
 
-## #34 — flowable-extension: spring-boot 4.0.x has a CRITICAL advisory (fix ≥ 4.0.6) plus a high
+## archived-34 — flowable-extension: spring-boot 4.0.x has a CRITICAL advisory (fix ≥ 4.0.6) plus a high
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -910,7 +910,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Resolved by Dependabot #96 (merge `223c937d` on `master`): Spring Boot 4.0.2 → 4.1.1, spring-web 7.0.9, jackson-databind 2.20.2 → 2.22.2.
+Resolved by Dependabot archived-96 (merge `223c937d` on `master`): Spring Boot 4.0.2 → 4.1.1, spring-web 7.0.9, jackson-databind 2.20.2 → 2.22.2.
 
 **Verification (2026-08-31):** local JDK 21.0.12 / Maven 3.9.16 `mvn test` → 34/34 before and after; `docker compose build flowable` (extension compiled in `maven:3.9.9-eclipse-temurin-21`) → BUILD SUCCESS 34/34; `infra/ensure-up.sh` rebuilt and recreated the Flowable container (healthy, REST 200); workflow E2E specs `WorkflowStudioTests|WorkflowExecutionTests|WorkflowOverrideTests` → 9/9 against the rebuilt image. Dependabot alerts for `flowable-extension/pom.xml` should clear on its next scan.
 
@@ -918,7 +918,7 @@ Resolved by Dependabot #96 (merge `223c937d` on `master`): Spring Boot 4.0.2 →
 
 ---
 
-## #35 — flowable-extension: jackson-databind has high + medium advisories (fix ≥ 2.21.5)
+## archived-35 — flowable-extension: jackson-databind has high + medium advisories (fix ≥ 2.21.5)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -945,7 +945,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Resolved by Dependabot #96 (merge `223c937d` on `master`): Spring Boot 4.0.2 → 4.1.1, spring-web 7.0.9, jackson-databind 2.20.2 → 2.22.2.
+Resolved by Dependabot archived-96 (merge `223c937d` on `master`): Spring Boot 4.0.2 → 4.1.1, spring-web 7.0.9, jackson-databind 2.20.2 → 2.22.2.
 
 **Verification (2026-08-31):** local JDK 21.0.12 / Maven 3.9.16 `mvn test` → 34/34 before and after; `docker compose build flowable` (extension compiled in `maven:3.9.9-eclipse-temurin-21`) → BUILD SUCCESS 34/34; `infra/ensure-up.sh` rebuilt and recreated the Flowable container (healthy, REST 200); workflow E2E specs `WorkflowStudioTests|WorkflowExecutionTests|WorkflowOverrideTests` → 9/9 against the rebuilt image. Dependabot alerts for `flowable-extension/pom.xml` should clear on its next scan.
 
@@ -953,7 +953,7 @@ Resolved by Dependabot #96 (merge `223c937d` on `master`): Spring Boot 4.0.2 →
 
 ---
 
-## #36 — SPA: direct deps axios, react-router-dom and vite carry high advisories
+## archived-36 — SPA: direct deps axios, react-router-dom and vite carry high advisories
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -980,7 +980,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Resolved on `master` by the Dependabot merges of 2026-08-31 (#157 for axios/react-router; vite via the earlier SPA group). Verified against `src/AutoNate.Spa/package-lock.json` at `f28a1c85`:
+Resolved on `master` by the Dependabot merges of 2026-08-31 (archived-157 for axios/react-router; vite via the earlier SPA group). Verified against `src/AutoNate.Spa/package-lock.json` at `f28a1c85`:
 
 | package | locked | fixed in (per this issue) |
 |---|---|---|
@@ -988,13 +988,13 @@ Resolved on `master` by the Dependabot merges of 2026-08-31 (#157 for axios/reac
 | react-router-dom / react-router | **7.18.3** | ≥ 7.18.2 |
 | vite | **8.2.2** | ≥ 8.0.16 |
 
-`npm audit` now reports **0 direct-dependency advisories** for these (9 vulnerable packages total, all transitive — `nanoid`, `lodash-es` and the mermaid/chevrotain chain under `@excalidraw/mermaid-to-excalidraw`; `@excalidraw/excalidraw` shows up only as their carrier). GitHub's open alerts on the SPA manifest agree: 9, all `nanoid`/`lodash-es`. Those are tracked in #37.
+`npm audit` now reports **0 direct-dependency advisories** for these (9 vulnerable packages total, all transitive — `nanoid`, `lodash-es` and the mermaid/chevrotain chain under `@excalidraw/mermaid-to-excalidraw`; `@excalidraw/excalidraw` shows up only as their carrier). GitHub's open alerts on the SPA manifest agree: 9, all `nanoid`/`lodash-es`. Those are tracked in archived-37.
 
 </details>
 
 ---
 
-## #37 — SPA: transitive advisories (brace-expansion, nanoid, postcss, js-yaml, lodash-es, form-data, ws, immutable, dompurify, mermaid)
+## archived-37 — SPA: transitive advisories (brace-expansion, nanoid, postcss, js-yaml, lodash-es, form-data, ws, immutable, dompurify, mermaid)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1021,7 +1021,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #38 — services/hocuspocus: ws and form-data have high advisories
+## archived-38 — services/hocuspocus: ws and form-data have high advisories
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1048,7 +1048,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #39 — services/executor has no package-lock.json — its dependencies cannot be audited or pinned
+## archived-39 — services/executor has no package-lock.json — its dependencies cannot be audited or pinned
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1075,13 +1075,13 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Resolved by #140: `services/executor/package-lock.json` is now committed (isolated-vm 7.0.1, pyodide 0.26.4, nats 2.29.3) and the `npm` Dependabot entry for `/services/executor` will start producing alerts on the next run.
+Resolved by archived-140: `services/executor/package-lock.json` is now committed (isolated-vm 7.0.1, pyodide 0.26.4, nats 2.29.3) and the `npm` Dependabot entry for `/services/executor` will start producing alerts on the next run.
 
 </details>
 
 ---
 
-## #40 — Make jsx-a11y an error-level lint gate (directory ratchet) and add an axe-core smoke check
+## archived-40 — Make jsx-a11y an error-level lint gate (directory ratchet) and add an axe-core smoke check
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -1108,7 +1108,7 @@ _Found by `/n8-audit 508` on 2026-08-30. Severity per the n8SDLC rubric: `sev:lo
 
 ---
 
-## #41 — Re-enable CA2016 (forward CancellationToken) and S108 (empty block) — the codebase is clean on both, so they'd act as regression guards
+## archived-41 — Re-enable CA2016 (forward CancellationToken) and S108 (empty block) — the codebase is clean on both, so they'd act as regression guards
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1135,7 +1135,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #42 — Seeded Site Configuration → Security menu items render "coming soon" stubs while the real admin pages exist under other template keys
+## archived-42 — Seeded Site Configuration → Security menu items render "coming soon" stubs while the real admin pages exist under other template keys
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -1167,7 +1167,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #43 — auth_cache_version is bumped from ~15 mutation sites and never read
+## archived-43 — auth_cache_version is bumped from ~15 mutation sites and never read
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -1194,7 +1194,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #44 — audit_outbox_dead_letters has a writer (park remediator) and no reader, endpoint or replay
+## archived-44 — audit_outbox_dead_letters has a writer (park remediator) and no reader, endpoint or replay
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -1221,7 +1221,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #45 — PUT /api/records/{id}/assignees has no SPA caller, so Record:Assign is grantable but bypassed via the generic Edit path
+## archived-45 — PUT /api/records/{id}/assignees has no SPA caller, so Record:Assign is grantable but bypassed via the generic Edit path
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1251,7 +1251,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #46 — GET /api/forms/{id}/versions/{versionNumber} has no caller anywhere (SPA, tests, plugins, docs)
+## archived-46 — GET /api/forms/{id}/versions/{versionNumber} has no caller anywhere (SPA, tests, plugins, docs)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1278,7 +1278,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #47 — POST /api/admin/projections/feeds/{feed}/reset-watermark is documented as the recovery step but has no SPA button and no test
+## archived-47 — POST /api/admin/projections/feeds/{feed}/reset-watermark is documented as the recovery step but has no SPA button and no test
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -1307,7 +1307,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #48 — /admin/config/features is seeded in the menu but SettingGroup.Features has zero definitions
+## archived-48 — /admin/config/features is seeded in the menu but SettingGroup.Features has zero definitions
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -1334,7 +1334,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #49 — JetStreamCodeNodeRunner comments claim a durable consumer and CodeNode:* config keys that don't exist
+## archived-49 — JetStreamCodeNodeRunner comments claim a durable consumer and CodeNode:* config keys that don't exist
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1361,13 +1361,13 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #146: all three misleading comments are now accurate — `JetStreamCodeNodeRunner.cs` header (core queue subscriber; timeouts hard-coded, no `CodeNode:*` keys claimed), the `NatsStreamProvisioner` block (stream removed entirely), and `services/executor/src/index.ts` (fixed in #145). The unused `pipeline-code-runs` stream is gone rather than documented.
+Closed by PR archived-146: all three misleading comments are now accurate — `JetStreamCodeNodeRunner.cs` header (core queue subscriber; timeouts hard-coded, no `CodeNode:*` keys claimed), the `NatsStreamProvisioner` block (stream removed entirely), and `services/executor/src/index.ts` (fixed in archived-145). The unused `pipeline-code-runs` stream is gone rather than documented.
 
 </details>
 
 ---
 
-## #50 — SitewideAppearance stub export in sections.tsx is unused (configAppearance maps to the real page)
+## archived-50 — SitewideAppearance stub export in sections.tsx is unused (configAppearance maps to the real page)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1394,7 +1394,7 @@ _Found by `/n8-audit integration` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #51 — HOT POST /api/auth/check: one DbContext + one SQL round-trip per check item (2 per row on list pages)
+## archived-51 — HOT POST /api/auth/check: one DbContext + one SQL round-trip per check item (2 per row on list pages)
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -1429,7 +1429,7 @@ _Found by `/n8-audit performance` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #52 — HOT GET /api/executions[/page]: every execution is fetched from Flowable, authorised in memory, then paged client-side
+## archived-52 — HOT GET /api/executions[/page]: every execution is fetched from Flowable, authorised in memory, then paged client-side
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -1461,7 +1461,7 @@ _Found by `/n8-audit performance` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #53 — HOT GET /api/agent/conversations/{id}: full message + tool-call history re-read after every agent turn
+## archived-53 — HOT GET /api/agent/conversations/{id}: full message + tool-call history re-read after every agent turn
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -1497,7 +1497,7 @@ _Found by `/n8-audit performance` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #54 — HOT GET /api/users/directory returns the whole local_users table on every editor mount, uncached
+## archived-54 — HOT GET /api/users/directory returns the whole local_users table on every editor mount, uncached
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -1527,7 +1527,7 @@ _Found by `/n8-audit performance` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #55 — DataTable auto-mode count probe doubles server cost of every auto-mode table
+## archived-55 — DataTable auto-mode count probe doubles server cost of every auto-mode table
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -1558,7 +1558,7 @@ _Found by `/n8-audit performance` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #56 — ix_menu_items_template_key has no request-path reader — maintenance cost on every menu_items write
+## archived-56 — ix_menu_items_template_key has no request-path reader — maintenance cost on every menu_items write
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -1589,7 +1589,7 @@ _Found by `/n8-audit performance` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #57 — AgentSession persists tool calls one INSERT at a time per turn
+## archived-57 — AgentSession persists tool calls one INSERT at a time per turn
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -1619,7 +1619,7 @@ _Found by `/n8-audit performance` on 2026-08-30. Severity per the n8SDLC rubric:
 
 ---
 
-## #58 — Executor Python runner: shared Pyodide interpreter, timeout that cannot fire, memoryMb ignored
+## archived-58 — Executor Python runner: shared Pyodide interpreter, timeout that cannot fire, memoryMb ignored
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1656,23 +1656,23 @@ _Found by `/n8-audit security+stability` on 2026-08-30. Severity per the n8SDLC 
 
 ## Plan
 
-While reproducing this I found the Python "sandbox" also exposes the Node host to author code (`import js; js.process…`) — filed as #161 (`sev:critical`). Same file, same boundary, so both land in one PR. #64 (JSON spliced into a triple-quoted literal) is the wrapper in the same function and gets fixed on the way.
+While reproducing this I found the Python "sandbox" also exposes the Node host to author code (`import js; js.process…`) — filed as archived-161 (`sev:critical`). Same file, same boundary, so both land in one PR. archived-64 (JSON spliced into a triple-quoted literal) is the wrapper in the same function and gets fixed on the way.
 
 **Design** — `services/executor/src/pythonRunner.ts` + new `pythonWorker.ts`:
 1. **One Pyodide interpreter per request**, in a dedicated `worker_threads` Worker. A small warm pool (`EXECUTOR_PY_WARM_WORKERS`, default 1) hides the ~0.8 s load; every worker is single-use and terminated after its job, so globals, monkey-patches and leftover state cannot cross authors. Concurrency is capped (`EXECUTOR_PY_MAX_CONCURRENCY`, default 2) with a FIFO wait so a burst cannot fork unbounded interpreters.
 2. **Timeout that fires**: the parent owns the deadline. At `timeoutMs` it rejects the request, writes SIGINT into Pyodide's interrupt `SharedArrayBuffer` (raises `KeyboardInterrupt` in the script — measured: stops `while True: pass` at the deadline, even inside `except BaseException: pass`), and `worker.terminate()`s after a short grace for C-level loops the interrupt cannot reach. The NATS loop is never blocked because the WASM runs on the worker thread.
 3. **`memoryMb` enforced**: a `WebAssembly.Memory.prototype.grow` hook in the worker caps the interpreter's linear memory at *post-load baseline + memoryMb*; Emscripten turns a refused grow into a plain Python `MemoryError` (measured: interpreter stays usable). `resourceLimits.maxOldGenerationSizeMb` (`EXECUTOR_PY_JS_HEAP_MB`, default 256) guards the worker's JS heap as an operator-level backstop.
-4. **Host escape closed (#161)**: `loadPyodide({ jsglobals: Object.create(null), env: {…fixed…} })`, `unregisterJsModule("pyodide_js")` + purge `pyodide_js*` from `sys.modules`, and `fetch`/`WebSocket` disabled in the worker after load. Verified by probe: `js.process`, `js.eval`, `pyodide_js`, `run_js`, `open_url`, host FS all fail; virtual MEMFS remains.
-5. **#64**: inputs/config reach Python via `pyodide.globals.set(...)` as JSON strings — no source splicing.
-6. Tests: `node --test` suite for the executor (`npm test`): happy path (transformer + analyzer, columns), timeout on a busy loop with the runner still serving afterwards, `MemoryError` at the cap, no global leakage between requests, every escape vector above rejected, and #64's quote/backslash round-trip. Smoke against the compose executor over NATS after rebuild.
+4. **Host escape closed (archived-161)**: `loadPyodide({ jsglobals: Object.create(null), env: {…fixed…} })`, `unregisterJsModule("pyodide_js")` + purge `pyodide_js*` from `sys.modules`, and `fetch`/`WebSocket` disabled in the worker after load. Verified by probe: `js.process`, `js.eval`, `pyodide_js`, `run_js`, `open_url`, host FS all fail; virtual MEMFS remains.
+5. **archived-64**: inputs/config reach Python via `pyodide.globals.set(...)` as JSON strings — no source splicing.
+6. Tests: `node --test` suite for the executor (`npm test`): happy path (transformer + analyzer, columns), timeout on a busy loop with the runner still serving afterwards, `MemoryError` at the cap, no global leakage between requests, every escape vector above rejected, and archived-64's quote/backslash round-trip. Smoke against the compose executor over NATS after rebuild.
 
-Branch `fix/58-python-sandbox`; PR with `Closes #58`, `Closes #161`, `Closes #64`.
+Branch `fix/58-python-sandbox`; PR with `Closes archived-58`, `Closes archived-161`, `Closes archived-64`.
 
 </details>
 
 ---
 
-## #59 — Authorization fails open by default: Enabled=false / Enforcement=off / AssignSuperAdminToAll=true with no startup validation
+## archived-59 — Authorization fails open by default: Enabled=false / Enforcement=off / AssignSuperAdminToAll=true with no startup validation
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1719,13 +1719,13 @@ Two corrections to the issue's premises, found while reading the code:
 5. README: correct the SuperAdmin claim, document the greenfield trap, note the new refuse-to-start behaviour.
 6. Tests: `AuthorizationOptionsValidatorTests` covering every branch (defaults in Production/Staging refused; `Enabled=false` refused; `Enforcement=off`/`read-only` refused; `"Full"` typo refused in *all* environments; valid config accepted; Development permissive), plus an assertion that the validator is actually registered on the host.
 
-Branch `fix/59-authz-fail-closed`; PR with `Closes #59`.
+Branch `fix/59-authz-fail-closed`; PR with `Closes archived-59`.
 
 </details>
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Fixed on `master` via #164.
+Fixed on `master` via archived-164.
 
 **What landed**
 - Fail-closed defaults: `Enabled = true`, `Enforcement = "full"`.
@@ -1744,7 +1744,7 @@ Fixed on `master` via #164.
 | Production, `Enabled=true` + `Enforcement=full` | passes authorization, proceeds |
 | **Development**, `Enforcement=Full` (mis-cased) | **refused** — "…must be one of \"off\", \"read-only\", \"full\" (lower-case, exactly)…" |
 
-Tests: `AuthorizationOptionsValidatorTests` 16/16; Authorization folder 295/295; full `AutoNate.Web.Tests` 1368/1 and full E2E 141 passed / 0 failed / 2 skipped. The single Web.Tests failure is pre-existing and unrelated — a `master` @ `f28a1c85` baseline in the same checkout fails the same test with the same signature (1352/1), it passes 3/3 in isolation, and it dies on a fixed 5 s WebSocket budget. Filed as #163.
+Tests: `AuthorizationOptionsValidatorTests` 16/16; Authorization folder 295/295; full `AutoNate.Web.Tests` 1368/1 and full E2E 141 passed / 0 failed / 2 skipped. The single Web.Tests failure is pre-existing and unrelated — a `master` @ `f28a1c85` baseline in the same checkout fails the same test with the same signature (1352/1), it passes 3/3 in isolation, and it dies on a fixed 5 s WebSocket budget. Filed as archived-163.
 
 **Correction to the issue's premise:** "every newly created user is silently made SuperAdmin" is not accurate. `SuperAdminBackfillSql` is gated by both the flag **and** a one-shot `auth_seed_state` key (`superadmin_backfill_v1`) — it grants the role once, to users existing at that moment; users created later get nothing. It is also the only startup path that grants SuperAdmin, so hard-failing on that flag would leave a greenfield install with no admin at all and, under `Enforcement=full`, unadministerable. It therefore warns rather than refusing, and the README claim is corrected with both real traps documented (pointing a deployment at a database that already holds other users; turning it off on a greenfield install).
 
@@ -1752,7 +1752,7 @@ Tests: `AuthorizationOptionsValidatorTests` 16/16; Authorization folder 295/295;
 
 ---
 
-## #60 — REST data connector fetches admin-supplied URLs with no SSRF guard and echoes the body to the caller
+## archived-60 — REST data connector fetches admin-supplied URLs with no SSRF guard and echoes the body to the caller
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1783,11 +1783,11 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-## Plan (#60 + #61 together)
+## Plan (archived-60 + archived-61 together)
 
-Both are "an outbound URL is caller-controlled and the request carries something valuable", so they land in one PR — but #61's surface is **wider than the issue states**.
+Both are "an outbound URL is caller-controlled and the request carries something valuable", so they land in one PR — but archived-61's surface is **wider than the issue states**.
 
-**#61 scope correction.** `IConnectionModelLister` is one of *five* consumers of the same connection-metadata `baseUrl`. The others are worse, because they run on every call rather than on an admin button press:
+**archived-61 scope correction.** `IConnectionModelLister` is one of *five* consumers of the same connection-metadata `baseUrl`. The others are worse, because they run on every call rather than on an admin button press:
 
 | site | what it sends |
 |---|---|
@@ -1801,20 +1801,20 @@ Fixing only the lister would leave the key flowing to an attacker-named host on 
 
 **Two guards, because the two problems have different shapes**
 
-1. `IOutboundUrlGuard` (async: scheme + DNS-resolve + `IsBlockedAddress`) for **#60**, where arbitrary REST endpoints are the point of the feature so no allowlist is possible. `IsBlockedAddress` moves out of `WebFetchSkill` into the shared guard and `WebFetchSkill` delegates to it, so the two copies cannot drift; its existing behaviour (http allowed) is preserved via a `RequireHttps` policy flag that the REST connector sets outside Development.
-2. `IProviderBaseUrlPolicy` (sync: https + per-kind host allowlist) for **#61**. An allowlist is strictly stronger than an IP check here because the set of legitimate hosts is known, and it is enforced at the trust boundary — the three places untrusted metadata becomes a `Uri` (`ChatProviderResolver`, `WebSearchProviderResolver`, `ConnectionModelLister`). Defaults `api.anthropic.com` / `api.openai.com` / `api.tavily.com`, extendable per kind through an `ExternalConnections:AllowedProviderHosts` config section for Azure OpenAI, gateways or a local model.
+1. `IOutboundUrlGuard` (async: scheme + DNS-resolve + `IsBlockedAddress`) for **archived-60**, where arbitrary REST endpoints are the point of the feature so no allowlist is possible. `IsBlockedAddress` moves out of `WebFetchSkill` into the shared guard and `WebFetchSkill` delegates to it, so the two copies cannot drift; its existing behaviour (http allowed) is preserved via a `RequireHttps` policy flag that the REST connector sets outside Development.
+2. `IProviderBaseUrlPolicy` (sync: https + per-kind host allowlist) for **archived-61**. An allowlist is strictly stronger than an IP check here because the set of legitimate hosts is known, and it is enforced at the trust boundary — the three places untrusted metadata becomes a `Uri` (`ChatProviderResolver`, `WebSearchProviderResolver`, `ConnectionModelLister`). Defaults `api.anthropic.com` / `api.openai.com` / `api.tavily.com`, extendable per kind through an `ExternalConnections:AllowedProviderHosts` config section for Azure OpenAI, gateways or a local model.
 
 **Behaviour change to call out:** an existing connection pointing at a custom base URL (self-hosted OpenAI-compatible endpoint, Ollama) stops working until its host is added to the allowlist. That is the intended trade — it is exactly the capability being abused — and the failure is a clear error naming the key to set.
 
 **Tests**: guard unit tests (literal IPs, DNS-to-private, mixed public/private answers, scheme rules, https-outside-Development); REST-connector preview/test refused against `127.0.0.1` and `169.254.169.254`; policy tests per kind (default allowed, attacker host refused before the credential is attached, http refused, operator-configured host allowed); plus the existing `WebFetchSkillTests` must stay green through the refactor.
 
-Branch `fix/60-61-outbound-url-guards`; PR with `Closes #60`, `Closes #61`.
+Branch `fix/60-61-outbound-url-guards`; PR with `Closes archived-60`, `Closes archived-61`.
 
 </details>
 
 ---
 
-## #61 — External-connection BaseUrl is caller-controlled: stored provider API key is sent to any host the admin names
+## archived-61 — External-connection BaseUrl is caller-controlled: stored provider API key is sent to any host the admin names
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1845,11 +1845,11 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-## Plan (#60 + #61 together)
+## Plan (archived-60 + archived-61 together)
 
-Both are "an outbound URL is caller-controlled and the request carries something valuable", so they land in one PR — but #61's surface is **wider than the issue states**.
+Both are "an outbound URL is caller-controlled and the request carries something valuable", so they land in one PR — but archived-61's surface is **wider than the issue states**.
 
-**#61 scope correction.** `IConnectionModelLister` is one of *five* consumers of the same connection-metadata `baseUrl`. The others are worse, because they run on every call rather than on an admin button press:
+**archived-61 scope correction.** `IConnectionModelLister` is one of *five* consumers of the same connection-metadata `baseUrl`. The others are worse, because they run on every call rather than on an admin button press:
 
 | site | what it sends |
 |---|---|
@@ -1863,20 +1863,20 @@ Fixing only the lister would leave the key flowing to an attacker-named host on 
 
 **Two guards, because the two problems have different shapes**
 
-1. `IOutboundUrlGuard` (async: scheme + DNS-resolve + `IsBlockedAddress`) for **#60**, where arbitrary REST endpoints are the point of the feature so no allowlist is possible. `IsBlockedAddress` moves out of `WebFetchSkill` into the shared guard and `WebFetchSkill` delegates to it, so the two copies cannot drift; its existing behaviour (http allowed) is preserved via a `RequireHttps` policy flag that the REST connector sets outside Development.
-2. `IProviderBaseUrlPolicy` (sync: https + per-kind host allowlist) for **#61**. An allowlist is strictly stronger than an IP check here because the set of legitimate hosts is known, and it is enforced at the trust boundary — the three places untrusted metadata becomes a `Uri` (`ChatProviderResolver`, `WebSearchProviderResolver`, `ConnectionModelLister`). Defaults `api.anthropic.com` / `api.openai.com` / `api.tavily.com`, extendable per kind through an `ExternalConnections:AllowedProviderHosts` config section for Azure OpenAI, gateways or a local model.
+1. `IOutboundUrlGuard` (async: scheme + DNS-resolve + `IsBlockedAddress`) for **archived-60**, where arbitrary REST endpoints are the point of the feature so no allowlist is possible. `IsBlockedAddress` moves out of `WebFetchSkill` into the shared guard and `WebFetchSkill` delegates to it, so the two copies cannot drift; its existing behaviour (http allowed) is preserved via a `RequireHttps` policy flag that the REST connector sets outside Development.
+2. `IProviderBaseUrlPolicy` (sync: https + per-kind host allowlist) for **archived-61**. An allowlist is strictly stronger than an IP check here because the set of legitimate hosts is known, and it is enforced at the trust boundary — the three places untrusted metadata becomes a `Uri` (`ChatProviderResolver`, `WebSearchProviderResolver`, `ConnectionModelLister`). Defaults `api.anthropic.com` / `api.openai.com` / `api.tavily.com`, extendable per kind through an `ExternalConnections:AllowedProviderHosts` config section for Azure OpenAI, gateways or a local model.
 
 **Behaviour change to call out:** an existing connection pointing at a custom base URL (self-hosted OpenAI-compatible endpoint, Ollama) stops working until its host is added to the allowlist. That is the intended trade — it is exactly the capability being abused — and the failure is a clear error naming the key to set.
 
 **Tests**: guard unit tests (literal IPs, DNS-to-private, mixed public/private answers, scheme rules, https-outside-Development); REST-connector preview/test refused against `127.0.0.1` and `169.254.169.254`; policy tests per kind (default allowed, attacker host refused before the credential is attached, http refused, operator-configured host allowed); plus the existing `WebFetchSkillTests` must stay green through the refactor.
 
-Branch `fix/60-61-outbound-url-guards`; PR with `Closes #60`, `Closes #61`.
+Branch `fix/60-61-outbound-url-guards`; PR with `Closes archived-60`, `Closes archived-61`.
 
 </details>
 
 ---
 
-## #62 — Every plugin DB role inherits SELECT on the entire public schema via plg_readers
+## archived-62 — Every plugin DB role inherits SELECT on the entire public schema via plg_readers
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1907,7 +1907,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #63 — Plugin zip size cap trusts the attacker-supplied header, then ExtractToDirectory writes the real bytes uncapped
+## archived-63 — Plugin zip size cap trusts the attacker-supplied header, then ExtractToDirectory writes the real bytes uncapped
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -1968,7 +1968,7 @@ Severity in hindsight: the original `sev:medium` was based on an unbounded-write
 
 ---
 
-## #64 — Executor Python wrapper splices JSON into a non-raw triple-quoted literal — any double quote in the data breaks json.loads
+## archived-64 — Executor Python wrapper splices JSON into a non-raw triple-quoted literal — any double quote in the data breaks json.loads
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2001,7 +2001,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #65 — Datastore file download echoes the uploader's Content-Type without the sanitiser used for page attachments
+## archived-65 — Datastore file download echoes the uploader's Content-Type without the sanitiser used for page attachments
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2033,7 +2033,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #66 — Local NATS/JetStream published on all interfaces with no authentication
+## archived-66 — Local NATS/JetStream published on all interfaces with no authentication
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2066,7 +2066,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #67 — 1 GiB global request-body limit + fully-materialised XLSX parsing is an OOM lever for any pipeline author
+## archived-67 — 1 GiB global request-body limit + fully-materialised XLSX parsing is an OOM lever for any pipeline author
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2093,7 +2093,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #68 — Data-connector and datastore endpoints fold raw exception text into 200/400 responses
+## archived-68 — Data-connector and datastore endpoints fold raw exception text into 200/400 responses
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2120,7 +2120,7 @@ _Found by `/n8-audit security` on 2026-08-30. Severity per the n8SDLC rubric: `s
 
 ---
 
-## #69 — Executor: NATS reconnect exhaustion silently ends the subscription loop; no unhandledRejection handler, no supervisor
+## archived-69 — Executor: NATS reconnect exhaustion silently ends the subscription loop; no unhandledRejection handler, no supervisor
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2153,7 +2153,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #70 — PluginRuntime leaks a collectible AssemblyLoadContext on every failed plugin enable
+## archived-70 — PluginRuntime leaks a collectible AssemblyLoadContext on every failed plugin enable
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2185,7 +2185,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #71 — AuditOutboxDispatcher makes untimed HTTP publishes (100 s default) inside an open Postgres transaction holding FOR UPDATE locks
+## archived-71 — AuditOutboxDispatcher makes untimed HTTP publishes (100 s default) inside an open Postgres transaction holding FOR UPDATE locks
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2217,7 +2217,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #72 — RepeatedAuthFailureDetector: unbounded singleton dictionary keyed by attacker-supplied username
+## archived-72 — RepeatedAuthFailureDetector: unbounded singleton dictionary keyed by attacker-supplied username
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2248,7 +2248,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #73 — Dapr sidecar watchdog orphans a hung restart script and respawns it every 120 s
+## archived-73 — Dapr sidecar watchdog orphans a hung restart script and respawns it every 120 s
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2279,7 +2279,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #74 — Hocuspocus pg.Pool has no 'error' listener — an idle-client failure becomes an uncaughtException
+## archived-74 — Hocuspocus pg.Pool has no 'error' listener — an idle-client failure becomes an uncaughtException
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2308,7 +2308,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #75 — Hocuspocus auth and webhook fetches to the .NET host have no timeout (undici default 300 s)
+## archived-75 — Hocuspocus auth and webhook fetches to the .NET host have no timeout (undici default 300 s)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2338,7 +2338,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #76 — BusWatcherStreamService fans out sequentially, never forwards its CancellationToken, and logs Information per message
+## archived-76 — BusWatcherStreamService fans out sequentially, never forwards its CancellationToken, and logs Information per message
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2368,7 +2368,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #77 — FlowableClient.DeleteAllWorkflowExecutionsAsync loops forever if any listed instance can't be deleted
+## archived-77 — FlowableClient.DeleteAllWorkflowExecutionsAsync loops forever if any listed instance can't be deleted
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2399,7 +2399,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #78 — NatsConnectionProvider caches the connection forever behind a non-volatile double-checked read and ignores the cancellation token
+## archived-78 — NatsConnectionProvider caches the connection forever behind a non-volatile double-checked read and ignores the cancellation token
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2429,7 +2429,7 @@ _Found by `/n8-audit stability` on 2026-08-30. Severity per the n8SDLC rubric: `
 
 ---
 
-## #79 — No CI: ~1,400 backend tests and 28 E2E specs only ever run on one developer's machine
+## archived-79 — No CI: ~1,400 backend tests and 28 E2E specs only ever run on one developer's machine
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2456,7 +2456,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #80 — Yjs collaboration endpoints and both shared-secret filters have zero tests
+## archived-80 — Yjs collaboration endpoints and both shared-secret filters have zero tests
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2483,7 +2483,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #81 — DataStore uploads/copy/table-preview are untested and EntityKinds.DataStore has no enforcement test
+## archived-81 — DataStore uploads/copy/table-preview are untested and EntityKinds.DataStore has no enforcement test
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2510,7 +2510,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #82 — POST /api/datasets/preview-file-source (untrusted file parser dispatch) has zero tests
+## archived-82 — POST /api/datasets/preview-file-source (untrusted file parser dispatch) has zero tests
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2537,7 +2537,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #83 — Notes/pages write API and version-restore endpoints have no endpoint tests
+## archived-83 — Notes/pages write API and version-restore endpoints have no endpoint tests
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2564,7 +2564,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #84 — AgentConversationTests: UI delete assertion is neutralised by an API delete before the check
+## archived-84 — AgentConversationTests: UI delete assertion is neutralised by an API delete before the check
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2596,7 +2596,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #85 — E2E-044/045 permission-gating journeys blocked on real SPA gaps: no client-side admin guard, unconditional delete button
+## archived-85 — E2E-044/045 permission-gating journeys blocked on real SPA gaps: no client-side admin guard, unconditional delete button
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2626,7 +2626,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #86 — Playwright backlog: 19 of 68 journeys BLOCKED and 3 named spec files never created
+## archived-86 — Playwright backlog: 19 of 68 journeys BLOCKED and 3 named spec files never created
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -2653,7 +2653,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #87 — 15 EntityKinds have no no-grant→403 enforcement test (gate-presence test only proves a gate exists)
+## archived-87 — 15 EntityKinds have no no-grant→403 enforcement test (gate-presence test only proves a gate exists)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2680,7 +2680,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #88 — Two [Fact(Skip)] E2E tests describe product defects with no linked issue
+## archived-88 — Two [Fact(Skip)] E2E tests describe product defects with no linked issue
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2710,7 +2710,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #89 — DocumentEditorTests uses a 3-second sleep to wait for Yjs persistence
+## archived-89 — DocumentEditorTests uses a 3-second sleep to wait for Yjs persistence
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2741,7 +2741,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #90 — Document bindings and comments API (837 lines) has no server-side endpoint tests
+## archived-90 — Document bindings and comments API (837 lines) has no server-side endpoint tests
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2768,7 +2768,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #91 — Privilege-mutation endpoints /api/admin/role-assignments and content permission-override have no tests
+## archived-91 — Privilege-mutation endpoints /api/admin/role-assignments and content permission-override have no tests
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2795,7 +2795,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #92 — E2E: 32 raw CSS/attribute locators in 5 spec files (tbody tr, [contenteditable])
+## archived-92 — E2E: 32 raw CSS/attribute locators in 5 spec files (tbody tr, [contenteditable])
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -2825,7 +2825,7 @@ _Found by `/n8-audit tests` on 2026-08-30. Severity per the n8SDLC rubric: `sev:
 
 ---
 
-## #93 — PipelinesAdminTests bypasses E2ETestBase.NewSignedInAsAdminAsync and its ConsoleErrorGuard
+## archived-93 — PipelinesAdminTests bypasses E2ETestBase.NewSignedInAsAdminAsync and its ConsoleErrorGuard
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2865,7 +2865,7 @@ Labels: `bug`, `sev:high`, `area:api`
 `src/AutoNate.Web/Services/Projections/BackfillRunner.cs:58-63; src/AutoNate.Web/Endpoints/AdminProjectionsEndpoints.cs:72-93; src/AutoNate.Spa/src/pages/admin/Projections.tsx:176`
 
 ## Why it matters
-The documented recovery path (`docs/projection-framework/operations.md`) for a corrupted or retention-truncated cache — `workflow_execution_cache`, `workflow_task_cache`, `workflow_variable_cache`, `workflow_event_log_cache`, `record_activity_rollup_cache` — does not work; admins get a red "No IProjectionBackfillSource<…> registered" toast. Adjacent to #47 (reset-watermark) but distinct.
+The documented recovery path (`docs/projection-framework/operations.md`) for a corrupted or retention-truncated cache — `workflow_execution_cache`, `workflow_task_cache`, `workflow_variable_cache`, `workflow_event_log_cache`, `record_activity_rollup_cache` — does not work; admins get a red "No IProjectionBackfillSource<…> registered" toast. Adjacent to archived-47 (reset-watermark) but distinct.
 
 ## Evidence
 Booted `AutoNateWebApplicationFactory` in a throw-away xunit probe (deleted afterwards), listed `GET /api/admin/projections` (5 projections, all `"feeds":[]`) and POSTed `/rebuild` for each:
@@ -2886,7 +2886,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
 
 ---
 
-## #113 — infra/ensure-nats-stream.sh narrows the workflow-execution stream back to workflow.execution.> on every make infra-ensure
+## archived-113 — infra/ensure-nats-stream.sh narrows the workflow-execution stream back to workflow.execution.> on every make infra-ensure
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2917,7 +2917,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`.
 
 ---
 
-## #114 — services/executor is not part of the local stack (no compose service, Makefile target, or ensure-up entry)
+## archived-114 — services/executor is not part of the local stack (no compose service, Makefile target, or ensure-up entry)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2930,7 +2930,7 @@ Labels: `bug`, `sev:medium`, `area:infra`
 `infra/docker-compose.yml; Makefile; infra/ensure-up.sh:30-41 (REQUIRED_SERVICES); services/executor/Dockerfile`
 
 ## Why it matters
-A pipeline code node in dev waits for a reply that never comes and fails with the generic 30 s timeout; there is also no `restart:` policy for the one component with no supervisor (#69 and #58 assume one exists).
+A pipeline code node in dev waits for a reply that never comes and fails with the generic 30 s timeout; there is also no `restart:` policy for the one component with no supervisor (archived-69 and archived-58 assume one exists).
 
 ## Evidence
 `grep -n executor infra/docker-compose.yml` → none; `grep -n hocuspocus infra/docker-compose.yml` → service present.
@@ -2946,9 +2946,9 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`.
 
 Plan:
 - `infra/docker-compose.yml`: add an `executor` service modelled on `hocuspocus` (build `../services/executor`, `NATS_URL=nats://nats:4222`, `depends_on: nats` healthy, `restart: unless-stopped`).
-- Health: the sidecar has no HTTP port, so add a tiny NATS health responder in `services/executor/src/index.ts` (subject `executor.health`, outside the `pipeline-code-run.>` stream capture — see #141) and a compose `healthcheck` that requests it.
+- Health: the sidecar has no HTTP port, so add a tiny NATS health responder in `services/executor/src/index.ts` (subject `executor.health`, outside the `pipeline-code-run.>` stream capture — see archived-141) and a compose `healthcheck` that requests it.
 - `infra/ensure-up.sh`: add `executor` to `REQUIRED_SERVICES` with the same build-stamp handling hocuspocus has; `Makefile`/README/docs mention.
-- Verify: `make infra-ensure` brings it up healthy; a JS transformer request through NATS is answered by the compose-managed executor (the smoke from #139).
+- Verify: `make infra-ensure` brings it up healthy; a JS transformer request through NATS is answered by the compose-managed executor (the smoke from archived-139).
 - Acceptance: executor container is part of `infra-ensure`, reports healthy, restarts on failure, and code nodes have a consumer in the documented dev stack.
 Files: infra/docker-compose.yml, infra/ensure-up.sh, services/executor/src/index.ts, docs/codebase/Integrations.md, README.md.
 
@@ -2956,19 +2956,19 @@ Files: infra/docker-compose.yml, infra/ensure-up.sh, services/executor/src/index
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #145 (merge `ed13cce1` on `master`).
+Closed by PR archived-145 (merge `ed13cce1` on `master`).
 
 - [x] `executor` service in `infra/docker-compose.yml` (build from `services/executor`, `NATS_URL=nats://nats:4222`, `restart: unless-stopped`, no ports, depends on nats healthy).
 - [x] In `REQUIRED_SERVICES` of `infra/ensure-up.sh`, with the same build-input stamp scheme as hocuspocus.
 - [x] Health: NATS probe `executor.health` (`healthcheck.ts`) → compose healthcheck → ensure-up readiness.
 
-**Evidence:** `./infra/ensure-up.sh` → `autonate-executor … (healthy)`; `docker exec autonate-executor node dist/healthcheck.js` → 0; JS (isolated-vm 7) and Python (Pyodide) transformers sent over NATS answered by the compose container with the expected rows; second ensure-up run = 1 s no-op. CI: none yet (#79). Next thing code nodes hit is #141.
+**Evidence:** `./infra/ensure-up.sh` → `autonate-executor … (healthy)`; `docker exec autonate-executor node dist/healthcheck.js` → 0; JS (isolated-vm 7) and Python (Pyodide) transformers sent over NATS answered by the compose container with the expected rows; second ensure-up run = 1 s no-op. CI: none yet (archived-79). Next thing code nodes hit is archived-141.
 
 </details>
 
 ---
 
-## #115 — System health page has no Hocuspocus probe — a collab-sidecar outage leaves /api/health/system green
+## archived-115 — System health page has no Hocuspocus probe — a collab-sidecar outage leaves /api/health/system green
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -2995,7 +2995,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`.
 
 ---
 
-## #116 — WorkflowStudio.tsx contains two literal NUL bytes, so grep classifies the 3,916-line file as binary
+## archived-116 — WorkflowStudio.tsx contains two literal NUL bytes, so grep classifies the 3,916-line file as binary
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3022,7 +3022,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`.
 
 ---
 
-## #117 — SPA production bundle: 3.9 MB entry chunk with no manualChunks and only 8 lazy() boundaries
+## archived-117 — SPA production bundle: 3.9 MB entry chunk with no manualChunks and only 8 lazy() boundaries
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -3049,20 +3049,20 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`.
 
 ---
 
-## #118 — SPA lint cap is a ceiling, not a ratchet: 411/411 saturated, 40 exhaustive-deps warnings, 12 unused eslint-disable directives
+## archived-118 — SPA lint cap is a ceiling, not a ratchet: 411/411 saturated, 40 exhaustive-deps warnings, 12 unused eslint-disable directives
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
 Labels: `bug`, `sev:low`, `area:spa`
 
 ## What
-`"lint": "eslint src --max-warnings=411"` equals the current count exactly, so the next warning fails lint while nothing requires the number to fall. Breakdown: `react/no-unescaped-entities` 234 (130 in `pages/admin/config/PluginDocumentation.tsx`), `react-hooks/exhaustive-deps` 40 (2 in the shared `DataTable.tsx`), jsx-a11y 97 (#40), `no-unused-vars` 24. `npx eslint src --report-unused-disable-directives` finds 12 unused directives (8 in `widgets/AutoConfigForm.tsx`).
+`"lint": "eslint src --max-warnings=411"` equals the current count exactly, so the next warning fails lint while nothing requires the number to fall. Breakdown: `react/no-unescaped-entities` 234 (130 in `pages/admin/config/PluginDocumentation.tsx`), `react-hooks/exhaustive-deps` 40 (2 in the shared `DataTable.tsx`), jsx-a11y 97 (archived-40), `no-unused-vars` 24. `npx eslint src --report-unused-disable-directives` finds 12 unused directives (8 in `widgets/AutoConfigForm.tsx`).
 
 ## Where
 `src/AutoNate.Spa/package.json:11; src/AutoNate.Spa/eslint.config.js`
 
 ## Why it matters
-40 stale-closure warnings are hook-correctness bugs waiting to happen; the unused directives are free to delete and are what #32 (missing reasons) trips over.
+40 stale-closure warnings are hook-correctness bugs waiting to happen; the unused directives are free to delete and are what archived-32 (missing reasons) trips over.
 
 ## Evidence
 `npx eslint src -f json` → 0 errors / 411 warnings; `--report-unused-disable-directives` → 12.
@@ -3076,14 +3076,14 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 ---
 
-## #119 — IFlowableReadThrough is registered in DI but injected nowhere — the executions UI never reads workflow_execution_cache
+## archived-119 — IFlowableReadThrough is registered in DI but injected nowhere — the executions UI never reads workflow_execution_cache
 
 `OPEN` · nathanpond · opened 2026-08-31
 
 Labels: `bug`, `sev:low`, `area:api`
 
 ## What
-`grep -rln IFlowableReadThrough src/AutoNate.Web` → Program.cs (registration), the interface, and `FlowableReadThrough.cs`; zero endpoints or services inject it. The executions endpoints call `IFlowableClient` directly (#52) while AQL, dashboards and the authorization selector compiler read only the 60 s-poll cache.
+`grep -rln IFlowableReadThrough src/AutoNate.Web` → Program.cs (registration), the interface, and `FlowableReadThrough.cs`; zero endpoints or services inject it. The executions endpoints call `IFlowableClient` directly (archived-52) while AQL, dashboards and the authorization selector compiler read only the 60 s-poll cache.
 
 ## Where
 `src/AutoNate.Web/Services/Flowable/Cache/IFlowableReadThrough.cs; src/AutoNate.Web/Services/Flowable/Cache/FlowableReadThrough.cs; src/AutoNate.Web/Program.cs`
@@ -3095,7 +3095,7 @@ The abstraction built to reconcile live-vs-cache reads is dead code, and its abs
 `grep -rn IFlowableReadThrough src/AutoNate.Web/Endpoints/*.cs` → 0.
 
 ## Suggested fix
-Route `ExecutionEndpoints` through `IFlowableReadThrough` as part of #52, or delete the interface and implementation.
+Route `ExecutionEndpoints` through `IFlowableReadThrough` as part of archived-52, or delete the interface and implementation.
 
 _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
@@ -3103,7 +3103,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 ---
 
-## #120 — README documents AUTONATE_DATA_ROOT and /data/; the real key is Data:Root (default data/) — and the Rider run config drifted from README
+## archived-120 — README documents AUTONATE_DATA_ROOT and /data/; the real key is Data:Root (default data/) — and the Rider run config drifted from README
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -3130,7 +3130,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 ---
 
-## #121 — Test factory sets Flowable:BaseAddress but the option is Flowable:BaseUrl — binds to nothing
+## archived-121 — Test factory sets Flowable:BaseAddress but the option is Flowable:BaseUrl — binds to nothing
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3157,7 +3157,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 ---
 
-## #122 — ScopedSubscriptionsOptions (Features:ScopedSubscriptions:Enabled) is declared and never read
+## archived-122 — ScopedSubscriptionsOptions (Features:ScopedSubscriptions:Enabled) is declared and never read
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3184,7 +3184,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 ---
 
-## #123 — Agents.codex.md prescribes `npx playwright test` against :5173; the E2E suite is Playwright .NET on a random port
+## archived-123 — Agents.codex.md prescribes `npx playwright test` against :5173; the E2E suite is Playwright .NET on a random port
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -3211,7 +3211,7 @@ _Found by `/n8-map` on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 ---
 
-## #124 — Spike: schema initialisation has no advisory lock and no version ledger
+## archived-124 — Spike: schema initialisation has no advisory lock and no version ledger
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -3238,26 +3238,26 @@ _Found by `/n8-map` on 2026-08-31. Filed as a design spike for `/n8-roadmap`._
 
 ---
 
-## #125 — Spike: executions have two sources of truth (Flowable live reads vs workflow_execution_cache)
+## archived-125 — Spike: executions have two sources of truth (Flowable live reads vs workflow_execution_cache)
 
 `OPEN` · nathanpond · opened 2026-08-31
 
 Labels: `needs-triage`, `spike`, `area:api`
 
 ## What
-The executions UI reads Flowable live through `IFlowableClient` (#52), while AQL, dashboards and the `WorkflowExecutionCacheSelectorCompiler` read `workflow_execution_cache` populated by a 60 s poll; `IFlowableReadThrough` — built to reconcile the two — is injected nowhere.
+The executions UI reads Flowable live through `IFlowableClient` (archived-52), while AQL, dashboards and the `WorkflowExecutionCacheSelectorCompiler` read `workflow_execution_cache` populated by a 60 s poll; `IFlowableReadThrough` — built to reconcile the two — is injected nowhere.
 
 ## Where
 `src/AutoNate.Web/Endpoints/ExecutionEndpoints.cs; src/AutoNate.Web/Services/Flowable/Cache/*; src/AutoNate.Web/Authorization/… WorkflowExecutionCacheSelectorCompiler`
 
 ## Why it matters
-Authorization decisions and list views can disagree for up to 60 s; every performance fix on the list (#52) implicitly picks a side. This is a design decision, not a bug fix.
+Authorization decisions and list views can disagree for up to 60 s; every performance fix on the list (archived-52) implicitly picks a side. This is a design decision, not a bug fix.
 
 ## Evidence
 See docs/codebase/Concerns.md §2 and Architecture.md (workflows section).
 
 ## Suggested fix
-Decide whether the cache is the read model (then the UI reads it and the poll interval/CDC becomes the SLA) or Flowable is (then the cache is only an index for AQL/authorization and #52 needs a Flowable-side query). Close with a decision comment; feed #52 and the IFlowableReadThrough issue.
+Decide whether the cache is the read model (then the UI reads it and the poll interval/CDC becomes the SLA) or Flowable is (then the cache is only an index for AQL/authorization and archived-52 needs a Flowable-side query). Close with a decision comment; feed archived-52 and the IFlowableReadThrough issue.
 
 _Found by `/n8-map` on 2026-08-31. Filed as a design spike for `/n8-roadmap`._
 
@@ -3265,7 +3265,7 @@ _Found by `/n8-map` on 2026-08-31. Filed as a design spike for `/n8-roadmap`._
 
 ---
 
-## #126 — Spike: runtime dependency surface — 9 containers for a single-host app; Redis exists only for Dapr actor state
+## archived-126 — Spike: runtime dependency surface — 9 containers for a single-host app; Redis exists only for Dapr actor state
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -3278,7 +3278,7 @@ Local/prod topology: Postgres, Flowable, Redis, NATS, Dapr placement, Dapr sched
 `infra/docker-compose.yml; src/AutoNate.Web/Services/Events/AuditOutboxDispatcher.cs; src/AutoNate.Web/Services/Signals/DaprStreamingSubscriber.cs; src/AutoNate.Web/Services/Nats/*`
 
 ## Why it matters
-Operational surface, restart-supervision gaps (#69), the self-restarting-sidecar path in `DaprStreamingSubscriber`, and a 100 s outbox timeout (#71) all trace back to the Dapr hop. Collapsing it is a roadmap-level decision with deployment consequences.
+Operational surface, restart-supervision gaps (archived-69), the self-restarting-sidecar path in `DaprStreamingSubscriber`, and a 100 s outbox timeout (archived-71) all trace back to the Dapr hop. Collapsing it is a roadmap-level decision with deployment consequences.
 
 ## Evidence
 See docs/codebase/Integrations.md and Concerns.md §2.
@@ -3292,26 +3292,26 @@ _Found by `/n8-map` on 2026-08-31. Filed as a design spike for `/n8-roadmap`._
 
 ---
 
-## #132 — Playwright E2E suite fails 100% on master: fixture-launched app never renders the login form (all tests time out in SignInAsync)
+## archived-132 — Playwright E2E suite fails 100% on master: fixture-launched app never renders the login form (all tests time out in SignInAsync)
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
 Labels: `bug`, `sev:high`, `area:tests`
 
 ## What
-Running `dotnet test tests/AutoNate.E2E.Tests --filter RecordsCrudTests|ManageUsersTests|NotificationsTests` on `master` (f68dc371 and again after #111) fails every test after exactly 30 s with `TimeoutException … waiting for GetByRole(Textbox, Name="Username")` at `AutoNateE2EFixture.SignInAsync` (:100). The fixture does start the app (`Now listening` is detected, wwwroot is rebuilt — index.html mtime matches the run), and infra postgres/nats/redis/hocuspocus were up, but **Flowable was not running** (app log: `Connection refused (localhost:8080)`). The same app launched with the launch profile (SpaProxy → Vite on :5173) renders the login form immediately.
+Running `dotnet test tests/AutoNate.E2E.Tests --filter RecordsCrudTests|ManageUsersTests|NotificationsTests` on `master` (f68dc371 and again after archived-111) fails every test after exactly 30 s with `TimeoutException … waiting for GetByRole(Textbox, Name="Username")` at `AutoNateE2EFixture.SignInAsync` (:100). The fixture does start the app (`Now listening` is detected, wwwroot is rebuilt — index.html mtime matches the run), and infra postgres/nats/redis/hocuspocus were up, but **Flowable was not running** (app log: `Connection refused (localhost:8080)`). The same app launched with the launch profile (SpaProxy → Vite on :5173) renders the login form immediately.
 
 ## Where
 `tests/AutoNate.E2E.Tests/AutoNateE2EFixture.cs:86-104, :134-162; src/AutoNate.Web/AutoNate.Web.csproj:12-24 (SpaProxy), infra/ensure-up.sh (Flowable in REQUIRED_SERVICES)`
 
 ## Why it matters
-The E2E suite is the only automated coverage for 49 journeys (docs/playwright-test-backlog.md) and was the intended gate for the mantine-datatable 9 bump (#111) — it could not be used. Either the fixture has an undocumented dependency (Flowable up? a running Vite dev server?) or the wwwroot-served SPA fails to boot in the fixture path; the tests give no signal which, because the guard reports only the element timeout. Also: the .NET Playwright package (1.50.0) needs browser build `chromium_headless_shell-1155`, which was absent from the cache — `pwsh bin/…/playwright.ps1 install` (or `npx playwright@1.50.0 install chromium-headless-shell`) is an undocumented prerequisite.
+The E2E suite is the only automated coverage for 49 journeys (docs/playwright-test-backlog.md) and was the intended gate for the mantine-datatable 9 bump (archived-111) — it could not be used. Either the fixture has an undocumented dependency (Flowable up? a running Vite dev server?) or the wwwroot-served SPA fails to boot in the fixture path; the tests give no signal which, because the guard reports only the element timeout. Also: the .NET Playwright package (1.50.0) needs browser build `chromium_headless_shell-1155`, which was absent from the cache — `pwsh bin/…/playwright.ps1 install` (or `npx playwright@1.50.0 install chromium-headless-shell`) is an undocumented prerequisite.
 
 ## Evidence
-Runs on 2026-08-31: master+#111 → `Failed: 14, Passed: 0` (7 m 1 s); master control → `Failed: 13, Passed: 0` (6 m 31 s); every error identical. `docker ps` → autonate-postgres/nats/redis/hocuspocus only. Smoke: `dotnet run --project src/AutoNate.Web -p:BuildSpa=true` (launch profile) → SpaProxy redirect to :5173 → login form renders (Playwright snapshot shows textbox "Username"). First attempt with the stale browser cache → `Executable doesn't exist at …/chromium_headless_shell-1155/…`.
+Runs on 2026-08-31: master+archived-111 → `Failed: 14, Passed: 0` (7 m 1 s); master control → `Failed: 13, Passed: 0` (6 m 31 s); every error identical. `docker ps` → autonate-postgres/nats/redis/hocuspocus only. Smoke: `dotnet run --project src/AutoNate.Web -p:BuildSpa=true` (launch profile) → SpaProxy redirect to :5173 → login form renders (Playwright snapshot shows textbox "Username"). First attempt with the stale browser cache → `Executable doesn't exist at …/chromium_headless_shell-1155/…`.
 
 ## Suggested fix
-1) Make the fixture fail fast with a diagnostic when `/` doesn't serve the SPA: after `Now listening`, GET `/` and assert 200 + `<div id="root">`, and dump the app's stderr/stdout tail + the page's console errors on the first timeout. 2) Verify whether the login page needs Flowable (or anything else in `infra/ensure-up.sh`'s REQUIRED_SERVICES) and either start it in the fixture or document it in docs/codebase/Testing.md. 3) Add the Playwright browser-install step to Testing.md and to the future CI workflow (#79).
+1) Make the fixture fail fast with a diagnostic when `/` doesn't serve the SPA: after `Now listening`, GET `/` and assert 200 + `<div id="root">`, and dump the app's stderr/stdout tail + the page's console errors on the first timeout. 2) Verify whether the login page needs Flowable (or anything else in `infra/ensure-up.sh`'s REQUIRED_SERVICES) and either start it in the fixture or document it in docs/codebase/Testing.md. 3) Add the Playwright browser-install step to Testing.md and to the future CI workflow (archived-79).
 
 _Found by `Dependabot PR review` on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
 
@@ -3331,7 +3331,7 @@ Files expected: `tests/AutoNate.E2E.Tests/AutoNateE2EFixture.cs`, possibly `src/
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #136 (merge `08e56246` on `master`).
+Closed by PR archived-136 (merge `08e56246` on `master`).
 
 **Root cause:** `bdc72176` changed the SPA fallback to `{*path:nonfile:regex(^(?!api(/|$)))}`; `RegexRouteConstraint` returns false for a missing catch-all value, so `GET /` stopped matching and was a bare 404 while deep links still served the shell. Every spec starts at `/` (`SignInAsync`), hence 27/27 identical sign-in timeouts. Flowable being down was a red herring; the Playwright browser-build mismatch was a separate, now-documented prerequisite.
 
@@ -3344,13 +3344,13 @@ Closed by PR #136 (merge `08e56246` on `master`).
 **Tests**
 - `SpaRootFallbackTests` (new): 6/6 pass; with the fix reverted → 1 failure, exactly `SpaRoutes_ServeTheShell(path: "/")`.
 - E2E slice `RecordsCrudTests|ManageUsersTests|NotificationsTests`: **Passed 14 / Failed 0 (12 s)** — was 14/14 timeouts on `master` before the fix.
-- CI: none exists yet (#79).
+- CI: none exists yet (archived-79).
 
 </details>
 
 ---
 
-## #139 — Standardise the Node.js runtime on 24 (Active LTS) across sidecars, dev and build
+## archived-139 — Standardise the Node.js runtime on 24 (Active LTS) across sidecars, dev and build
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3367,11 +3367,11 @@ Standardise the Node.js runtime on the current Active LTS (24) everywhere: the t
 - [ ] `docs/codebase/Stack.md` reflects the pinned version.
 
 ## Notes
-Unblocks #102 (isolated-vm 7 requires Node ≥ 24). #105 / #101 (`@types/node` 26) are closed rather than merged — types track the runtime major; they return as a 24 → 26 bump later. Node 26 is Current until it enters LTS in October 2026; revisit then.
+Unblocks archived-102 (isolated-vm 7 requires Node ≥ 24). archived-105 / archived-101 (`@types/node` 26) are closed rather than merged — types track the runtime major; they return as a 24 → 26 bump later. Node 26 is Current until it enters LTS in October 2026; revisit then.
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #140 (merge `7df45faa` on `master`).
+Closed by PR archived-140 (merge `7df45faa` on `master`).
 
 **Acceptance criteria**
 - [x] `.nvmrc` and `engines.node` (`>=24 <25`) in root, SPA, hocuspocus, executor.
@@ -3381,17 +3381,17 @@ Closed by PR #140 (merge `7df45faa` on `master`).
 - [x] `docs/codebase/Stack.md` reflects the pin; `.n8/decisions.md` records the policy (revisit Node 26 when it enters LTS, Oct 2026).
 
 **Found on the way**
-- isolated-vm 5 cannot compile against Node 24 (`#error "C++20 or later required."`) → moved to 7.0.1, superseding #102.
+- isolated-vm 5 cannot compile against Node 24 (`#error "C++20 or later required."`) → moved to 7.0.1, superseding archived-102.
 - The executor image never worked, even on `node:22` — `--ignore-scripts` skipped the native build (control build reproduced `Cannot find module './out/isolated_vm'` on master). Fixed in the Dockerfile; npm ≥ 11.19's install-script approval added.
-- #141 filed: the .NET runner's plain NATS request receives JetStream's publish ack before the executor's reply.
+- archived-141 filed: the .NET runner's plain NATS request receives JetStream's publish ack before the executor's reply.
 
-**Tests:** image builds ×2, runtime boot ×2, sandbox smoke 2/2; CI: none yet (#79).
+**Tests:** image builds ×2, runtime boot ×2, sandbox smoke 2/2; CI: none yet (archived-79).
 
 </details>
 
 ---
 
-## #141 — JetStreamCodeNodeRunner uses a plain NATS request on a stream-captured subject — the first reply is JetStream's publish ack, not the executor's CodeNodeReply
+## archived-141 — JetStreamCodeNodeRunner uses a plain NATS request on a stream-captured subject — the first reply is JetStream's publish ack, not the executor's CodeNodeReply
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3404,22 +3404,22 @@ Labels: `bug`, `sev:high`, `area:api`
 `src/AutoNate.Web/Services/Pipelines/Execution/JetStreamCodeNodeRunner.cs:49-69; src/AutoNate.Web/Services/Nats/NatsStreamProvisioner.cs:97-101; services/executor/src/index.ts:22`
 
 ## Why it matters
-Every code-transformer / analyzer node fails as soon as a working executor is attached (until now the executor image never booted — #114/#139 — so the failure mode was a 30 s timeout instead). With the fixed image the node fails instantly with an empty error.
+Every code-transformer / analyzer node fails as soon as a working executor is attached (until now the executor image never booted — archived-114/archived-139 — so the failure mode was a 30 s timeout instead). With the fixed image the node fails instantly with an empty error.
 
 ## Evidence
 Smoke test 2026-08-31 against the Node 24 executor image: `nc.request("pipeline-code-run.smoke.node1", …)` → `{"stream":"pipeline-code-runs","seq":1}` (JS) / `seq:2` (Python) in ~5 ms. Same payloads published to an explicit inbox with the ack skipped → `{"success":true,"output":{rows:[{x:1,doubled:2},…]}}` for both languages. `NatsStreamProvisioner` log on app boot: `JetStream stream 'pipeline-code-runs' is ready (subjects: pipeline-code-run.>)`.
 
 ## Suggested fix
-Either (a) stop capturing the request subject in a stream — request/reply is core NATS; delete the `pipeline-code-runs` stream from `DesiredStreams` (the executor subscribes with core `nc.subscribe`, see #49) — or (b) keep the stream and make the runner subscribe to an explicit inbox, skipping any reply without a `success` field (the smoke script's shape). (a) is simpler and matches what the sidecar actually does. Regression test: a fake executor answering on the reply subject after a JetStream ack; the runner must return the executor's reply.
+Either (a) stop capturing the request subject in a stream — request/reply is core NATS; delete the `pipeline-code-runs` stream from `DesiredStreams` (the executor subscribes with core `nc.subscribe`, see archived-49) — or (b) keep the stream and make the runner subscribe to an explicit inbox, skipping any reply without a `success` field (the smoke script's shape). (a) is simpler and matches what the sidecar actually does. Regression test: a fake executor answering on the reply subject after a JetStream ack; the runner must return the executor's reply.
 
-_Found by `Node 24 executor smoke test (#139)` on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
+_Found by `Node 24 executor smoke test (archived-139)` on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
 
 <!-- fingerprint: jetstream-ack-shadows-reply|src/AutoNate.Web/Services/Pipelines/Execution/JetStreamCodeNodeRunner.cs|RequestAsync -->
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
 Plan:
-- `NatsStreamProvisioner`: stop provisioning the `pipeline-code-runs` stream over `pipeline-code-run.>` — the executor is a core-NATS queue subscriber (#49), so the stream only exists to intercept request/reply with a PubAck.
+- `NatsStreamProvisioner`: stop provisioning the `pipeline-code-runs` stream over `pipeline-code-run.>` — the executor is a core-NATS queue subscriber (archived-49), so the stream only exists to intercept request/reply with a PubAck.
 - `JetStreamCodeNodeRunner`: read replies from an explicit inbox and ignore anything that isn't a `CodeNodeReply` (defence in depth if a stream ever captures the subject again); keep the existing timeout/cancellation semantics.
 - Regression test against the real NATS in the test infra: provision a throw-away stream that captures a test subject, run a fake executor that answers after JetStream's ack, and assert the runner returns the executor's reply — fails on today's code.
 - Acceptance: test passes; `NatsStreamProvisioner` no longer declares the stream; docs/codebase/Integrations.md updated.
@@ -3429,18 +3429,18 @@ Files: src/AutoNate.Web/Services/Pipelines/Execution/JetStreamCodeNodeRunner.cs,
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #146 (merge `9c7b1ca1` on `master`).
+Closed by PR archived-146 (merge `9c7b1ca1` on `master`).
 
 - [x] `pipeline-code-runs` stream no longer provisioned; listed in `LegacyStreamsToRemove` — live boot logged `Removed legacy JetStream stream 'pipeline-code-runs'`, `nats stream ls` afterwards shows only `workflow-execution`.
 - [x] `JetStreamCodeNodeRunner` reads an explicit inbox and ignores anything not shaped like a `CodeNodeReply`.
 - [x] Regression test `JetStreamCodeNodeRunnerTests` (real NATS, throw-away capturing stream, fake executor answering after the ack): 6/6 pass; the integration case fails on the old runner with `Executor sidecar reported an unknown failure`.
-CI: none yet (#79).
+CI: none yet (archived-79).
 
 </details>
 
 ---
 
-## #147 — Four DataStoresAdminTests E2E specs are stale: file-store detail moved to the SVAR file manager and file-backed datasets now require picking a file
+## archived-147 — Four DataStoresAdminTests E2E specs are stale: file-store detail moved to the SVAR file manager and file-backed datasets now require picking a file
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3480,53 +3480,53 @@ Files: tests/AutoNate.E2E.Tests/DataStoresAdminTests.cs (+ possibly DataStoreFil
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #148 (merge `9f115c99` on `master`).
+Closed by PR archived-148 (merge `9f115c99` on `master`).
 
 - [x] Two file-store detail specs rewritten against `DataStoreFileManager` (SVAR): toolbar upload modal + `Add New → Add new folder → .wx-modal` prompt.
 - [x] Two dataset specs seed a CSV over `POST /api/datastores/{id}/files` and pick it under *File* before Create/Save.
 - [x] No `data-testid` needed yet — exact-text targeting works; noted as the fallback if the third-party widget proves brittle.
 
-**Evidence:** `dotnet test tests/AutoNate.E2E.Tests --filter DataStoresAdminTests` → **Passed 16 / Failed 0** (20 s); was 12/16 on `master`. Every flow was reproduced by hand in a browser before being encoded. With this, the full suite should be 140 passed / 0 failed / 2 skipped. CI: none yet (#79).
+**Evidence:** `dotnet test tests/AutoNate.E2E.Tests --filter DataStoresAdminTests` → **Passed 16 / Failed 0** (20 s); was 12/16 on `master`. Every flow was reproduced by hand in a browser before being encoded. With this, the full suite should be 140 passed / 0 failed / 2 skipped. CI: none yet (archived-79).
 
 </details>
 
 ---
 
-## #150 — Migrate BlockNote 0.51 → 0.54 (comments API) across SPA and hocuspocus
+## archived-150 — Migrate BlockNote 0.51 → 0.54 (comments API) across SPA and hocuspocus
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
 Labels: `feature`, `area:spa`
 
 ## What
-Migrate the collaborative editors from BlockNote 0.51 to 0.54 (SPA `@blocknote/{core,react,mantine}` and hocuspocus `@blocknote/{core,server-util}` in lock-step). 0.54 removed `YjsThreadStore` and `User` from `@blocknote/core/comments`, which `src/lib/yjs/commentAudit.ts`, `useBlockNoteWithYjs.ts` and `useResolveUsers.ts` depend on — the reason Dependabot's SPA group (#107/#131/#138) and the hocuspocus group (#104) could not merge.
+Migrate the collaborative editors from BlockNote 0.51 to 0.54 (SPA `@blocknote/{core,react,mantine}` and hocuspocus `@blocknote/{core,server-util}` in lock-step). 0.54 removed `YjsThreadStore` and `User` from `@blocknote/core/comments`, which `src/lib/yjs/commentAudit.ts`, `useBlockNoteWithYjs.ts` and `useResolveUsers.ts` depend on — the reason Dependabot's SPA group (archived-107/archived-131/archived-138) and the hocuspocus group (archived-104) could not merge.
 
 ## Acceptance criteria
 - [ ] SPA and hocuspocus on the same BlockNote version (0.54.x); `tsc`/build clean in both.
 - [ ] Comment threads on notes/pages still create, resolve and audit (the `commentAudit` hooks) — verified by the notes/documents E2E specs and a manual thread round-trip.
 - [ ] Yjs document format unchanged: an existing note opens and edits after the bump (no re-migration of stored Y.Docs).
-- [ ] #104 (hocuspocus group) can then land; a follow-up pairs `@hocuspocus/provider` 4.6 with `@hocuspocus/server` 4.6.
+- [ ] archived-104 (hocuspocus group) can then land; a follow-up pairs `@hocuspocus/provider` 4.6 with `@hocuspocus/server` 4.6.
 
 ## Notes
 Dependency-driven migration (step 3 of the Dependabot plan, 2026-08-31). The docx-editor deprecation is a separate roadmap question and stays excluded.
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #152 (merge `00f1eb38` on `master`).
+Closed by PR archived-152 (merge `00f1eb38` on `master`).
 
 - [x] SPA and hocuspocus on BlockNote **0.54.0**; `tsc`/lint/Vite build and hocuspocus `tsc` clean. `@tiptap/core` override removed (single 3.30.5 resolves naturally); `y-prosemirror` now a direct SPA dependency.
-- [x] Comment threads through the migrated store: `createThread` → 1 thread, `resolveThread` → `resolved: true`, `deleteThread` → gone from store and raw Y.Map. The audit POST fails with 400 for a **pre-existing** contract mismatch (#151) — not introduced here.
+- [x] Comment threads through the migrated store: `createThread` → 1 thread, `resolveThread` → `resolved: true`, `deleteThread` → gone from store and raw Y.Map. The audit POST fails with 400 for a **pre-existing** contract mismatch (archived-151) — not introduced here.
 - [x] Existing dev page (`Hawaii: The Aloha State`: headings, tables, lists, marks) opens with zero console errors; edit mode + formatting toolbar with *Add comment* works for the editor role. Y.Doc format untouched.
 - [x] Full Playwright suite against a rebuilt hocuspocus (server-util 0.54.0): **140 passed / 0 failed / 2 skipped**.
-- [ ] `@hocuspocus/provider` 4.6 + `@hocuspocus/server` 4.6 (Dependabot #104) — now unblocked; next step.
+- [ ] `@hocuspocus/provider` 4.6 + `@hocuspocus/server` 4.6 (Dependabot archived-104) — now unblocked; next step.
 
-CI: none yet (#79).
+CI: none yet (archived-79).
 
 </details>
 
 ---
 
-## #151 — Comment audit events never reach the server: SPA posts `documentName`, POST /api/yjs/comment-event requires `pageId` → always 400
+## archived-151 — Comment audit events never reach the server: SPA posts `documentName`, POST /api/yjs/comment-event requires `pageId` → always 400
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3545,9 +3545,9 @@ Every comment create/reply/resolve/reopen/delete on notes and pages is silently 
 Manual run 2026-08-31 on a dev page with the migrated (0.54) store: `createThread` → `POST /api/yjs/comment-event` → **400**; console: `[yjs] comment-event created for page:426344ed-…/3333aa0c-… failed: AxiosError: Request failed with status code 400`. Server rule: `if (!Guid.TryParse(request.PageId, …)) return BadRequest`.
 
 ## Suggested fix
-Pick one contract and add a test. Preferred: keep the client's `documentName` (it carries the `page:`/`note:` kind the server needs to resolve notes to their parent page) and make the endpoint accept `documentName`, resolving `note:<guid>` → parent page for the `Page.View` authorization and the `pageId` in the event payload; keep accepting `pageId` for compatibility. Regression test: an endpoint test posting the exact client body shape → 202/204 and a recorded audit event; plus a Playwright spec that creates a comment thread and asserts the POST succeeds (the UI composer needs a real mouse flow — see the #150 notes).
+Pick one contract and add a test. Preferred: keep the client's `documentName` (it carries the `page:`/`note:` kind the server needs to resolve notes to their parent page) and make the endpoint accept `documentName`, resolving `note:<guid>` → parent page for the `Page.View` authorization and the `pageId` in the event payload; keep accepting `pageId` for compatibility. Regression test: an endpoint test posting the exact client body shape → 202/204 and a recorded audit event; plus a Playwright spec that creates a comment thread and asserts the POST succeeds (the UI composer needs a real mouse flow — see the archived-150 notes).
 
-_Found by `BlockNote 0.54 migration smoke test (#150)` on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
+_Found by `BlockNote 0.54 migration smoke test (archived-150)` on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
 
 <!-- fingerprint: contract-mismatch|src/AutoNate.Web/Endpoints/YjsEndpoints.cs|comment-event -->
 
@@ -3562,7 +3562,7 @@ Taking the issue's preferred contract: the client keeps sending `documentName` (
 3. Playwright spec: create a comment thread through the BlockNote UI and assert the `comment-event` POST returns 204 — attempted after 1–2; if the composer's mouse flow proves too flaky for the suite it gets noted here rather than landing a flaky spec.
 4. Client `commentAudit.ts` needs no change beyond its comment; it will be verified end-to-end in step 3.
 
-Branch `fix/151-comment-event-contract`; PR with `Closes #151`.
+Branch `fix/151-comment-event-contract`; PR with `Closes archived-151`.
 
 </details>
 
@@ -3581,40 +3581,40 @@ Fixed on `master` via the PR above.
 
 ---
 
-## #154 — Hocuspocus 4.0 → 4.6: bump server and provider together
+## archived-154 — Hocuspocus 4.0 → 4.6: bump server and provider together
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
 Labels: `feature`, `area:services`
 
 ## What
-Move the Yjs transport to Hocuspocus 4.6 on both ends together: `@hocuspocus/server` 4.0 → 4.6 in `services/hocuspocus` (with the rest of Dependabot #104: pg 8.23, @types/pg, yjs 13.6.32, react 19.2.8 patches) and `@hocuspocus/provider` 4.0 → 4.6 in the SPA (excluded from the SPA group so it can only move with the server).
+Move the Yjs transport to Hocuspocus 4.6 on both ends together: `@hocuspocus/server` 4.0 → 4.6 in `services/hocuspocus` (with the rest of Dependabot archived-104: pg 8.23, @types/pg, yjs 13.6.32, react 19.2.8 patches) and `@hocuspocus/provider` 4.0 → 4.6 in the SPA (excluded from the SPA group so it can only move with the server).
 
 ## Acceptance criteria
 - [ ] hocuspocus builds and boots on 4.6; SPA `tsc`/build clean with provider 4.6; `yjs` on the same version in both.
 - [ ] A collaborative page/note syncs end-to-end against the rebuilt sidecar (E2E notes/documents specs + an existing dev page opens with no console errors).
 - [ ] Ticket auth (`/internal/yjs-auth`) and the `/internal/yjs-webhook` materializer still work (hocuspocus log + page snapshot persisted).
-- [ ] Dependabot #104 closed as superseded.
+- [ ] Dependabot archived-104 closed as superseded.
 
 ## Notes
-Follows the BlockNote 0.54 migration (#150). Hocuspocus 4.x minor releases: check the changelog for `onAuthenticate` / extension API changes before bumping.
+Follows the BlockNote 0.54 migration (archived-150). Hocuspocus 4.x minor releases: check the changelog for `onAuthenticate` / extension API changes before bumping.
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closed by PR #156 (merge `30d44a99` on `master`).
+Closed by PR archived-156 (merge `30d44a99` on `master`).
 
 - [x] hocuspocus builds/boots on `@hocuspocus/server` 4.6.0; SPA on `@hocuspocus/provider` 4.6.0; `yjs` 13.6.32 on both.
 - [x] Full Playwright suite against the rebuilt sidecar: 140 passed / 0 failed / 2 skipped.
 - [x] Manual round-trip on a throwaway dev page: typed text → hocuspocus → `onStoreDocument` → materializer → `/internal/yjs-webhook` → persisted `bodyJsonb` (version 3); two Yjs tickets, zero console errors; page deleted afterwards.
-- [x] Dependabot #104 closed as superseded.
+- [x] Dependabot archived-104 closed as superseded.
 
-Gap noted: the E2E notes/documents specs don't exercise sync (they pass even when the sidecar can't reach the app) — a follow-up spec asserting the webhook-persisted body would make this guard permanent. CI: none yet (#79).
+Gap noted: the E2E notes/documents specs don't exercise sync (they pass even when the sidecar can't reach the app) — a follow-up spec asserting the webhook-persisted body would make this guard permanent. CI: none yet (archived-79).
 
 </details>
 
 ---
 
-## #158 — Mantine >=9.4 Textarea autosize triggers Chromium ResizeObserver-loop error on width change (E2E allowlisted)
+## archived-158 — Mantine >=9.4 Textarea autosize triggers Chromium ResizeObserver-loop error on width change (E2E allowlisted)
 
 `OPEN` · nathanpond · opened 2026-08-31
 
@@ -3637,9 +3637,9 @@ dispatched as a window `error` event (Playwright: `pageerror`). Layout settles o
 
 ## Evidence
 
-Bisect on `Assistant_CrossPageSearchResizePersistenceAndDelete` with only `@mantine/*` varied (all other #157 updates applied): 9.1.1 pass, 9.2.0 pass, 9.3.0 pass, **9.4.0 fail**, 9.5.2 fail. `npm view @mantine/core@9.3.2 dependencies.react-textarea-autosize` is set; `@9.4.0` is not.
+Bisect on `Assistant_CrossPageSearchResizePersistenceAndDelete` with only `@mantine/*` varied (all other archived-157 updates applied): 9.1.1 pass, 9.2.0 pass, 9.3.0 pass, **9.4.0 fail**, 9.5.2 fail. `npm view @mantine/core@9.3.2 dependencies.react-textarea-autosize` is set; `@9.4.0` is not.
 
-## Mitigation (landed with #157)
+## Mitigation (landed with archived-157)
 
 `tests/AutoNate.E2E.Tests/Support/ConsoleErrorGuard.cs` — `DefaultAllowed` gains the substring `ResizeObserver loop completed with undelivered notifications` with a rationale comment. This is browser-level notice text, not a JS exception, and matches the class the default allowlist exists for.
 
@@ -3674,7 +3674,7 @@ Remaining on our side: when a Mantine release includes the fix, bump `@mantine/*
 
 ---
 
-## #161 — Executor Python sandbox: Pyodide's `js` module exposes the Node host (process, eval, fetch, NODEFS) to author code
+## archived-161 — Executor Python sandbox: Pyodide's `js` module exposes the Node host (process, eval, fetch, NODEFS) to author code
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3687,7 +3687,7 @@ The executor's Python sandbox is not a sandbox on Node. Pyodide registers a `js`
 `services/executor/src/pythonRunner.ts:16-19` (`loadPyodide` without `jsglobals`), `:71-73` (author source executed in that interpreter)
 
 ## Why it matters
-Path: `POST /api/code-transformers` (language=python) → pipeline run → NATS `pipeline-code-run.>` → executor. Whatever secrets and network reach the executor container has (NATS URL and credentials once #66 lands, any mounted config, the compose network) are readable and usable by pipeline authors; `js.fetch` turns the sidecar into an SSRF pivot inside the compose network. The JS path (isolated-vm) does not have this problem.
+Path: `POST /api/code-transformers` (language=python) → pipeline run → NATS `pipeline-code-run.>` → executor. Whatever secrets and network reach the executor container has (NATS URL and credentials once archived-66 lands, any mounted config, the compose network) are readable and usable by pipeline authors; `js.fetch` turns the sidecar into an SSRF pivot inside the compose network. The JS path (isolated-vm) does not have this problem.
 
 ## Evidence
 Probe on the installed `pyodide@0.26.4` (2026-08-31):
@@ -3698,15 +3698,15 @@ restricted (jsglobals: Object.create(null)): js.process / js.globalThis / js.eva
 ```
 
 ## Suggested fix
-Load Pyodide with `jsglobals: Object.create(null)`, unregister the `pyodide_js` module (and drop it from `sys.modules`) after load so `pyodide_js.FS` / `loadPackage` are unreachable, and run each request in its own `worker_threads` Worker (the #58 design) so nothing leaks between authors. Regression tests: `import js; js.process`, `import pyodide_js`, `open('/etc/passwd')`, and `pyodide.code.run_js` must all fail from author code.
+Load Pyodide with `jsglobals: Object.create(null)`, unregister the `pyodide_js` module (and drop it from `sys.modules`) after load so `pyodide_js.FS` / `loadPackage` are unreachable, and run each request in its own `worker_threads` Worker (the archived-58 design) so nothing leaks between authors. Regression tests: `import js; js.process`, `import pyodide_js`, `open('/etc/passwd')`, and `pyodide.code.run_js` must all fail from author code.
 
-_Found while working #58 on 2026-08-31. Severity per the n8SDLC rubric: `sev:critical`._
+_Found while working archived-58 on 2026-08-31. Severity per the n8SDLC rubric: `sev:critical`._
 
 <!-- fingerprint: sandbox-host-escape|services/executor/src/pythonRunner.ts|loadPyodide-jsglobals -->
 
 ---
 
-## #163 — SubscriptionManagerTests.Disconnect_ClearsRegistryIndices fails on every full-suite run (5 s WebSocket budget), passes in isolation
+## archived-163 — SubscriptionManagerTests.Disconnect_ClearsRegistryIndices fails on every full-suite run (5 s WebSocket budget), passes in isolation
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3719,7 +3719,7 @@ Labels: `bug`, `sev:medium`, `area:tests`
 `tests/AutoNate.Web.Tests/SubscriptionManagerTests.cs:296-297` (the shared 5 s budget), consumed at `:231`, `:251`, `:266` and the other `TestTimeout()` call sites.
 
 ## Why it matters
-The suite cannot be used as a merge gate while one test fails on every full run: a real regression appearing in that file would be indistinguishable from the standing failure, and "1 failed" trains everyone to ignore the result. It also blocks #79 (no CI) — wiring this suite into CI as-is would produce a permanently red pipeline.
+The suite cannot be used as a merge gate while one test fails on every full run: a real regression appearing in that file would be indistinguishable from the standing failure, and "1 failed" trains everyone to ignore the result. It also blocks archived-79 (no CI) — wiring this suite into CI as-is would produce a permanently red pipeline.
 
 ## Evidence
 Four full-suite runs on this machine, same checkout:
@@ -3745,7 +3745,7 @@ Scale the receive budget for full-suite conditions rather than raising it blindl
 
 Worth a sweep of the other wall-clock budgets in the suite at the same time — `DataStoreListFilteringTests` and `ApiNotFoundGuardTests` failed in a fresh-worktree run for a different (missing `wwwroot`) reason, so a fresh checkout needs `BuildSpa` before the suite is meaningful; that is worth documenting in `docs/codebase/Testing.md` alongside this fix.
 
-_Found while verifying #59 on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
+_Found while verifying archived-59 on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
 
 <!-- fingerprint: flaky-test-wall-clock-budget|tests/AutoNate.Web.Tests/SubscriptionManagerTests.cs|TestTimeout -->
 
@@ -3769,7 +3769,7 @@ Two consequences for the fix:
 1. **It is a second test, not just one.** `NotesQueryEndpointTests.FromNotes_GroupByType_Counts_PerKind` fails the same way — only under full-suite load, passing 2/2 in isolation — but its symptom is a `400` from the query endpoint rather than a timeout, so the shared cause may be contention in the fixture/DB layer rather than the 5 s WebSocket budget alone. Whoever takes this should treat "wall-clock budgets in `SubscriptionManagerTests`" as the confirmed instance and go looking for the general one.
 2. **The acceptance bar stated below still holds and is now the important part**: the full suite must pass twice in a row with no `--filter`. A single green run does not clear this — run 2 above was green while runs 1–4 were not.
 
-This matters for #79 (CI): at roughly a 60% clean rate per full run, a pipeline wired to this suite as-is would go red on most commits for reasons unrelated to the change under test.
+This matters for archived-79 (CI): at roughly a 60% clean rate per full run, a pipeline wired to this suite as-is would go red on most commits for reasons unrelated to the change under test.
 
 </details>
 
@@ -3782,14 +3782,14 @@ This matters for #79 (CI): at roughly a 60% clean rate per full run, a pipeline 
 - `ApiNotFoundGuardTests.Unknown_api_path_returns_404_not_spa_index` — expects `Cache-Control: no-store`, gets `null`
 - `DataStoreListFilteringTests.GetDataStores_filters_by_per_store_view_grants` — gets `404`
 
-So **running E2E and then Web.Tests fails those two**, and unlike #163's flake they also fail in isolation, which makes them look like real breakage. `dotnet build src/AutoNate.Web -p:BuildSpa=true` restores them; verified both directions in this session.
+So **running E2E and then Web.Tests fails those two**, and unlike archived-163's flake they also fail in isolation, which makes them look like real breakage. `dotnet build src/AutoNate.Web -p:BuildSpa=true` restores them; verified both directions in this session.
 
 This also explains a false lead from earlier: a `master` baseline run in a fresh `git worktree` failed exactly these two, because a new worktree has no SPA build either — I initially read that as "master is broken".
 
 Two practical consequences:
 
 1. **Order matters locally**: run `AutoNate.Web.Tests` before `AutoNate.E2E.Tests`, or rebuild the SPA in between.
-2. **For #79 (CI)**: the pipeline must either build the SPA before the backend suite, run the two suites in separate jobs/checkouts, or rebuild between them — otherwise CI reproduces this as a spurious two-test failure on every run that does E2E first.
+2. **For archived-79 (CI)**: the pipeline must either build the SPA before the backend suite, run the two suites in separate jobs/checkouts, or rebuild between them — otherwise CI reproduces this as a spurious two-test failure on every run that does E2E first.
 
 </details>
 
@@ -3803,13 +3803,13 @@ It was not. After a plain rebuild the same tests pass 8/8 on the same branch, `m
 
 So the isolation check — the thing I lean on to tell a real failure from a load flake — is itself unreliable in that window. **Rebuild first**: `dotnet build src/AutoNate.Web -p:BuildSpa=true` plus the test project, *then* re-run the filter.
 
-For #79 (CI): this is another reason the two suites want separate jobs or checkouts rather than running back-to-back in one workspace.
+For archived-79 (CI): this is another reason the two suites want separate jobs or checkouts rather than running back-to-back in one workspace.
 
 </details>
 
 ---
 
-## #165 — REST data connector config never binds: handler deserializes case-sensitively, SPA writes camelCase
+## archived-165 — REST data connector config never binds: handler deserializes case-sensitively, SPA writes camelCase
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-08-31
 
@@ -3835,15 +3835,15 @@ Reproduced directly against `RestDataConnectorHandler` in a test: a connector wh
 ## Suggested fix
 Deserialize with `PropertyNameCaseInsensitive = true` (or a shared camelCase `JsonSerializerOptions`) in `ParseConfig`, matching what the SPA writes. Regression test: a camelCase config round-trips to a populated `RestConnectorConfig`, and a preview against a stub endpoint returns rows.
 
-**Note for whoever takes this:** the mis-binding currently *masks* the SSRF fixed in #60 for UI-authored connectors — they never reach the fetch. #60's guard is in place first precisely so that fixing this binding does not turn a dead code path into a live SSRF; keep them in that order.
+**Note for whoever takes this:** the mis-binding currently *masks* the SSRF fixed in archived-60 for UI-authored connectors — they never reach the fetch. archived-60's guard is in place first precisely so that fixing this binding does not turn a dead code path into a live SSRF; keep them in that order.
 
-_Found while working #60 on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
+_Found while working archived-60 on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
 
 <!-- fingerprint: json-binding-case-mismatch|src/AutoNate.Web/Services/DataConnectors/Builtin/RestDataConnectorHandler.cs|ParseConfig -->
 
 ---
 
-## #172 — Site Configuration → Appearance: saving Site name silently reverts on reload
+## archived-172 — Site Configuration → Appearance: saving Site name silently reverts on reload
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -3856,7 +3856,7 @@ Saving a new **Site name** in Site Configuration → Appearance appears to succe
 Reproduced by `AdminOperationsTests.Appearance_SiteNamePersistsAcrossReload`, currently `[Fact(Skip)]` in `tests/AutoNate.E2E.Tests/AdminOperationsTests.cs`.
 
 ## Why it matters
-Data-loss-shaped from the operator's point of view: the UI reports a successful save and the value silently reverts, so the only way to notice is to reload and re-read. The site name is also the fallback document title (#18), so it is visible everywhere.
+Data-loss-shaped from the operator's point of view: the UI reports a successful save and the value silently reverts, so the only way to notice is to reload and re-read. The site name is also the fallback document title (archived-18), so it is visible everywhere.
 
 ## Evidence
 The E2E spec was written against the expected behaviour and skipped rather than deleted, with the prose reason: *"appearance Save changes accepts edits, but reloading restores the default Site name instead of the saved value."* Un-skip it to reproduce.
@@ -3864,13 +3864,13 @@ The E2E spec was written against the expected behaviour and skipped rather than 
 ## Suggested fix
 Trace the Appearance save path end to end — whether the PUT persists, whether the read-back projects the saved row, and whether `SiteAppearanceProvider`'s cached query is being served stale after the mutation. The skipped spec is the acceptance test; it should go green rather than be replaced.
 
-_Filed while working #88 (skipped tests with no linked issue) on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
+_Filed while working archived-88 (skipped tests with no linked issue) on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
 
 <!-- fingerprint: silent-save-revert|src/AutoNate.Web/Endpoints/SiteSettingsEndpoints.cs|appearance-site-name -->
 
 ---
 
-## #173 — DOCX import navigates to ?import=1 but never finalises parsed content — document reloads empty
+## archived-173 — DOCX import navigates to ?import=1 but never finalises parsed content — document reloads empty
 
 `CLOSED` · nathanpond · opened 2026-08-31 · closed 2026-09-01
 
@@ -3891,13 +3891,13 @@ The spec was written against the expected behaviour and skipped with the prose r
 ## Suggested fix
 Follow the `?import=1` handoff: whether the parsed content reaches the Y.Doc, and whether it is committed before the editor mounts/persists. The skipped spec is the acceptance test.
 
-_Filed while working #88 (skipped tests with no linked issue) on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
+_Filed while working archived-88 (skipped tests with no linked issue) on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
 
 <!-- fingerprint: import-never-finalises|src/AutoNate.Spa/src/components/documents/DocxDocumentEditor.tsx|import-handoff -->
 
 ---
 
-## #182 — Role-assignment revoke is gated kind-level: a one-role assign grant can strip any role from anyone
+## archived-182 — Role-assignment revoke is gated kind-level: a one-role assign grant can strip any role from anyone
 
 `CLOSED` · nathanpond · opened 2026-09-01 · closed 2026-09-01
 
@@ -3920,13 +3920,13 @@ Assign is gated instance-level on the POST side (`/api/admin/roles/{id}/assignme
 ## Suggested fix
 Resolve the assignment first and gate instance-level on its `RoleId`, mirroring the POST. The test above then inverts to assert 403 and the assignment surviving.
 
-_Found while writing the coverage for #91 on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
+_Found while writing the coverage for archived-91 on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
 
 <!-- fingerprint: kind-level-gate-on-instance-op|src/AutoNate.Web/Endpoints/RoleAssignmentEndpoints.cs|revoke-assignment -->
 
 ---
 
-## #183 — preview-file-source reads any datastore file with no DataStore authorization
+## archived-183 — preview-file-source reads any datastore file with no DataStore authorization
 
 `CLOSED` · nathanpond · opened 2026-09-01 · closed 2026-09-01
 
@@ -3947,13 +3947,13 @@ A caller holding `dataset:create` and **zero** datastore grants — one who gets
 ## Suggested fix
 Authorize `(DataStore, View)` against the referenced `dataStoreId` inside the handler before touching the file — the same check `GET /api/datastores/{id}/files` makes. Now that a `DataStoreInstanceAuthorizer` exists (see the instance-authorizer fix), `IAuthorizer.AuthorizeAsync` answers this directly.
 
-_Found while writing the coverage for #82 on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
+_Found while writing the coverage for archived-82 on 2026-08-31. Severity per the n8SDLC rubric: `sev:high`._
 
 <!-- fingerprint: missing-cross-feature-authz|src/AutoNate.Web/Endpoints/DatasetEndpoints.cs|preview-file-source -->
 
 ---
 
-## #184 — preview-file-source 500s and leaks a stack trace on a folder .keep placeholder
+## archived-184 — preview-file-source 500s and leaks a stack trace on a folder .keep placeholder
 
 `CLOSED` · nathanpond · opened 2026-09-01 · closed 2026-09-01
 
@@ -3976,13 +3976,13 @@ Reachable by anyone holding `dataset:create`. There is no exception-handling mid
 ## Suggested fix
 Filter `.keep` in the file branch the way the folder branch already does, and return 404 for a path with no readable content. Separately worth deciding whether the app should install exception-handling middleware so an unhandled throw anywhere cannot return internals.
 
-_Found while writing the coverage for #82 on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
+_Found while writing the coverage for archived-82 on 2026-08-31. Severity per the n8SDLC rubric: `sev:medium`._
 
 <!-- fingerprint: unhandled-exception-leaks-stack|src/AutoNate.Web/Endpoints/DatasetEndpoints.cs|preview-keep-placeholder -->
 
 ---
 
-## #185 — Yjs ticket endpoint is an existence oracle for notes and documents (403 vs 404)
+## archived-185 — Yjs ticket endpoint is an existence oracle for notes and documents (403 vs 404)
 
 `CLOSED` · nathanpond · opened 2026-09-01 · closed 2026-09-01
 
@@ -4005,13 +4005,13 @@ The `page:` / `pagemeta:` branch in the same handler is already correct — it a
 ## Suggested fix
 Move the existence lookups behind the authorize call, or collapse both outcomes onto 403. Then invert the test.
 
-_Found while writing the coverage for #80 on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
+_Found while writing the coverage for archived-80 on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 <!-- fingerprint: existence-oracle|src/AutoNate.Web/Endpoints/YjsEndpoints.cs|ticket-note-document-branch -->
 
 ---
 
-## #186 — Four small correctness/hardening findings from the endpoint-coverage pass
+## archived-186 — Four small correctness/hardening findings from the endpoint-coverage pass
 
 `CLOSED` · nathanpond · opened 2026-09-01 · closed 2026-09-01
 
@@ -4034,13 +4034,13 @@ The zero-binding branch returns `DocumentBindingListResponse` (`{items}`); every
 
 Also noted, not filed: the shared-secret filters compare lengths before `FixedTimeEquals`, so secret *length* remains a branch oracle — inherent to that construction, fixable only by hashing both sides to a fixed width first.
 
-_Found while writing the coverage for #90 and #91 on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
+_Found while writing the coverage for archived-90 and archived-91 on 2026-08-31. Severity per the n8SDLC rubric: `sev:low`._
 
 <!-- fingerprint: coverage-pass-minor-findings|src/AutoNate.Web/Endpoints|role-principal-override-toctou-shape -->
 
 ---
 
-## #193 — Seeded admin account ships its password hash and salt in the repo, and is auto-granted SuperAdmin
+## archived-193 — Seeded admin account ships its password hash and salt in the repo, and is auto-granted SuperAdmin
 
 `CLOSED` · nathanpond · opened 2026-09-01 · closed 2026-09-02
 

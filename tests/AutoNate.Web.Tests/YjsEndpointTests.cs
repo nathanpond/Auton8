@@ -14,7 +14,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
-// Regression coverage for #80: the Yjs collaboration endpoints and both
+// Regression coverage for archived-80: the Yjs collaboration endpoints and both
 // shared-secret endpoint filters shipped with zero tests.
 //
 //   POST /api/yjs/ticket        cookie-authenticated; mints the HMAC ticket
@@ -472,7 +472,7 @@ public sealed class YjsEndpointTests
     // grants could probe note/document ids for existence. The `page:` branch
     // never had the problem — it authorizes first and returns 403 either way.
     //
-    // Fixed in #185 by moving the existence lookups behind the authorization
+    // Fixed in archived-185 by moving the existence lookups behind the authorization
     // decision, so the note and documents branches answer the way the page
     // branch always did.
     [Fact]
@@ -495,7 +495,7 @@ public sealed class YjsEndpointTests
             "/api/yjs/ticket",
             JsonSerializer.Serialize(new { documentName = $"note:{Guid.NewGuid()}" }));
 
-        // #185: both are 403 now. A caller with no grants cannot tell a real
+        // archived-185: both are 403 now. A caller with no grants cannot tell a real
         // note id from an invented one, which is the whole point — the 404 is
         // reserved for someone who could have seen it.
         Assert.Equal(HttpStatusCode.Forbidden, existing.StatusCode);

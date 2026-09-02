@@ -66,7 +66,7 @@ public static class YjsEndpoints
             // and authorize on Page. pagemeta: addresses the page directly.
             // documents: authorizes on the Document kind directly (Phase 3+).
             // Existence is resolved here but only *disclosed* after the
-            // authorization check below (#185).
+            // authorization check below (archived-185).
             //
             // The note and documents branches used to answer 404 for a missing
             // row before authorizing, while an existing row the caller could

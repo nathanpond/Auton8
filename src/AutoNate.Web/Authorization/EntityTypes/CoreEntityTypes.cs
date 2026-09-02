@@ -246,7 +246,7 @@ public static class CoreEntityTypes
     // Grants admin picker. So grants the runtime *does* honour could not be
     // discovered or authored from the standard page; the only way in was
     // ContentPermissionOverrideEndpoints, which carried its own hardcoded
-    // action lists as a second source of truth (#25).
+    // action lists as a second source of truth (archived-25).
     //
     // The action lists here are those same lists, so the picker and the
     // override endpoints agree by construction: Comment is document-only

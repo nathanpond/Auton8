@@ -13,7 +13,7 @@
 
 ---
 
-## #1 — smartdocs
+## archived-1 — smartdocs
 
 `MERGED (merged 2026-05-30)` · nathanpond · opened 2026-05-30 · `smartdocs` → `master`
 
@@ -21,7 +21,7 @@ _No description._
 
 ---
 
-## #2 — [codex] expand Playwright E2E coverage
+## archived-2 — [codex] expand Playwright E2E coverage
 
 `MERGED (merged 2026-05-31)` · nathanpond · opened 2026-05-31 · `codex/playwright-tests` → `master`
 
@@ -49,7 +49,7 @@ _No description._
 
 ---
 
-## #3 — Bump mermaid from 11.15.0 to 11.17.2 in /src/AutoNate.Spa
+## archived-3 — Bump mermaid from 11.15.0 to 11.17.2 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/mermaid-11.17.2` → `master`
 
@@ -176,7 +176,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #4 — Bump js-yaml from 4.1.1 to 4.3.2 in /src/AutoNate.Spa
+## archived-4 — Bump js-yaml from 4.1.1 to 4.3.2 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/js-yaml-4.3.2` → `master`
 
@@ -291,7 +291,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #5 — Bump dompurify from 3.4.3 to 3.4.14 in /src/AutoNate.Spa
+## archived-5 — Bump dompurify from 3.4.3 to 3.4.14 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/dompurify-3.4.14` → `master`
 
@@ -405,7 +405,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #6 — Bump react-router and react-router-dom in /src/AutoNate.Spa
+## archived-6 — Bump react-router and react-router-dom in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/multi-9ceb6b67f2` → `master`
 
@@ -625,7 +625,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #94 — Bump esbuild from 0.28.0 to 0.28.2
+## archived-94 — Bump esbuild from 0.28.0 to 0.28.2
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/esbuild-0.28.2` → `master`
 
@@ -778,7 +778,7 @@ You can trigger Dependabot actions by commenting on this PR:
 
 ---
 
-## #95 — Bump bpmn-js from 18.15.0 to 18.25.1
+## archived-95 — Bump bpmn-js from 18.15.0 to 18.25.1
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/bpmn-js-18.25.1` → `master`
 
@@ -939,7 +939,7 @@ You can trigger Dependabot actions by commenting on this PR:
 
 ---
 
-## #96 — Bump the maven-minor-patch group across 1 directory with 10 updates
+## archived-96 — Bump the maven-minor-patch group across 1 directory with 10 updates
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/maven/flowable-extension/maven-minor-patch-3cdc32700b` → `master`
 
@@ -1442,13 +1442,13 @@ _Description has been truncated_
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Not verified here** (2026-08-31): this group fixes the repo's only critical advisory (Spring Boot, #34) and the jackson-databind highs (#35), but it moves Spring Boot 4.0.2 → 4.1.1 (a minor with possible autoconfig changes) and the machine used for this review has no JDK/Maven, so `mvn test` could not be run. Recommended: run `mvn -q -f flowable-extension/pom.xml test` and rebuild the custom Flowable image (`infra/`) before merging — it should go in first among the Maven PRs.
+**Not verified here** (2026-08-31): this group fixes the repo's only critical advisory (Spring Boot, archived-34) and the jackson-databind highs (archived-35), but it moves Spring Boot 4.0.2 → 4.1.1 (a minor with possible autoconfig changes) and the machine used for this review has no JDK/Maven, so `mvn test` could not be run. Recommended: run `mvn -q -f flowable-extension/pom.xml test` and rebuild the custom Flowable image (`infra/`) before merging — it should go in first among the Maven PRs.
 
 </details>
 
 ---
 
-## #97 — Bump org.junit.jupiter:junit-jupiter from 5.13.4 to 6.1.3 in /flowable-extension
+## archived-97 — Bump org.junit.jupiter:junit-jupiter from 5.13.4 to 6.1.3 in /flowable-extension
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/maven/flowable-extension/org.junit.jupiter-junit-jupiter-6.1.3` → `master`
 
@@ -1518,13 +1518,13 @@ Bumps [org.junit.jupiter:junit-jupiter](https://github.com/junit-team/junit-fram
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Held** (2026-08-31): JUnit 5 → 6 is a major (new namespaces/API removals); not verifiable here without a JDK. Take after #96.
+**Held** (2026-08-31): JUnit 5 → 6 is a major (new namespaces/API removals); not verifiable here without a JDK. Take after archived-96.
 
 </details>
 
 ---
 
-## #98 — Bump bpmn-js-create-append-anything from 1.2.0 to 2.0.0
+## archived-98 — Bump bpmn-js-create-append-anything from 1.2.0 to 2.0.0
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/bpmn-js-create-append-anything-2.0.0` → `master`
 
@@ -1632,7 +1632,7 @@ Bumps [bpmn-js-create-append-anything](https://github.com/bpmn-io/bpmn-js-create
 
 ---
 
-## #99 — chore(deps-dev): bump typescript from 5.9.3 to 7.0.2 in /services/executor
+## archived-99 — chore(deps-dev): bump typescript from 5.9.3 to 7.0.2 in /services/executor
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/executor/typescript-7.0.2` → `master`
 
@@ -1724,12 +1724,12 @@ Bumps [typescript](https://github.com/microsoft/TypeScript) from 5.9.3 to 7.0.2.
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Validated against current `master` (which now carries the TS 7 tsconfig groundwork from #170) in an isolated worktree:
+Validated against current `master` (which now carries the TS 7 tsconfig groundwork from archived-170) in an isolated worktree:
 
 - `typescript@7.0.2` installed, `npx tsc --version` → 7.0.2
 - `npm test` (build + `node --test`): **11 passed / 0 failed** — including the sandbox suite (timeout, memory cap, isolation, host-escape probes)
 
-The executor has no ESLint, no bundler and no Vite plugin — its whole toolchain is `tsc` — so the "upgrade typescript-eslint and the Vite plugin together" hold I put on this PR applied to #109 (the SPA), not here. Unblocking it on its own merits.
+The executor has no ESLint, no bundler and no Vite plugin — its whole toolchain is `tsc` — so the "upgrade typescript-eslint and the Vite plugin together" hold I put on this PR applied to archived-109 (the SPA), not here. Unblocking it on its own merits.
 
 For the record, the SPA hold stands and is a hard external blocker: `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`, so TS 7 is out of range until upstream ships support.
 
@@ -1737,7 +1737,7 @@ For the record, the SPA hold stands and is a hard external blocker: `typescript-
 
 ---
 
-## #100 — Bump org.graalvm.js:js-scriptengine from 24.1.2 to 25.3.4.1 in /flowable-extension
+## archived-100 — Bump org.graalvm.js:js-scriptengine from 24.1.2 to 25.3.4.1 in /flowable-extension
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/maven/flowable-extension/org.graalvm.js-js-scriptengine-25.3.4.1` → `master`
 
@@ -1865,7 +1865,7 @@ Native Standalone contains a Native Image compiled launcher.</p>
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Held** (2026-08-31): GraalVM js-scriptengine 24 → 25 is a major runtime change for workflow scripts and may require a matching GraalVM/JDK level; not verifiable here without a JDK. Take after #96 with the workflow-script E2E specs.
+**Held** (2026-08-31): GraalVM js-scriptengine 24 → 25 is a major runtime change for workflow scripts and may require a matching GraalVM/JDK level; not verifiable here without a JDK. Take after archived-96 with the workflow-script E2E specs.
 
 </details>
 
@@ -1881,7 +1881,7 @@ Runtime gate after merge (`bd7d1424`), 2026-08-31:
 
 ---
 
-## #101 — Bump @types/node from 24.13.3 to 26.4.0 in /services/executor
+## archived-101 — Bump @types/node from 24.13.3 to 26.4.0 in /services/executor
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/executor/types/node-26.4.0` → `master`
 
@@ -1927,7 +1927,7 @@ You can trigger Dependabot actions by commenting on this PR:
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closing rather than merging: `@types/node` should track the runtime major, and the runtime was just standardised on **Node 24** (#139 / #140) — the 24.x types already in the lockfile are the correct ones. This bump will be wanted again as a 24 → 26 move once Node 26 enters LTS (October 2026); Dependabot now also tracks the Docker base images so both arrive together.
+Closing rather than merging: `@types/node` should track the runtime major, and the runtime was just standardised on **Node 24** (archived-139 / archived-140) — the 24.x types already in the lockfile are the correct ones. This bump will be wanted again as a 24 → 26 move once Node 26 enters LTS (October 2026); Dependabot now also tracks the Docker base images so both arrive together.
 
 </details>
 
@@ -1941,7 +1941,7 @@ If you change your mind, just re-open this PR and I'll resolve any conflicts on 
 
 ---
 
-## #102 — Bump isolated-vm from 5.0.4 to 7.0.1 in /services/executor
+## archived-102 — Bump isolated-vm from 5.0.4 to 7.0.1 in /services/executor
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/executor/isolated-vm-7.0.1` → `master`
 
@@ -1999,13 +1999,13 @@ You can trigger Dependabot actions by commenting on this PR:
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Held** (2026-08-31): `isolated-vm` 7.0.1 declares `engines.node >= 24.0.0`; the executor image is `node:22-alpine`. Bump the base image first (and re-verify the sandbox behaviour — see #58).
+**Held** (2026-08-31): `isolated-vm` 7.0.1 declares `engines.node >= 24.0.0`; the executor image is `node:22-alpine`. Bump the base image first (and re-verify the sandbox behaviour — see archived-58).
 
 </details>
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Superseded by #140, which moved `isolated-vm` to ^7.0.1 as part of the Node 24 standardisation (#139) — 5.x cannot compile against Node 24's V8 headers, so the two had to land together. Verified end-to-end: the rebuilt executor image executes JS transformers through isolated-vm 7.0.1.
+Superseded by archived-140, which moved `isolated-vm` to ^7.0.1 as part of the Node 24 standardisation (archived-139) — 5.x cannot compile against Node 24's V8 headers, so the two had to land together. Verified end-to-end: the rebuilt executor image executes JS transformers through isolated-vm 7.0.1.
 
 </details>
 
@@ -2019,7 +2019,7 @@ If you change your mind, just re-open this PR and I'll resolve any conflicts on 
 
 ---
 
-## #103 — Bump pyodide from 0.26.4 to 314.0.6 in /services/executor
+## archived-103 — Bump pyodide from 0.26.4 to 314.0.6 in /services/executor
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/executor/pyodide-314.0.6` → `master`
 
@@ -2090,13 +2090,13 @@ Bumps [pyodide](https://github.com/pyodide/pyodide) from 0.26.4 to 314.0.6.
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Held** (2026-08-31): Pyodide moved to CPython-based version numbers, so 0.26.4 → 314.0.6 is a real release but a major upgrade of the Python sandbox runtime. The executor has no automated tests and open sandbox issues (#58, #64); take this deliberately alongside that work, not as an unreviewed bump.
+**Held** (2026-08-31): Pyodide moved to CPython-based version numbers, so 0.26.4 → 314.0.6 is a real release but a major upgrade of the Python sandbox runtime. The executor has no automated tests and open sandbox issues (archived-58, archived-64); take this deliberately alongside that work, not as an unreviewed bump.
 
 </details>
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Re-examined 2026-08-31 — validating and merging.** The hold said: *"the executor has no automated tests and open sandbox issues (#58, #64); take this deliberately alongside that work."* That precondition is now met — #58, #64 and #161 are fixed, and the executor has an 11-test sandbox suite whose whole purpose is to answer a question like this one.
+**Re-examined 2026-08-31 — validating and merging.** The hold said: *"the executor has no automated tests and open sandbox issues (archived-58, archived-64); take this deliberately alongside that work."* That precondition is now met — archived-58, archived-64 and archived-161 are fixed, and the executor has an 11-test sandbox suite whose whole purpose is to answer a question like this one.
 
 **Local suite against `pyodide@314.0.6`: 11 passed / 0 failed**, including every property the sandbox rests on — timeout (plain busy loop *and* one swallowing `KeyboardInterrupt`), the `memoryMb` cap, per-request isolation, the host-escape probes, and the fixed environment.
 
@@ -2121,7 +2121,7 @@ That last line matters most: the `memoryMb` cap reads `pyodide._module.HEAPU8` t
 
 ---
 
-## #104 — Bump the hocuspocus-minor-patch group across 1 directory with 10 updates
+## archived-104 — Bump the hocuspocus-minor-patch group across 1 directory with 10 updates
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/hocuspocus/hocuspocus-minor-patch-fad54ada6e` → `master`
 
@@ -2703,7 +2703,7 @@ Updates `@types/react-dom` from 19.2.3 to 19.2.5
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Held** (2026-08-31): `tsc` passes for the sidecar with these bumps, but `@blocknote/core`/`@blocknote/server-util` 0.54 must match the SPA's BlockNote version (Yjs document format), and the SPA can't take 0.54 yet — see #107. `@hocuspocus/server` 4.6 likewise pairs with `@hocuspocus/provider` 4.6 in the SPA. Land together with the SPA side.
+**Held** (2026-08-31): `tsc` passes for the sidecar with these bumps, but `@blocknote/core`/`@blocknote/server-util` 0.54 must match the SPA's BlockNote version (Yjs document format), and the SPA can't take 0.54 yet — see archived-107. `@hocuspocus/server` 4.6 likewise pairs with `@hocuspocus/provider` 4.6 in the SPA. Land together with the SPA side.
 
 </details>
 
@@ -2715,7 +2715,7 @@ Looks like these dependencies are updatable in another way, so this is no longer
 
 ---
 
-## #105 — Bump @types/node from 24.12.4 to 26.4.0 in /services/hocuspocus
+## archived-105 — Bump @types/node from 24.12.4 to 26.4.0 in /services/hocuspocus
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/hocuspocus/types/node-26.4.0` → `master`
 
@@ -2761,7 +2761,7 @@ You can trigger Dependabot actions by commenting on this PR:
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closing rather than merging: `@types/node` should track the runtime major, and the runtime was just standardised on **Node 24** (#139 / #140) — the 24.x types already in the lockfile are the correct ones. This bump will be wanted again as a 24 → 26 move once Node 26 enters LTS (October 2026); Dependabot now also tracks the Docker base images so both arrive together.
+Closing rather than merging: `@types/node` should track the runtime major, and the runtime was just standardised on **Node 24** (archived-139 / archived-140) — the 24.x types already in the lockfile are the correct ones. This bump will be wanted again as a 24 → 26 move once Node 26 enters LTS (October 2026); Dependabot now also tracks the Docker base images so both arrive together.
 
 </details>
 
@@ -2775,7 +2775,7 @@ If you change your mind, just re-open this PR and I'll resolve any conflicts on 
 
 ---
 
-## #106 — chore(deps-dev): bump typescript from 5.9.3 to 7.0.2 in /services/hocuspocus
+## archived-106 — chore(deps-dev): bump typescript from 5.9.3 to 7.0.2 in /services/hocuspocus
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/hocuspocus/typescript-7.0.2` → `master`
 
@@ -2872,9 +2872,9 @@ Validated on the rebased head (`758ac63`), which now sits on the Hocuspocus 4.6 
 - `npm ci` clean, `npx tsc --version` → 7.0.2
 - `npm run build` → clean compile, `dist/` emitted
 
-`services/hocuspocus` needed **no** tsconfig change for TypeScript 7 — it already sets `rootDir`, so it compiles as-is. (The executor did need one; that landed separately in #170 before #99.)
+`services/hocuspocus` needed **no** tsconfig change for TypeScript 7 — it already sets `rootDir`, so it compiles as-is. (The executor did need one; that landed separately in archived-170 before archived-99.)
 
-Like the executor, this sidecar has no ESLint, no bundler and no Vite plugin — its whole toolchain is `tsc` — so the "upgrade typescript-eslint and the Vite plugin together" hold applied to #109 (the SPA), not here.
+Like the executor, this sidecar has no ESLint, no bundler and no Vite plugin — its whole toolchain is `tsc` — so the "upgrade typescript-eslint and the Vite plugin together" hold applied to archived-109 (the SPA), not here.
 
 The SPA hold stands: `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <6.1.0"`, so TS 7 is out of range there until upstream ships support.
 
@@ -2882,7 +2882,7 @@ The SPA hold stands: `typescript-eslint@8.69.0` declares `typescript: ">=4.8.4 <
 
 ---
 
-## #107 — Bump the spa-minor-patch group across 1 directory with 40 updates
+## archived-107 — Bump the spa-minor-patch group across 1 directory with 40 updates
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/spa-minor-patch-f83b28ffca` → `master`
 
@@ -3685,7 +3685,7 @@ _Description has been truncated_
 **Held — not safe as a group** (reviewed 2026-08-31, local validation on top of `master`):
 - `@blocknote/core` 0.51 → 0.54 removes `YjsThreadStore` and `User` from `@blocknote/core/comments`; `src/lib/yjs/commentAudit.ts`, `useBlockNoteWithYjs.ts` and `useResolveUsers.ts` fail to compile (`tsc -b` → 15 errors). This needs a code migration, not a dependency bump.
 - `@eigenpal/docx-editor-*` 1.0.3 → 1.9.0: every version of all four packages is now marked **deprecated** on npm; 1.9.0 also drops the transitive `y-prosemirror` that `src/components/documents/DocxDocumentEditor.tsx:4` imports directly (`Cannot find module 'y-prosemirror'`). Deciding the future of the documents editor is a roadmap question.
-- `@hocuspocus/provider` 4.0 → 4.6 must move together with the server in #104.
+- `@hocuspocus/provider` 4.0 → 4.6 must move together with the server in archived-104.
 
 The rest of the group (Mantine 9.5.2, vite 8.2.2, axios 1.20.0, react 19.2.8, zod, tanstack, …) built cleanly in isolation. Suggested next step: `@dependabot ignore` BlockNote and docx-editor from this group (or exclude them in `dependabot.yml`) so the remaining 30+ updates can land; track the BlockNote comments-API migration and the docx-editor deprecation as issues.
 
@@ -3699,7 +3699,7 @@ Looks like these dependencies are updatable in another way, so this is no longer
 
 ---
 
-## #108 — chore(deps-dev): bump @eslint/js from 9.39.4 to 10.0.1 in /src/AutoNate.Spa
+## archived-108 — chore(deps-dev): bump @eslint/js from 9.39.4 to 10.0.1 in /src/AutoNate.Spa
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/eslint/js-10.0.1` → `master`
 
@@ -3843,7 +3843,7 @@ The rest of the lint stack is already ready:
 
 **`eslint-plugin-react` is the single remaining blocker.** Worth re-checking when it ships a release accepting `eslint@^10`.
 
-Not forcing it: dropping `eslint-plugin-react` to unblock the bump would trade a working lint gate for a dependency version, and this repo leans on those gates — `npm run lint` carries the warning ratchet and the jsx-a11y error list added in #40.
+Not forcing it: dropping `eslint-plugin-react` to unblock the bump would trade a working lint gate for a dependency version, and this repo leans on those gates — `npm run lint` carries the warning ratchet and the jsx-a11y error list added in archived-40.
 
 </details>
 
@@ -3865,7 +3865,7 @@ If you change your mind, just re-open this PR and I'll resolve any conflicts on 
 
 ---
 
-## #109 — chore(deps-dev): bump typescript from 6.0.3 to 7.0.2 in /src/AutoNate.Spa
+## archived-109 — chore(deps-dev): bump typescript from 6.0.3 to 7.0.2 in /src/AutoNate.Spa
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/typescript-7.0.2` → `master`
 
@@ -3943,7 +3943,7 @@ If you change your mind, just re-open this PR and I'll resolve any conflicts on 
 
 ---
 
-## #110 — Bump react-markdown from 9.1.0 to 10.1.0 in /src/AutoNate.Spa
+## archived-110 — Bump react-markdown from 9.1.0 to 10.1.0 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/react-markdown-10.1.0` → `master`
 
@@ -4033,7 +4033,7 @@ props.</p>
 
 ---
 
-## #111 — Bump mantine-datatable from 8.3.13 to 9.4.0 in /src/AutoNate.Spa
+## archived-111 — Bump mantine-datatable from 8.3.13 to 9.4.0 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/mantine-datatable-9.4.0` → `master`
 
@@ -4102,7 +4102,7 @@ Bumps [mantine-datatable](https://github.com/icflorescu/mantine-datatable) from 
 
 ---
 
-## #127 — Bump postcss from 8.5.10 to 8.5.26 in /src/AutoNate.Spa
+## archived-127 — Bump postcss from 8.5.10 to 8.5.26 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/postcss-8.5.26` → `master`
 
@@ -4286,7 +4286,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #128 — Bump brace-expansion in /src/AutoNate.Spa
+## archived-128 — Bump brace-expansion in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/multi-5e81c1b34f` → `master`
 
@@ -4348,7 +4348,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #129 — Bump axios from 1.15.2 to 1.18.0 in /src/AutoNate.Spa
+## archived-129 — Bump axios from 1.15.2 to 1.18.0 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/axios-1.18.0` → `master`
 
@@ -4493,7 +4493,7 @@ Bumps [axios](https://github.com/axios/axios) from 1.15.2 to 1.18.0.
 
 ---
 
-## #130 — Bump immutable from 4.3.8 to 4.3.9 in /src/AutoNate.Spa
+## archived-130 — Bump immutable from 4.3.8 to 4.3.9 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/immutable-4.3.9` → `master`
 
@@ -4614,7 +4614,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #131 — Bump the spa-minor-patch group across 1 directory with 38 updates
+## archived-131 — Bump the spa-minor-patch group across 1 directory with 38 updates
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/spa-minor-patch-1b4e4f12d7` → `master`
 
@@ -5412,12 +5412,12 @@ _Description has been truncated_
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Held — same blockers as the superseded #107** (reviewed 2026-08-31). This regrouped set still contains:
+**Held — same blockers as the superseded archived-107** (reviewed 2026-08-31). This regrouped set still contains:
 - `@blocknote/core`/`react`/`mantine` 0.51 → 0.54 — removes `YjsThreadStore` and `User` from `@blocknote/core/comments`; `src/lib/yjs/commentAudit.ts`, `useBlockNoteWithYjs.ts`, `useResolveUsers.ts` fail `tsc -b` (15 errors). Needs a code migration.
 - `@eigenpal/docx-editor-*` 1.0.3 → 1.9.0 — every version of all four packages is now marked **deprecated** on npm, and 1.9.0 drops the transitive `y-prosemirror` that `DocxDocumentEditor.tsx:4` imports directly. Roadmap decision, not a bump.
-- `@hocuspocus/provider` 4.0 → 4.6 must land with `@hocuspocus/server` in #104.
+- `@hocuspocus/provider` 4.0 → 4.6 must land with `@hocuspocus/server` in archived-104.
 
-Everything else here (Mantine 9.5.2, vite 8.2.2, react 19.2.8, @xyflow, plugin-react) built cleanly in isolation on 2026-08-31, and `axios` was taken separately via #129. To unblock the rest, exclude `@blocknote/*`, `@eigenpal/*` and `@hocuspocus/provider` from the `spa-minor-patch` group in `.github/dependabot.yml` (or `@dependabot ignore` them) and let this PR regroup.
+Everything else here (Mantine 9.5.2, vite 8.2.2, react 19.2.8, @xyflow, plugin-react) built cleanly in isolation on 2026-08-31, and `axios` was taken separately via archived-129. To unblock the rest, exclude `@blocknote/*`, `@eigenpal/*` and `@hocuspocus/provider` from the `spa-minor-patch` group in `.github/dependabot.yml` (or `@dependabot ignore` them) and let this PR regroup.
 
 </details>
 
@@ -5429,7 +5429,7 @@ Looks like these dependencies are updatable in another way, so this is no longer
 
 ---
 
-## #133 — Bump ws from 8.20.1 to 8.21.3 in /src/AutoNate.Spa
+## archived-133 — Bump ws from 8.20.1 to 8.21.3 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/ws-8.21.3` → `master`
 
@@ -5532,7 +5532,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #134 — Bump form-data from 4.0.5 to 4.0.6 in /src/AutoNate.Spa
+## archived-134 — Bump form-data from 4.0.5 to 4.0.6 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/form-data-4.0.6` → `master`
 
@@ -5591,7 +5591,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #135 — Bump vite from 8.0.10 to 8.2.2 in /src/AutoNate.Spa
+## archived-135 — Bump vite from 8.0.10 to 8.2.2 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/vite-8.2.2` → `master`
 
@@ -5742,11 +5742,11 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #136 — Serve the SPA shell at the site root again; fail-fast E2E fixture
+## archived-136 — Serve the SPA shell at the site root again; fail-fast E2E fixture
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/132-e2e-harness` → `master`
 
-Closes #132
+Closes archived-132
 
 ## What
 `bdc72176` constrained the SPA fallback to `{*path:nonfile:regex(^(?!api(/|$)))}` so `/api` can never fall through to `index.html`. `RegexRouteConstraint` returns `false` for a missing catch-all value, so the root URL `/` stopped matching — deep links still served the shell, `/` was a bare 404. Every Playwright spec starts at `/`, so the whole E2E suite turned into identical 30 s sign-in timeouts with no diagnostic. In a Release deploy the same bug hits every user who opens the site root.
@@ -5769,7 +5769,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #137 — Bump form-data from 4.0.5 to 4.0.6 in /services/hocuspocus
+## archived-137 — Bump form-data from 4.0.5 to 4.0.6 in /services/hocuspocus
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/hocuspocus/form-data-4.0.6` → `master`
 
@@ -5828,7 +5828,7 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #138 — Bump the spa-minor-patch group across 1 directory with 37 updates
+## archived-138 — Bump the spa-minor-patch group across 1 directory with 37 updates
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/spa-minor-patch-9197407e85` → `master`
 
@@ -6626,7 +6626,7 @@ _Description has been truncated_
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-**Held — same three blockers as #107/#131** (this is the same group regrouped): `@blocknote/*` 0.54 (removes `YjsThreadStore`/`User` from `@blocknote/core/comments` → 15 `tsc` errors), `@eigenpal/docx-editor-*` 1.9.0 (deprecated on npm at every version; drops the transitive `y-prosemirror` the SPA imports), and `@hocuspocus/provider` 4.6 (must land with the server in #104). To let the other ~30 updates through, exclude those packages from the `spa-minor-patch` group in `.github/dependabot.yml` — happy to do that on request.
+**Held — same three blockers as archived-107/archived-131** (this is the same group regrouped): `@blocknote/*` 0.54 (removes `YjsThreadStore`/`User` from `@blocknote/core/comments` → 15 `tsc` errors), `@eigenpal/docx-editor-*` 1.9.0 (deprecated on npm at every version; drops the transitive `y-prosemirror` the SPA imports), and `@hocuspocus/provider` 4.6 (must land with the server in archived-104). To let the other ~30 updates through, exclude those packages from the `spa-minor-patch` group in `.github/dependabot.yml` — happy to do that on request.
 
 </details>
 
@@ -6644,21 +6644,21 @@ Looks like these dependencies are updatable in another way, so this is no longer
 
 ---
 
-## #140 — Standardise Node.js on 24 (Active LTS); fix the executor image
+## archived-140 — Standardise Node.js on 24 (Active LTS); fix the executor image
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `feat/139-node-24` → `master`
 
-Closes #139
-Closes #39
+Closes archived-139
+Closes archived-39
 
 ## What
 Pins Node 24 everywhere (`.nvmrc`, `engines.node`, both sidecar Dockerfiles), and in doing so fixes the executor image, which has never actually run.
 
 ## Findings along the way
-- **isolated-vm 5 cannot build on Node 24** — its C++17 build hits `#error "C++20 or later required."` in Node 24's V8 headers. 7.0.1 (Dependabot #102) is the supported version; taken here, so **#102 is superseded**.
-- **The executor image was already broken on `node:22`** — `npm install --ignore-scripts` skips isolated-vm's node-gyp build, so `master`'s image crashes on boot with `Cannot find module './out/isolated_vm'` (control build reproduced it). Nobody had run it (#114).
+- **isolated-vm 5 cannot build on Node 24** — its C++17 build hits `#error "C++20 or later required."` in Node 24's V8 headers. 7.0.1 (Dependabot archived-102) is the supported version; taken here, so **archived-102 is superseded**.
+- **The executor image was already broken on `node:22`** — `npm install --ignore-scripts` skips isolated-vm's node-gyp build, so `master`'s image crashes on boot with `Cannot find module './out/isolated_vm'` (control build reproduced it). Nobody had run it (archived-114).
 - **npm ≥ 11.19 silently no-ops unapproved install scripts** — `npm rebuild isolated-vm` reported "rebuilt successfully" in 1.6 s without building. Fixed with `"allowScripts": { "isolated-vm": true }` in `package.json` and `--foreground-scripts`; the Dockerfile now verifies by `require`-ing the addon.
-- `services/executor` had no lockfile (#39) — added.
+- `services/executor` had no lockfile (archived-39) — added.
 
 ## Verification
 - `docker build services/hocuspocus` → boots on Node 24.20.0, `Hocuspocus listening on port 1234`.
@@ -6666,8 +6666,8 @@ Pins Node 24 everywhere (`.nvmrc`, `engines.node`, both sidecar Dockerfiles), an
 - SPA / hocuspocus lockfiles untouched; `engines` only adds a version declaration.
 
 ## Follow-ups
-- #105 / #101 (`@types/node` 26): closed — types track the runtime major; they return as a 24→26 bump when Node 26 goes LTS (October 2026).
-- #114: add the executor to `docker-compose.yml` (now that its image works).
+- archived-105 / archived-101 (`@types/node` 26): closed — types track the runtime major; they return as a 24→26 bump when Node 26 goes LTS (October 2026).
+- archived-114: add the executor to `docker-compose.yml` (now that its image works).
 - Separate finding filed from the smoke test: a plain NATS `request()` on `pipeline-code-run.>` receives the JetStream publish ack before the executor's reply.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
@@ -6676,7 +6676,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #142 — Bump node from 24-alpine to 26-alpine in /services/hocuspocus
+## archived-142 — Bump node from 24-alpine to 26-alpine in /services/hocuspocus
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/docker/services/hocuspocus/node-26-alpine` → `master`
 
@@ -6713,7 +6713,7 @@ You can trigger Dependabot actions by commenting on this PR:
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closing: the runtime was standardised on **Node 24 (Active LTS)** in #140 (`.nvmrc`, `engines`, both images). Node 26 is Current until it enters LTS in October 2026; we'll take 24 → 26 deliberately then. `dependabot.yml` now ignores major bumps of the `node` base image so this doesn't reopen weekly.
+Closing: the runtime was standardised on **Node 24 (Active LTS)** in archived-140 (`.nvmrc`, `engines`, both images). Node 26 is Current until it enters LTS in October 2026; we'll take 24 → 26 deliberately then. `dependabot.yml` now ignores major bumps of the `node` base image so this doesn't reopen weekly.
 
 </details>
 
@@ -6727,7 +6727,7 @@ If you change your mind, just re-open this PR and I'll resolve any conflicts on 
 
 ---
 
-## #143 — Bump node from 24-alpine to 26-alpine in /services/executor
+## archived-143 — Bump node from 24-alpine to 26-alpine in /services/executor
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/docker/services/executor/node-26-alpine` → `master`
 
@@ -6764,7 +6764,7 @@ You can trigger Dependabot actions by commenting on this PR:
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closing: the runtime was standardised on **Node 24 (Active LTS)** in #140 (`.nvmrc`, `engines`, both images). Node 26 is Current until it enters LTS in October 2026; we'll take 24 → 26 deliberately then. `dependabot.yml` now ignores major bumps of the `node` base image so this doesn't reopen weekly.
+Closing: the runtime was standardised on **Node 24 (Active LTS)** in archived-140 (`.nvmrc`, `engines`, both images). Node 26 is Current until it enters LTS in October 2026; we'll take 24 → 26 deliberately then. `dependabot.yml` now ignores major bumps of the `node` base image so this doesn't reopen weekly.
 
 </details>
 
@@ -6778,7 +6778,7 @@ If you change your mind, just re-open this PR and I'll resolve any conflicts on 
 
 ---
 
-## #144 — Bump bpmn-js from 18.25.1 to 18.26.0
+## archived-144 — Bump bpmn-js from 18.25.1 to 18.26.0
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/bpmn-js-18.26.0` → `master`
 
@@ -6861,19 +6861,19 @@ You can trigger Dependabot actions by commenting on this PR:
 
 ---
 
-## #145 — Run the executor sidecar as part of the local stack
+## archived-145 — Run the executor sidecar as part of the local stack
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `feat/114-executor-in-stack` → `master`
 
-Closes #114
+Closes archived-114
 
 ## What
 Adds `services/executor` to `infra/docker-compose.yml` and `infra/ensure-up.sh` so pipeline code nodes have a consumer in the documented dev stack, with a real health signal.
 
 - **Compose service** `executor`: built from `../services/executor`, `NATS_URL=nats://nats:4222`, depends on `nats` (healthy) and `nats-init` (completed), `restart: unless-stopped`, no ports.
-- **Health probe over NATS**: the sidecar answers `executor.health` and ships `dist/healthcheck.js`; the compose `healthcheck` requests it (3 s timeout). The subject sits outside `pipeline-code-run.>`, which a JetStream stream captures (#141).
+- **Health probe over NATS**: the sidecar answers `executor.health` and ships `dist/healthcheck.js`; the compose `healthcheck` requests it (3 s timeout). The subject sits outside `pipeline-code-run.>`, which a JetStream stream captures (archived-141).
 - **`ensure-up.sh`**: `executor` in `REQUIRED_SERVICES`; readiness = container health; build-input stamp (`infra/mounts/executor/.build-input-hash`) so editing `src/` rebuilds the image, mirroring hocuspocus.
-- Header comment in `index.ts` corrected — it is a core queue subscriber, not a durable consumer (part of #49).
+- Header comment in `index.ts` corrected — it is a core queue subscriber, not a durable consumer (part of archived-49).
 - README local-stack list + `docs/codebase/Integrations.md`.
 
 ## Verification
@@ -6883,7 +6883,7 @@ Adds `services/executor` to `infra/docker-compose.yml` and `infra/ensure-up.sh` 
 - [x] Second `./infra/ensure-up.sh` → "already running and ready" in 1 s.
 - [x] `restart=unless-stopped`, zero published ports.
 
-Note: with a working executor attached, #141 (the runner reading JetStream's ack as the reply) becomes the next thing code nodes hit.
+Note: with a working executor attached, archived-141 (the runner reading JetStream's ack as the reply) becomes the next thing code nodes hit.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -6891,21 +6891,21 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #146 — Executor replies: explicit inbox, no JetStream stream on pipeline-code-run.>
+## archived-146 — Executor replies: explicit inbox, no JetStream stream on pipeline-code-run.>
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/141-jetstream-ack` → `master`
 
-Closes #141
-Closes #49
+Closes archived-141
+Closes archived-49
 
 ## What
-`JetStreamCodeNodeRunner` used a plain `RequestAsync` on `pipeline-code-run.<run>.<node>` while `NatsStreamProvisioner` captured that subject in a `pipeline-code-runs` stream. JetStream therefore answered every request with a PubAck (`{"stream":…,"seq":…}`) before the executor could, and the runner parsed the ack as a failed `CodeNodeReply` ("Executor sidecar reported an unknown failure") and discarded the real reply. Masked until #139/#114 made the executor image actually run.
+`JetStreamCodeNodeRunner` used a plain `RequestAsync` on `pipeline-code-run.<run>.<node>` while `NatsStreamProvisioner` captured that subject in a `pipeline-code-runs` stream. JetStream therefore answered every request with a PubAck (`{"stream":…,"seq":…}`) before the executor could, and the runner parsed the ack as a failed `CodeNodeReply` ("Executor sidecar reported an unknown failure") and discarded the real reply. Masked until archived-139/archived-114 made the executor image actually run.
 
 ## Changes
 - **`NatsStreamProvisioner`** — `pipeline-code-runs` removed from `DesiredStreams`, added to `LegacyStreamsToRemove` so already-provisioned servers are cleaned on the next boot. Request/reply is core NATS; the stream bought nothing (the sidecar is a core queue subscriber).
 - **`JetStreamCodeNodeRunner`** — `NewInbox` + `SubscribeCoreAsync` + `PublishAsync(replyTo:)`; reads the inbox until a message shaped like a `CodeNodeReply` (has `success`) arrives, ignoring anything else. Same 30 s timeout/cancellation semantics. Stale header comment fixed.
 - **`JetStreamCodeNodeRunnerTests`** (new, real NATS from the test infra) — provisions a throw-away stream over the subject, runs a fake executor that answers *after* the ack, asserts the runner returns the executor's reply; plus theory cases for the ack/reply classifier.
-- `docs/codebase/{Integrations,Architecture,Structure}.md` — no more "durable consumer" / stream description (the three stale-comment sites from #49 are now all corrected: runner header, provisioner block, `services/executor/src/index.ts` in #145).
+- `docs/codebase/{Integrations,Architecture,Structure}.md` — no more "durable consumer" / stream description (the three stale-comment sites from archived-49 are now all corrected: runner header, provisioner block, `services/executor/src/index.ts` in archived-145).
 
 ## Verification
 - [x] `JetStreamCodeNodeRunnerTests` → 6/6.
@@ -6918,11 +6918,11 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #148 — E2E: update the four stale DataStoresAdminTests specs to the current UI
+## archived-148 — E2E: update the four stale DataStoresAdminTests specs to the current UI
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/147-datastores-e2e` → `master`
 
-Closes #147
+Closes archived-147
 
 ## What
 Rewrites the four `DataStoresAdminTests` specs that had drifted from the product (file-store detail → SVAR file manager on 2026-06-06; file-backed datasets → mandatory file pick). Test-only change; no product code touched.
@@ -6946,7 +6946,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #149 — Bump ws from 8.20.1 to 8.21.3 in /services/hocuspocus
+## archived-149 — Bump ws from 8.20.1 to 8.21.3 in /services/hocuspocus
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/hocuspocus/ws-8.21.3` → `master`
 
@@ -7049,11 +7049,11 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #152 — Migrate BlockNote 0.51 → 0.54 (Yjs decoupling) across SPA and hocuspocus
+## archived-152 — Migrate BlockNote 0.51 → 0.54 (Yjs decoupling) across SPA and hocuspocus
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `feat/blocknote-0.54` → `master`
 
-Closes #150
+Closes archived-150
 
 ## What
 BlockNote 0.52 decoupled Yjs from `@blocknote/core`, which is what broke every Dependabot SPA/hocuspocus group so far. This lands 0.54.0 on both sides in lock-step.
@@ -7070,11 +7070,11 @@ BlockNote 0.52 decoupled Yjs from `@blocknote/core`, which is what broke every D
 - [x] Comment thread created/resolved/deleted through the migrated `YjsThreadStore` + `wrapThreadStoreWithAuditing` proxy (0 → 1 → 0 threads).
 
 ## Found on the way
-- **#151** — the audit POST `/api/yjs/comment-event` has *always* returned 400: the SPA sends `documentName`, the endpoint requires `pageId` (both from commit `1b0cd589`). Not caused here; filed separately.
-- No E2E spec exercises BlockNote comment threads (the "comment" specs are record comments); the composer is timing-sensitive under automation. Worth a spec once #151 is fixed.
+- **archived-151** — the audit POST `/api/yjs/comment-event` has *always* returned 400: the SPA sends `documentName`, the endpoint requires `pageId` (both from commit `1b0cd589`). Not caused here; filed separately.
+- No E2E spec exercises BlockNote comment threads (the "comment" specs are record comments); the composer is timing-sensitive under automation. Worth a spec once archived-151 is fixed.
 
 ## Follow-ups
-- Dependabot #104 (hocuspocus group: `@hocuspocus/server` 4.6, pg, yjs) can now land; pair with a `@hocuspocus/provider` 4.6 bump on the SPA.
+- Dependabot archived-104 (hocuspocus group: `@hocuspocus/server` 4.6, pg, yjs) can now land; pair with a `@hocuspocus/provider` 4.6 bump on the SPA.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -7082,7 +7082,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #153 — Bump the hocuspocus-minor-patch group across 1 directory with 8 updates
+## archived-153 — Bump the hocuspocus-minor-patch group across 1 directory with 8 updates
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/services/hocuspocus/hocuspocus-minor-patch-c19589bf8c` → `master`
 
@@ -7457,7 +7457,7 @@ You can trigger Dependabot actions by commenting on this PR:
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Closing: every update in this group is already on master via #156 (`@hocuspocus/server` 4.6.0, pg 8.23.0, `@types/pg` 8.23.1, react/react-dom 19.2.8 + types, yjs 13.6.32) — this PR was opened from a base that predates that merge.
+Closing: every update in this group is already on master via archived-156 (`@hocuspocus/server` 4.6.0, pg 8.23.0, `@types/pg` 8.23.1, react/react-dom 19.2.8 + types, yjs 13.6.32) — this PR was opened from a base that predates that merge.
 
 </details>
 
@@ -7471,7 +7471,7 @@ To ignore these dependencies, configure [ignore rules](https://docs.github.com/e
 
 ---
 
-## #155 — Bump the spa-minor-patch group across 1 directory with 29 updates
+## archived-155 — Bump the spa-minor-patch group across 1 directory with 29 updates
 
 `CLOSED` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/spa-minor-patch-07ff83b63d` → `master`
 
@@ -8123,14 +8123,14 @@ Looks like these dependencies are updatable in another way, so this is no longer
 
 ---
 
-## #156 — Hocuspocus 4.0 → 4.6: server and provider together
+## archived-156 — Hocuspocus 4.0 → 4.6: server and provider together
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `feat/hocuspocus-4.6` → `master`
 
-Closes #154
+Closes archived-154
 
 ## What
-`@hocuspocus/server` 4.6.0 in `services/hocuspocus` (plus pg 8.23, `@types/pg`, yjs 13.6.32, react 19.2.8 — the rest of Dependabot #104 now that BlockNote is at 0.54) and `@hocuspocus/provider` 4.6.0 + yjs 13.6.32 in the SPA, in one change so the two ends never disagree.
+`@hocuspocus/server` 4.6.0 in `services/hocuspocus` (plus pg 8.23, `@types/pg`, yjs 13.6.32, react 19.2.8 — the rest of Dependabot archived-104 now that BlockNote is at 0.54) and `@hocuspocus/provider` 4.6.0 + yjs 13.6.32 in the SPA, in one change so the two ends never disagree.
 
 ## Verification
 - [x] hocuspocus `tsc`; SPA `tsc` / lint / Vite build; single `yjs` 13.6.32 in each tree.
@@ -8139,7 +8139,7 @@ Closes #154
 
 ## Notes
 - The E2E suite's notes/documents specs pass even when the sidecar can't authenticate (the fixture app runs on a random port; the compose sidecar calls `:5108`), i.e. they exercise the local Y.Doc, not sync. Worth a follow-up spec that asserts the webhook-persisted body.
-- Dependabot #104 is superseded by this PR.
+- Dependabot archived-104 is superseded by this PR.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -8147,7 +8147,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #157 — chore(deps): bump the spa-minor-patch group across 1 directory with 28 updates
+## archived-157 — chore(deps): bump the spa-minor-patch group across 1 directory with 28 updates
 
 `MERGED (merged 2026-08-31)` · app/dependabot · opened 2026-08-31 · `dependabot/npm_and_yarn/src/AutoNate.Spa/spa-minor-patch-5a2278a040` → `master`
 
@@ -8787,22 +8787,22 @@ _Description has been truncated_
 
 <details><summary>Comment — nathanpond, 2026-08-31</summary>
 
-Validated in an isolated worktree on top of current `master` (supersedes #155, which conflicted after #152/#156 landed):
+Validated in an isolated worktree on top of current `master` (supersedes archived-155, which conflicted after archived-152/archived-156 landed):
 
 - `npm ci` → ESLint 0 errors / 411 warnings (at cap), `tsc -b` clean
 - Full E2E: **140 passed / 0 failed / 2 skipped** (both skips pre-existing)
-- One real finding: `@mantine/*` ≥ 9.4 `Textarea autosize` sets its own height inside the `ResizeObserver` callback observing the textarea, so a width change (chatbot sidebar resize) makes Chromium raise `ResizeObserver loop completed with undelivered notifications` as a page error. Bisected: 9.1.1/9.2.0/9.3.0 pass, 9.4.0/9.5.2 fail. It is benign browser notice text, not a JS exception — allowlisted in `ConsoleErrorGuard` with a rationale; tracked in #158 for removal once upstream defers the write. That is the one extra commit pushed onto this branch.
+- One real finding: `@mantine/*` ≥ 9.4 `Textarea autosize` sets its own height inside the `ResizeObserver` callback observing the textarea, so a width change (chatbot sidebar resize) makes Chromium raise `ResizeObserver loop completed with undelivered notifications` as a page error. Bisected: 9.1.1/9.2.0/9.3.0 pass, 9.4.0/9.5.2 fail. It is benign browser notice text, not a JS exception — allowlisted in `ConsoleErrorGuard` with a rationale; tracked in archived-158 for removal once upstream defers the write. That is the one extra commit pushed onto this branch.
 - No `bpmn-js` bump in this group, so the vendored bundle is unchanged.
 
 </details>
 
 ---
 
-## #159 — fix(yjs): accept documentName on POST /api/yjs/comment-event
+## archived-159 — fix(yjs): accept documentName on POST /api/yjs/comment-event
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/151-comment-event-contract` → `master`
 
-Closes #151
+Closes archived-151
 
 ## What
 
@@ -8822,7 +8822,7 @@ No client change needed — `commentAudit.ts`'s existing contract is now honoure
 
 - `tests/AutoNate.Web.Tests/YjsCommentEventEndpointTests.cs` (9 cases): page doc → 204 + recorded `content.comment.created` with the pageId; note doc → parent pageId + noteId; legacy `pageId` body; unusable names → 400 with nothing published; missing both → 400; unknown note → 404. Red against the old handler (`Failed: 1`), green with the fix.
 - `NotesTests.NotesPage_AddCommentOnRichTextNote_PostsCommentEventForNoteDocument`: drives BlockNote's real *Add comment* flow (type → select → toolbar → composer → Save) on a richtext note and asserts the `comment-event` POST for the `note:` document returns 204 with `eventType: created`.
-- Full E2E: see the run summary in the final comment on #151.
+- Full E2E: see the run summary in the final comment on archived-151.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -8830,11 +8830,11 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #160 — test(e2e): link ResizeObserver allowlist entry to upstream Mantine issue/PR
+## archived-160 — test(e2e): link ResizeObserver allowlist entry to upstream Mantine issue/PR
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `chore/158-guard-upstream-link` → `master`
 
-Refs #158 — comment-only: the allowlist rationale now points at mantinedev/mantine#9161 / #9162 so the entry can be removed when a release includes the fix.
+Refs archived-158 — comment-only: the allowlist rationale now points at mantinedev/mantine#9161 / #9162 so the entry can be removed when a release includes the fix.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -8842,23 +8842,23 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #162 — fix(executor): isolate, time-limit and memory-cap the Python sandbox; close the host escape
+## archived-162 — fix(executor): isolate, time-limit and memory-cap the Python sandbox; close the host escape
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/58-python-sandbox` → `master`
 
-Closes #58
-Closes #161
-Closes #64
+Closes archived-58
+Closes archived-161
+Closes archived-64
 
 ## What
 
 The executor's Python path becomes a real sandbox:
 
-- **One interpreter per request** in a single-use `worker_threads` Worker (`pythonWorker.ts`); warm pool + concurrency cap (`EXECUTOR_PY_WARM_WORKERS`=1, `EXECUTOR_PY_MAX_CONCURRENCY`=2). Nothing crosses authors (#58 ③).
-- **Timeout that fires** (#58 ①): the main thread owns the deadline — reject at `timeoutMs`, SIGINT via Pyodide's interrupt buffer (`KeyboardInterrupt`), `worker.terminate()` after 250 ms grace for C-level loops. The NATS loop is never blocked.
-- **`memoryMb` enforced** (#58 ②): `WebAssembly.Memory.prototype.grow` hook caps linear memory at baseline + `memoryMb` → Python `MemoryError`, interpreter stays usable. `EXECUTOR_PY_JS_HEAP_MB`=256 backstops the worker JS heap.
-- **Host escape closed** (#161): `jsglobals: Object.create(null)`, `pyodide_js` unregistered + purged from `sys.modules`, `fetch`/`WebSocket` disabled in the worker, `_` (worker script host path) popped from `os.environ`. Left: Pyodide's in-memory FS and a fixed fake env.
-- **#64**: inputs/config passed via `pyodide.globals.set` as JSON strings — no source splicing; quotes/backslashes round-trip.
+- **One interpreter per request** in a single-use `worker_threads` Worker (`pythonWorker.ts`); warm pool + concurrency cap (`EXECUTOR_PY_WARM_WORKERS`=1, `EXECUTOR_PY_MAX_CONCURRENCY`=2). Nothing crosses authors (archived-58 ③).
+- **Timeout that fires** (archived-58 ①): the main thread owns the deadline — reject at `timeoutMs`, SIGINT via Pyodide's interrupt buffer (`KeyboardInterrupt`), `worker.terminate()` after 250 ms grace for C-level loops. The NATS loop is never blocked.
+- **`memoryMb` enforced** (archived-58 ②): `WebAssembly.Memory.prototype.grow` hook caps linear memory at baseline + `memoryMb` → Python `MemoryError`, interpreter stays usable. `EXECUTOR_PY_JS_HEAP_MB`=256 backstops the worker JS heap.
+- **Host escape closed** (archived-161): `jsglobals: Object.create(null)`, `pyodide_js` unregistered + purged from `sys.modules`, `fetch`/`WebSocket` disabled in the worker, `_` (worker script host path) popped from `os.environ`. Left: Pyodide's in-memory FS and a fixed fake env.
+- **archived-64**: inputs/config passed via `pyodide.globals.set` as JSON strings — no source splicing; quotes/backslashes round-trip.
 
 `index.ts` prewarms the pool at start-up and drains NATS + terminates spares on SIGTERM/SIGINT. README + `docs/codebase/{Structure,Integrations,Architecture}.md` updated (Architecture still said the executor wasn't in compose).
 
@@ -8874,11 +8874,11 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #164 — fix(authz): fail closed by default and refuse to start on an open posture
+## archived-164 — fix(authz): fail closed by default and refuse to start on an open posture
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/59-authz-fail-closed` → `master`
 
-Closes #59
+Closes archived-59
 
 ## What
 
@@ -8910,9 +8910,9 @@ Real host, `dotnet run`, bogus DB so nothing is touched — the authorization de
 
 - `AuthorizationOptionsValidatorTests` — 16 cases: the exact pre-fix defaults, every enforcement level, mis-cased/typo values in both environments, and an assertion that the validator is actually registered on the host.
 - `AutoNate.Web.Tests` Authorization folder: **295/295**.
-- Full `AutoNate.Web.Tests`: **1368 passed / 1 failed**. That one failure — `SubscriptionManagerTests.Disconnect_ClearsRegistryIndices` — is **pre-existing and unrelated**: a baseline run of `master` @ `f28a1c85` in the same checkout fails the *same* test with the same signature (1352/1, 16 s), it passes 3/3 in isolation, and it dies on a fixed 5 s WebSocket receive budget (`TaskCanceledException`), not an authorization decision. Filed as #163.
+- Full `AutoNate.Web.Tests`: **1368 passed / 1 failed**. That one failure — `SubscriptionManagerTests.Disconnect_ClearsRegistryIndices` — is **pre-existing and unrelated**: a baseline run of `master` @ `f28a1c85` in the same checkout fails the *same* test with the same signature (1352/1, 16 s), it passes 3/3 in isolation, and it dies on a fixed 5 s WebSocket receive budget (`TaskCanceledException`), not an authorization decision. Filed as archived-163.
 - The default flip is inert for the suite: all three direct `new AuthorizationOptions` constructions either set the fields explicitly or use `Enabled = false`, which short-circuits before `Enforcement` is read.
-- Full E2E suite run on this branch (results in the closing comment on #59).
+- Full E2E suite run on this branch (results in the closing comment on archived-59).
 
 README + `docs/codebase/Architecture.md` updated.
 
@@ -8922,22 +8922,22 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #166 — fix(security): guard every outbound URL that carries user data or a credential
+## archived-166 — fix(security): guard every outbound URL that carries user data or a credential
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/60-61-outbound-url-guards` → `master`
 
-Closes #60
-Closes #61
+Closes archived-60
+Closes archived-61
 
 Two shapes of one defect: a destination the caller controls, on a request carrying something worth stealing. Each gets the guard that actually fits it.
 
-## #60 — REST data connector (SSRF)
+## archived-60 — REST data connector (SSRF)
 
 `config.Url` went straight to `HttpClient` and the reply was parsed into rows the caller sees, so a connector pointed at `169.254.169.254` (or the Dapr sidecar, NATS monitoring, Flowable) read cloud credentials and internal-only APIs out through `POST /api/dataconnectors/{id}/preview`.
 
 Calling arbitrary third-party APIs *is* the feature, so an allowlist is impossible — this gets `IOutboundUrlGuard` (`Services/Http/OutboundUrlGuard.cs`): scheme check, then every resolved address must be public, **before a socket opens**; `https` required outside Development. `IsBlockedAddress` moves off `WebFetchSkill` into `OutboundAddressRules` so the two guards can't drift — the skill keeps its public helper and delegates to it.
 
-## #61 — provider credential exfiltration (wider than the issue said)
+## archived-61 — provider credential exfiltration (wider than the issue said)
 
 The issue named `IConnectionModelLister`. It is one of **five** consumers of the same connection-metadata `baseUrl`, and the least frequent:
 
@@ -8957,7 +8957,7 @@ Here the legitimate hosts *are* a known short list, so this gets an allowlist (`
 
 ## Found on the way
 
-**#165** — `RestDataConnectorHandler.ParseConfig` deserializes case-sensitively while the SPA writes and documents camelCase, so UI-authored REST connectors never bind (`Url` stays empty). Proven with a standalone `System.Text.Json` probe. Filed rather than fixed here, because it is a functional bug and fixing it turns a currently-dead code path live — #60's guard belongs in place first. The connector tests therefore use the PascalCase shape that binds today, with a comment; they keep passing once #165 lands.
+**archived-165** — `RestDataConnectorHandler.ParseConfig` deserializes case-sensitively while the SPA writes and documents camelCase, so UI-authored REST connectors never bind (`Url` stays empty). Proven with a standalone `System.Text.Json` probe. Filed rather than fixed here, because it is a functional bug and fixing it turns a currently-dead code path live — archived-60's guard belongs in place first. The connector tests therefore use the PascalCase shape that binds today, with a comment; they keep passing once archived-165 lands.
 
 ## Evidence
 
@@ -8972,12 +8972,12 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #167 — fix(agent): authorize the two skills that read gated entities unguarded
+## archived-167 — fix(agent): authorize the two skills that read gated entities unguarded
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/19-20-agent-skill-authorization` → `master`
 
-Closes #19
-Closes #20
+Closes archived-19
+Closes archived-20
 
 Two agent skills read gated entities through stores that gate by nothing, so a user the REST API answers with **403** could read the same data by asking the chatbot.
 
@@ -8990,7 +8990,7 @@ Each skill now mirrors the gate its REST counterpart applies — kind-level for 
 
 ## The part that outlives this fix
 
-#20 asked for the permanent version, and that is most of the value here. `AgentSkillAuthorizationTests` classifies **every** `IAgentSkill` in the assembly as one of:
+archived-20 asked for the permanent version, and that is most of the value here. `AgentSkillAuthorizationTests` classifies **every** `IAgentSkill` in the assembly as one of:
 
 - `Authorizer` — calls an authorizer itself
 - `GatedStore` — reads via a store that applies `IAuthorizer` internally
@@ -9011,7 +9011,7 @@ The other 12 unguarded skills were checked individually and are genuinely exempt
 ## Evidence
 
 - `AgentSkillAuthorizationTests` 11/11: denial paths use stores that **throw if touched**, so a refusal is proven to happen before the read, not as post-filtering; plus allowed-path tests, the denial-equals-miss test, and the two gate tests.
-- Full `AutoNate.Web.Tests`: **1432 passed / 1 failed** — the failure is `SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`, the known intermittent load flake tracked in #163 and previously reproduced on `master` with no branch changes.
+- Full `AutoNate.Web.Tests`: **1432 passed / 1 failed** — the failure is `SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`, the known intermittent load flake tracked in archived-163 and previously reproduced on `master` with no branch changes.
 - Full E2E: results in the closing comment.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
@@ -9020,16 +9020,16 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #168 — fix(deps): patch the last SPA advisories via scoped overrides
+## archived-168 — fix(deps): patch the last SPA advisories via scoped overrides
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/security-deps-37-38` → `master`
 
-Closes #37
-Closes #38
+Closes archived-37
+Closes archived-38
 
 `npm audit` in `src/AutoNate.Spa` goes from **9 vulnerable packages to 0**.
 
-## #37 — the nine SPA alerts
+## archived-37 — the nine SPA alerts
 
 All nine were `nanoid` and `lodash-es` reached only through `@excalidraw/excalidraw`, which pins them itself — so `npm audit fix` was a **no-op** and neither could be bumped directly. Overrides are scoped per consumer rather than blanket, because the two `nanoid` instances need different lines:
 
@@ -9039,7 +9039,7 @@ All nine were `nanoid` and `lodash-es` reached only through `@excalidraw/excalid
 | `nanoid` (excalidraw) | 3.3.3 | 3.3.18 | patch bump on the same line — and it now dedupes to the existing top-level copy |
 | `nanoid` (mermaid-to-excalidraw) | 4.0.2 | 5.1.16 | the 4.x line has no fix; v5 keeps the main entry and the `nanoid()` signature and only drops `./async`, which nothing in the tree imports (verified) |
 
-## #38 — already resolved
+## archived-38 — already resolved
 
 `services/hocuspocus` needed no change: the `ws` / `form-data` advisories were cleared by the earlier Hocuspocus 4.6 bump, and neither package is in its lockfile any more. Verified against both `npm audit` (0 vulnerable packages) and GitHub's alert list (0 alerts on that manifest).
 
@@ -9057,54 +9057,54 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #169 — fix(security): clear the remaining security backlog (authz, plugin grants, response hygiene, limits)
+## archived-169 — fix(security): clear the remaining security backlog (authz, plugin grants, response hygiene, limits)
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/21-22-23-endpoint-authz` → `master`
 
-Closes #21
-Closes #22
-Closes #23
-Closes #62
-Closes #63
-Closes #65
-Closes #66
-Closes #67
-Closes #68
+Closes archived-21
+Closes archived-22
+Closes archived-23
+Closes archived-62
+Closes archived-63
+Closes archived-65
+Closes archived-66
+Closes archived-67
+Closes archived-68
 
 Clears the remaining security backlog. Two commits: endpoint authorization, then the lower-severity hardening.
 
 ## Endpoint authorization
 
-- **#22** — `GET /api/code-transformers/{id}` returned the full Python/JS body, including for `IsUnsafe` rows, to any authenticated caller with a GUID, while the list endpoint beside it required `Transformer:List`. Now requires `View` on the row's own kind; a denial is `NotFound`.
-- **#23** — create gated on `(Transformer, Run)` **whatever kind was requested**. `Run` is an execution grant, so letting someone execute a pipeline node also let them author the sandboxed code later runs execute — and because the kind was hard-coded, `analyzer:*` was never enforced at all. `Transformer`/`Analyzer` gain `Create`/`Edit`/`Delete` (there was no correct token before) and every route resolves the kind through `MapKindToEntityKind`.
-- **#21** — `GET /api/content/locator/{n}` mapped a sequential long to (kind, id, ancestor chain) with no authorization, so a loop over the range enumerated the whole content tree and handed over the GUIDs to feed other endpoints. Every hit is now authorized (notes via their parent page, per D10) and a denial is byte-identical to an unknown locator.
+- **archived-22** — `GET /api/code-transformers/{id}` returned the full Python/JS body, including for `IsUnsafe` rows, to any authenticated caller with a GUID, while the list endpoint beside it required `Transformer:List`. Now requires `View` on the row's own kind; a denial is `NotFound`.
+- **archived-23** — create gated on `(Transformer, Run)` **whatever kind was requested**. `Run` is an execution grant, so letting someone execute a pipeline node also let them author the sandboxed code later runs execute — and because the kind was hard-coded, `analyzer:*` was never enforced at all. `Transformer`/`Analyzer` gain `Create`/`Edit`/`Delete` (there was no correct token before) and every route resolves the kind through `MapKindToEntityKind`.
+- **archived-21** — `GET /api/content/locator/{n}` mapped a sequential long to (kind, id, ancestor chain) with no authorization, so a loop over the range enumerated the whole content tree and handed over the GUIDs to feed other endpoints. Every hit is now authorized (notes via their parent page, per D10) and a denial is byte-identical to an unknown locator.
 
-⚠️ The route is `/api/content/locator/{n}`, **singular** — #21 quoted `/locators/`. Against that path my deny assertions passed *vacuously*, because a route miss is also a 404. Caught and corrected before merge.
+⚠️ The route is `/api/content/locator/{n}`, **singular** — archived-21 quoted `/locators/`. Against that path my deny assertions passed *vacuously*, because a route miss is also a 404. Caught and corrected before merge.
 
 ## Hardening
 
-- **#62** — every per-plugin role inherits `plg_readers`, which held SELECT on **all** tables plus default privileges for future ones, so any uploaded plugin could read password hashes, encrypted provider secrets, every other plugin's role password, and share-link token hashes. Reading app tables is a *documented* capability (`IPluginDataAccess` states it), so this revokes the credential tables rather than narrowing to an allowlist and breaking the contract. The revoke runs **last**: placed beside the GRANT it fires before several of those tables exist and `ALTER DEFAULT PRIVILEGES` hands them straight back — which my first attempt did, and the test caught.
-- **#65** — datastore download replayed the uploader's `Content-Type`. Now shares page attachments' sanitiser (extracted so the two can't drift) plus `nosniff`.
-- **#66** — NATS published 4222/8222 on all interfaces with no auth, beside Dapr endpoints already on loopback. Bound to `127.0.0.1`; containers still reach `nats:4222`.
-- **#67** — the 1 GiB body limit was global. Now 64 MB globally with the large ceiling on the datastore upload route only, and the XLSX transformer refuses >64 MB cleanly rather than as an OOM on a worker thread.
-- **#68** — connector and datastore previews folded raw exception text (internal hostnames, connection-string fragments, Postgres `MessageText`) into responses. Detail goes to the log against a correlation id; callers get the id.
+- **archived-62** — every per-plugin role inherits `plg_readers`, which held SELECT on **all** tables plus default privileges for future ones, so any uploaded plugin could read password hashes, encrypted provider secrets, every other plugin's role password, and share-link token hashes. Reading app tables is a *documented* capability (`IPluginDataAccess` states it), so this revokes the credential tables rather than narrowing to an allowlist and breaking the contract. The revoke runs **last**: placed beside the GRANT it fires before several of those tables exist and `ALTER DEFAULT PRIVILEGES` hands them straight back — which my first attempt did, and the test caught.
+- **archived-65** — datastore download replayed the uploader's `Content-Type`. Now shares page attachments' sanitiser (extracted so the two can't drift) plus `nosniff`.
+- **archived-66** — NATS published 4222/8222 on all interfaces with no auth, beside Dapr endpoints already on loopback. Bound to `127.0.0.1`; containers still reach `nats:4222`.
+- **archived-67** — the 1 GiB body limit was global. Now 64 MB globally with the large ceiling on the datastore upload route only, and the XLSX transformer refuses >64 MB cleanly rather than as an OOM on a worker thread.
+- **archived-68** — connector and datastore previews folded raw exception text (internal hostnames, connection-string fragments, Postgres `MessageText`) into responses. Detail goes to the log against a correlation id; callers get the id.
 
-## #63 — exploit claim corrected
+## archived-63 — exploit claim corrected
 
-The issue's attack (forge a tiny declared size, expand to gigabytes) **does not work on .NET**: `ZipArchive` truncates each entry stream at the declared size. Measured — an 8 MiB entry forged to declare 10 bytes yields exactly 10 bytes. Full evidence posted on #63.
+The issue's attack (forge a tiny declared size, expand to gigabytes) **does not work on .NET**: `ZipArchive` truncates each entry stream at the declared size. Measured — an 8 MiB entry forged to declare 10 bytes yields exactly 10 bytes. Full evidence posted on archived-63.
 
 `PluginZipExtractor` still replaces both `ExtractToDirectory` calls, so the bound rests on **bytes actually written** rather than that runtime detail, and entry paths are re-checked by the code that creates files. A test pins the truncation behaviour so the suite says something if a future runtime stops doing it.
 
 ## Evidence
 
 - `CodeTransformerEnforcementTests`, `ContentLocatorEnforcementTests`, `PluginReaderGrantTests`, `PluginZipExtractorTests` — **all four guards red-checked** by reverting them and confirming the tests fail (locator: 2 fail; plg_readers: 3 credential tables become readable).
-- Full `AutoNate.Web.Tests`: **1452 passed / 1 failed** — the failure is `SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`, #163's known intermittent flake, previously reproduced on `master` unchanged.
+- Full `AutoNate.Web.Tests`: **1452 passed / 1 failed** — the failure is `SubscriptionManagerTests.Disconnect_ClearsRegistryIndices`, archived-163's known intermittent flake, previously reproduced on `master` unchanged.
 - Full E2E: **142 passed / 0 failed / 2 skipped**.
 
 Three failures surfaced along the way and were each run down rather than retried:
-- `PluginDataIsolationTests` — genuinely broken by #62, because it used `public.plugins` as its "plugin can read public" probe and that table holds every plugin's role password. Probe moved to an ordinary table; the test now also asserts the credential tables are denied.
-- `DataConnectors_PreviewModal_OpensAndShowsConnectorReply` — a Playwright strict-mode violation, not a wrong outcome: #68's new body text also matches the spec's own regex, so the error state resolved to two elements.
-- `ApiNotFoundGuardTests` + `DataStoreListFilteringTests` — **environmental**: the E2E fixture empties `src/AutoNate.Web/wwwroot`, and both need the built SPA. They fail in isolation too, so they read as real breakage. Details and the CI consequence are on #163.
+- `PluginDataIsolationTests` — genuinely broken by archived-62, because it used `public.plugins` as its "plugin can read public" probe and that table holds every plugin's role password. Probe moved to an ordinary table; the test now also asserts the credential tables are denied.
+- `DataConnectors_PreviewModal_OpensAndShowsConnectorReply` — a Playwright strict-mode violation, not a wrong outcome: archived-68's new body text also matches the spec's own regex, so the error state resolved to two elements.
+- `ApiNotFoundGuardTests` + `DataStoreListFilteringTests` — **environmental**: the E2E fixture empties `src/AutoNate.Web/wwwroot`, and both need the built SPA. They fail in isolation too, so they read as real breakage. Details and the CI consequence are on archived-163.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -9112,17 +9112,17 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #170 — chore(executor): make the tsconfig TypeScript 7 ready
+## archived-170 — chore(executor): make the tsconfig TypeScript 7 ready
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `chore/ts7-sidecar-groundwork` → `master`
 
-Groundwork so #99 (typescript 5.9.3 → 7.0.2 in `services/executor`) becomes a plain version bump.
+Groundwork so archived-99 (typescript 5.9.3 → 7.0.2 in `services/executor`) becomes a plain version bump.
 
 TypeScript 7 rejects the current tsconfig with **TS5011** (`rootDir` must be explicit), and once that's satisfied it fails to resolve `@types/node` globals — 13 errors across `index.ts`, `healthcheck.ts` and `pythonRunner.ts` (`process`, `NodeJS`). An explicit `rootDir` plus `types: ["node"]` fixes both.
 
 Both options are **inert on the pinned 5.9.3**, so this lands independently and de-risks the bump: verified by building and running the executor's full suite (**11/11**) on 5.9.3 with the new tsconfig, and by compiling a copy against **typescript@7.0.2** (clean with, 13 errors without).
 
-`services/hocuspocus` needs no change — it already sets `rootDir` and compiles clean under 7.0.2 as-is, which is worth knowing before #106.
+`services/hocuspocus` needs no change — it already sets `rootDir` and compiles clean under 7.0.2 as-is, which is worth knowing before archived-106.
 
 Honest caveat: I could not pin down *why* `@types/node` resolves for hocuspocus but not the executor under TS 7 (not `incremental`, not a stale tsbuildinfo, both have the package). The fix is verified in both directions regardless.
 
@@ -9132,66 +9132,66 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #171 — fix: twenty bugs — leaks, unbounded work, config drift, and two analyzers back on
+## archived-171 — fix: twenty bugs — leaks, unbounded work, config drift, and two analyzers back on
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/small-defects-batch1` → `master`
 
-Closes #18
-Closes #30
-Closes #31
-Closes #41
-Closes #50
-Closes #72
-Closes #73
-Closes #74
-Closes #75
-Closes #76
-Closes #77
-Closes #78
-Closes #113
-Closes #116
-Closes #118
-Closes #121
-Closes #122
-Closes #163
-Closes #165
+Closes archived-18
+Closes archived-30
+Closes archived-31
+Closes archived-41
+Closes archived-50
+Closes archived-72
+Closes archived-73
+Closes archived-74
+Closes archived-75
+Closes archived-76
+Closes archived-77
+Closes archived-78
+Closes archived-113
+Closes archived-116
+Closes archived-118
+Closes archived-121
+Closes archived-122
+Closes archived-163
+Closes archived-165
 
 Twenty bugs, grouped by what they actually are.
 
 ## Resource leaks and unbounded work
 
-- **#72** — the repeated-auth-failure detector keyed a singleton map by the *attacker-supplied* username from the unauthenticated login endpoint and never evicted, so credential stuffing grew the heap indefinitely. Sweeps emptied windows, plus a hard ceiling. **Red-checked.**
-- **#77** — `DeleteAllWorkflowExecutionsAsync` always refetched page 0 and exited only on an empty page, so one undeletable instance meant refetching forever — an unbounded HTTP hammer from inside a live admin request. Stops when a pass deletes nothing, plus a time budget.
-- **#73** — the Dapr watchdog's 45 s timeout never killed the child, so a hung restart script was orphaned and another spawned every 2 minutes. Now kills the process tree, and drains both pipes concurrently (a child writing past the 64 KB buffer deadlocked).
-- **#78** — `NatsConnectionProvider` read its cached connection outside the lock without `Volatile` and never re-validated it, so a terminally-closed handle was reused until process restart.
-- **#74 / #75** — Hocuspocus `pg.Pool` had no `'error'` listener (idle-client failure becomes an uncaughtException), and neither cross-service fetch had a timeout (undici's 300 s default).
+- **archived-72** — the repeated-auth-failure detector keyed a singleton map by the *attacker-supplied* username from the unauthenticated login endpoint and never evicted, so credential stuffing grew the heap indefinitely. Sweeps emptied windows, plus a hard ceiling. **Red-checked.**
+- **archived-77** — `DeleteAllWorkflowExecutionsAsync` always refetched page 0 and exited only on an empty page, so one undeletable instance meant refetching forever — an unbounded HTTP hammer from inside a live admin request. Stops when a pass deletes nothing, plus a time budget.
+- **archived-73** — the Dapr watchdog's 45 s timeout never killed the child, so a hung restart script was orphaned and another spawned every 2 minutes. Now kills the process tree, and drains both pipes concurrently (a child writing past the 64 KB buffer deadlocked).
+- **archived-78** — `NatsConnectionProvider` read its cached connection outside the lock without `Volatile` and never re-validated it, so a terminally-closed handle was reused until process restart.
+- **archived-74 / archived-75** — Hocuspocus `pg.Pool` had no `'error'` listener (idle-client failure becomes an uncaughtException), and neither cross-service fetch had a timeout (undici's 300 s default).
 
 ## Wrong behaviour
 
-- **#165** — the built-in REST connector **could not be configured through its own admin page**: the SPA writes camelCase, `System.Text.Json` binds case-sensitively, so `Url` was always empty. The SSRF tests move to the camelCase shape they should have used all along.
-- **#113** — `ensure-nats-stream.sh` ran `stream edit --subjects` on every invocation, re-narrowing the stream and dropping record/application/content publishes on every `make infra-ensure`.
-- **#116** — two literal NUL bytes made grep treat `WorkflowStudio.tsx` as binary. They were **deliberate key delimiters**, so stripping them would have silently introduced collisions; replaced with the escape sequence instead, byte-identical at runtime.
-- **#18** — every tab and history entry read "AutoNate" (WCAG 2.4.2 / 508 §502). Titles come from `APP_ROUTES` centrally, with a path-derived fallback for dynamic pages — a gap the new E2E spec caught rather than my assuming it was covered.
+- **archived-165** — the built-in REST connector **could not be configured through its own admin page**: the SPA writes camelCase, `System.Text.Json` binds case-sensitively, so `Url` was always empty. The SSRF tests move to the camelCase shape they should have used all along.
+- **archived-113** — `ensure-nats-stream.sh` ran `stream edit --subjects` on every invocation, re-narrowing the stream and dropping record/application/content publishes on every `make infra-ensure`.
+- **archived-116** — two literal NUL bytes made grep treat `WorkflowStudio.tsx` as binary. They were **deliberate key delimiters**, so stripping them would have silently introduced collisions; replaced with the escape sequence instead, byte-identical at runtime.
+- **archived-18** — every tab and history entry read "AutoNate" (WCAG 2.4.2 / 508 §502). Titles come from `APP_ROUTES` centrally, with a path-derived fallback for dynamic pages — a gap the new E2E spec caught rather than my assuming it was covered.
 
 ## Enforcement instead of discipline
 
-- **#41** — CA2016 and S108 back to `warning`. The issue predicted "the codebase is clean"; **19 sites fired**, and the first CA2016 hits were in handlers #76 had just given a token to. All six were genuine unforwarded tokens; the thirteen S108 blocks now say why they are empty. Both rules at zero.
-- **#118** — 411 to **164** warnings. The 234 JSX entities were escaped from ESLint's own line/column positions rather than by pattern-matching the source (234 fixed, 0 skipped); 13 unused directives removed; `--report-unused-disable-directives` added so the next one fails lint.
-- **#163** — the 5 s WebSocket budget failed on most full-suite runs while passing in isolation. It is a hang guard, not a latency assertion: now 30 s and env-overridable.
+- **archived-41** — CA2016 and S108 back to `warning`. The issue predicted "the codebase is clean"; **19 sites fired**, and the first CA2016 hits were in handlers archived-76 had just given a token to. All six were genuine unforwarded tokens; the thirteen S108 blocks now say why they are empty. Both rules at zero.
+- **archived-118** — 411 to **164** warnings. The 234 JSX entities were escaped from ESLint's own line/column positions rather than by pattern-matching the source (234 fixed, 0 skipped); 13 unused directives removed; `--report-unused-disable-directives` added so the next one fails lint.
+- **archived-163** — the 5 s WebSocket budget failed on most full-suite runs while passing in isolation. It is a hang guard, not a latency assertion: now 30 s and env-overridable.
 
 ## Dead code and config drift
 
-**#30**, **#31**, **#50** (re-verified by trial-delete plus `tsc -b --force`, not taken on the issues' word), **#121** (`Flowable:BaseAddress` bound to nothing), **#122** (a feature flag nothing read).
+**archived-30**, **archived-31**, **archived-50** (re-verified by trial-delete plus `tsc -b --force`, not taken on the issues' word), **archived-121** (`Flowable:BaseAddress` bound to nothing), **archived-122** (a feature flag nothing read).
 
 ## Verification
 
-Full `AutoNate.Web.Tests` **1458 / 0** — including `SubscriptionManagerTests`, which #163 fixes. Full E2E **142 / 0 / 2** after the dynamic-page title gap was closed.
+Full `AutoNate.Web.Tests` **1458 / 0** — including `SubscriptionManagerTests`, which archived-163 fixes. Full E2E **142 / 0 / 2** after the dynamic-page title gap was closed.
 
-Worth noting for whoever runs these: Web.Tests must run **before** E2E, which empties `wwwroot` (see #163's thread).
+Worth noting for whoever runs these: Web.Tests must run **before** E2E, which empties `wwwroot` (see archived-163's thread).
 
 ## Not closed here
 
-**#119** — `IFlowableReadThrough` is referenced by `ProjectionFrameworkPhase2Tests` and is the intended landing point for #52, so deleting it would be churn rather than a fix. Left for #52.
+**archived-119** — `IFlowableReadThrough` is referenced by `ProjectionFrameworkPhase2Tests` and is the intended landing point for archived-52, so deleting it would be churn rather than a fix. Left for archived-52.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -9199,27 +9199,27 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #174 — fix: health probe, inert grants, and every E2E spec behind the console guard
+## archived-174 — fix: health probe, inert grants, and every E2E spec behind the console guard
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/bugs-batch2` → `master`
 
-Closes #24
-Closes #88
-Closes #89
-Closes #93
-Closes #115
+Closes archived-24
+Closes archived-88
+Closes archived-89
+Closes archived-93
+Closes archived-115
 
 Five more bugs, plus two product defects promoted out of prose into tracked issues.
 
 ## Monitoring gap
 
-**#115** — every notes, pages, documents and diagram load rides on the Hocuspocus sidecar, and nothing probed it: a collab outage showed **fully green** health while every Y.Doc load failed in the SPA. That is precisely the class of failure the 5 s health poll exists to surface. Adds a TCP reachability probe on `YjsServer:HocuspocusWsUrl` with the same 3 s budget the other probes use.
+**archived-115** — every notes, pages, documents and diagram load rides on the Hocuspocus sidecar, and nothing probed it: a collab outage showed **fully green** health while every Y.Doc load failed in the SPA. That is precisely the class of failure the 5 s health poll exists to surface. Adds a TCP reachability probe on `YjsServer:HocuspocusWsUrl` with the same 3 s budget the other probes use.
 
 TCP rather than a WebSocket handshake on purpose: Hocuspocus rejects an unauthenticated upgrade *by design*, so a handshake would need a minted ticket and would report "down" for what is actually an authorization result.
 
 ## Grants that did nothing
 
-**#24** — three things `/api/admin/registry` advertised had no effect:
+**archived-24** — three things `/api/admin/registry` advertised had no effect:
 
 - **Pipeline cancel was gated on `Run`**, so an admin who granted `pipeline:cancel` to an on-call operator watched them 403, and the only working grant was the one that also lets them *start* runs. Now honours `Cancel`. ⚠️ Deployments relying on run-implies-cancel need the cancel grant added — that is the fix, but it is a real migration step.
 - **`Dataset:schedule` / `Pipeline:schedule` removed** rather than wired: the cron lives in the same row as the rest of the definition and is edited through the same endpoint, so `Edit` is genuinely the gate and a separate grant has nothing to attach to.
@@ -9227,13 +9227,13 @@ TCP rather than a WebSocket handshake on purpose: Hocuspocus rejects an unauthen
 
 ## Test-suite integrity
 
-**#93 — the issue named the wrong file.** `PipelinesAdminTests` uses `NewSignedInAsAdminAsync` fourteen times and builds no context of its own. The real gap was larger: **six other spec files built 19 hand-rolled contexts, every one unguarded**, because `NewSignedInAsAdminAsync` was the only helper installing `ConsoleErrorGuard` and those specs needed a limited user or an anonymous visitor.
+**archived-93 — the issue named the wrong file.** `PipelinesAdminTests` uses `NewSignedInAsAdminAsync` fourteen times and builds no context of its own. The real gap was larger: **six other spec files built 19 hand-rolled contexts, every one unguarded**, because `NewSignedInAsAdminAsync` was the only helper installing `ConsoleErrorGuard` and those specs needed a limited user or an anonymous visitor.
 
 `E2ETestBase` gains `NewSignedInAsAsync(username, password)` and `NewAnonymousSessionAsync`; AgentSidebar, WorkflowOverride, Notifications, AuthShell, PermissionGating and Login all move onto guarded sessions. Permission-denial journeys are the worst place to lose this — the page is *supposed* to look empty, so an exception there is invisible. All 23 converted specs pass with the guard on, so nothing was hiding behind it. One raw context stays in AuthShellTests deliberately: API-only, no page, no console to guard.
 
-**#89** — a fixed 3 s sleep stood in for "Hocuspocus has persisted the Y.Doc". There is no server-side signal to poll for a *document* body: persistence goes sidecar → `yjs_documents` with no API over it, and the content-version bump the webhook does is page-specific, so the version does not move here. I measured that — **my first two poll designs were wrong, one of them passing vacuously** because a fresh document starts at version 2, not 1. The spec now retries the real assertion instead: reload, look for the text, reload again if absent. Disconnecting on reload is itself what flushes the sidecar, so a too-early attempt costs a round trip rather than the edit.
+**archived-89** — a fixed 3 s sleep stood in for "Hocuspocus has persisted the Y.Doc". There is no server-side signal to poll for a *document* body: persistence goes sidecar → `yjs_documents` with no API over it, and the content-version bump the webhook does is page-specific, so the version does not move here. I measured that — **my first two poll designs were wrong, one of them passing vacuously** because a fresh document starts at version 2, not 1. The spec now retries the real assertion instead: reload, look for the text, reload again if absent. Disconnecting on reload is itself what flushes the sidecar, so a too-early attempt costs a round trip rather than the edit.
 
-**#88** — two `[Fact(Skip)]` specs described product defects in prose with no issue behind them, which makes a skipped test a permanently silent bug. Filed **#172** (Appearance save silently reverts on reload — data-loss-shaped) and **#173** (DOCX import never finalises parsed content). Both Skip messages now name their issue and say the spec is that issue's acceptance test.
+**archived-88** — two `[Fact(Skip)]` specs described product defects in prose with no issue behind them, which makes a skipped test a permanently silent bug. Filed **archived-172** (Appearance save silently reverts on reload — data-loss-shaped) and **archived-173** (DOCX import never finalises parsed content). Both Skip messages now name their issue and say the spec is that issue's acceptance test.
 
 ## Verification
 
@@ -9245,18 +9245,18 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #175 — fix(a11y): contrast, colour-only meaning, route focus, and the silent login error
+## archived-175 — fix(a11y): contrast, colour-only meaning, route focus, and the silent login error
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/bugs-batch3-a11y` → `master`
 
-Closes #7
-Closes #15
-Closes #16
-Closes #17
+Closes archived-7
+Closes archived-15
+Closes archived-16
+Closes archived-17
 
 Four accessibility defects, all in the SPA.
 
-## #7 — the default sidebar heading colour was unreadable
+## archived-7 — the default sidebar heading colour was unreadable
 
 `sidebarSectionColor` shipped as `#adb5bd` on white: **2.07:1**, against a 4.5:1 requirement that applies because 0.78rem bold uppercase is not WCAG "large text". Every SITE / SECURITY group heading — the thing that makes a 30-item admin nav navigable — was effectively invisible to low-vision users.
 
@@ -9264,19 +9264,19 @@ Now `#5c636a` (**6.09:1**), still muted enough to read as a heading rather than 
 
 The pair is also added to `CONTRAST_CHECKS`, which is *why* this shipped: the admin editor warns on nine pairs and this was not one of them, so nothing ever flagged the default.
 
-## #16 — archived rows meant something only if you could see colour
+## archived-16 — archived rows meant something only if you could see colour
 
 `.row-archived td { color: dimmed }` was the entire cue. A screen-reader user got no signal at all; a colour-deficient user saw a lightness shift with no reason to read it as "archived" (WCAG 1.4.1).
 
 A shared `<ArchivedBadge>` now carries the meaning **in text**, in the primary cell of all three lists (records, record types, relationship types). The dimming stays as the supporting visual, so the state is conveyed through three independent channels rather than one.
 
-## #15 — navigation announced nothing
+## archived-15 — navigation announced nothing
 
 In a server-rendered app a navigation resets focus to the document; in an SPA it does not, so focus stayed on whichever nav link had just been activated. A screen reader announced nothing on route change, and Tab resumed in the header rather than in the page the user had just asked for (WCAG 2.4.3).
 
 `useRouteFocus` moves focus to the `#content` wrapper the skip link already targets — it carries `tabIndex={-1}` for exactly this purpose. Skipped on first paint, where the browser's own initial focus is correct and stealing it would also fight any landing-form autofocus.
 
-## #17 — a failed sign-in was silent
+## archived-17 — a failed sign-in was silent
 
 The error rendered without `role="alert"`, so it was never announced: the user was left on a form that appeared to have done nothing (WCAG 3.3.1 / 4.1.3). Both inputs also carried `autoFocus`, which drops a screen-reader user mid-form, past the brand and heading that say *which site* they are signing in to. The form is two fields — Tab reaches them immediately — so the autofocus is removed rather than made conditional.
 
@@ -9292,18 +9292,18 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #176 — fix: silent-failure defects — outbox timeout, leaked plugin ALCs, executor lifecycle, unauthorable grants
+## archived-176 — fix: silent-failure defects — outbox timeout, leaked plugin ALCs, executor lifecycle, unauthorable grants
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/bugs-batch4` → `master`
 
-Closes #25
-Closes #69
-Closes #70
-Closes #71
+Closes archived-25
+Closes archived-69
+Closes archived-70
+Closes archived-71
 
 Four defects that all end the same way: something breaks quietly and stays broken until a human happens to notice.
 
-## #71 — an untimed publish inside an open transaction
+## archived-71 — an untimed publish inside an open transaction
 
 `AuditOutboxDispatcher` resolved the **unnamed** `HttpClient` (100 s default) and published up to a 100-row batch serially — all inside an open Postgres transaction holding `FOR UPDATE` locks on those rows.
 
@@ -9311,19 +9311,19 @@ Against a Dapr sidecar that accepts TCP but stalls (the exact state `DaprStreami
 
 Now a named client with a 5 s budget: far beyond a healthy local publish, and it bounds the whole batch to minutes.
 
-## #70 — a leaked assembly load context per failed enable
+## archived-70 — a leaked assembly load context per failed enable
 
 `PluginRuntime` builds a **collectible** ALC before validating the plugin, and only the success path hands it to `LoadedPlugin`. All four early returns and the catch dropped the reference without unloading — leaking the ALC, its assembly and its resolver for the process lifetime, and keeping the `.dll` memory-mapped. That last part is why re-uploading a fixed build over the same folder failed.
 
 It compounds rather than being a one-off, because `PluginEnableFailureDetector` actively prompts the admin to retry. A `finally` now unloads unless the ALC was retained, and a failure to unload is logged rather than masking the original error.
 
-## #69 — the executor could stop serving without exiting
+## archived-69 — the executor could stop serving without exiting
 
 It connected with nats.js defaults, so after ten failed reconnects (~20 s) the connection closed for good: the subscription iterator completed *normally*, `main()` resolved, and the process either exited 0 or idled with an empty loop — while every code-node pipeline failed with the generic 30 s timeout.
 
 Now it reconnects indefinitely, exits non-zero if the connection closes anyway **or if the loop ever ends**, and installs `unhandledRejection` / `uncaughtException` handlers that do the same. Compose already restarts it, so exiting is the correct signal rather than lingering as a healthy-looking process with no subscription.
 
-## #25 — grants the runtime honoured but nobody could author
+## archived-25 — grants the runtime honoured but nobody could author
 
 `Document` and `Folder` are enforced on 22 route registrations and honoured by `ContentAuthorizer`'s `/document/…` and `/folder/…` selectors, but neither appeared in `CoreEntityTypes` — and `/api/admin/registry`, which drives the Grants admin picker, is built from that list.
 
@@ -9341,16 +9341,16 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #177 — fix: enforce Record:Assign where it is actually used, retire dead surface, explain every suppression
+## archived-177 — fix: enforce Record:Assign where it is actually used, retire dead surface, explain every suppression
 
 `MERGED (merged 2026-08-31)` · nathanpond · opened 2026-08-31 · `fix/bugs-batch5` → `master`
 
-Closes #32
-Closes #33
-Closes #45
-Closes #46
+Closes archived-32
+Closes archived-33
+Closes archived-45
+Closes archived-46
 
-## #45 — a permission that could not be exercised
+## archived-45 — a permission that could not be exercised
 
 `PUT /api/records/{id}/assignees` carries `RequirePermission(Record, Assign)` and has **no caller outside its own test**. The SPA changes assignees through `PATCH /api/records/{id}`, which accepts `assigneeIds` and was gated on `Edit` alone — so `Record:Assign` could be granted or denied with no observable effect for any real user.
 
@@ -9358,15 +9358,15 @@ The fix is server-side rather than pointing the SPA at the other route: the PATC
 
 Tests cover all three cases — assignees without the grant → 403, with it → 200, and a non-assignee edit still needing only `Edit`, so this charges `Assign` for assignees rather than making `Edit` require it. **Red-checked** by removing the gate.
 
-## #46 — an orphaned route
+## archived-46 — an orphaned route
 
 `GET /api/forms/{id}/versions/{versionNumber}` had no caller anywhere in the SPA, tests, plugins or docs, and `IFormStore.GetVersionAsync` existed only to serve it. An authenticated, untested route is a liability rather than an option, and the restore flow does not use it — deleted. Re-adding it *with a test* when the version-diff UI is built is cheap.
 
-## #33 — filenames naming delivery phases
+## archived-33 — filenames naming delivery phases
 
 `ProjectionFrameworkPhase2Tests`, `ProjectionFrameworkPhase3Tests` and `Phase7DocumentImportTests` named phases that resolve to nothing now that `docs/plans` is historical, so a reader had to open all three to learn what was covered. Renamed for behaviour: `ProjectionVariableHistoryAndRetentionTests`, `ProjectionColdTierArchiveTests`, `DocumentImportTests`.
 
-## #32 — suppressions that did not say why
+## archived-32 — suppressions that did not say why
 
 Eleven `eslint-disable` directives carried no reason, which makes a deliberate suppression indistinguishable from a stale-closure bug someone silenced. Each now says why it is safe, **derived from the surrounding code rather than boilerplate** — several already had the reason in a comment above, just not where a linter could see it.
 
@@ -9376,7 +9376,7 @@ Eleven `eslint-disable` directives carried no reason, which makes a deliberate s
 
 Full `AutoNate.Web.Tests` **1461 / 0**. Full E2E **143 / 0 / 2**.
 
-One note on getting there: the first full run showed `NotesQueryEndpointTests.FromNotes_OnEmpty_ReturnsSchemaColumns` failing, and my isolation re-run appeared to confirm it — but that re-run was polluted, because it ran straight after E2E, which deletes the static-web-asset manifests the test host needs. After a rebuild it passes 8/8 on this branch, `master` passed throughout, and the clean full run above is green. Added to the notes on #163 so the next person does not chase it the way I did.
+One note on getting there: the first full run showed `NotesQueryEndpointTests.FromNotes_OnEmpty_ReturnsSchemaColumns` failing, and my isolation re-run appeared to confirm it — but that re-run was polluted, because it ran straight after E2E, which deletes the static-web-asset manifests the test host needs. After a rebuild it passes 8/8 on this branch, `master` passed throughout, and the clean full run above is green. Added to the notes on archived-163 so the next person does not chase it the way I did.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -9384,16 +9384,16 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #178 — fix(a11y): make DataTable and Notes page rows keyboard-operable (#10, #12)
+## archived-178 — fix(a11y): make DataTable and Notes page rows keyboard-operable (archived-10, archived-12)
 
 `MERGED (merged 2026-09-01)` · nathanpond · opened 2026-08-31 · `fix/bugs-batch6-keyboard` → `master`
 
-Closes #10
-Closes #12
+Closes archived-10
+Closes archived-12
 
 Two keyboard-accessibility defects where the primary task of a screen was simply unreachable without a mouse (WCAG 2.1.1 / 4.1.2, 508 §502).
 
-## #12 — DataTable rows
+## archived-12 — DataTable rows
 
 `DataTable` forwarded `onRowClick` straight to mantine-datatable, which renders a bare `<tr onClick>`: no `tabIndex`, no name, no key handler. Any table whose only way into a row is the row itself was mouse-only — and **Notifications is exactly that**, with no link or button in any cell, so a keyboard or AT user could not open a single notification. `RecordList` survived only because its Key column happens to contain a `<Link>`.
 
@@ -9401,17 +9401,17 @@ The wrapper also accepted `getRowAriaLabel` and threw it away, with a comment cl
 
 **Deliberately not `role="button"`.** A `<tr>` has to keep its row role or the table stops being exposed as a table, and browsers will not surface a row as a button anyway. Focusable + named + Enter/Space is what makes it operable while remaining a row. The key handler ignores events that bubbled from a control inside the row, so Space still types and Enter still submits where it should.
 
-## #10 — Notes explorer page rows
+## archived-10 — Notes explorer page rows
 
 Page rows were `<div onClick>` with no `tabIndex`, role or key handler and no alternate link, so a keyboard-only user could reach Notes and then not open a single page — the sharpest of these, since opening a page *is* the module.
 
 The fix is the pattern the notebook row a few hundred lines above already uses, comment and all: the row stays a `<div>` because it contains the "+" and kebab buttons and nested `<button>`s are invalid HTML, so `role="button"` plus `tabIndex` restores focus and Enter/Space. Inner buttons keep their own keyboard behaviour.
 
-Worth noting: #10 also listed notebook (`:563`) and cabinet (`:816`) rows, but those line numbers now point at control spans — that row markup already carries role/tabIndex/onKeyDown, so the page row was the remaining gap.
+Worth noting: archived-10 also listed notebook (`:563`) and cabinet (`:816`) rows, but those line numbers now point at control spans — that row markup already carries role/tabIndex/onKeyDown, so the page row was the remaining gap.
 
 ## Verified, not asserted
 
-Both fixes have E2E specs that actually drive the keyboard: focus the row, press Enter, assert the destination. That mattered — the Notifications spec failed twice against role-based locators before I dumped the rendered row and found why: a `<tr>` computes its accessible name from its cells, so `aria-label` on the row is not exposed as its name. The spec locates by attribute instead, which here is the feature under test rather than a lapse from #92's guidance.
+Both fixes have E2E specs that actually drive the keyboard: focus the row, press Enter, assert the destination. That mattered — the Notifications spec failed twice against role-based locators before I dumped the rendered row and found why: a `<tr>` computes its accessible name from its cells, so `aria-label` on the row is not exposed as its name. The spec locates by attribute instead, which here is the feature under test rather than a lapse from archived-92's guidance.
 
 ## Verification
 
@@ -9423,17 +9423,17 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #179 — fix(a11y): finish the keyboard cluster; mount the real security admin; make DOCX import commit (#8, #9, #11, #13, #42, #172, #173)
+## archived-179 — fix(a11y): finish the keyboard cluster; mount the real security admin; make DOCX import commit (archived-8, archived-9, archived-11, archived-13, archived-42, archived-172, archived-173)
 
 `MERGED (merged 2026-09-01)` · nathanpond · opened 2026-09-01 · `fix/bugs-batch7-keyboard` → `master`
 
-Closes #8
-Closes #9
-Closes #11
-Closes #13
-Closes #42
-Closes #172
-Closes #173
+Closes archived-8
+Closes archived-9
+Closes archived-11
+Closes archived-13
+Closes archived-42
+Closes archived-172
+Closes archived-173
 
 Seven issues: the rest of the keyboard-accessibility cluster, plus three "the feature is there but does nothing" defects.
 
@@ -9441,7 +9441,7 @@ Seven issues: the rest of the keyboard-accessibility cluster, plus three "the fe
 
 # Keyboard accessibility
 
-## #11 — MenuTreeEditor rows
+## archived-11 — MenuTreeEditor rows
 
 Both row branches put `onClick` on a bare `<li>`, and every nested control `stopPropagation`'d, so no child could select the row. A keyboard admin could expand, hide, edit and delete rows but never select one.
 
@@ -9449,7 +9449,7 @@ The row label is now a real `UnstyledButton` (the separator branch gets one arou
 
 **Correction to the issue:** it says selection "opens the detail editor", but `selectedId` only drives the row highlight — editing is the pen icon, which was already reachable. The defect is real; the consequence is narrower.
 
-## #13 — AgentSidebar focus contract
+## archived-13 — AgentSidebar focus contract
 
 Opening the assistant left focus on the header button, so reaching the composer meant tabbing blind through the page; closing orphaned focus on `<body>`; Escape did nothing.
 
@@ -9457,7 +9457,7 @@ Now focus moves to the composer on open, Escape closes from inside the panel, an
 
 **Deliberately not a FocusTrap**, which is what the issue suggested. In push / under-header modes this panel is non-modal and the page behind it stays usable, so trapping Tab would be a keyboard trap (WCAG 2.1.2) rather than a fix.
 
-## #8 / #9 — the Notes dialogs
+## archived-8 / archived-9 — the Notes dialogs
 
 Every Notes dialog was a raw `<div onClick={onClose}>` overlay wrapping a `<div onClick={stopPropagation}>` panel. No role, so a screen reader announced nothing; no focus trap, so Tab walked out into the page behind; no focus return, so closing dropped the user on `<body>`. Creating, renaming, moving and deleting notes were all mouse-only. Fields compounded it: a presentational `<div>` label beside an id-less `<input>` reads as "edit, blank".
 
@@ -9466,7 +9466,7 @@ A new shared `NotesModal` wraps Mantine's compound Modal — role, `aria-modal`,
 **Mantine's own `returnFocus` does nothing here**, which is worth knowing beyond this PR: it runs through `useFocusReturn`, whose effect is a `useDidUpdate` that skips the first render. It only works for a modal mounted once and toggled via `opened`. These dialogs are conditionally rendered, so they mount with `opened` already true and unmount on close — neither the capture nor the restore branch ever runs. The shell captures the opener itself. **The E2E assertion on focus return is what surfaced this; inspection would not have.** The same pattern appears in `components/ConfirmModal.tsx`.
 
 **Two corrections to the issues:**
-- #8 lists twelve dialogs including `EditorPane:783`. That one is not a dialog — it is the ellipsis dropdown, `position: absolute` at `zIndex: 60`, whose items are already real `<button>`s and which already handles Escape and outside-click. Converting it to a centered modal would have been wrong, so it is untouched. It does lack `role="menu"` and arrow-key navigation — a smaller, separate gap.
+- archived-8 lists twelve dialogs including `EditorPane:783`. That one is not a dialog — it is the ellipsis dropdown, `position: absolute` at `zIndex: 60`, whose items are already real `<button>`s and which already handles Escape and outside-click. Converting it to a centered modal would have been wrong, so it is untouched. It does lack `role="menu"` and arrow-key navigation — a smaller, separate gap.
 - `FaIconPicker`, shared by the cabinet and notebook dialogs, had the same defects and was on neither issue: an unlabelled search box and icon buttons whose selected state was border colour alone. Both fixed.
 
 Lint warnings **162 → 110**: 52 `jsx-a11y` warnings retired by the fix itself, not suppressed. Cap ratcheted in `package.json` and the docs.
@@ -9479,7 +9479,7 @@ Also: ConfirmDialog's document-level Enter handler is gone. With focus now start
 
 Three defects that all presented as "the feature is there but does nothing", plus the locator cleanup they forced.
 
-## #42 — the shipped security admin was unreachable
+## archived-42 — the shipped security admin was unreachable
 
 The seeded Site Configuration → Security menu points at the `configSecurity*` template keys, and those keys rendered "coming soon" stubs while the real user/group/role/grant/explain admin shipped under separate `manageUsers` / `adminRoles` / … keys. The feature existed and could not be reached from the one place the seed sends an admin.
 
@@ -9489,7 +9489,7 @@ The seed was never wrong: its own `page_templates` rows describe these keys as *
 
 The E2E theory asserts content only the real page renders ("All groups", "Add grant", …) *and* that the stub sentence is absent, because every stub rendered an h1 too — a heading-shape assertion would not have caught this. All five red-check.
 
-## #173 — DOCX import silently discarded the upload
+## archived-173 — DOCX import silently discarded the upload
 
 Import navigated to `?import=1` and stayed there: parsed content never reached `body_jsonb`, the stash was never discarded, and the document reloaded empty.
 
@@ -9499,7 +9499,7 @@ Finalize now watches the editor's document settle — poll every 250 ms, require
 
 On timeout it deliberately does **not** finalize: committing an empty body would clear `?import=1` and destroy the server-side stash, which at that point holds the only copy of the upload. Leaving import mode in place means a reload retries the parse.
 
-## #172 — not a bug
+## archived-172 — not a bug
 
 The report was that Appearance accepts a new Site name, reports success, and reverts to the default on reload. It does not. Its skipped spec reloaded on the line after the Save click, and the navigation aborted the in-flight PATCH.
 
@@ -9507,13 +9507,13 @@ Measured rather than argued: `PATCH /api/admin/appearance` → 200, the success 
 
 ## Locator cleanup this forced
 
-Batch 7's named menu-row button shifted `row.Locator("button").Nth(4)` and broke two passing specs. The underlying problem was that the visibility / edit / delete icons had **no accessible name at all** — a Mantine Tooltip sets `aria-describedby`, not the name — so the specs had nothing to ask for but a position. Naming them fixes the a11y gap and retires 7 positional locators, which is what #92 is about.
+Batch 7's named menu-row button shifted `row.Locator("button").Nth(4)` and broke two passing specs. The underlying problem was that the visibility / edit / delete icons had **no accessible name at all** — a Mantine Tooltip sets `aria-describedby`, not the name — so the specs had nothing to ask for but a position. Naming them fixes the a11y gap and retires 7 positional locators, which is what archived-92 is about.
 
 ## Verification
 
 Full E2E **153 / 0 / 0 skipped** — both previously-skipped acceptance specs now run and pass. Full `AutoNate.Web.Tests` **1461 / 0**, `tsc -b`, `vite build` and lint all clean.
 
-One note on getting there: the first backend run showed `NotesQueryEndpointTests.FromNotes_OnEmpty_ReturnsSchemaColumns` failing. That is the known artifact recorded on #163 — the E2E fixture empties `AutoNate.Web/wwwroot` and deletes the static-web-asset manifests, so a backend run before rebuilding `AutoNate.Web` is unreliable. Rebuilt, then 8/8 in isolation and green in the full re-run above.
+One note on getting there: the first backend run showed `NotesQueryEndpointTests.FromNotes_OnEmpty_ReturnsSchemaColumns` failing. That is the known artifact recorded on archived-163 — the E2E fixture empties `AutoNate.Web/wwwroot` and deletes the static-web-asset manifests, so a backend run before rebuilding `AutoNate.Web` is unreliable. Rebuilt, then 8/8 in isolation and green in the full re-run above.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -9521,21 +9521,21 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #180 — fix: retire writes nothing reads; wire up the paths that led nowhere (#43, #44, #47, #14, #48)
+## archived-180 — fix: retire writes nothing reads; wire up the paths that led nowhere (archived-43, archived-44, archived-47, archived-14, archived-48)
 
 `CLOSED` · nathanpond · opened 2026-09-01 · `fix/bugs-batch9-backend` → `fix/bugs-batch7-keyboard`
 
-Closes #43
-Closes #44
-Closes #47
-Closes #14
-Closes #48
+Closes archived-43
+Closes archived-44
+Closes archived-47
+Closes archived-14
+Closes archived-48
 
 Five defects sharing a shape: something is written that nothing reads, or offered that leads nowhere.
 
-> Stacked on #179 — review that one first; the diff below is the last five commits.
+> Stacked on archived-179 — review that one first; the diff below is the last five commits.
 
-## #43 — a write with no possible reader
+## archived-43 — a write with no possible reader
 
 `AuthCacheBumper.BumpAsync` issued an `UPDATE` on every grant, role, group and role-assignment mutation — **17 call sites** — for a process-wide auth cache that was never built. Nothing ever `SELECT`ed the version.
 
@@ -9543,7 +9543,7 @@ It could not have had a consumer either: `Authorizer` is registered **scoped**, 
 
 Deleted: the class, all 17 call sites, the DI registration, the test helpers, and the table itself. Leaving an orphan table behind just relocates the puzzle.
 
-## #44 — a dead-letter table only psql could reach
+## archived-44 — a dead-letter table only psql could reach
 
 `AuditOutboxDeadLetterParkRemediator` moves an abandoned `audit_outbox` row into `audit_outbox_dead_letters` so that, in its own words, *"forensics is still possible"*. Nothing read the table — no `SELECT`, no route, no UI — so the self-healing story ended in a black hole, and the two indexes served nothing.
 
@@ -9551,13 +9551,13 @@ Deleted: the class, all 17 call sites, the DI registration, the test helpers, an
 
 Both gated on `SystemIssue:Remediate` rather than `View`, **including the read**: these rows carry the raw payload of the dropped event, which the ordinary issue list never exposes, so the people who should see them are the ones who can act on them. The panel treats a 403 as "hide the panel" rather than an error, so a View-only operator still gets the page they are entitled to.
 
-## #47 — the documented recovery step had no button
+## archived-47 — the documented recovery step had no button
 
 `reset-watermark` is documented in `docs/projection-framework/operations.md` as *the* recovery step for a corrupted or retention-truncated cache, but was reachable only by curl: no API client function, no button, no test — while its siblings pause/resume/rebuild had all three.
 
 The Feeds column now lists each feed with its own confirm-guarded **Reset watermark** action rather than collapsing them into a hover-only count: the reset acts on one feed, so an operator has to be able to say which.
 
-## #14 — button text picked by the wrong maths
+## archived-14 — button text picked by the wrong maths
 
 `badgeTextColor` thresholded **YIQ brightness** at 160 — a video-encoding measure with no defined relationship to contrast ratio. Its result becomes `--mantine-primary-color-contrast`, so it was the text colour of every filled primary button in the app, not just status pills.
 
@@ -9567,7 +9567,7 @@ The WCAG primitives lived privately in `siteAppearance.ts` while `statusAppearan
 
 Measuring cannot rescue every accent: for some backgrounds neither black nor white reaches 4.5:1. That is a property of the accent, not something a text colour can fix, so the appearance editor now warns on that pair instead of silently shipping an unreadable button.
 
-## #48 — a nav item leading to an empty form
+## archived-48 — a nav item leading to an empty form
 
 The Site Configuration menu seeded a **Features** item pointing at `configFeatures`, but `SettingGroup.Features` has no settings defined, so it led to a form reading "No settings in this group yet."
 
@@ -9579,7 +9579,7 @@ Removed the seeded row, plus an idempotent `DELETE` for installs that already ha
 
 Full `AutoNate.Web.Tests` **1465 / 0** (4 new), full E2E **154 / 0** (1 new). `tsc -b`, `vite build` and lint clean.
 
-Every new guard red-checked: the watermark test by gutting the `DELETE`, the contrast test by restoring the YIQ heuristic, the Features test by restoring the seed row. #43 is a deletion, so its check is the inverse — 1465 tests exercising grant/role/group mutations pass with the bump gone, which is what "no consumer" has to mean.
+Every new guard red-checked: the watermark test by gutting the `DELETE`, the contrast test by restoring the YIQ heuristic, the Features test by restoring the seed row. archived-43 is a deletion, so its check is the inverse — 1465 tests exercising grant/role/group mutations pass with the bump gone, which is what "no consumer" has to mean.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -9587,25 +9587,25 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 <details><summary>Comment — nathanpond, 2026-09-01</summary>
 
-Content landed on `master` via #189.
+Content landed on `master` via archived-189.
 
-This PR was auto-closed by GitHub when its base branch was deleted during the stack merge, not abandoned. Every commit from this batch is an ancestor of `fix/bugs-batch13-authz`, which #189 merged — verified commit-by-commit before merging. The write-up above still describes what shipped.
+This PR was auto-closed by GitHub when its base branch was deleted during the stack merge, not abandoned. Every commit from this batch is an ancestor of `fix/bugs-batch13-authz`, which archived-189 merged — verified commit-by-commit before merging. The write-up above still describes what shipped.
 
 </details>
 
 ---
 
-## #181 — fix: make Rebuild work, gate accessibility permanently, unpin brittle locators (#112, #40, #92)
+## archived-181 — fix: make Rebuild work, gate accessibility permanently, unpin brittle locators (archived-112, archived-40, archived-92)
 
 `MERGED (merged 2026-09-01)` · nathanpond · opened 2026-09-01 · `fix/bugs-batch10` → `fix/bugs-batch9-backend`
 
-Closes #112
-Closes #40
-Closes #92
+Closes archived-112
+Closes archived-40
+Closes archived-92
 
-> Stacked on #180 → #179. Review those first; the diff below is the last four commits.
+> Stacked on archived-180 → archived-179. Review those first; the diff below is the last four commits.
 
-## #112 — Rebuild was decorative
+## archived-112 — Rebuild was decorative
 
 `POST /api/admin/projections/{name}/rebuild` returned **400 for every projection**. `BackfillRunner` resolves `IProjectionBackfillSource<TSource>` and throws when none is registered, and nothing implemented the interface — so the recovery path in `docs/projection-framework/operations.md` did not work.
 
@@ -9619,7 +9619,7 @@ One framework fix came with it: `BackfillRunner` resolved the source from the **
 
 Tests: one drives the real projection list and rebuilds each, so adding a projection without a backfill source fails there rather than in production; the other proves a backfill actually repairs data, recomputing a bucket **400 days old** that the feed's recent-window recompute can never reach.
 
-## #40 — the permanent version of every 508 fix
+## archived-40 — the permanent version of every 508 fix
 
 **Lint ratchet.** The nine jsx-a11y rules were warnings inside a total budget, so a new violation was free until the budget ran out. They are now **errors** for the sixteen directories that are already clean — a list derived by running eslint, not by aspiration, so `npm run lint` passes the moment it lands. Fixing a directory and moving it into the list is the ratchet. Verified by planting a `<div onClick>` in `src/pages/records`: 2 errors, exit 1.
 
@@ -9632,13 +9632,13 @@ It found four real defects on arrival, all fixed here — the most important one
 - 19 eyedropper buttons on the appearance page announced as just "button".
 - Home's stat cards put white text at 0.85 opacity on light fills; every card measured below 4.5:1. Opacity removed, fills darkened. Orange needed a raw hex — even Mantine's `orange.9` is 4.30:1, just under.
 
-## #92 — a position is not a handle
+## archived-92 — a position is not a handle
 
 The pipelines specs reached rows through `main.Locator("table").First` → `Locator("tbody tr").First`, with a comment explaining the semantic option had been judged fragile. That couples the assertion to structure and ordering: change the sort or add a table above, and the spec silently targets a different row instead of failing.
 
 `DataTable` gains `getRowTestId`; the specs now ask for "a run row" and "a step row". Two things came out of doing it:
 
-- The wrapper's claim that *"mantine-datatable doesn't expose per-row aria props directly"* is wrong — `customRowAttributes` does exactly that. The dead `{getRowAriaLabel ? null : null}` discard is gone and the callback is honoured, so these rows also get accessible names. **Note:** this touches the same block as #178; merge that first and the conflict is trivial.
+- The wrapper's claim that *"mantine-datatable doesn't expose per-row aria props directly"* is wrong — `customRowAttributes` does exactly that. The dead `{getRowAriaLabel ? null : null}` discard is gone and the callback is honoured, so these rows also get accessible names. **Note:** this touches the same block as archived-178; merge that first and the conflict is trivial.
 - My first prefix, `pipeline-run-`, is also a prefix of `pipeline-run-step-`, so the run selector matched step rows. It passed only because the runs table happens to render first — exactly the incidental ordering dependency this change exists to remove.
 
 **Not changed:** the `[contenteditable='true']` / `.cm-editor` / `.excalidraw` locators the issue also lists. Those address third-party editing surfaces we do not render, and they name the editable region rather than depending on structure or ordering. Swapping them for a wrapper testid would add indirection without removing coupling.
@@ -9655,21 +9655,21 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #187 — test: cover the untested endpoint surfaces, add CI, and fix what that uncovered (#79, #80-#84, #87, #90, #91)
+## archived-187 — test: cover the untested endpoint surfaces, add CI, and fix what that uncovered (archived-79, archived-80-archived-84, archived-87, archived-90, archived-91)
 
 `CLOSED` · nathanpond · opened 2026-09-01 · `fix/bugs-batch11-coverage` → `fix/bugs-batch10`
 
-Closes #79
-Closes #80
-Closes #81
-Closes #82
-Closes #83
-Closes #84
-Closes #87
-Closes #90
-Closes #91
+Closes archived-79
+Closes archived-80
+Closes archived-81
+Closes archived-82
+Closes archived-83
+Closes archived-84
+Closes archived-87
+Closes archived-90
+Closes archived-91
 
-> Stacked on #181 → #180 → #179 → #178. Review those first.
+> Stacked on archived-181 → archived-180 → archived-179 → archived-178. Review those first.
 
 The test-coverage cluster, plus CI to enforce it — and the defects that writing the tests uncovered. Backend suite goes from **1467 to 1645** tests.
 
@@ -9679,27 +9679,27 @@ DataStore, DataConnector, Dataset, Query and Pipeline had selector compilers reg
 
 Measured, not inferred: with view/edit/create grants on `/datastore/*` — and again with an exact `/datastore/{id}` — `GET /api/datastores/{id}` returned 403; after registering the handler, 200. The two registration blocks sit adjacent in `Program.cs`, so this reads as compilers added without their handlers.
 
-## #84 — an assertion that could not fail, hiding a broken button
+## archived-84 — an assertion that could not fail, hiding a broken button
 
 The spec clicked the UI delete, then issued an unconditional API `DELETE` for the same conversation *before* asserting it was gone. Removing the mask showed the affordance never worked: the conversation was still readable 10 seconds later. The confirmation is a Mantine modal and the spec registered a `page.Dialog` handler — which only fires for `window.confirm` — so nothing was ever confirmed. It now clicks the modal and asserts the server 404s.
 
-## #87 — proving the gates deny
+## archived-87 — proving the gates deny
 
 `AuthorizationGatePresenceTests` reads route metadata; it never calls the endpoint, so it cannot tell a correct gate from one wired to the wrong `(EntityKind, Action)` pair. Table-driven over the eight kind-level routes, three cases each: denied without a grant, allowed with the declared one, and — the case presence-checking cannot see — **still denied when holding a different kind's grant for the same action**. Red-checked by re-gating `/api/pipelines` on `Dataset:List`: 2 of 24 fail, and they are the two that name the mis-wiring.
 
-## #79 — CI
+## archived-79 — CI
 
 Three jobs so a red build says *what* broke. Two details that are not obvious from the file: NATS is started with `docker run` because service containers cannot pass a `command` and NATS only enables JetStream with `--jetstream`; and the E2E job installs Node despite running no npm step, because its fixture launches the app with `-p:BuildSpa=true` and deletes `wwwroot` first — my first draft passed the SPA bundle through as an artifact, which would have been thrown away.
 
 Deliberately **not** `-warnaserror`, which the issue suggested: the tree carries analyzer warnings in code this workflow does not own, so it would be red on arrival, which is how a gate gets switched off.
 
-## #80–#83, #90, #91 — the coverage itself
+## archived-80–archived-83, archived-90, archived-91 — the coverage itself
 
 Yjs tickets and both shared-secret filters (replay, tampering, absent/empty/wrong secrets, and that a wrong secret answers identically for real and non-existent documents); datastore files and the dataset file-source parser dispatch; notes/pages writes and version restore — restore has to restore the *content*, not just return 204; document bindings and comments with the full View/Comment/Edit/RefreshBindings gate matrix; and privilege mutation, where every test reads the store back so a 403 that still wrote a row fails.
 
 ## Five findings filed, not fixed here
 
-Each backed by a passing test that asserts the current behaviour, so they invert when fixed: **#182** (revoke gated kind-level — a one-role assign grant strips any role from anyone), **#183** (`preview-file-source` reads any datastore file with no DataStore authorization), **#184** (that endpoint 500s and leaks a stack trace on a `.keep` placeholder), **#185** (Yjs ticket existence oracle), **#186** (four smaller findings).
+Each backed by a passing test that asserts the current behaviour, so they invert when fixed: **archived-182** (revoke gated kind-level — a one-role assign grant strips any role from anyone), **archived-183** (`preview-file-source` reads any datastore file with no DataStore authorization), **archived-184** (that endpoint 500s and leaks a stack trace on a `.keep` placeholder), **archived-185** (Yjs ticket existence oracle), **archived-186** (four smaller findings).
 
 ## One fixed: `role:assign` was a path to super-admin
 
@@ -9721,25 +9721,25 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 <details><summary>Comment — nathanpond, 2026-09-01</summary>
 
-Content landed on `master` via #189.
+Content landed on `master` via archived-189.
 
-This PR was auto-closed by GitHub when its base branch was deleted during the stack merge, not abandoned. Every commit from this batch is an ancestor of `fix/bugs-batch13-authz`, which #189 merged — verified commit-by-commit before merging. The write-up above still describes what shipped.
+This PR was auto-closed by GitHub when its base branch was deleted during the stack merge, not abandoned. Every commit from this batch is an ancestor of `fix/bugs-batch13-authz`, which archived-189 merged — verified commit-by-commit before merging. The write-up above still describes what shipped.
 
 </details>
 
 ---
 
-## #188 — fix(spa): gate the admin shell and record delete on permission; unblock the typed-field journey (#85, #86)
+## archived-188 — fix(spa): gate the admin shell and record delete on permission; unblock the typed-field journey (archived-85, archived-86)
 
 `CLOSED` · nathanpond · opened 2026-09-01 · `fix/bugs-batch12-gating` → `fix/bugs-batch11-coverage`
 
-Closes #85
+Closes archived-85
 
-Refs #86 — partially addressed; see the scope note at the end.
+Refs archived-86 — partially addressed; see the scope note at the end.
 
-> Stacked on #187 → #181 → #180 → #179 → #178. Review those first.
+> Stacked on archived-187 → archived-181 → archived-180 → archived-179 → archived-178. Review those first.
 
-## #85 — two journeys blocked on the affordances they were meant to test
+## archived-85 — two journeys blocked on the affordances they were meant to test
 
 Admin routes sat under the authenticated `AppShell` with no client-side guard, so a user with no grants could deep-link to `/admin/config` and get the full chrome — nav, headings, empty tables — while every API call behind it returned 403. `RecordDetail` rendered its delete action unconditionally, so a user without `record:delete` was offered a button whose every click ended in a 403.
 
@@ -9749,7 +9749,7 @@ The backend held in both cases, so neither was exposure. They were **affordance*
 
 Three specs, each with a positive twin so an absent element is proven to be the permission check rather than a mis-locator — the record one grants delete mid-test and re-asserts. Both fixes red-checked by reverting the SPA changes.
 
-## #86 — the starting point it names, and three corrected rows
+## archived-86 — the starting point it names, and three corrected rows
 
 E2E-061's blocker was *"the current record seeder creates schema-less record types"*. `ApiSeeder.AddRecordTypeFieldAsync` builds a typed schema, and `RecordsAdvancedTests.cs` — one of the three named-but-missing spec files — covers text/number/option fields plus an option filter narrowing the list.
 
@@ -9757,7 +9757,7 @@ Making it targetable meant fixing a real gap: the three controls in a filter row
 
 Verified by inverting rather than trusting a green: selecting `silver` instead of `gold` swaps which record survives, so the filter is genuinely applied and the assertion is not passing on a coincidentally short list.
 
-Three rows corrected. **E2E-029** and **E2E-066** were still marked BLOCKED but had already been unblocked earlier in this stack — by the DOCX import finalize fix (#173), and by establishing that the appearance "revert" was a racy spec rather than a product defect (#172). E2E-061 is marked PARTIAL: the filter matrix is covered, column-picker selection is not.
+Three rows corrected. **E2E-029** and **E2E-066** were still marked BLOCKED but had already been unblocked earlier in this stack — by the DOCX import finalize fix (archived-173), and by establishing that the appearance "revert" was a racy spec rather than a product defect (archived-172). E2E-061 is marked PARTIAL: the filter matrix is covered, column-picker selection is not.
 
 **BLOCKED count 17 → 14.**
 
@@ -9770,13 +9770,13 @@ They are not unwritten tests; they are missing fixture capability:
 - stable BPMN canvas node selection (E2E-036, E2E-037, E2E-059)
 - operator-state seeding for Flowable (E2E-060)
 
-Each is its own piece of work. Writing specs against them before the hooks exist would produce exactly the flaky, position-based tests #92 was filed about — so #86 stays open with an accurate count rather than being closed over 14 skipped specs.
+Each is its own piece of work. Writing specs against them before the hooks exist would produce exactly the flaky, position-based tests archived-92 was filed about — so archived-86 stays open with an accurate count rather than being closed over 14 skipped specs.
 
 ## Verification
 
 Full E2E **163 / 0** (four new specs). Full `AutoNate.Web.Tests` **1645 / 0**.
 
-The combined run showed one failure, `NotesQueryEndpointTests.FromNotes_OnEmpty_ReturnsSchemaColumns` — the artifact recorded on #163. It ran E2E first, which empties `AutoNate.Web/wwwroot` and deletes the static-web-asset manifests; the build that followed was a no-op because no sources had changed, so the manifests were never regenerated. After `--no-incremental`, 8/8 in isolation.
+The combined run showed one failure, `NotesQueryEndpointTests.FromNotes_OnEmpty_ReturnsSchemaColumns` — the artifact recorded on archived-163. It ran E2E first, which empties `AutoNate.Web/wwwroot` and deletes the static-web-asset manifests; the build that followed was a no-op because no sources had changed, so the manifests were never regenerated. After `--no-incremental`, 8/8 in isolation.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -9784,69 +9784,69 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 <details><summary>Comment — nathanpond, 2026-09-01</summary>
 
-Content landed on `master` via #189.
+Content landed on `master` via archived-189.
 
-This PR was auto-closed by GitHub when its base branch was deleted during the stack merge, not abandoned. Every commit from this batch is an ancestor of `fix/bugs-batch13-authz`, which #189 merged — verified commit-by-commit before merging. The write-up above still describes what shipped.
+This PR was auto-closed by GitHub when its base branch was deleted during the stack merge, not abandoned. Every commit from this batch is an ancestor of `fix/bugs-batch13-authz`, which archived-189 merged — verified commit-by-commit before merging. The write-up above still describes what shipped.
 
 </details>
 
 ---
 
-## #189 — fix: land bug batches 9-13 (authorization, projections, a11y gates, CI, endpoint coverage)
+## archived-189 — fix: land bug batches 9-13 (authorization, projections, a11y gates, CI, endpoint coverage)
 
 `MERGED (merged 2026-09-01)` · nathanpond · opened 2026-09-01 · `fix/bugs-batch13-authz` → `master`
 
-Closes #182
-Closes #183
-Closes #43
-Closes #44
-Closes #47
-Closes #14
-Closes #48
-Closes #112
-Closes #40
-Closes #92
-Closes #79
-Closes #80
-Closes #81
-Closes #82
-Closes #83
-Closes #84
-Closes #87
-Closes #90
-Closes #91
-Closes #85
+Closes archived-182
+Closes archived-183
+Closes archived-43
+Closes archived-44
+Closes archived-47
+Closes archived-14
+Closes archived-48
+Closes archived-112
+Closes archived-40
+Closes archived-92
+Closes archived-79
+Closes archived-80
+Closes archived-81
+Closes archived-82
+Closes archived-83
+Closes archived-84
+Closes archived-87
+Closes archived-90
+Closes archived-91
+Closes archived-85
 
-**Retargeted to `master` and now carries batches 9 through 13.** #180 and #187 were auto-closed by GitHub when their base branches were deleted during the merge of #179 and #181 — their content was never lost, and every commit from those batches is an ancestor of this branch (verified commit-by-commit, not by branch name). Merging this lands all of it.
+**Retargeted to `master` and now carries batches 9 through 13.** archived-180 and archived-187 were auto-closed by GitHub when their base branches were deleted during the merge of archived-179 and archived-181 — their content was never lost, and every commit from those batches is an ancestor of this branch (verified commit-by-commit, not by branch name). Merging this lands all of it.
 
-The individual batch write-ups are on #180, #187, #188 and the original #189 body; this is the summary.
+The individual batch write-ups are on archived-180, archived-187, archived-188 and the original archived-189 body; this is the summary.
 
 ## Authorization
 
-- **#182** — revoke was gated `RequireKindPermission(Role, Assign)`, which never resolved the assignment, so a grant naming one throwaway role could strip **anybody's membership of any role, SuperAdmin included**. Now resolves the assignment and authorizes against the role it names.
-- **#183** — `preview-file-source` checked only `Dataset:Create` while reading an arbitrary file from an arbitrary store named in the body. Now authorizes `(DataStore, View)` against the store it reads.
-- **#87** — the kind-level gates are proved to *deny*: three cases per route, including "still denied when holding a different kind's grant", which is the case route-metadata inspection structurally cannot see.
-- **#91**, **#90** — privilege-mutation and document binding/comment coverage; every test reads state back, so a 403 that still wrote a row fails.
+- **archived-182** — revoke was gated `RequireKindPermission(Role, Assign)`, which never resolved the assignment, so a grant naming one throwaway role could strip **anybody's membership of any role, SuperAdmin included**. Now resolves the assignment and authorizes against the role it names.
+- **archived-183** — `preview-file-source` checked only `Dataset:Create` while reading an arbitrary file from an arbitrary store named in the body. Now authorizes `(DataStore, View)` against the store it reads.
+- **archived-87** — the kind-level gates are proved to *deny*: three cases per route, including "still denied when holding a different kind's grant", which is the case route-metadata inspection structurally cannot see.
+- **archived-91**, **archived-90** — privilege-mutation and document binding/comment coverage; every test reads state back, so a 403 that still wrote a row fails.
 - Registered the **five missing `IInstanceAuthorizer`s**. DataStore, DataConnector, Dataset, Query and Pipeline had selector compilers but no handler, so every instance-level endpoint for them returned 403 to everyone but super-admins — including the row's owner.
 - `role:assign` no longer reaches SuperAdmin (self-assignment and SuperAdmin hand-out both refused, under full enforcement only).
 
 ## Correctness
 
 - **#112** — `Rebuild` returned 400 for every projection because no `IProjectionBackfillSource` existed. Five implemented; `BackfillRunner` now resolves them in a scope.
-- **#43**, **#44**, **#47**, **#48** — retired a write nothing read, gave the dead-letter table a reader and a replay, wired `reset-watermark` to a button, stopped seeding a nav item that led to an empty form.
-- **#14** — button text colour picked by measured WCAG contrast instead of YIQ brightness.
+- **archived-43**, **archived-44**, **archived-47**, **archived-48** — retired a write nothing read, gave the dead-letter table a reader and a replay, wired `reset-watermark` to a button, stopped seeding a nav item that led to an empty form.
+- **archived-14** — button text colour picked by measured WCAG contrast instead of YIQ brightness.
 - `DatastoresDatabaseInitializer`'s probe-then-`CREATE DATABASE` TOCTOU no longer fails app startup when two instances start at once.
 
 ## Accessibility
 
-- **#40** — jsx-a11y is now an **error** for sixteen already-clean directories, plus an axe scan over four signed-in pages. It found four real defects on arrival, including that **the shipped theme still failed WCAG**: the accessible defaults had been fixed in the SPA constant and never mirrored into the server-side seed a real install reads.
-- **#85** — the admin shell and the record delete action are gated on permission, so a user without access sees "you don't have access" rather than a shell whose every call 403s.
+- **archived-40** — jsx-a11y is now an **error** for sixteen already-clean directories, plus an axe scan over four signed-in pages. It found four real defects on arrival, including that **the shipped theme still failed WCAG**: the accessible defaults had been fixed in the SPA constant and never mirrored into the server-side seed a real install reads.
+- **archived-85** — the admin shell and the record delete action are gated on permission, so a user without access sees "you don't have access" rather than a shell whose every call 403s.
 
 ## Tests and CI
 
-- **#79** — CI runs on every push and PR. Backend and SPA gates run in full; E2E runs 155 of 163, with the Flowable- and Dapr-dependent specs excluded **by trait** and the gap recorded in `.n8/decisions.md`.
-- **#84** — the conversation-delete spec could not fail. Removing the mask showed the button never worked in test: the spec waited on `window.confirm` for what is a Mantine modal.
-- **#80–#83**, **#92** — Yjs ticket/secret-filter coverage, datastore and parser-dispatch coverage, notes write and version-restore coverage, and pipeline rows addressed by test-id rather than position.
+- **archived-79** — CI runs on every push and PR. Backend and SPA gates run in full; E2E runs 155 of 163, with the Flowable- and Dapr-dependent specs excluded **by trait** and the gap recorded in `.n8/decisions.md`.
+- **archived-84** — the conversation-delete spec could not fail. Removing the mask showed the button never worked in test: the spec waited on `window.confirm` for what is a Mantine modal.
+- **archived-80–archived-83**, **archived-92** — Yjs ticket/secret-filter coverage, datastore and parser-dispatch coverage, notes write and version-restore coverage, and pipeline rows addressed by test-id rather than position.
 
 ## Verification
 
@@ -9860,7 +9860,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #190 — chore(deps-dev): bump browserslist from 4.28.2 to 4.28.8 in /src/AutoNate.Spa
+## archived-190 — chore(deps-dev): bump browserslist from 4.28.2 to 4.28.8 in /src/AutoNate.Spa
 
 `MERGED (merged 2026-09-01)` · app/dependabot · opened 2026-09-01 · `dependabot/npm_and_yarn/src/AutoNate.Spa/browserslist-4.28.8` → `master`
 
@@ -9978,29 +9978,29 @@ You can disable automated security fix PRs for this repo from the [Security Aler
 
 ---
 
-## #191 — fix: close the preview 500, the ticket existence oracle, and three of #186
+## archived-191 — fix: close the preview 500, the ticket existence oracle, and three of archived-186
 
 `MERGED (merged 2026-09-01)` · nathanpond · opened 2026-09-01 · `fix/bugs-batch14-hardening` → `master`
 
-Closes #184
-Closes #185
-Closes #186
+Closes archived-184
+Closes archived-185
+Closes archived-186
 
 The three findings from the endpoint-coverage pass, plus a suite-wide test defect that showed up while verifying them.
 
-## #184 — a 500 that handed back a stack trace
+## archived-184 — a 500 that handed back a stack trace
 
 A folder's `.keep` placeholder row carries an empty `storage_key`, and the endpoint downloaded the file before dispatching to a parser. `ResolveAbsolutePath("")` resolves to the datastores **root directory**, so `File.OpenRead` threw — and with no exception-handling middleware the caller got a 500 carrying the exception text and stack. Reachable by anyone holding `dataset:create`.
 
 The folder branch already filtered `.keep`; the file branch does now too, and answers 404, because a placeholder is not a file anyone can preview.
 
-## #185 — the ticket endpoint confirmed what existed
+## archived-185 — the ticket endpoint confirmed what existed
 
 The note and `documents:` branches answered 404 for a missing row and 403 for one the caller could not see, so any signed-in user with no grants could probe note and document ids for existence, one GUID at a time.
 
 Existence is still resolved first but only **disclosed** after the authorization check: an unauthorized caller gets 403 either way, while someone who could have seen the row still gets the informative 404. The note-kind-mismatch 400 is deferred the same way — it also confirmed the note existed, which the issue didn't mention. The `page:` branch always had this shape; the other two now match it.
 
-## #186 — three of four
+## archived-186 — three of four
 
 1. **Overrides accept user and group only.** The grant store's allowlist also contains `role` — right for an admin using `/api/admin/grants` — but nothing narrowed it here, so anyone with Edit on a folder could attach a resource grant to a role, **SuperAdmin included**, through an endpoint whose own header describes user/group sharing. The store's rejection message also claimed user/group while enforcing three kinds; it now names what it actually allows.
 3. **Comment create and reply answer 409, not 500.** The pre-check is a TOCTOU the code already described as *"a real-world race we accept"*, but nothing caught the `DbUpdateException` — so the loser got an unhandled 500 rather than the 409 the same handler promises three lines earlier, and the client's retry keys off that 409.
@@ -10026,7 +10026,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #192 — fix: survive the CREATE ROLE catalog race on concurrent startup
+## archived-192 — fix: survive the CREATE ROLE catalog race on concurrent startup
 
 `MERGED (merged 2026-09-01)` · nathanpond · opened 2026-09-01 · `fix/role-create-race` → `master`
 
@@ -10050,15 +10050,15 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #194 — 0.1 release readiness and the Auton8 rename
+## archived-194 — 0.1 release readiness and the Auton8 rename
 
 `MERGED (merged 2026-09-02)` · nathanpond · opened 2026-09-01 · `feat/0.1-public-release` → `master`
 
-Closes #193
+Closes archived-193
 
 Everything that has to be true before this repository can be made public, plus the AutoNate → Auton8 rename. The history rewrite and the flip itself are **not** in this PR — see the end.
 
-## The credential (#193)
+## The credential (archived-193)
 
 `infra/postgres/init/02-create-autonate-app-schema.sql` seeded `admin` with its `password_hash` *and* `password_salt` in the file. Both halves of the PBKDF2 verification were present, so this was not a hash to crack — the plaintext is `admin`. The INSERT was ungated by environment, and `AssignSuperAdminToAllExistingUsers` defaulted true, whose backfill grants SuperAdmin to every row in `local_users`. Every install that ran the script came up with a super-admin whose password is public. Publishing the repo would have published the credential, but the finding never depended on that.
 
@@ -10080,7 +10080,7 @@ Red-checked: reintroducing a default credential fails 5 of the 10 bootstrap test
 
 ## 0.1 content
 
-- **The last stub.** `configFormMappings` rendered "This section is a stub. Functionality coming soon." — the same defect class as #42, which fixed five siblings and missed this one. Component deleted; the seeded menu row and page template now seed disabled, with a one-shot `retire_form_mappings_stub_v1` migration for installs that already have them. The `appRoutes` entry had to go too: `template()` indexes `PAGE_TEMPLATES`, and a miss is `undefined` rather than a type error, so leaving it would have mounted a blank page instead of falling through to NotFound.
+- **The last stub.** `configFormMappings` rendered "This section is a stub. Functionality coming soon." — the same defect class as archived-42, which fixed five siblings and missed this one. Component deleted; the seeded menu row and page template now seed disabled, with a one-shot `retire_form_mappings_stub_v1` migration for installs that already have them. The `appRoutes` entry had to go too: `template()` indexes `PAGE_TEMPLATES`, and a miss is `undefined` rather than a type error, so leaving it would have mounted a blank page instead of falling through to NotFound.
 - **The landing page.** Four StatCards presented as a metrics strip and carried no metrics — one read "THEME STATUS / Mantine", and the other three were the same three destinations, with the same icons, as the quick links directly beneath them. Grid removed rather than wired to invented counts; links broadened past workflow-only; retitled, since the product is no longer just automation.
 - **Hygiene.** Apache-2.0 `LICENSE`, `SECURITY.md` (private reporting, honest response expectations rather than an invented SLA), `CONTRIBUTING.md`, and credential-shaped `.gitignore` patterns. The plan's "untrack `AutoNate.sln.DotSettings.user`" item turned out to be already done.
 - **README.** Was a runbook titled "AutoNate Local Development". Now a landing page; the runbook is `docs/DEVELOPMENT.md` and `docs/DEPLOYMENT.md`, both of which gained the first-administrator step that had no home before.
@@ -10091,7 +10091,7 @@ Red-checked: reintroducing a default credential fails 5 of the 10 bootstrap test
 
 **The login cover 404s.** Three backend appearance defaults pointed at `/spa/assets/img/login-bg/login-bg-17.jpg`. Nothing serves a `/spa` request path — static files are served at the root — and the SPA-side default disagreed, pointing at `space.jpg`. All four now agree, with a guarded migration for installs still carrying the broken URL. That also removed the last reference to an image carrying a paid theme's demo filename, which is now deleted along with a stray extensionless duplicate of `space.jpg`.
 
-**Five statements in `docs/codebase/` assert the repo has no CI.** True when generated, false since #79. Corrected, and every page now carries a provenance banner — they are a snapshot of shape, not a current defect list. Also `AUTONATE_DATA_ROOT`, documented in the README and absent from the code; the real key is `Data__Root`.
+**Five statements in `docs/codebase/` assert the repo has no CI.** True when generated, false since archived-79. Corrected, and every page now carries a provenance banner — they are a snapshot of shape, not a current defect list. Also `AUTONATE_DATA_ROOT`, documented in the README and absent from the code; the real key is `Data__Root`.
 
 ## The rename
 
@@ -10133,7 +10133,7 @@ https://claude.ai/code/session_01Y5ie3qTEptr4MjYw5i6a5F
 
 ---
 
-## #195 — Document why a force-push does not remove history from GitHub
+## archived-195 — Document why a force-push does not remove history from GitHub
 
 `OPEN` · nathanpond · opened 2026-09-02 · `fix/rewrite-pull-refs-caveat` → `master`
 

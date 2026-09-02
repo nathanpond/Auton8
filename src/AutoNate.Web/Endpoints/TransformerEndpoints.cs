@@ -9,7 +9,7 @@ namespace AutoNate.Web.Endpoints;
 // Read-only: Phase 5 introduces actual run endpoints (orchestrated through
 // pipelines). The flat list is (key, displayName, inputArity) for
 // transformers and (key, displayName) for analyzers; the per-key schema
-// endpoint (audit fix #7) drives the pipeline editor's node-config form
+// endpoint (audit fix archived-7) drives the pipeline editor's node-config form
 // so authors don't hand-edit JSON for the 14 built-ins.
 public static class TransformerEndpoints
 {
