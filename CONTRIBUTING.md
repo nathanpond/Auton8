@@ -40,7 +40,10 @@ with an obvious fix — go straight to a PR.
 ## Working on the code
 
 Build and run instructions live in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md);
-deployment lives in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+deployment lives in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). The
+[wiki](https://github.com/nathanpond/Auton8/wiki) carries the codebase map —
+architecture, structure, conventions and testing — which is the fastest way to
+find where something belongs.
 
 Before opening a PR, run what CI runs:
 
