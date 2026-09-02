@@ -1,0 +1,8 @@
+services:
+  web:
+    image: example:1
+    ports:
+      - "127.0.0.1:9000:9000"
+      # loopback-exception: the metrics port is scraped by a collector running
+      # on another host in the development network.
+      - "9100:9100"

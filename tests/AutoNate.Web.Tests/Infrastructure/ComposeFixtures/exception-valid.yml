@@ -1,0 +1,8 @@
+services:
+  keycloak:
+    image: example/keycloak:1
+    # loopback-exception: stands in for a real external identity provider, so it
+    # must be reachable from outside the compose network to mimic how a
+    # production IdP is actually configured.
+    ports:
+      - "8180:8080"

@@ -1,0 +1,7 @@
+# The shape every compose example on the internet uses, and the one that
+# silently publishes on all interfaces.
+services:
+  web:
+    image: example:1
+    ports:
+      - "8080:8080"

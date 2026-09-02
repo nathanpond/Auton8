@@ -82,7 +82,8 @@ invariant is a user decision — log it as an `## Ad-hoc` entry in
    to. A service that deliberately mimics an out-of-network dependency — a
    Keycloak instance standing in for a real IdP, say — may be excepted, but the
    exception carries a written reason next to the port it applies to, so it is
-   impossible to make silently. *(guard: #50 — test-enforced once that lands)*
+   impossible to make silently. *(test-enforced:
+   `ComposeLoopbackBindingTests`)*
 
 Two more guards exist and should not be weakened, though they are not on the
 list above: the jsx-a11y error gate in `npm run lint`, and
