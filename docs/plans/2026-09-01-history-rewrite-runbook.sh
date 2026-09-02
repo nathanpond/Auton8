@@ -14,6 +14,27 @@
 #
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# READ THIS FIRST — a force-push is NOT sufficient on GitHub.
+#
+# GitHub keeps a read-only `refs/pull/<n>/head` for every pull request ever
+# opened. They are server-managed: filter-repo cannot rewrite them and you
+# cannot delete them. After a force-push they still point at the ORIGINAL
+# commits, so the stripped content stays fetchable by anyone who can read the
+# repository:
+#
+#     git fetch origin 'refs/pull/194/head:refs/pr194'
+#
+# This was verified on this repository on 2026-09-02: after a clean rewrite
+# (130 MiB -> 8.63 MiB, zero ColorAdmin objects on every branch), all 21,922
+# theme blobs were still reachable through pull refs, across 73 of them.
+#
+# So the rewrite alone does NOT make it safe to go public. After pushing, you
+# must ALSO get GitHub Support to purge the unreachable objects and stale pull
+# refs, and confirm they are gone, BEFORE flipping visibility. Keep the
+# repository private until that is confirmed.
+# ---------------------------------------------------------------------------
+
 ORIGIN="$(git -C "$(dirname "$0")/../.." remote get-url origin)"
 WORK="${TMPDIR:-/tmp}/auton8-rewrite-$(date +%s)"
 SRC="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -117,6 +138,16 @@ Then, and only then:
 
 Afterwards: delete your local clone and re-clone. Do NOT merge an old clone
 into the new history — it would reintroduce every stripped object.
+
+THEN, before making the repository public, verify the pull refs:
+
+  git ls-remote origin 'refs/pull/*/head' | wc -l
+  git fetch origin 'refs/pull/<any>/head:refs/prcheck'
+  git rev-list --objects refs/prcheck | grep -ci coloradmin   # must be 0
+
+If that is not 0, the stripped content is still published. Open a GitHub
+Support request asking them to garbage-collect unreachable objects and stale
+pull-request refs after a history rewrite, and wait for confirmation.
 Finally, delete the safety tag once you are satisfied:
   git push origin :refs/tags/pre-rewrite-backup
 EOF
