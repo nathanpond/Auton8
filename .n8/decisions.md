@@ -265,3 +265,22 @@ decision tables in #110. Seven decisions taken and applied:
   **Issue:** #112, #110
 - **Note:** Two things were settled as conventions rather than asked: new mutations emit audit events through the existing `add-audit-event` path (#112, #110), and a compensation handler sees the variable values in scope when its compensated activity completed, per the BPMN specification (#115) — with an explicit instruction to document the limitation if the engine does not preserve that snapshot.
 - **Note:** The first pass also missed the agent-skill surface entirely across all thirteen M3 issues, despite 30+ skills existing including `OperateWorkflowExecutionsSkill`. Found by the owner's challenge, not by the plan.
+
+## Ad-hoc — 2026-09-02 (M0–M2 challenged after the M3 review)
+
+The owner asked for the same audit against M0–M2 that exposed the M3 gaps. One real
+finding, two decisions that were not mine to make, and one milestone that came back
+clean.
+
+- **Finding (M2, corrected):** None of #87, #90, #92 or #94 emitted audit events, and all four are privileged mutations on the identity surface. `EventCatalog.cs` **already** carries `auth.login.succeeded`, `auth.login.failed` and `auth.account.locked`, firing from `/account/login` — so M2 as planned would have shipped a second, unaudited login path. Local logins on the record, SSO logins not, with the enterprise path being the one an auditor actually asks about. JIT provisioning would likewise have created user accounts without the event the local creation path emits. Audit acceptance criteria added to all four, including the sign-in reconciliation in #92 (an IdP-driven grant or revocation is an access change) and the break-glass activation in #94 (precisely what an incident review needs to find).
+  **Why it was missed:** the same class of omission caught in M3 earlier the same day and not back-propagated. The lesson is that a convention discovered mid-planning has to be swept across already-planned milestones, not only applied forward.
+  **Issue:** #87, #90, #92, #94
+- **Finding (M2, corrected):** M2 said nothing about the agent-skill surface while M3 explicitly states no new mutating skills. #87 now states it and asserts it with a test, so the two milestones are consistent.
+- **Decision:** Published images carry the **exact release version only** — no `latest`, no floating major or minor tag, enforced by a test on the workflow.
+  **Why:** A 0.x project makes no upgrade-compatibility promise, so a moving tag lets a routine `docker compose pull` jump an unpinned deployment across a breaking version. It is also what the digest-pinned release compose file in #58 already assumes.
+  **Issue:** #56
+- **Decision:** The release quickstart shows a command the deployer runs to generate the shared secrets, rather than the container generating them for itself.
+  **Why:** The deployer is running in minutes and still chose their own secret. Having the software mint a credential for itself is close enough to the shipped-credential defect this project already had once (invariant 1) to rule out deliberately.
+  **Issue:** #58
+- **Note:** M1 came back clean. Every Claude's Discretion item across #65–#72 is genuinely builder-level — shard counts, merge tools, sample sizes, which YAML parser. No product decision was hidden there.
+- **Note:** M0's remaining Discretion items are builder-level after the two above were lifted out.
