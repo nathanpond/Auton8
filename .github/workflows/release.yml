@@ -60,6 +60,11 @@ jobs:
     name: Publish ${{ matrix.image }}
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      autonate-web: ${{ steps.digest.outputs.autonate-web }}
+      hocuspocus: ${{ steps.digest.outputs.hocuspocus }}
+      executor: ${{ steps.digest.outputs.executor }}
+      flowable: ${{ steps.digest.outputs.flowable }}
     permissions:
       contents: read
       packages: write        # GHCR push
@@ -175,4 +180,87 @@ jobs:
             "\`\`\`" \
             "gh attestation verify oci://${{ steps.base.outputs.image }}@${{ steps.build.outputs.digest }} --repo ${GITHUB_REPOSITORY}" \
             "\`\`\`" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # Matrix jobs cannot each set a distinct output key, so each writes its
+      # digest to an artifact and the assets job collects them. Simpler than
+      # the alternatives and it leaves the digests visible in the run.
+      - name: Record the digest
+        id: digest
+        run: |
+          mkdir -p digests
+          echo "${{ steps.build.outputs.digest }}" > "digests/${{ matrix.image }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image }}
+          path: digests/${{ matrix.image }}
+          retention-days: 1
+
+  assets:
+    name: Release assets
+    needs: [validate, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach assets to the release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: false
+          path: digests
+
+      - name: Generate the release assets
+        env:
+          # The supporting images are pinned in infra/docker-compose.yml and
+          # read from it, so the released stack and the development stack
+          # cannot drift onto different versions of Postgres or NATS.
+          COMPOSE: infra/docker-compose.yml
+        run: |
+          set -eu
+          digest() { cat "digests/digest-$1/$1"; }
+
+          from_compose() {
+            grep -oE "image: $1@sha256:[a-f0-9]+" "$COMPOSE" | head -1 | sed 's/.*@//'
+          }
+
+          export DIGEST_AUTONATEWEB="$(digest autonate-web)"
+          export DIGEST_HOCUSPOCUS="$(digest hocuspocus)"
+          export DIGEST_EXECUTOR="$(digest executor)"
+          export DIGEST_FLOWABLE="$(digest flowable)"
+          export DIGEST_POSTGRES="$(from_compose postgres)"
+          export DIGEST_REDIS="$(from_compose redis)"
+          export DIGEST_NATS="$(from_compose nats)"
+          export DIGEST_NATSBOX="$(from_compose natsio/nats-box)"
+          export DIGEST_DAPRD="$(from_compose daprio/daprd)"
+          export DIGEST_PLACEMENT="$(from_compose daprio/placement)"
+          export DIGEST_SCHEDULER="$(from_compose daprio/scheduler)"
+
+          ./infra/release/generate.sh "${{ needs.validate.outputs.version }}" release-assets
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Auton8 ${{ needs.validate.outputs.version }}" \
+            --generate-notes \
+            --verify-tag \
+            2>/dev/null || echo "release already exists; attaching to it"
+
+          gh release upload "$GITHUB_REF_NAME" \
+            release-assets/compose.yml \
+            release-assets/env.template \
+            release-assets/QUICKSTART.md \
+            --clobber
+
+      - name: Report
+        run: |
+          printf '%s\n' \
+            "### Release assets" \
+            "" \
+            "\`compose.yml\`, \`env.template\` and \`QUICKSTART.md\` attached to \`$GITHUB_REF_NAME\`." \
+            "Every image in the compose file is pinned by digest." \
             >> "$GITHUB_STEP_SUMMARY"

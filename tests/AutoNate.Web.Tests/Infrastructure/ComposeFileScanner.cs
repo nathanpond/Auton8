@@ -73,7 +73,13 @@ internal static class ComposeFileScanner
             // Test fixtures are deliberately non-compliant. Matched by the
             // directory-name convention rather than by listing each one, so
             // adding a fixture directory cannot silently re-break this.
-            || relative.Contains("Fixtures/", StringComparison.Ordinal);
+            || relative.Contains("Fixtures/", StringComparison.Ordinal)
+            // The release compose TEMPLATE carries __DIGEST_*__ placeholders by
+            // design; infra/release/generate.sh substitutes them and refuses to
+            // emit anything with one left. ReleaseComposeTests checks the
+            // template's own rules, so scanning it here would only assert that
+            // a template is not a finished file.
+            || relative.Contains("infra/release/", StringComparison.Ordinal);
     }
 
     /// <summary>

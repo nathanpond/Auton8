@@ -34,8 +34,22 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("id-token: write", workflow, StringComparison.Ordinal);
         Assert.Contains("attestations: write", workflow, StringComparison.Ordinal);
 
-        // And must not acquire the ability to rewrite the repository.
-        Assert.DoesNotContain("contents: write", workflow);
+        // The workflow default must stay read-only, so a job that declares
+        // nothing cannot write anything.
+        Assert.Contains("permissions:\n  contents: read", workflow, StringComparison.Ordinal);
+
+        // `contents: write` is legitimate — the assets job attaches files to
+        // the release — but only there. This assertion originally forbade it
+        // outright and failed the moment that job was added, which was the
+        // right failure: widening a permission should have to be deliberate.
+        // So it is scoped instead of dropped.
+        var publishJob = workflow[workflow.IndexOf("  publish:", StringComparison.Ordinal)
+                                  ..workflow.IndexOf("  assets:", StringComparison.Ordinal)];
+        Assert.DoesNotContain("contents: write", publishJob);
+
+        var assetsJob = workflow[workflow.IndexOf("  assets:", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("packages: write", assetsJob);
+        Assert.DoesNotContain("id-token: write", assetsJob);
     }
 
     [Fact]

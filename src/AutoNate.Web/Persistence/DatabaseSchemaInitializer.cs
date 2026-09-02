@@ -3984,36 +3984,52 @@ internal static class DatabaseSchemaInitializer
             .GetService<ILoggerFactory>()
             ?.CreateLogger("AutoNate.Web.Persistence.DatabaseSchemaInitializer");
 
-        // A dedicated connection, not the DbContext's own and not a transaction.
+        // The lock is taken on the DbContext's OWN connection, explicitly
+        // opened for the duration.
         //
-        // Session-level rather than pg_advisory_xact_lock because the
-        // alternative means wrapping the ~90 DDL batches below in a single
-        // enclosing transaction — a behaviour change far larger than the race
-        // it would fix. On its own connection so the lock's lifetime does not
-        // depend on any one batch's command or on EF's connection pooling
-        // handing the context a different physical connection part-way through.
-        await using var lockConnection =
-            new NpgsqlConnection(dbContext.Database.GetConnectionString());
-        await lockConnection.OpenAsync(cancellationToken);
-
-        await AcquireSchemaLockAsync(lockConnection, logger, cancellationToken);
+        // Session-level rather than pg_advisory_xact_lock, because the
+        // transactional form means wrapping the ~90 DDL batches below in one
+        // enclosing transaction — a much larger behaviour change than the race
+        // it fixes. A session lock lives with the connection, so that
+        // connection has to stay open until the work is done; explicitly
+        // opening it here is what guarantees EF does not hand the batches a
+        // different physical connection part-way through.
+        //
+        // It used to open a SECOND, dedicated connection. That cost one extra
+        // long-held connection per concurrently-initialising database, and the
+        // test suite — which builds a database per test class, in parallel —
+        // exhausted PostgreSQL's default max_connections of 100:
+        // "53300: sorry, too many clients already", 903 failures. Anything
+        // running several instances against one server would have hit the same
+        // wall, so this is not merely a test-harness concern.
+        await dbContext.Database.OpenConnectionAsync(cancellationToken);
+        var lockConnection = dbContext.Database.GetDbConnection();
 
         try
         {
-            await RunSchemaBatchesAsync(scope, dbContext, cancellationToken);
+            await AcquireSchemaLockAsync(lockConnection, logger, cancellationToken);
+
+            try
+            {
+                await RunSchemaBatchesAsync(scope, dbContext, cancellationToken);
+            }
+            finally
+            {
+                // Release on the exception path too. Closing the connection
+                // would release a session lock anyway, but doing it explicitly
+                // means a failure here does not leave the next host waiting out
+                // the full timeout for a lock nobody holds.
+                await ReleaseSchemaLockAsync(lockConnection, logger);
+            }
         }
         finally
         {
-            // Release on the exception path too. A session-level lock would be
-            // released by the connection closing anyway, but doing it
-            // explicitly means a failure here does not leave the next host
-            // waiting out the full timeout for a lock nobody holds.
-            await ReleaseSchemaLockAsync(lockConnection, logger);
+            await dbContext.Database.CloseConnectionAsync();
         }
     }
 
     private static async Task AcquireSchemaLockAsync(
-        NpgsqlConnection connection, ILogger? logger, CancellationToken cancellationToken)
+        System.Data.Common.DbConnection connection, ILogger? logger, CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + LockWaitTimeout;
         var announcedWait = false;
@@ -4023,7 +4039,10 @@ internal static class DatabaseSchemaInitializer
             await using (var command = connection.CreateCommand())
             {
                 command.CommandText = "SELECT pg_try_advisory_lock(@key);";
-                command.Parameters.AddWithValue("key", SchemaInitLockKey);
+                var keyParam = command.CreateParameter();
+                keyParam.ParameterName = "key";
+                keyParam.Value = SchemaInitLockKey;
+                command.Parameters.Add(keyParam);
 
                 var acquired = (bool?)await command.ExecuteScalarAsync(cancellationToken) ?? false;
                 if (acquired)
@@ -4062,13 +4081,17 @@ internal static class DatabaseSchemaInitializer
         }
     }
 
-    private static async Task ReleaseSchemaLockAsync(NpgsqlConnection connection, ILogger? logger)
+    private static async Task ReleaseSchemaLockAsync(
+        System.Data.Common.DbConnection connection, ILogger? logger)
     {
         try
         {
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT pg_advisory_unlock(@key);";
-            command.Parameters.AddWithValue("key", SchemaInitLockKey);
+            var keyParam = command.CreateParameter();
+            keyParam.ParameterName = "key";
+            keyParam.Value = SchemaInitLockKey;
+            command.Parameters.Add(keyParam);
             await command.ExecuteScalarAsync();
         }
         catch (Exception ex)

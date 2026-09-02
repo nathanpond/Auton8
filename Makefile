@@ -111,8 +111,12 @@ app-container: preflight infra-prepare
 		./infra/dapr/components/statestore.yaml > $(MOUNT_ROOT)/autonate-web-dapr/components/statestore.yaml
 	$(COMPOSE) -f infra/docker-compose.app.yml --profile app up -d --build
 
+# Stop ONLY the app containers. `compose --profile app down` would tear down
+# the entire project — every supporting service with it — which is not what
+# "stop the app" means to anyone typing this, and cost a full stack restart
+# the first time it was used.
 app-container-down:
-	$(COMPOSE) -f infra/docker-compose.app.yml --profile app down
+	$(COMPOSE) -f infra/docker-compose.app.yml rm -sf autonate-web autonate-web-dapr
 
 app: app-dapr
 

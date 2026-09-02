@@ -13,6 +13,18 @@ services:
       # is on. Containers reach it as `postgres:5432` over the compose network,
       # which is unaffected.
       - "127.0.0.1:${AUTONATE_POSTGRES_PORT:-5432}:5432"
+    # PostgreSQL's default max_connections is 100, which is a conservative
+    # figure for a single application. It is not the load this server actually
+    # takes: the backend suite builds a database per test class and runs those
+    # classes in parallel, so ~100 initialisations can be in flight at once,
+    # each holding a connection for the duration of DatabaseSchemaInitializer.
+    # At 100 the suite fails en masse with "53300: sorry, too many clients
+    # already" — 732 tests in one run — and the failures look like anything but
+    # a connection ceiling.
+    #
+    # Idle usage is ~16 connections, so this is headroom for a known burst
+    # rather than a leak being papered over.
+    command: ["postgres", "-c", "max_connections=300"]
     volumes:
       - ./mounts/postgres/data:/var/lib/postgresql/data
       # Only 01-create-autonate-db.sql lives here now, and the asymmetry is

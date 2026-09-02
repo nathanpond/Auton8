@@ -1,0 +1,341 @@
+# Auton8 __VERSION__
+#
+# Everything needed to run Auton8, in one file. No clone, no build, no source
+# tree: every image is pinned by digest and every file the stack needs is
+# inlined below.
+#
+#   1. Put this file and .env in an empty directory.
+#   2. Set Bootstrap__AdminUsername and Bootstrap__AdminPassword in .env.
+#      Nothing is seeded — without them there is no way to sign in.
+#   3. docker compose up -d
+#
+# Every published port binds to 127.0.0.1. This stack ships no TLS and the
+# services trust each other on the compose network; put a reverse proxy in
+# front of it before exposing anything. See QUICKSTART.md.
+
+configs:
+  # Inlined rather than mounted: a released compose file cannot reference paths
+  # in a source tree the consumer does not have.
+  jetstream-bootstrap:
+    # $$ throughout: Compose interpolates $VAR inside inlined config content
+    # before writing it. Written as $VAR, the shell would receive an empty
+    # STREAM_NAME and empty SUBJECTS — creating a nameless stream covering
+    # nothing, and every publish afterwards failing with "no response from
+    # stream". Compose warns about this, and the warning is easy to skim past.
+    content: |
+      #!/bin/sh
+      set -eu
+      STREAM_NAME="workflow-execution"
+      SUBJECTS="workflow.execution.> record.> application.> content.>"
+      until nc -z nats 4222 >/dev/null 2>&1; do sleep 1; done
+      if nats --server nats://nats:4222 stream info "$${STREAM_NAME}" >/dev/null 2>&1; then
+        nats --server nats://nats:4222 stream edit "$${STREAM_NAME}" --subjects "$${SUBJECTS}" --force >/dev/null
+      else
+        nats --server nats://nats:4222 stream add "$${STREAM_NAME}" --subjects "$${SUBJECTS}" --retention limits --defaults >/dev/null
+      fi
+
+  dapr-pubsub:
+    content: |
+      apiVersion: dapr.io/v1alpha1
+      kind: Component
+      metadata:
+        name: pubsub
+      spec:
+        type: pubsub.jetstream
+        version: v1
+        metadata:
+          - name: natsURL
+            value: nats://nats:4222
+          - name: streamName
+            value: workflow-execution
+          - name: deliverPolicy
+            value: new
+      scopes:
+        - autonate-web
+        - flowable
+
+  dapr-statestore:
+    content: |
+      apiVersion: dapr.io/v1alpha1
+      kind: Component
+      metadata:
+        name: statestore
+      spec:
+        type: state.redis
+        version: v1
+        metadata:
+          - name: redisHost
+            value: redis:6379
+          - name: redisPassword
+            value: ""
+          - name: actorStateStore
+            value: "true"
+      scopes:
+        - autonate-web
+
+services:
+  postgres:
+    image: postgres@__DIGEST_POSTGRES__
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-autonate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: flowable
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # The AutoNate database. The application creates its own schema on first
+  # start; this only has to exist.
+  postgres-init:
+    image: postgres@__DIGEST_POSTGRES__
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        psql -h postgres -U ${POSTGRES_USER:-autonate} -d postgres -tc \
+          "SELECT 1 FROM pg_database WHERE datname = 'AutoNate'" | grep -q 1 \
+          || psql -h postgres -U ${POSTGRES_USER:-autonate} -d postgres -c 'CREATE DATABASE "AutoNate"'
+        psql -h postgres -U ${POSTGRES_USER:-autonate} -d postgres -tc \
+          "SELECT 1 FROM pg_database WHERE datname = 'autonate_datastores'" | grep -q 1 \
+          || psql -h postgres -U ${POSTGRES_USER:-autonate} -d postgres -c 'CREATE DATABASE "autonate_datastores"'
+
+  redis:
+    image: redis@__DIGEST_REDIS__
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats@__DIGEST_NATS__
+    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "4222"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  nats-init:
+    image: natsio/nats-box@__DIGEST_NATSBOX__
+    depends_on:
+      nats:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/bootstrap-jetstream.sh"]
+    configs:
+      - source: jetstream-bootstrap
+        target: /scripts/bootstrap-jetstream.sh
+        mode: 0555
+
+  dapr-placement:
+    image: daprio/placement@__DIGEST_PLACEMENT__
+    command: ["./placement", "--port", "50006"]
+
+  dapr-scheduler:
+    image: daprio/scheduler@__DIGEST_SCHEDULER__
+    command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
+    user: root
+    volumes:
+      - dapr-scheduler-data:/data
+
+  flowable:
+    image: ghcr.io/nathanpond/auton8/flowable@__DIGEST_FLOWABLE__
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AUTONATE_FLOWABLE_EVENTS_DAPR_PUBLISH_BASE_URL: http://127.0.0.1:3500
+      AUTONATE_FLOWABLE_EVENTS_PUBSUB_NAME: pubsub
+      AUTONATE_FLOWABLE_EVENTS_TOPIC_ROOT: workflow.execution.events
+      AUTONATE_FLOWABLE_EVENTS_SOURCE_APP_ID: flowable
+      AUTONATE_FLOWABLE_EVENTS_CALLBACK_BASE_URL: http://autonate-web:8080
+      AUTONATE_FLOWABLE_EVENTS_CALLBACK_SHARED_SECRET: ${WORKFLOW_CALLBACK_SECRET:?set WORKFLOW_CALLBACK_SECRET in .env}
+      FLOWABLE_PROCESS_HISTORY_LEVEL: full
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flowable
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-autonate}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: ${TZ:-UTC}
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  flowable-dapr:
+    image: daprio/daprd@__DIGEST_DAPRD__
+    command:
+      - ./daprd
+      - --app-id
+      - flowable
+      - --app-port
+      - "8080"
+      - --app-channel-address
+      - "127.0.0.1"
+      - --dapr-http-port
+      - "3500"
+      - --resources-path
+      - /components
+      - --placement-host-address
+      - dapr-placement:50006
+      - --scheduler-host-address
+      - dapr-scheduler:50007
+    depends_on:
+      flowable:
+        condition: service_healthy
+        restart: true
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      dapr-placement:
+        condition: service_started
+      dapr-scheduler:
+        condition: service_started
+    network_mode: "service:flowable"
+    configs:
+      - source: dapr-pubsub
+        target: /components/pubsub.yaml
+      - source: dapr-statestore
+        target: /components/statestore.yaml
+
+  hocuspocus:
+    image: ghcr.io/nathanpond/auton8/hocuspocus@__DIGEST_HOCUSPOCUS__
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HOCUSPOCUS_PORT: "1234"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: AutoNate
+      POSTGRES_USER: ${POSTGRES_USER:-autonate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      AUTONATE_WEB_URL: http://autonate-web:8080
+      YJS_INTERNAL_SHARED_SECRET: ${YJS_SHARED_SECRET:?set YJS_SHARED_SECRET in .env}
+    ports:
+      - "127.0.0.1:${HOCUSPOCUS_PORT:-1234}:1234"
+
+  executor:
+    image: ghcr.io/nathanpond/auton8/executor@__DIGEST_EXECUTOR__
+    restart: unless-stopped
+    depends_on:
+      nats:
+        condition: service_healthy
+      nats-init:
+        condition: service_completed_successfully
+    environment:
+      NATS_URL: nats://nats:4222
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  autonate-web:
+    image: ghcr.io/nathanpond/auton8/autonate-web@__DIGEST_AUTONATEWEB__
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+      nats-init:
+        condition: service_completed_successfully
+    environment:
+      ConnectionStrings__Default: >-
+        Host=postgres;Port=5432;Database=AutoNate;Username=${POSTGRES_USER:-autonate};Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      ConnectionStrings__Datastores: >-
+        Host=postgres;Port=5432;Database=autonate_datastores;Username=${POSTGRES_USER:-autonate};Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      Nats__Url: nats://nats:4222
+      Flowable__BaseUrl: http://flowable:8080/flowable-rest
+      Flowable__Username: ${FLOWABLE_USER:-rest-admin}
+      Flowable__Password: ${FLOWABLE_PASSWORD:-test}
+      WorkflowBehaviors__CallbackSharedSecret: ${WORKFLOW_CALLBACK_SECRET:?set WORKFLOW_CALLBACK_SECRET in .env}
+      YjsServer__InternalSharedSecret: ${YJS_SHARED_SECRET:?set YJS_SHARED_SECRET in .env}
+      Dapr__HttpEndpoint: http://127.0.0.1:3500
+      Dapr__GrpcEndpoint: http://127.0.0.1:50001
+      ASPNETCORE_ENVIRONMENT: ${APP_ENVIRONMENT:-Development}
+      AllowedHosts: ${ALLOWED_HOSTS:-*}
+      # No defaults. Nothing is seeded: unset means no way to sign in, which
+      # is the invariant rather than an oversight.
+      Bootstrap__AdminUsername: ${Bootstrap__AdminUsername:-}
+      Bootstrap__AdminPassword: ${Bootstrap__AdminPassword:-}
+    ports:
+      - "127.0.0.1:${APP_PORT:-5108}:8080"
+    volumes:
+      - autonate-web-data:/data
+
+  autonate-web-dapr:
+    image: daprio/daprd@__DIGEST_DAPRD__
+    command:
+      - ./daprd
+      - --app-id
+      - autonate-web
+      - --app-port
+      - "8080"
+      - --app-channel-address
+      - "127.0.0.1"
+      - --dapr-http-port
+      - "3500"
+      - --dapr-grpc-port
+      - "50001"
+      - --resources-path
+      - /components
+      - --placement-host-address
+      - dapr-placement:50006
+      - --scheduler-host-address
+      - dapr-scheduler:50007
+    depends_on:
+      # service_started, not service_healthy: the app refuses to boot without
+      # a sidecar and the sidecar needs the app's network namespace, so
+      # waiting for health deadlocks. The app's entrypoint waits for the
+      # sidecar instead.
+      autonate-web:
+        condition: service_started
+        restart: true
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      dapr-placement:
+        condition: service_started
+      dapr-scheduler:
+        condition: service_started
+    network_mode: "service:autonate-web"
+    configs:
+      - source: dapr-pubsub
+        target: /components/pubsub.yaml
+      - source: dapr-statestore
+        target: /components/statestore.yaml
+
+volumes:
+  postgres-data:
+  redis-data:
+  nats-data:
+  dapr-scheduler-data:
+  autonate-web-data:

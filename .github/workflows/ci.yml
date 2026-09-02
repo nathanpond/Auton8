@@ -99,11 +99,16 @@ jobs:
           POSTGRES_DB: flowable
         ports:
           - 5432:5432
+        # max_connections=300, matching infra/docker-compose.yml. The suite
+        # runs test classes in parallel and each initialises its own database,
+        # so the default of 100 is exceeded and the run fails with
+        # "53300: sorry, too many clients already".
         options: >-
           --health-cmd "pg_isready -U autonate -d flowable"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 12
+          --cmd "postgres -c max_connections=300"
 
       redis:
         image: redis:7-alpine
