@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using Npgsql;
 using AuthorizationOptions = AutoNate.Web.Authorization.AuthorizationOptions;
 
@@ -3934,6 +3935,22 @@ internal static class DatabaseSchemaInitializer
             ON code_transformers (kind);
         """;
 
+    // The schema ledger. Created before anything else so every batch below can
+    // record itself.
+    //
+    // Deliberately separate from auth_seed_state: those keys gate one-shot DATA
+    // migrations with their own semantics (a backfill that must never run
+    // twice), while this records which SCHEMA batch has been applied. Merging
+    // them would conflate "this data was migrated" with "this DDL ran".
+    private const string SchemaVersionsSql =
+        """
+        CREATE TABLE IF NOT EXISTS schema_versions (
+            step_name TEXT PRIMARY KEY,
+            app_version TEXT NOT NULL,
+            applied_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """;
+
     // Serialises schema initialisation across hosts.
     //
     // The batches below are individually idempotent, which is not the same as
@@ -4067,16 +4084,23 @@ internal static class DatabaseSchemaInitializer
     private static async Task RunSchemaBatchesAsync(
         AsyncServiceScope scope, AutoNateDbContext dbContext, CancellationToken cancellationToken)
     {
-        await dbContext.Database.ExecuteSqlRawAsync(WorkflowVersioningSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(WorkflowDefaultVariablesSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(WorkflowExecutionErrorsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(WorkflowTaskCompletionsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordsDataSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordsEdgesSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordsCommentsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordWatchesSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AuthorizationSchemaSql, cancellationToken);
+        // The ledger has to exist before anything can record itself in it.
+        await dbContext.Database.ExecuteSqlRawAsync(SchemaVersionsSql, cancellationToken);
+
+        var applied = await LoadAppliedStepsAsync(dbContext, cancellationToken);
+
+        await GuardAgainstNewerSchemaAsync(dbContext, cancellationToken);
+
+        await ApplyStepAsync(dbContext, applied, nameof(WorkflowVersioningSql), WorkflowVersioningSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(WorkflowDefaultVariablesSql), WorkflowDefaultVariablesSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(WorkflowExecutionErrorsSql), WorkflowExecutionErrorsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(WorkflowTaskCompletionsSql), WorkflowTaskCompletionsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordsSchemaSql), RecordsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordsDataSchemaSql), RecordsDataSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordsEdgesSchemaSql), RecordsEdgesSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordsCommentsSchemaSql), RecordsCommentsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordWatchesSchemaSql), RecordWatchesSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AuthorizationSchemaSql), AuthorizationSchemaSql, cancellationToken);
 
         // Before the seeds, not after them.
         //
@@ -4090,65 +4114,65 @@ internal static class DatabaseSchemaInitializer
         // role_assignments, where the SuperAdmin grant lands) and before the
         // first seed that needs an actor.
         await EnsureBootstrapAdminAsync(scope.ServiceProvider, dbContext, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordEdgeBackfillSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordEdgeShadowBackfillSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(EntityEdgeHotIndexesSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RolePermissionsToGrantsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(MenusSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(IconMenuWrapSettingsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigStatusAppearanceSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSiteInformationSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PluginsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PluginDataIsolationSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(MenuItemsPluginColumnSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesPluginColumnsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesSeedSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PageTemplatesThumbnailSeedSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PluginsIconMenuRemovalSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(EmptyFeaturesMenuRemovalSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PluginsSiteConfigMenuSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemHealthSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigSystemIssuesSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigFormsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotSettingsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(FormsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(NotificationsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteSettingsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AuditOutboxDeadLettersSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SystemIssuesSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(LocalUserLockoutSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ExternalConnectionsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AgentConversationsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AgentMessageSummaryColumnsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AgentModelCatalogSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AgentModelCatalogSeedSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(AgentModelDefaultAvailableColumnsSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SiteConfigChatbotModelsMenuSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ContentHierarchySchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ContentLocatorSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ContentDocumentsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(DocumentsMenuItemSeedSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ContentNotePageIndexSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(NotePreviewSvgSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PageFavoritesSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(YjsDocumentsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ContentSampleProjectSeedSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(DashboardsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SavedQueriesSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(QueryMenuSeedSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ProjectionFrameworkSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(WorkflowCacheSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(WorkflowEventLogSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(ProcessRetentionConfigSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(RecordActivityRollupSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(DataStoresSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(DatasetsSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(SavedQueryShareTokensSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(PipelinesSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(CodeTransformersSchemaSql, cancellationToken);
-        await dbContext.Database.ExecuteSqlRawAsync(DataMainMenuSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordEdgeBackfillSql), RecordEdgeBackfillSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordEdgeShadowBackfillSql), RecordEdgeShadowBackfillSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(EntityEdgeHotIndexesSql), EntityEdgeHotIndexesSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RolePermissionsToGrantsSql), RolePermissionsToGrantsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PageTemplatesSchemaSql), PageTemplatesSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(MenusSchemaSql), MenusSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(IconMenuWrapSettingsSql), IconMenuWrapSettingsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteConfigStatusAppearanceSql), SiteConfigStatusAppearanceSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteConfigSiteInformationSql), SiteConfigSiteInformationSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PluginsSchemaSql), PluginsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PluginDataIsolationSql), PluginDataIsolationSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(MenuItemsPluginColumnSql), MenuItemsPluginColumnSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PageTemplatesPluginColumnsSql), PageTemplatesPluginColumnsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PageTemplatesSeedSql), PageTemplatesSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PageTemplatesThumbnailSeedSql), PageTemplatesThumbnailSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PluginsIconMenuRemovalSql), PluginsIconMenuRemovalSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(EmptyFeaturesMenuRemovalSql), EmptyFeaturesMenuRemovalSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PluginsSiteConfigMenuSql), PluginsSiteConfigMenuSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteConfigSystemHealthSql), SiteConfigSystemHealthSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteConfigSystemIssuesSql), SiteConfigSystemIssuesSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteConfigFormsSql), SiteConfigFormsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteConfigChatbotSettingsSql), SiteConfigChatbotSettingsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(FormsSchemaSql), FormsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(NotificationsSql), NotificationsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteSettingsSql), SiteSettingsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AuditOutboxSchemaSql), AuditOutboxSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AuditOutboxDeadLettersSchemaSql), AuditOutboxDeadLettersSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SystemIssuesSchemaSql), SystemIssuesSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(LocalUserLockoutSql), LocalUserLockoutSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ExternalConnectionsSchemaSql), ExternalConnectionsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AgentConversationsSchemaSql), AgentConversationsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AgentMessageSummaryColumnsSql), AgentMessageSummaryColumnsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AgentModelCatalogSchemaSql), AgentModelCatalogSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AgentModelCatalogSeedSql), AgentModelCatalogSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(AgentModelDefaultAvailableColumnsSql), AgentModelDefaultAvailableColumnsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SiteConfigChatbotModelsMenuSql), SiteConfigChatbotModelsMenuSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ContentHierarchySchemaSql), ContentHierarchySchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ContentLocatorSchemaSql), ContentLocatorSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ContentDocumentsSchemaSql), ContentDocumentsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(DocumentsMenuItemSeedSql), DocumentsMenuItemSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ContentNotePageIndexSql), ContentNotePageIndexSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(NotePreviewSvgSql), NotePreviewSvgSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PageFavoritesSchemaSql), PageFavoritesSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(YjsDocumentsSchemaSql), YjsDocumentsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ContentSampleProjectSeedSql), ContentSampleProjectSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(DashboardsSchemaSql), DashboardsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SavedQueriesSchemaSql), SavedQueriesSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(QueryMenuSeedSql), QueryMenuSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ProjectionFrameworkSchemaSql), ProjectionFrameworkSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(WorkflowCacheSchemaSql), WorkflowCacheSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(WorkflowEventLogSchemaSql), WorkflowEventLogSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(ProcessRetentionConfigSchemaSql), ProcessRetentionConfigSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(RecordActivityRollupSchemaSql), RecordActivityRollupSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(DataStoresSchemaSql), DataStoresSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(DatasetsSchemaSql), DatasetsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SavedQueryShareTokensSchemaSql), SavedQueryShareTokensSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PipelinesSchemaSql), PipelinesSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(CodeTransformersSchemaSql), CodeTransformersSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);
 
         // Before the SuperAdmin backfill on purpose: on a first boot the
         // account created here is the one that needs to come up administrable.
@@ -4157,12 +4181,174 @@ internal static class DatabaseSchemaInitializer
             ?? new AuthorizationOptions();
         if (authOptions.AssignSuperAdminToAllExistingUsers)
         {
-            await dbContext.Database.ExecuteSqlRawAsync(SuperAdminBackfillSql, cancellationToken);
+            await ApplyStepAsync(dbContext, applied, nameof(SuperAdminBackfillSql), SuperAdminBackfillSql, cancellationToken);
         }
 
         // Last: every table above now exists, so the credential tables can be
         // taken back off plg_readers (archived-62).
-        await dbContext.Database.ExecuteSqlRawAsync(PluginReaderLockdownSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(PluginReaderLockdownSql), PluginReaderLockdownSql, cancellationToken);
+    }
+
+
+    /// <summary>The product version, used to stamp ledger rows.</summary>
+    /// <remarks>
+    /// Read from the assembly's informational version, which
+    /// Directory.Build.props sets from a single &lt;Version&gt; element. Used
+    /// only for reporting and for the newer-schema guard — the ledger keys on
+    /// step name, not on version, so a version that fails to parse degrades to
+    /// a cosmetic problem rather than a correctness one.
+    /// </remarks>
+    internal static string AppVersion { get; } =
+        typeof(DatabaseSchemaInitializer).Assembly
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion.Split('+')[0]
+        ?? typeof(DatabaseSchemaInitializer).Assembly.GetName().Version?.ToString()
+        ?? "0.0.0";
+
+    private static async Task<HashSet<string>> LoadAppliedStepsAsync(
+        AutoNateDbContext dbContext, CancellationToken cancellationToken)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await dbContext.Database.OpenConnectionAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT step_name FROM schema_versions;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Applies one schema batch unless the ledger already records it.
+    /// </summary>
+    /// <remarks>
+    /// On a database that predates the ledger, every step runs once and is
+    /// recorded as it goes. That is deliberate and is NOT the same as writing
+    /// the ledger rows without running anything: for an existing install we
+    /// cannot know which batches were applied, and marking an un-applied step
+    /// as applied would skip it permanently, leaving a silently half-migrated
+    /// schema. The batches are idempotent, which is what makes running them
+    /// once safe. The guarantee is therefore "no schema work after the first
+    /// boot", not "no schema work on the boot that introduces the ledger".
+    /// </remarks>
+    private static async Task ApplyStepAsync(
+        AutoNateDbContext dbContext,
+        HashSet<string> applied,
+        string stepName,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        // A batch that consults auth_seed_state carries its own re-run gate, and
+        // that gate — not this ledger — owns when it may run again. Skipping it
+        // here would make the ledger a second, wrong gate: clearing an
+        // auth_seed_state marker to re-enable a data migration would silently
+        // do nothing, because the ledger would still record the step as done.
+        //
+        // Found by RebrandMigrationTests, which rewinds an install by clearing
+        // `rebrand_auton8_v1` and restarting, and expects the rename to run
+        // again. Ledger-gating that step broke it.
+        //
+        // These batches are cheap to re-enter — each opens with a
+        // NOT EXISTS check against auth_seed_state and returns immediately —
+        // so running them every boot costs a query, not work.
+        var ownsItsOwnGate = sql.Contains("auth_seed_state", StringComparison.Ordinal);
+
+        if (applied.Contains(stepName) && !ownsItsOwnGate)
+        {
+            return;
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO schema_versions (step_name, app_version, applied_at_utc)
+            VALUES ({0}, {1}, NOW())
+            ON CONFLICT (step_name) DO NOTHING;
+            """.Replace("{0}", $"'{stepName.Replace("'", "''")}'")
+               .Replace("{1}", $"'{AppVersion.Replace("'", "''")}'"),
+            cancellationToken);
+
+        applied.Add(stepName);
+    }
+
+
+    /// <summary>
+    /// Refuses to start against a database initialised by a newer build.
+    /// </summary>
+    /// <remarks>
+    /// Rolling an application back is a legitimate operational action; running
+    /// it against a schema it does not understand is not. Without this, an
+    /// older build starts happily and then fails in scattered, confusing ways
+    /// as it meets columns and tables it has no model for. Failing at startup
+    /// with both versions named is the difference between a five-minute
+    /// rollback and an afternoon.
+    ///
+    /// v1.0 makes no upgrade promise (see #59), but the ledger and this guard
+    /// ship anyway: clean upgrade paths after 1.0 are only possible if 1.0
+    /// recorded what it applied.
+    /// </remarks>
+    private static async Task GuardAgainstNewerSchemaAsync(
+        AutoNateDbContext dbContext, CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await dbContext.Database.OpenConnectionAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT step_name, app_version
+            FROM schema_versions
+            ORDER BY applied_at_utc DESC;
+            """;
+
+        string? newestStep = null;
+        Version? newestVersion = null;
+
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (!Version.TryParse(reader.GetString(1), out var recorded))
+                {
+                    // An unparseable version is not evidence of anything; the
+                    // ledger's job is step names, and versions are advisory.
+                    continue;
+                }
+
+                if (newestVersion is null || recorded > newestVersion)
+                {
+                    newestVersion = recorded;
+                    newestStep = reader.GetString(0);
+                }
+            }
+        }
+
+        if (newestVersion is null || !Version.TryParse(AppVersion, out var running))
+        {
+            return;
+        }
+
+        if (newestVersion > running)
+        {
+            throw new InvalidOperationException(
+                $"This database was initialised by Auton8 {newestVersion}, which is newer than the "
+                + $"running build ({running}). Step '{newestStep}' was applied by that version. "
+                + "Refusing to start rather than run against a schema this build does not understand. "
+                + $"Deploy {newestVersion} or later, or restore a database matching this build.");
+        }
     }
 
     // Creates the first administrator on an otherwise empty install.
