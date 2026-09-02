@@ -1,5 +1,62 @@
 # Deployment
 
+> **Auton8 1.0 requires a fresh database.** Upgrading a 0.x install is not
+> supported. The 0.1.0 release notes described an upgrade path; that guidance
+> does not carry into 1.0. Releases after 1.0 will carry upgrade paths — the
+> `schema_versions` ledger that makes them possible ships in 1.0 for exactly
+> that reason, even though 1.0 itself does not use it to migrate anything.
+
+## Running as containers
+
+The released `compose.yml` runs the whole product and is the shortest path to a
+working deployment; see the wiki's Installation page. What follows applies
+whichever way the application is hosted.
+
+### Configuration a container must supply
+
+Several settings default to `localhost`. That is correct when the application
+runs on the host beside the compose stack, and wrong inside a container, where
+`localhost` is the container itself. Each of these **fails at startup** rather
+than warning, and each has to be pointed at a service name:
+
+| Setting | Why it is not optional |
+|---|---|
+| `ConnectionStrings__Default` | The application database |
+| `ConnectionStrings__Datastores` | A **second** connection string. `DatastoresDatabaseInitializer` carries its own, and missing it fails startup with a Postgres connect error that looks like the first one |
+| `Nats__Url` | JetStream. Missing it throws `can not connect uris: nats://127.0.0.1:4222` |
+| `Flowable__BaseUrl` | The BPMN engine |
+
+The runtime data root (`Data__Root`, `/data` in the image) needs writeable
+persistent storage mounted, and the datastores writer password is generated to
+`/data/datastores-writer.secret` on first run if not supplied — move it to your
+secret store.
+
+### Dapr ordering
+
+The application **refuses to start without a reachable Dapr sidecar**, and a
+sidecar sharing the app's network namespace needs that namespace to exist
+first. Neither can be started first, and waiting for the app to become
+*healthy* deadlocks. The shipped image resolves this in its entrypoint by
+waiting on the sidecar's `/v1.0/healthz/outbound` — deliberately the outbound
+variant, because plain `/v1.0/healthz` includes the application's own health
+and would deadlock on the thing being started.
+
+Any hand-rolled orchestration needs to solve the same ordering problem.
+
+### Schema initialisation
+
+The application owns its schema end to end. It creates the base tables and
+every migration after them on startup, so a deployment only has to provide an
+**empty database** — there is no init script to mount and no ordering to get
+right.
+
+Initialisation is serialised by a Postgres advisory lock, so two hosts starting
+against one database is defined behaviour rather than a race. Applied steps are
+recorded in `schema_versions`, and the application **refuses to start against a
+database written by a newer build**, naming both versions. `GET /api/health/system`
+reports the current schema version and applied-step count, so the question
+"which version is this database at" is answerable from the admin UI.
+
 ## Configuration
 
 The dev defaults under `appsettings.Development.json` are tuned for a single-machine `Development` environment with the local Docker Compose stack. Production deployments must override the keys below — most have safe-but-permissive dev defaults that are wrong for any environment that's reachable from outside the host. Override with environment variables (double-underscore syntax: `Section__Subsection__Key=value`) or an environment-specific `appsettings.<Environment>.json`.
