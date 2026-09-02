@@ -264,7 +264,9 @@ public sealed class SelectorCompilerTagPredicateTests
         PostgresTestDatabase db,
         Guid actorId,
         string kind,
-        Func<Persistence.AutoNateDbContext, IQueryable<T>> source,
+        // Fully qualified: a bare `Persistence.` here resolves against
+        // AutoNate.Web.Tests.Persistence once any test lives in that namespace.
+        Func<AutoNate.Web.Persistence.AutoNateDbContext, IQueryable<T>> source,
         Func<T, Guid> idAccessor) where T : class
     {
         var authorizer = db.CreateAuthorizer(enabled: true, AuthorizationEnforcement.Full);

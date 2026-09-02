@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using AuthorizationOptions = AutoNate.Web.Authorization.AuthorizationOptions;
 
 namespace AutoNate.Web.Persistence;
@@ -1583,6 +1585,15 @@ internal static class DatabaseSchemaInitializer
         -- Rare on a developer machine, reproducible on CI, which is where it
         -- turned up: one test in a 1666-test run, in a suite that had just
         -- passed locally.
+        --
+        -- The schema-initialisation advisory lock added around EnsureAsync does
+        -- NOT make this handler redundant, and removing it on that basis would
+        -- reintroduce the failure. Advisory lock keys are scoped to a database;
+        -- pg_roles is a cluster-wide shared catalog. Two hosts owning different
+        -- databases on one server take the lock independently — each succeeds
+        -- immediately, because they are different locks — and then race this
+        -- CREATE ROLE exactly as before. Catching the error is what makes it
+        -- safe; the lock protects the per-database DDL around it.
         DO $$
         BEGIN
             CREATE ROLE plg_readers NOLOGIN;
@@ -3923,10 +3934,139 @@ internal static class DatabaseSchemaInitializer
             ON code_transformers (kind);
         """;
 
+    // Serialises schema initialisation across hosts.
+    //
+    // The batches below are individually idempotent, which is not the same as
+    // concurrency-safe: two sessions issuing `CREATE INDEX IF NOT EXISTS` or
+    // `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` against the same relation
+    // deadlock or fail on a duplicate object rather than one waiting for the
+    // other. Two hosts starting together — a restart under a supervisor, a
+    // rolling replacement, two developers sharing a database — is therefore a
+    // race without this.
+    //
+    // The value is arbitrary but must never change: it is the identity two
+    // hosts agree on. 0x4175746F_6E387631 spells "Auto" "n8v1" in ASCII, which
+    // makes it recognisable in pg_locks when someone is working out what is
+    // holding a database up.
+    private const long SchemaInitLockKey = 0x4175746F6E387631L;
+
+    // How long to wait for another host to finish before giving up. Long
+    // enough for a full first-boot initialisation on a slow machine, short
+    // enough that a stuck holder produces a diagnosable failure rather than a
+    // process that never finishes starting.
+    private static readonly TimeSpan LockWaitTimeout = TimeSpan.FromMinutes(5);
+
+    private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(250);
+
     public static async Task EnsureAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AutoNateDbContext>();
+
+        var logger = scope.ServiceProvider
+            .GetService<ILoggerFactory>()
+            ?.CreateLogger("AutoNate.Web.Persistence.DatabaseSchemaInitializer");
+
+        // A dedicated connection, not the DbContext's own and not a transaction.
+        //
+        // Session-level rather than pg_advisory_xact_lock because the
+        // alternative means wrapping the ~90 DDL batches below in a single
+        // enclosing transaction — a behaviour change far larger than the race
+        // it would fix. On its own connection so the lock's lifetime does not
+        // depend on any one batch's command or on EF's connection pooling
+        // handing the context a different physical connection part-way through.
+        await using var lockConnection =
+            new NpgsqlConnection(dbContext.Database.GetConnectionString());
+        await lockConnection.OpenAsync(cancellationToken);
+
+        await AcquireSchemaLockAsync(lockConnection, logger, cancellationToken);
+
+        try
+        {
+            await RunSchemaBatchesAsync(scope, dbContext, cancellationToken);
+        }
+        finally
+        {
+            // Release on the exception path too. A session-level lock would be
+            // released by the connection closing anyway, but doing it
+            // explicitly means a failure here does not leave the next host
+            // waiting out the full timeout for a lock nobody holds.
+            await ReleaseSchemaLockAsync(lockConnection, logger);
+        }
+    }
+
+    private static async Task AcquireSchemaLockAsync(
+        NpgsqlConnection connection, ILogger? logger, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + LockWaitTimeout;
+        var announcedWait = false;
+
+        while (true)
+        {
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT pg_try_advisory_lock(@key);";
+                command.Parameters.AddWithValue("key", SchemaInitLockKey);
+
+                var acquired = (bool?)await command.ExecuteScalarAsync(cancellationToken) ?? false;
+                if (acquired)
+                {
+                    if (announcedWait)
+                    {
+                        logger?.LogInformation(
+                            "Acquired the schema-initialisation lock; continuing startup.");
+                    }
+
+                    return;
+                }
+            }
+
+            if (!announcedWait)
+            {
+                // Without this, a host blocked here looks hung. This line is
+                // the difference between "the app is slow to start" and "the
+                // app is waiting for another host to finish initialising".
+                logger?.LogInformation(
+                    "Another host holds the schema-initialisation lock ({LockKey}); waiting up to {Timeout} for it.",
+                    SchemaInitLockKey, LockWaitTimeout);
+                announcedWait = true;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    $"Timed out after {LockWaitTimeout} waiting for the schema-initialisation advisory "
+                    + $"lock ({SchemaInitLockKey}). Another host is initialising this database and has not "
+                    + "finished, or a previous run left the lock held. Inspect pg_locks for an advisory "
+                    + $"lock with objid {SchemaInitLockKey}.");
+            }
+
+            await Task.Delay(LockPollInterval, cancellationToken);
+        }
+    }
+
+    private static async Task ReleaseSchemaLockAsync(NpgsqlConnection connection, ILogger? logger)
+    {
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT pg_advisory_unlock(@key);";
+            command.Parameters.AddWithValue("key", SchemaInitLockKey);
+            await command.ExecuteScalarAsync();
+        }
+        catch (Exception ex)
+        {
+            // Closing the connection releases a session-level lock regardless,
+            // so this is not fatal — but it should not be silent either.
+            logger?.LogWarning(
+                ex, "Failed to release the schema-initialisation lock explicitly; "
+                    + "it will be released when the connection closes.");
+        }
+    }
+
+    private static async Task RunSchemaBatchesAsync(
+        AsyncServiceScope scope, AutoNateDbContext dbContext, CancellationToken cancellationToken)
+    {
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowVersioningSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowDefaultVariablesSql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(WorkflowExecutionErrorsSql, cancellationToken);
