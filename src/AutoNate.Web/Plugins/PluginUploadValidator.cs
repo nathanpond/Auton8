@@ -39,7 +39,7 @@ public static class PluginUploadValidator
                 // crafted archive can declare tiny entries and still expand to
                 // gigabytes. So this is only a cheap early rejection of the
                 // honest oversize case; the real cap is enforced on the bytes
-                // actually written, by PluginZipExtractor (#63).
+                // actually written, by PluginZipExtractor (archived-63).
                 total += entry.Length;
                 if (total > maxUncompressedBytes)
                 {

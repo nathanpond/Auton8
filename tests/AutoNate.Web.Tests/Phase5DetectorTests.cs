@@ -363,7 +363,7 @@ public sealed class RepeatedAuthFailureDetectorTests
         Assert.Empty(await read.SystemIssues.AsNoTracking().ToListAsync());
     }
 
-    // #72: _windows was keyed by the attacker-supplied username from the
+    // archived-72: _windows was keyed by the attacker-supplied username from the
     // unauthenticated login endpoint and never evicted, so credential stuffing
     // with rotating usernames grew a singleton's heap without bound.
     [Fact]

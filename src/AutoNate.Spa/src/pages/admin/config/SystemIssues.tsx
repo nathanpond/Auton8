@@ -215,7 +215,7 @@ export default function SystemIssues() {
   );
 }
 
-// Parked audit events (#44). The park remediator preserves an abandoned
+// Parked audit events (archived-44). The park remediator preserves an abandoned
 // audit_outbox row here "so forensics is still possible", but until now the
 // only way to read one was psql, and there was no way at all to put the event
 // back. Rendered below the issue table because a dead letter is the residue of

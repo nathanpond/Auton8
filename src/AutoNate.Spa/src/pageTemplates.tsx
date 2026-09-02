@@ -71,7 +71,7 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   // the seeded page_templates rows describe them as "mounted inside Site
   // Config" — the intent was always the real screens. They rendered "coming
   // soon" stubs instead, so the shipped user/role/permission admin was
-  // unreachable from the one place the seed points an admin at (#42). Same
+  // unreachable from the one place the seed points an admin at (archived-42). Same
   // components as the manageUsers/adminRoles/… keys, mounted under the
   // Site Config keys.
   configSecurityUsers: <ManageUsers />,

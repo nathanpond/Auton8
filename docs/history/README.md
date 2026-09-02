@@ -23,10 +23,21 @@ requests**. These files exist so the reasoning does not disappear with them:
   issues were carried over to the new repository and renumbered; closed ones
   are history, including 26 security findings, every one closed as fixed.
 
-## Reading `#N` references
+## The `archived-N` convention
+
+References to this register are written **`archived-N`**, not `#N`. A bare `#N`
+in a file or commit message is turned into a link by GitHub, and it would point
+at issue N *in the current repository* — a different, real issue. `archived-N`
+carries the same information and links to nothing.
+
+`#N` still appears in a few places where it never meant an issue: `§11b #1`
+section references in `docs/plans/`, CSS colours, and ordinals like
+`Read-back #1`.
+
+## Reading `archived-N` references
 
 Numbers in these files, and in any commit message written before 2026-09-02,
 refer to the **pre-migration** register archived here — not to issue numbers in
 the current repository. The two number spaces are unrelated, so a pre-migration
-`Closes #85` may coincide with a different, real issue today. When in doubt,
+`Closes archived-85` may coincide with a different, real issue today. When in doubt,
 look it up here.

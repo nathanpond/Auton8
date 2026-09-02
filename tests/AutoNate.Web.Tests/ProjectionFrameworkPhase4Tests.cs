@@ -108,7 +108,7 @@ public sealed class ProjectionFrameworkPhase4Tests
         // IProjectionBackfillSource<TSource> and throws when none is
         // registered, which the endpoint maps to 400 — so Rebuild was broken
         // for every projection at once, and the recovery path in
-        // docs/projection-framework/operations.md did not work (#112).
+        // docs/projection-framework/operations.md did not work (archived-112).
         //
         // Driving the real list rather than a hardcoded set means adding a
         // projection without a backfill source fails here rather than in
@@ -201,7 +201,7 @@ public sealed class ProjectionFrameworkPhase4Tests
 
         // A record created well outside RecentDayWindow. The polling feed only
         // ever recomputes the recent window, so this bucket is exactly what a
-        // rebuild exists to repair — and what returned 400 before #112.
+        // rebuild exists to repair — and what returned 400 before archived-112.
         var typeId = Guid.NewGuid();
         var actor = Guid.NewGuid();
         var oldDay = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-400));

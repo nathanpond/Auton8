@@ -4,7 +4,7 @@ using Xunit;
 namespace AutoNate.Web.Tests;
 
 /// <summary>
-/// Regression guard for #132: the SPA fallback route must serve index.html at
+/// Regression guard for archived-132: the SPA fallback route must serve index.html at
 /// the site root as well as for deep links, and must never swallow /api.
 ///
 /// Program.cs only wires the static-file / fallback pipeline when

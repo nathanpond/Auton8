@@ -13,7 +13,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
-// #82: POST /api/datasets/preview-file-source resolves a parser out of
+// archived-82: POST /api/datasets/preview-file-source resolves a parser out of
 // DatasetFileParserRegistry by caller-supplied kind and runs it over
 // caller-supplied file bytes. Nothing tested the dispatch, the unknown-kind
 // path, the parser's declared limits, or the gate — so this file walks the
@@ -351,7 +351,7 @@ public sealed class DatasetPreviewFileSourceTests
     // root DIRECTORY, so File.OpenRead threw and — with no exception-handling
     // middleware — the caller got a 500 carrying the exception text and stack.
     // The folder branch already filtered ".keep" out; the file branch now does
-    // too, so it is simply not found (#184).
+    // too, so it is simply not found (archived-184).
     [Fact]
     public async Task PreviewFileSource_FolderPlaceholderKeepFile_ReturnsNotFound()
     {
@@ -365,7 +365,7 @@ public sealed class DatasetPreviewFileSourceTests
 
             var resp = await PreviewAsync(client, storeId, "file", "/empty/.keep", RawFileParser.KindName);
 
-            // #184: a clean 404, and nothing about the server in the body.
+            // archived-184: a clean 404, and nothing about the server in the body.
             Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
             var body = await resp.Content.ReadAsStringAsync();
             Assert.DoesNotContain("Exception", body, StringComparison.Ordinal);
@@ -405,7 +405,7 @@ public sealed class DatasetPreviewFileSourceTests
         }
     }
 
-    // #183: dataset:create alone must not read a datastore's contents.
+    // archived-183: dataset:create alone must not read a datastore's contents.
     //
     // The route gate is (Dataset, Create) and that used to be the only check,
     // so a caller with no datastore grants — one who gets an empty list from

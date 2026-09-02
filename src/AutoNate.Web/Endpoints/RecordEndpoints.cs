@@ -253,7 +253,7 @@ public static class RecordEndpoints
                 // that carries RequirePermission(Record, Assign), has no caller
                 // outside its own test. So Record:Assign was grantable and
                 // deniable with no observable effect: assignees changed through
-                // Edit like any other field (#45). Charge Assign whenever the
+                // Edit like any other field (archived-45). Charge Assign whenever the
                 // body actually carries assignees, so the permission means the
                 // same thing however the change arrives.
                 if (TryGetCaseInsensitive(body, "assigneeIds", out var assigneeProbe)
@@ -283,7 +283,7 @@ public static class RecordEndpoints
           .RequirePermission(EntityKinds.Record, Actions.Edit)
           .AuthorizedInHandler(
               "Record:Edit via the filter above; a body that carries assigneeIds " +
-              "additionally requires Record:Assign on the same record (#45).");
+              "additionally requires Record:Assign on the same record (archived-45).");
 
         group.MapDelete("/{id:guid}", async (
             Guid id,

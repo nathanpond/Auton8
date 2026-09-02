@@ -88,7 +88,7 @@ public sealed class AdminConfigTests : E2ETestBase
     /// <c>configSecurity*</c> template keys. Those keys rendered "coming
     /// soon" stubs while the real user/role/permission admin shipped under
     /// separate keys, so the feature was unreachable from the one place the
-    /// seed sends an admin (#42). Each route now has to show content only
+    /// seed sends an admin (archived-42). Each route now has to show content only
     /// the real page renders — a heading assertion alone would not catch a
     /// regression, since every stub rendered an h1 too.
     /// </summary>

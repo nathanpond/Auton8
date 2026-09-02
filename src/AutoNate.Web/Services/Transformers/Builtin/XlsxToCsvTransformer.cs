@@ -38,7 +38,7 @@ public sealed class XlsxToCsvTransformer : ITransformer
         // memory, on the request or worker thread, so a bloated XLSX submitted
         // through a pipeline is an OOM lever for any pipeline author. Refuse
         // oversized input cleanly instead of discovering it as an
-        // OutOfMemoryException mid-run (#67).
+        // OutOfMemoryException mid-run (archived-67).
         if (bytes.Length > MaxWorkbookBytes)
         {
             throw new InvalidOperationException(

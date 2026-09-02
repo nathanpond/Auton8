@@ -51,7 +51,7 @@ public sealed class PluginDataIsolationTests
 
             // Plugin A reads public successfully. This used to probe
             // public.plugins, which is now revoked from plg_readers because it
-            // holds every plugin's role_password_encrypted (#62) — so the probe
+            // holds every plugin's role_password_encrypted (archived-62) — so the probe
             // moved to an ordinary app table.
             await using (var conn = dataA.CreateConnection())
             {
@@ -61,7 +61,7 @@ public sealed class PluginDataIsolationTests
 
             // ...but not the tables holding credentials. A plugin that could
             // read these could lift password hashes, provider secrets, or the
-            // role password of every other plugin (#62).
+            // role password of every other plugin (archived-62).
             foreach (var forbidden in new[]
                      { "local_users", "plugins", "saved_query_share_tokens" })
             {
@@ -74,7 +74,7 @@ public sealed class PluginDataIsolationTests
 
             // Plugin A cannot write to public — no INSERT grant. Probes a
             // table it can still read, so the failure is specifically about
-            // writing rather than about the #62 revokes.
+            // writing rather than about the archived-62 revokes.
             await using (var conn = dataA.CreateConnection())
             {
                 await conn.OpenAsync();

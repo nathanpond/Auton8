@@ -51,7 +51,7 @@ export type PipelineRun = {
   triggerKind: string;
 };
 
-// Audit fix #11 — per-step log entries the orchestrator captures
+// Audit fix archived-11 — per-step log entries the orchestrator captures
 // during execution (start, success/cancel/fail boundary, full
 // exception message + stack snippet on failure). Plugin runners can
 // emit their own entries via the future IStepLogger surface; the

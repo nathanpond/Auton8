@@ -93,7 +93,7 @@ type DataTableProps<T> = {
   getRowAriaLabel?: (row: T) => string;
   // Stable per-row handle for E2E. Specs previously reached these rows
   // positionally (`table` → `tbody tr` → `.First`), which couples them to DOM
-  // structure and row ordering (#92) — a sort-order change silently retargets
+  // structure and row ordering (archived-92) — a sort-order change silently retargets
   // the assertion instead of failing it.
   getRowTestId?: (row: T) => string | undefined;
   getRowClassName?: (row: T) => string | undefined;
@@ -436,7 +436,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   // mantine-datatable renders onRowClick as a bare <tr onClick>: no tabIndex,
   // no role, no key handler. Any table whose only way into a row is the row
   // itself was therefore mouse-only — Notifications could not be opened at all
-  // without a pointer (WCAG 2.1.1 / 4.1.2, #12). customRowAttributes is the
+  // without a pointer (WCAG 2.1.1 / 4.1.2, archived-12). customRowAttributes is the
   // supported hook for putting real attributes on the <tr>, so rows become
   // focusable buttons that answer Enter and Space, and getRowAriaLabel — which
   // this wrapper used to accept and throw away — finally names them.
@@ -448,7 +448,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
             // A stable per-row handle for E2E. Specs previously reached rows
             // positionally (`table` -> `tbody tr` -> `.First`), which couples
-            // them to DOM structure and row ordering (#92).
+            // them to DOM structure and row ordering (archived-92).
             const testId = getRowTestId?.(record);
             if (testId) attrs["data-testid"] = testId;
 
@@ -459,7 +459,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
             // renders onRowClick as a bare <tr onClick>: no tabIndex, no key
             // handler. Any table whose only way into a row is the row itself
             // was mouse-only — Notifications could not be opened without a
-            // pointer at all (WCAG 2.1.1 / 4.1.2, #12).
+            // pointer at all (WCAG 2.1.1 / 4.1.2, archived-12).
             if (onRowClick) {
               attrs["tabIndex"] = 0;
               // Deliberately NOT role="button": a <tr> must keep its row role

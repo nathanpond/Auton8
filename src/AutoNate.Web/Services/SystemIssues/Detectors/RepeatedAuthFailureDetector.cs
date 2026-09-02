@@ -39,7 +39,7 @@ public sealed class RepeatedAuthFailureDetector(
     // endpoint, so this map is only safe if entries leave it. Credential
     // stuffing with rotating usernames would otherwise add a string + window +
     // queue per attempt to a singleton that lives for the process, long past
-    // the 5-minute window they fall out of (#72). Every RecordFailure sweeps
+    // the 5-minute window they fall out of (archived-72). Every RecordFailure sweeps
     // windows that have gone empty, and MaxTrackedUsernames is a hard ceiling
     // for the case where arrivals outpace the sweep.
     private readonly ConcurrentDictionary<string, FailureWindow> _windows =

@@ -16,7 +16,7 @@ using RoleAssignmentModel = AutoNate.Web.Models.Authorization.RoleAssignment;
 
 namespace AutoNate.Web.Tests.Authorization;
 
-// #91: the endpoints that hand out privilege had no endpoint tests at all —
+// archived-91: the endpoints that hand out privilege had no endpoint tests at all —
 // POST /api/admin/roles/{id}/assignments (RoleEndpoints) + DELETE and
 // GET /by-principal on /api/admin/role-assignments (RoleAssignmentEndpoints),
 // plus the self-service content overrides at
@@ -285,7 +285,7 @@ public sealed class PrivilegeMutationEndpointTests
         Assert.Empty(await ListAssignmentsForRoleAsync(factory, roleId));
     }
 
-    // #182: the revoke gate has to be about the role the assignment names.
+    // archived-182: the revoke gate has to be about the role the assignment names.
     // It used to be RequireKindPermission(Role, Assign) — "does any allow
     // grant for role:assign exist?" — which never resolved the assignment, so
     // a grant naming one throwaway role could strip anyone's SuperAdmin. The
@@ -541,7 +541,7 @@ public sealed class PrivilegeMutationEndpointTests
         Assert.Equal(0, stored.Priority);
     }
 
-    // #186 item 1: self-service sharing is for people and groups of people.
+    // archived-186 item 1: self-service sharing is for people and groups of people.
     // The grant store's allowlist also contains `role` — correct for an admin
     // using /api/admin/grants — but nothing narrowed it here, so anyone with
     // Edit on a folder could attach a resource grant to a role, SuperAdmin
@@ -564,7 +564,7 @@ public sealed class PrivilegeMutationEndpointTests
         Assert.Equal(before, (await ListAllGrantsAsync(factory)).Count);
     }
 
-    // Deliberate, not an oversight (#186 item 2, assessed and left alone).
+    // Deliberate, not an oversight (archived-186 item 2, assessed and left alone).
     // EfCorePermissionGrantStore validates the principal kind but not that the
     // principal exists, so privilege can be written against an id before it is
     // created. That is how pre-provisioning works with an external IdP, where

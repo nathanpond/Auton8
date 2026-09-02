@@ -692,7 +692,7 @@ public sealed class SystemHealthService(
     // Every notes, pages, documents and diagram load rides on the Hocuspocus
     // sidecar, and nothing here probed it — so a collab outage left the health
     // page fully green while every Y.Doc load failed in the SPA, which is
-    // exactly the class of failure the 5 s poll exists to surface (#115).
+    // exactly the class of failure the 5 s poll exists to surface (archived-115).
     //
     // A TCP connect rather than a WebSocket handshake: Hocuspocus rejects an
     // unauthenticated upgrade by design, so a handshake would need a minted

@@ -20,7 +20,7 @@ public static class PipelineRunTriggerKinds
     public const string Scheduled = "scheduled";
 }
 
-// Step log entry (audit fix #11). The orchestrator buffers these
+// Step log entry (audit fix archived-11). The orchestrator buffers these
 // during each step's execution and persists the buffer alongside the
 // step's terminal status. Level is a free string ("info" / "warn" /
 // "error") so plugin runners can use whatever vocabulary they want;

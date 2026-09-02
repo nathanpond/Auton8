@@ -105,7 +105,7 @@ export function reportMenuRenderFailure(menuItemId: string): void {
     });
 }
 
-// Audit dead letters (#44). AuditOutboxDeadLetterParkRemediator moves an
+// Audit dead letters (archived-44). AuditOutboxDeadLetterParkRemediator moves an
 // abandoned audit_outbox row here so its payload survives, but nothing read
 // the table — an operator could only reach a dropped audit event with psql.
 export type AuditDeadLetter = {

@@ -104,7 +104,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task Pipelines_CronBuilder_PresetSelectionRendersNextRunsPreview()
     {
-        // Audit fix #12 — schedule fields used to be raw TextInputs;
+        // Audit fix archived-12 — schedule fields used to be raw TextInputs;
         // users had to remember the v1 backend's "*/N * * * *" parser
         // quirk. The new CronExpressionBuilder offers presets that
         // produce supported forms and shows the next 3 firings inline
@@ -161,7 +161,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task Pipelines_CreateWithSchedule_RendersCronBadge()
     {
-        // Audit fix #2 (Pipeline schedule UI) — backend has accepted
+        // Audit fix archived-2 (Pipeline schedule UI) — backend has accepted
         // scheduleCron on create since Phase 5 but the SPA create modal
         // had no input for it, so no pipeline could ever run on a
         // schedule. This test proves the create dialog round-trips the
@@ -178,7 +178,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
         await Assertions.Expect(modal).ToBeVisibleAsync(new() { Timeout = 10_000 });
         await modal.GetByLabel("Name").FillAsync(name);
         // The Schedule field is now driven by CronExpressionBuilder
-        // (audit fix #12); the "*/5 * * * *" preset is value-equal to
+        // (audit fix archived-12); the "*/5 * * * *" preset is value-equal to
         // the literal cron string we want to land in the DB.
         await modal.GetByLabel("Schedule", new() { Exact = true }).SelectOptionAsync(cron);
         await modal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
@@ -196,7 +196,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task PipelineEditor_SettingsModal_PersistsScheduleAndRenamesBadge()
     {
-        // Audit fix #2 (Pipeline schedule UI) — the editor's existing
+        // Audit fix archived-2 (Pipeline schedule UI) — the editor's existing
         // updateMutation only sent { graph }, so name/description/
         // scheduleCron were unreachable post-create. The new "Settings"
         // toolbar button opens a modal that PUTs just those three fields.
@@ -239,7 +239,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
         var newName = $"{originalName}-renamed";
         // Use a preset value so the CronExpressionBuilder NativeSelect
         // can hit it directly. "*/15 * * * *" is the "Every 15 minutes"
-        // preset (audit fix #12).
+        // preset (audit fix archived-12).
         const string cron = "*/15 * * * *";
         await settings.GetByLabel("Name").FillAsync(newName);
         await settings.GetByLabel("Description").FillAsync("Scheduled by E2E");
@@ -269,7 +269,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task PipelineEditor_TransformerNode_PicksBuiltinAndRendersSchemaForm()
     {
-        // Audit fix #7 — the node-config drawer used to be a freeform
+        // Audit fix archived-7 — the node-config drawer used to be a freeform
         // JSON Textarea regardless of which of the 14 built-in
         // transformers the node referenced. The fix surfaces
         // /api/transformers/{key}/schema and renders per-builtin form
@@ -336,7 +336,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task PipelineEditor_TransformerDropdown_IncludesCodeTransformers()
     {
-        // Audit fix #3 — Phase 6 user-authored code transformers were
+        // Audit fix archived-3 — Phase 6 user-authored code transformers were
         // unreachable from a pipeline node because the editor's Transformer
         // / Analyzer NativeSelect was populated only from listTransformers()
         // / listAnalyzers() (built-ins). Backend's TransformerNodeRunner
@@ -404,7 +404,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task PipelineRun_StepLogs_RenderInExpandedPanelAfterFailedRun()
     {
-        // Audit fix #11 — step rows used to show only status + rowCount
+        // Audit fix archived-11 — step rows used to show only status + rowCount
         // + errorMessage. The orchestrator now buffers per-step log
         // entries (start, success/cancel/fail boundary, full exception
         // type + message + clipped stack on failure) and the SPA
@@ -444,7 +444,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
                 DataObject = new
                 {
                     name = pipelineName,
-                    description = "Audit fix #11 step logs test.",
+                    description = "Audit fix archived-11 step logs test.",
                     graph
                 }
             });
@@ -490,7 +490,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
         // Click the run row to expand step detail. The rows now carry a
         // data-testid keyed on the run id, so this asks for "a run row"
         // rather than "the first <tr> in the first <table>" — the old form
-        // silently retargeted if the table order or sort changed (#92).
+        // silently retargeted if the table order or sort changed (archived-92).
         await main.Locator("[data-testid^='pipeline-run-row-']").First.ClickAsync();
 
         // The Steps panel mounts under the runs table. Wait for the single bad
@@ -535,7 +535,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task PipelineRun_CancelAndRetry_FlipsStatusAndEnqueuesNewRun()
     {
-        // Audit fix #10 — cancel and retry endpoints + SPA action icons.
+        // Audit fix archived-10 — cancel and retry endpoints + SPA action icons.
         // We seed all setup through the REST API so the test isn't
         // racing the 5s PipelineRunWorker poll:
         //   1. Create pipeline (empty graph — orchestrator runs no-op)
@@ -558,7 +558,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
                 DataObject = new
                 {
                     name = pipelineName,
-                    description = "Audit fix #10 cancel/retry test.",
+                    description = "Audit fix archived-10 cancel/retry test.",
                     graph = new { nodes = Array.Empty<object>(), edges = Array.Empty<object>() }
                 }
             });
@@ -668,7 +668,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task CodeTransformers_CreateModal_MountsCodeMirrorAndOmitsTestPanel()
     {
-        // Audit fix #5 — the code area is now a CodeMirror editor
+        // Audit fix archived-5 — the code area is now a CodeMirror editor
         // (line numbers, syntax highlighting) rather than a plain
         // Mantine Textarea. The wrapping Box exposes aria-label="Code
         // editor"; the editor itself renders under .cm-editor. The test
@@ -695,7 +695,7 @@ public sealed class PipelinesAdminTests : E2ETestBase
     [Fact]
     public async Task CodeTransformers_EditModal_RendersTestPanelAndPyodideHintForPython()
     {
-        // Audit fix #5 — opening an existing row via the Edit ActionIcon
+        // Audit fix archived-5 — opening an existing row via the Edit ActionIcon
         // surfaces the Test run panel below the editor (input + config
         // textareas + Run test button). Python-language rows also
         // surface a Pyodide cold-start hint so authors aren't surprised

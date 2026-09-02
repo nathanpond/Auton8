@@ -163,7 +163,7 @@ export default function PipelineEditor() {
 }
 
 // Schema-driven config form for a transformer / analyzer node (audit
-// fix #7). Each field renders to the Mantine control the schema's
+// fix archived-7). Each field renders to the Mantine control the schema's
 // `type` declares; the value flows back as a string so the runtime
 // can read it through its existing IReadOnlyDictionary<string, string>
 // surface unchanged. Defaults are shown in placeholder text rather
@@ -419,7 +419,7 @@ function PipelineEditorInner() {
     [nodes, selectedNodeId]
   );
 
-  // Per-node schema fetch (audit fix #7). Only fires when the selected
+  // Per-node schema fetch (audit fix archived-7). Only fires when the selected
   // node is a transformer/analyzer with a chosen key — code-transformer
   // names also flow through these endpoints and 404 (no built-in
   // schema), at which point the editor falls back to the JSON Textarea.
@@ -764,7 +764,7 @@ function PipelineEditorInner() {
                 })()
               )}
               {/*
-                Audit fix #7 — kind-specific form when /api/transformers/
+                Audit fix archived-7 — kind-specific form when /api/transformers/
                 {key}/schema (or /analyzers/{key}/schema) returns a schema
                 for the picked key. Code transformers and plugin-
                 contributed kinds return 404 and fall through to the

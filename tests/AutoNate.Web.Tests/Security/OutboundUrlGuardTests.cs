@@ -6,7 +6,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Security;
 
-// #60: the REST data connector fetched user-supplied URLs with no guard, so a
+// archived-60: the REST data connector fetched user-supplied URLs with no guard, so a
 // connector pointed at 169.254.169.254 read cloud instance credentials out
 // through the preview endpoint.
 public sealed class OutboundUrlGuardTests

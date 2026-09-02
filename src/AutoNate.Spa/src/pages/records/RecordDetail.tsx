@@ -61,7 +61,7 @@ export default function RecordDetail() {
   const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  // The delete affordance used to render unconditionally (#85). The backend
+  // The delete affordance used to render unconditionally (archived-85). The backend
   // gate held — the API refused the call — but offering a button that always
   // fails is its own defect: the user cannot tell "not allowed" from "broken",
   // and it reads as an invitation to try. Instance-level check because the

@@ -246,7 +246,7 @@ public static class SavedQueryEndpoints
     private static string BuildShareUrl(HttpContext http, string rawToken)
     {
         var request = http.Request;
-        // Audit fix #9 — was /api/public/queries/share/{token}, which
+        // Audit fix archived-9 — was /api/public/queries/share/{token}, which
         // dropped recipients on raw JSON. The new /q/{token} route is
         // an unauthenticated SPA page that calls the same backend
         // endpoint and renders the result in a DataTable, handles

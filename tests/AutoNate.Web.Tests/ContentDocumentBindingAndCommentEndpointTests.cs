@@ -20,7 +20,7 @@ using DocCommentListResponse = AutoNate.Web.Endpoints.ContentDocumentCommentEndp
 
 namespace AutoNate.Web.Tests;
 
-// #90: ContentDocumentBindingEndpoints + ContentDocumentCommentEndpoints had
+// archived-90: ContentDocumentBindingEndpoints + ContentDocumentCommentEndpoints had
 // only authorizer unit tests — nothing exercised the routes themselves, so
 // nothing would have caught a wrong (EntityKind, Action) pair on a filter or a
 // resolver that ran under the wrong principal.
@@ -274,7 +274,7 @@ public sealed class ContentDocumentBindingAndCommentEndpointTests
         var response = await h.Client.PostAsync(h.BindingsUrl() + "refresh-all", content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        // #186 item 4: the zero-binding branch used to short-circuit with a
+        // archived-186 item 4: the zero-binding branch used to short-circuit with a
         // DocumentBindingListResponse while every other path returned a
         // RefreshAllResponse, so a client reading `failures.length` got
         // undefined for a document with no bindings. Deserializing as the
@@ -722,7 +722,7 @@ public sealed class ContentDocumentBindingAndCommentEndpointTests
     [Fact]
     public async Task RefreshAll_WithoutRecordViewGrant_SnapshotsDeniedInsteadOfTheValue()
     {
-        // The leak #90 was filed over: if bindings resolved under anything but
+        // The leak archived-90 was filed over: if bindings resolved under anything but
         // the caller's own grants, this refresh would stamp "Acme" into a
         // document readable by someone with no right to that record.
         await using var h = await Harness.CreateGatedAsync();

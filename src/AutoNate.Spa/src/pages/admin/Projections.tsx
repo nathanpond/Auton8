@@ -160,7 +160,7 @@ export default function Projections() {
                       // Each feed is listed rather than collapsed into a
                       // hover-only count, because the watermark reset acts on
                       // one feed and an operator has to be able to say which
-                      // (#47). Reset was documented in
+                      // (archived-47). Reset was documented in
                       // docs/projection-framework/operations.md as the recovery
                       // step for a corrupted cache but had no button at all.
                       <Stack gap={4}>

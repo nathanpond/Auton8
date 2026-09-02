@@ -6,7 +6,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Authorization;
 
-// #87: fifteen EntityKinds had no enforcement test at all.
+// archived-87: fifteen EntityKinds had no enforcement test at all.
 //
 // AuthorizationGatePresenceTests proves every mapped endpoint carries an
 // explicit auth decision, but it reads route metadata — it never calls the

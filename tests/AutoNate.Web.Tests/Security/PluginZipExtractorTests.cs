@@ -5,7 +5,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Security;
 
-// #63 hardening. The issue's stated exploit — forge a tiny declared size in the
+// archived-63 hardening. The issue's stated exploit — forge a tiny declared size in the
 // central directory, sail past the gate, expand to gigabytes — does not work on
 // .NET, because ZipArchive truncates each entry stream at the declared size
 // (pinned below). What remains, and what PluginZipExtractor adds, is
@@ -36,7 +36,7 @@ public sealed class PluginZipExtractorTests : IDisposable
         Assert.Equal("hello", File.ReadAllText(Path.Combine(dest, "lib", "thing.txt")));
     }
 
-    // #63 described forging the central directory so a tiny declared size
+    // archived-63 described forging the central directory so a tiny declared size
     // passes the gate while the stream expands to gigabytes. That exploit does
     // not work on .NET: ZipArchive truncates the entry stream at the declared
     // uncompressed size, so understating it yields *fewer* bytes, not more.

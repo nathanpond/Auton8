@@ -756,7 +756,7 @@ public sealed class FlowableClient(
         // disappearing. If a historic instance cannot be removed, the old
         // `while (true)` refetched the same page forever — an unbounded HTTP
         // hammer on Flowable from inside a live admin request. Stop when a
-        // pass deletes nothing, and cap the whole operation either way (#77).
+        // pass deletes nothing, and cap the whole operation either way (archived-77).
         var budget = TimeSpan.FromMinutes(5);
         var startedAt = DateTimeOffset.UtcNow;
 

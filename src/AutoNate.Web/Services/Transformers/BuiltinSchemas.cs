@@ -1,6 +1,6 @@
 namespace AutoNate.Web.Services.Transformers;
 
-// Per-built-in config schemas (audit fix #7). The DisplayName mirrors the
+// Per-built-in config schemas (audit fix archived-7). The DisplayName mirrors the
 // matching ITransformer / IAnalyzer's DisplayName so the schema endpoint
 // can be self-describing without a registry round-trip on the SPA side.
 //

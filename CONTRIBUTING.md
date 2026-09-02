@@ -8,7 +8,7 @@ the outside, and knowing them first will save you a wasted afternoon.
 **GitHub Issues are the plan, not a suggestion box.** This project is managed
 with an issue-driven workflow: issues are grouped into milestones, carry
 `sev:*` and `area:*` labels, and are closed by pull requests that reference
-them (`Closes #123`). Roadmap and audit passes file issues in bulk, so the
+them (`Closes archived-123`). Roadmap and audit passes file issues in bulk, so the
 register is the authoritative picture of what is known to be wrong.
 
 Blank issues are turned off deliberately — `.github/ISSUE_TEMPLATE/` has forms
@@ -18,12 +18,14 @@ always acceptable.
 
 **Security findings do not go in issues.** See [SECURITY.md](SECURITY.md).
 
-**`#N` in an old commit message is not an issue in this repository.** The
-project moved repositories on 2026-09-02 (see
-[docs/history/](docs/history/README.md) for why), and issue numbers were not
-preserved. References in commits written before that date point at the archived
-register, not at the current one — and may coincide with a different, real
-issue here.
+**`archived-N` is not an issue in this repository.** The project moved
+repositories on 2026-09-02 (see [docs/history/](docs/history/README.md) for
+why) and issue numbers were not preserved, so every reference to the old
+register is written `archived-N` rather than `#N` — a bare `#N` would be
+auto-linked to a different, real issue here. Look those up in
+[docs/history/](docs/history/README.md).
+
+Write `#N` only for issues in *this* repository.
 
 ## Proposing a change
 

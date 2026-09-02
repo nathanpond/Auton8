@@ -1,5 +1,5 @@
 // WCAG contrast primitives, shared by the appearance editor's warnings and by
-// the badge/button text-colour picker (#14).
+// the badge/button text-colour picker (archived-14).
 //
 // These lived privately in siteAppearance.ts while statusAppearance.ts carried
 // its own, different, non-WCAG heuristic. siteAppearance.ts imports

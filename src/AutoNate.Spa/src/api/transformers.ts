@@ -2,7 +2,7 @@ import { AxiosError } from "axios";
 import { api } from "./client";
 
 // Phase 4 of the Data Stores plan — Transformer catalog API surface for the
-// Phase 5 React Flow node palette. Per-key config schemas (audit fix #7)
+// Phase 5 React Flow node palette. Per-key config schemas (audit fix archived-7)
 // drive the editor's kind-specific form rendering.
 export type TransformerCatalogEntry = {
   key: string;

@@ -47,7 +47,7 @@ public abstract class E2ETestBase
     /// Specs that needed a limited user or an anonymous visitor used to build
     /// their own context and page, which silently opted them out of
     /// ConsoleErrorGuard — the guard is installed by NewSignedInAsAdminAsync,
-    /// so anything that could not use that helper had no guard at all (#93).
+    /// so anything that could not use that helper had no guard at all (archived-93).
     /// Permission-denial journeys are exactly where a silent client-side
     /// exception is easiest to miss, because the page is *expected* to look
     /// empty.

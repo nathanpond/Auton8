@@ -7,9 +7,9 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Authorization;
 
-// #22: GET /api/code-transformers/{id} returned the full source body — for
+// archived-22: GET /api/code-transformers/{id} returned the full source body — for
 // unsafe rows too — to any authenticated caller holding a GUID.
-// #23: create gated on (Transformer, Run) whatever kind was requested, so a
+// archived-23: create gated on (Transformer, Run) whatever kind was requested, so a
 // grant meant to let someone execute a pipeline node let them author the
 // sandboxed code that later runs execute, and analyzer:* was never enforced.
 [Trait("Category", "Integration")]
@@ -56,7 +56,7 @@ public sealed class CodeTransformerEnforcementTests
         Assert.Contains("secret-body", await resp.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
-    // The heart of #23: Run is an execution grant and must not confer authoring.
+    // The heart of archived-23: Run is an execution grant and must not confer authoring.
     [Fact]
     public async Task Create_WithOnlyRunGrant_IsForbidden()
     {
@@ -81,7 +81,7 @@ public sealed class CodeTransformerEnforcementTests
         Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
     }
 
-    // Kind isolation, the other half of #23: the gate must resolve against the
+    // Kind isolation, the other half of archived-23: the gate must resolve against the
     // kind actually being created, so a transformer grant is not an analyzer
     // grant and analyzer:* is finally enforceable.
     [Fact]

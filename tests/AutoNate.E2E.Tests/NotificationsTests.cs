@@ -51,7 +51,7 @@ public sealed class NotificationsTests : E2ETestBase
         await Assertions.Expect(page.GetByText(pageTitle).First)
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // #12: DataTable forwarded onRowClick as a bare <tr onClick>, so a
+        // archived-12: DataTable forwarded onRowClick as a bare <tr onClick>, so a
         // notification row had no tabIndex, no role and no key handler — and
         // Notifications has no link or button in any cell, so a keyboard user
         // could not open one at all. The row is now a focusable button that

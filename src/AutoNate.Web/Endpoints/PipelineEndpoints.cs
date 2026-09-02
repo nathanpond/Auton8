@@ -144,7 +144,7 @@ public static class PipelineEndpoints
             return Results.Ok(new PipelineRunDetailDto(run, stepDtos));
         }).RequirePermission(EntityKinds.Pipeline, Actions.View);
 
-        // Audit fix #10 — cancel a Queued or Running run. The store flips
+        // Audit fix archived-10 — cancel a Queued or Running run. The store flips
         // the row to Cancelled and the orchestrator's between-node check
         // bails on the next iteration; the worker won't pick up a
         // Queued row that's been flipped. Already-terminal runs return
@@ -168,12 +168,12 @@ public static class PipelineEndpoints
         // operator expects them to be able to stop a run without also being
         // able to start one. This was gated on Run, so the advertised grant
         // 403'd and the only way to cancel was the grant that also starts
-        // runs (#24). Deployments that relied on run-implies-cancel need the
+        // runs (archived-24). Deployments that relied on run-implies-cancel need the
         // cancel grant added.
         }).RequirePermission(EntityKinds.Pipeline, Actions.Cancel)
           .DisableAntiforgery();
 
-        // Audit fix #10 — retry a Failed or Cancelled run. Enqueues a new
+        // Audit fix archived-10 — retry a Failed or Cancelled run. Enqueues a new
         // run with the original run's graph snapshot (so a retry
         // exercises the same DAG even if the pipeline's saved graph has
         // since changed); trigger kind is `manual` because the human is

@@ -308,7 +308,7 @@ export function AgentSidebar() {
     wasStreamingRef.current = stream.state.streaming;
   }, [stream.state.streaming]);
 
-  // Focus contract for opening and closing the assistant (#13).
+  // Focus contract for opening and closing the assistant (archived-13).
   //
   // Deliberately NOT a FocusTrap. In push / under-header modes this panel is
   // non-modal — the page behind it stays fully usable — so trapping Tab

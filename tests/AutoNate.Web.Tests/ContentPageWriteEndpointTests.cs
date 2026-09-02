@@ -11,7 +11,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
-// Regression coverage for #83: the notes/pages write API and the two
+// Regression coverage for archived-83: the notes/pages write API and the two
 // version-restore paths shipped without a single endpoint test, and restore
 // mutates user content irreversibly.
 //
@@ -265,7 +265,7 @@ public sealed class ContentPageWriteEndpointTests
 
     // ---- pages: version restore ----------------------------------------
 
-    // The core of #83. Restore must put the *target version's* bytes back on
+    // The core of archived-83. Restore must put the *target version's* bytes back on
     // the live row — both fields, not just the title the history list shows.
     [Fact]
     public async Task RestorePageVersion_RestoresThatVersionsTitleAndBody()
@@ -566,7 +566,7 @@ public sealed class ContentPageWriteEndpointTests
 
     // ---- notes: version restore ----------------------------------------
 
-    // Note restore is the other half of #83, and it has an extra trap: note
+    // Note restore is the other half of archived-83, and it has an extra trap: note
     // kind is immutable post-create, so a restore must move title + content
     // and leave note_kind alone.
     [Fact]

@@ -88,7 +88,7 @@ PWDEBUG=1 dotnet test tests/AutoNate.E2E.Tests   # headed browser
 
 Always run `make e2e-install` (or `pwsh tests/AutoNate.E2E.Tests/bin/Debug/net10.0/playwright.ps1 install chromium`) before a bare `dotnet test`: `Microsoft.Playwright` pins an exact browser build (1.50.0 → `chromium_headless_shell-1155`), and a cache populated by `@playwright/mcp` or `playwright-cli` has newer builds only — the symptom is every test failing instantly with `Executable doesn't exist at …/chromium_headless_shell-1155/…`.
 
-The fixture (`AutoNateE2EFixture.StartAppAsync`) probes `GET /` after `Now listening` and throws with the app's stdout/stderr tail if the SPA shell (`<div id="root">`) isn't served — so a host-side regression surfaces as one clear fixture error, not N identical 30 s sign-in timeouts (#132). The host-side guard for the same thing is `tests/AutoNate.Web.Tests/SpaRootFallbackTests.cs`.
+The fixture (`AutoNateE2EFixture.StartAppAsync`) probes `GET /` after `Now listening` and throws with the app's stdout/stderr tail if the SPA shell (`<div id="root">`) isn't served — so a host-side regression surfaces as one clear fixture error, not N identical 30 s sign-in timeouts (archived-132). The host-side guard for the same thing is `tests/AutoNate.Web.Tests/SpaRootFallbackTests.cs`.
 
 (`Makefile:91-100`, `tests/AutoNate.E2E.Tests/README.md` "Running".) First run rebuilds the SPA into `wwwroot/` (30–60 s). Do not run two E2E invocations concurrently — both target the `AutoNate_E2E` database.
 
@@ -342,14 +342,14 @@ public sealed class RecordTypeTests : E2ETestBase
 
 ### 5.2 Rules
 
-- **Always `await using var session = await NewSignedInAsAdminAsync();`** — it installs `ConsoleErrorGuard` before sign-in and fails the test on dispose if any non-allowlisted `console.error` or `pageerror` fired (`Support/ConsoleErrorGuard.cs:25-47`, `:76-80`). Don't bypass it with a raw `Fixture.NewContextAsync()` unless you need a second (limited) user — and then still sign in via `AutoNateE2EFixture.SignInAsync(page, username, password)` (issue #93 tracks one bypass).
+- **Always `await using var session = await NewSignedInAsAdminAsync();`** — it installs `ConsoleErrorGuard` before sign-in and fails the test on dispose if any non-allowlisted `console.error` or `pageerror` fired (`Support/ConsoleErrorGuard.cs:25-47`, `:76-80`). Don't bypass it with a raw `Fixture.NewContextAsync()` unless you need a second (limited) user — and then still sign in via `AutoNateE2EFixture.SignInAsync(page, username, password)` (issue archived-93 tracks one bypass).
 - Default allowlist is only `"Failed to load resource"` and `"authentication-failed"`; use `session.ConsoleErrors.Allow("substring")` per test for an intentional error path. Do not grow the default list (`ConsoleErrorGuard.cs:27-34`).
-- **Selectors: `GetByRole` / `GetByLabel` / `GetByText` first; CSS/attribute locators only when Mantine gives no accessible handle** (e.g. `input[autocomplete='current-password']` because the eye-icon button shares the `Password` label — `AutoNateE2EFixture.cs:96-101`). Mantine inputs have auto-generated ids — never `#username`. Issue #92 tracks the remaining raw locators.
+- **Selectors: `GetByRole` / `GetByLabel` / `GetByText` first; CSS/attribute locators only when Mantine gives no accessible handle** (e.g. `input[autocomplete='current-password']` because the eye-icon button shares the `Password` label — `AutoNateE2EFixture.cs:96-101`). Mantine inputs have auto-generated ids — never `#username`. Issue archived-92 tracks the remaining raw locators.
 - **Unique names per test**: `TestNames.ShortSlug()`, `TestNames.Prefixed("asset")` → `e2e-asset-3f8c1e29`, `TestNames.ShortCode()` → `E` + 5 hex (satisfies `^[A-Z][A-Z0-9]{1,7}$`) (`Support/TestNames.cs:17-32`). Assert on the unique value, not on a column header or placeholder that repeats.
 - **Seed via `ApiSeeder(page.APIRequest)`** when the test's subject is the UI on top of data, not the create flow itself (`Support/ApiSeeder.cs:17-27`; `RecordTypeTests.cs:56-58`).
 - Only `admin`/`admin` is seeded. Limited users are minted per test through the API: `adminSeeder.CreateUserAsync(username, password)` — users created after boot get zero grants because the SuperAdmin backfill runs once (`PermissionGatingTests.cs:15-27`, `:240-249`).
-- Explicit timeouts on expectations (`Timeout = 10_000`, 15 s for first paint after login). No `Task.Delay` sleeps (issue #89 tracks the one that exists).
-- Skipped facts must carry a `Skip = "Blocked: …"` reason describing the product defect (`DocumentEditorTests.cs:39`, `AdminOperationsTests.cs:111`) — and should link an issue (#88).
+- Explicit timeouts on expectations (`Timeout = 10_000`, 15 s for first paint after login). No `Task.Delay` sleeps (issue archived-89 tracks the one that exists).
+- Skipped facts must carry a `Skip = "Blocked: …"` reason describing the product defect (`DocumentEditorTests.cs:39`, `AdminOperationsTests.cs:111`) — and should link an issue (archived-88).
 - Playwright scratch output (`browser_snapshot` files, screenshots) goes under `/temp/`.
 
 ---
@@ -376,9 +376,9 @@ public sealed class RecordTypeTests : E2ETestBase
 
 Tracked as GitHub issues filed 2026-08-31 by `/n8-audit`; do not re-litigate here, go to the issue:
 
-- ~~#79 — no CI (`area:ci`)~~ — closed; `.github/workflows/ci.yml` runs the SPA gates, the backend suite, and E2E minus the Flowable/Dapr-dependent specs
-- #80, #81, #82, #83, #90, #91 — untested endpoint groups (Yjs/shared-secret filters, DataStore uploads, dataset preview-file-source, notes/pages writes, document bindings/comments, role-assignment / permission-override)
-- #87 — 15 `EntityKinds` with no no-grant→403 enforcement test
-- #84, #85, #86, #88, #89, #92, #93 — E2E suite quality (neutralised assertion, blocked journeys, skips without issues, sleep, raw CSS locators, guard bypass)
+- ~~archived-79 — no CI (`area:ci`)~~ — closed; `.github/workflows/ci.yml` runs the SPA gates, the backend suite, and E2E minus the Flowable/Dapr-dependent specs
+- archived-80, archived-81, archived-82, archived-83, archived-90, archived-91 — untested endpoint groups (Yjs/shared-secret filters, DataStore uploads, dataset preview-file-source, notes/pages writes, document bindings/comments, role-assignment / permission-override)
+- archived-87 — 15 `EntityKinds` with no no-grant→403 enforcement test
+- archived-84, archived-85, archived-86, archived-88, archived-89, archived-92, archived-93 — E2E suite quality (neutralised assertion, blocked journeys, skips without issues, sleep, raw CSS locators, guard bypass)
 
 Fixing any of these means following §4/§5 shapes above; when you do, close the issue from the PR body (`Closes #N`).

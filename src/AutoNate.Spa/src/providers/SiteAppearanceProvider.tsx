@@ -37,7 +37,7 @@ export function SiteAppearanceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applySiteAppearanceToDocument(effectiveAppearance);
-    // The title is owned by useRouteDocumentTitle (#18) — it needs the site
+    // The title is owned by useRouteDocumentTitle (archived-18) — it needs the site
     // name *and* the route. Setting it here too would race that effect and
     // flatten every page back to the bare site name on any appearance change.
   }, [effectiveAppearance]);

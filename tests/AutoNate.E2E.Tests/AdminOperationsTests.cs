@@ -147,7 +147,7 @@ public sealed class AdminOperationsTests : E2ETestBase
         await Assertions.Expect(page.GetByLabel("Site name"))
             .ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // The gate #40 asks for, aimed at the values a real install actually
+        // The gate archived-40 asks for, aimed at the values a real install actually
         // gets rather than at the SPA constant.
         //
         // Two accessible defaults had been corrected in the SPA's
@@ -174,7 +174,7 @@ public sealed class AdminOperationsTests : E2ETestBase
         var accent = page.GetByRole(AriaRole.Textbox, new() { Name = "Primary accent", Exact = true });
         await Assertions.Expect(accent).ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        // #00acac is the case that motivated #14: the old YIQ heuristic
+        // #00acac is the case that motivated archived-14: the old YIQ heuristic
         // thresholded brightness at 160 and chose white, which computes to
         // 2.80:1. Black is 6.74:1 on the same colour. The value feeds
         // --mantine-primary-color-contrast, so it is the text colour of every
@@ -207,7 +207,7 @@ public sealed class AdminOperationsTests : E2ETestBase
     // Clicking "Save changes" only dispatches the PATCH. Reloading straight
     // after the click races it: the navigation aborts the in-flight request
     // and the value never reaches the database, which reads exactly like a
-    // silent save-and-revert (#172 was filed on that reading). Wait for the
+    // silent save-and-revert (archived-172 was filed on that reading). Wait for the
     // page's own success alert, which is the completion signal a user waits
     // for too, so the spec also now asserts that saving reports success.
     private static async Task SaveAppearanceAsync(IPage page)

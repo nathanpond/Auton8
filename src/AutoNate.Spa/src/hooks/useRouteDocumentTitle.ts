@@ -47,7 +47,7 @@ function flatten(routes: AppRoute[]): AppRoute[] {
 // Most of the app is served by DynamicPageRoute from the page registry, and
 // PageRegistryEntry carries only { id, path, contentType } — no title. Rather
 // than leave every one of those reading the bare site name (the whole point of
-// #18), derive a title from the last meaningful path segment.
+// archived-18), derive a title from the last meaningful path segment.
 //
 // The menu item for the path would give a nicer, operator-authored label, but
 // the menu is not loaded in the shell and threading it here would couple title

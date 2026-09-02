@@ -251,7 +251,7 @@ public sealed class DataStoresAdminTests : E2ETestBase
     [Fact]
     public async Task DataStores_EditExisting_PersistsRenamedRow()
     {
-        // Audit fix #13 — updateDataStore was a dead wrapper before this
+        // Audit fix archived-13 — updateDataStore was a dead wrapper before this
         // commit; renaming or redescribing a store required delete-and-
         // recreate, which would also drop the per-store schema/role on
         // SqlType stores. The Edit modal reuses the create modal's
@@ -281,7 +281,7 @@ public sealed class DataStoresAdminTests : E2ETestBase
 
         var renamed = $"{original}-renamed";
         await editModal.GetByLabel("Name").FillAsync(renamed);
-        await editModal.GetByLabel("Description").FillAsync("Renamed by audit fix #13 test");
+        await editModal.GetByLabel("Description").FillAsync("Renamed by audit fix archived-13 test");
         await editModal.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
         await Assertions.Expect(editModal).Not.ToBeVisibleAsync(new() { Timeout = 15_000 });
 
@@ -352,7 +352,7 @@ public sealed class DataStoresAdminTests : E2ETestBase
     [Fact]
     public async Task DataConnectors_EditExisting_PersistsRenamedRow()
     {
-        // Audit fix #6 — updateDataConnector / getDataConnector were
+        // Audit fix archived-6 — updateDataConnector / getDataConnector were
         // dead in the SPA. A wrong URL or rotated token forced delete-
         // and-recreate (losing lastFetchedAtUtc + cursor). New Edit
         // ActionIcon opens the same modal as create, pre-filled.
@@ -395,7 +395,7 @@ public sealed class DataStoresAdminTests : E2ETestBase
     [Fact]
     public async Task DataConnectors_PreviewModal_OpensAndShowsConnectorReply()
     {
-        // Audit fix #6 — Preview ActionIcon opens a modal that fires
+        // Audit fix archived-6 — Preview ActionIcon opens a modal that fires
         // POST /api/dataconnectors/{id}/preview. The connector here has
         // an empty REST URL so the backend handler will return a
         // structured failure rather than rows; that's the cheapest
@@ -433,7 +433,7 @@ public sealed class DataStoresAdminTests : E2ETestBase
         // also be acceptable (yellow Alert with "0 rows"), so we match
         // any of the three completion states.
         // .First because the error state now matches twice: the alert title
-        // ("Connector returned an error") and the body, which since #68 reads
+        // ("Connector returned an error") and the body, which since archived-68 reads
         // "Preview failed. Reference <id>…" instead of echoing the raw
         // exception text. Any one of them showing is the assertion.
         await Assertions.Expect(
@@ -464,7 +464,7 @@ public sealed class DataStoresAdminTests : E2ETestBase
     [Fact]
     public async Task Datasets_CreateModal_OpensWithModeAndSourcePickers()
     {
-        // Audit fix #4 — the modal's source picker used to be two raw
+        // Audit fix archived-4 — the modal's source picker used to be two raw
         // UUID TextInputs (Source ID + Source table) the user had to
         // copy-paste by hand. The fix replaces them with a NativeSelect
         // bound to listDataStores() (default kind) and listDataConnectors()
@@ -498,7 +498,7 @@ public sealed class DataStoresAdminTests : E2ETestBase
     [Fact]
     public async Task Datasets_SourceKindToggle_SwapsBetweenDataStoreAndDataConnectorPickers()
     {
-        // Audit fix #4 — the source-kind NativeSelect flips which picker
+        // Audit fix archived-4 — the source-kind NativeSelect flips which picker
         // renders. Switching also clears the previously-picked sourceId
         // so the form can't POST a connector UUID with kind=datastore.
         await using var session = await NewSignedInAsAdminAsync();

@@ -522,7 +522,7 @@ return await context.Data.QueryAsync<string>(sql, ct: ct);`}
         </pre>
         <p>
           The <code>plugins.code</code> column is constrained to{" "}
-          <code>[a-z][a-z0-9]&#123;7&#125;</code> at provisioning time, so
+          <code>[a-z][a-z0-9]&archived-123;7&archived-125;</code> at provisioning time, so
           string-interpolating it into SQL is safe — but only if you trust that
           source. Never interpolate values that came from outside the database.
         </p>
@@ -839,9 +839,9 @@ context.Menus.AddMenuItem("user", parentId: null, new NewMenuItem(
           </li>
           <li>
             <strong>Placeholder substitution</strong> happens before the JSX
-            is persisted. <code>&#123;&#123;pluginCode&#125;&#125;</code> is
+            is persisted. <code>&archived-123;&archived-123;pluginCode&archived-125;&archived-125;</code> is
             replaced with the plugin&apos;s 8-char code and{" "}
-            <code>&#123;&#123;pluginId&#125;&#125;</code> with its UUID. Use
+            <code>&archived-123;&archived-123;pluginId&archived-125;&archived-125;</code> with its UUID. Use
             them to address your own per-plugin endpoints (the data hook
             below) without knowing the code at build time.
           </li>

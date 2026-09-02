@@ -11,7 +11,7 @@ namespace AutoNate.Web.Authorization.EntityTypes;
 // DataStore + DataConnector. Phase 2 adds Dataset. Phase 3 promotes
 // SavedQuery to the Query kind. Phase 4 adds Transformer + Analyzer.
 // Phase 5 adds Pipeline (PipelineRun was registered too, but no endpoint
-// ever authorized against it — see the Pipeline comment below; #24).
+// ever authorized against it — see the Pipeline comment below; archived-24).
 public static class AnalyticsEntityTypes
 {
     public static IReadOnlyList<IEntityType> All => _all.Value;
@@ -69,7 +69,7 @@ public static class AnalyticsEntityTypes
             // No Schedule: a dataset's cron lives in the same row as the rest
             // of its definition and is edited through the same endpoint, so
             // Edit is the gate. Advertising Schedule offered admins a grant
-            // that changed nothing (#24).
+            // that changed nothing (archived-24).
             Actions.View, Actions.List, Actions.Create, Actions.Edit, Actions.Delete,
             Actions.Refresh
         },
@@ -103,7 +103,7 @@ public static class AnalyticsEntityTypes
     // Without them the authoring endpoints had no correct token to gate on and
     // fell back to Run — which made a grant meant to let someone *execute* a
     // pipeline node also let them author the sandboxed code that later runs
-    // execute (#23).
+    // execute (archived-23).
     public static EntityTypeDefinition Transformer { get; } = new(
         kind: EntityKinds.Transformer,
         clrType: typeof(object),
@@ -129,7 +129,7 @@ public static class AnalyticsEntityTypes
     // Pipeline = the DAG definition. Run is gated separately from Edit so an
     // operator can hand out execution rights without authoring rights, and
     // Cancel terminates an in-flight run — which now actually gates the cancel
-    // endpoint rather than being advertised and ignored (#24).
+    // endpoint rather than being advertised and ignored (archived-24).
     //
     // Schedule is gone for the same reason it went from Dataset: the cron
     // rides on the pipeline row and is edited through the update endpoint, so

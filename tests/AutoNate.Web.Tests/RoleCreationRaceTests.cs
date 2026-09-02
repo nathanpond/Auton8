@@ -15,7 +15,7 @@ namespace AutoNate.Web.Tests;
 // pg_advisory_xact_lock's tag includes the database oid and each host owns a
 // different database. Catching the error is the only thing that works.
 //
-// This has now been the same bug twice — #192 for the datastores writer role,
+// This has now been the same bug twice — archived-192 for the datastores writer role,
 // and plg_readers, which failed one test of a 1666-test CI run that had just
 // passed locally. The test reads the *production* SQL rather than a copy of
 // it, so it fails if someone reintroduces the check-then-act shape there.

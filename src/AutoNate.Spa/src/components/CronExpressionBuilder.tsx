@@ -13,7 +13,7 @@ import { Alert, NativeSelect, Stack, Text, TextInput } from "@mantine/core";
 //   - PipelinesPage (Schedule cron, create modal)
 //   - PipelineEditor (Schedule cron, Settings modal)
 //
-// Audit fix #12.
+// Audit fix archived-12.
 
 export type CronExpressionBuilderProps = {
   label?: string;

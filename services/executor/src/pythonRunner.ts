@@ -2,7 +2,7 @@ import { Worker } from "node:worker_threads";
 import type { PythonJob, PythonWorkerMessage } from "./pythonProtocol.js";
 import { CodeNodeFrame, CodeNodeRequest, normaliseOutput } from "./wire.js";
 
-// Pyodide (WASM Python) sandbox, one interpreter per request (#58).
+// Pyodide (WASM Python) sandbox, one interpreter per request (archived-58).
 //
 // Each request runs in its own `worker_threads` Worker (pythonWorker.ts)
 // that loads a fresh Pyodide and is terminated afterwards, so no state

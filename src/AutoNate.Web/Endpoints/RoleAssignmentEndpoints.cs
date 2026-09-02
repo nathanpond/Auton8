@@ -15,7 +15,7 @@ public static class RoleAssignmentEndpoints
 
         // Authorized in the handler because the gate has to be about the role
         // this assignment names, and the route only carries the assignment id
-        // (#182).
+        // (archived-182).
         //
         // It was gated with RequireKindPermission(Role, Assign), which asks
         // only "does any allow grant for role+assign exist?" — it never

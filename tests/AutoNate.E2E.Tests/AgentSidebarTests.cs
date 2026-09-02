@@ -111,7 +111,7 @@ public sealed class AgentSidebarTests : E2ETestBase
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
 
-        // Drive the whole thing from the keyboard — the point of #13 is that
+        // Drive the whole thing from the keyboard — the point of archived-13 is that
         // a mouse was previously the only way to reach the composer. Focus
         // the header trigger and press Enter rather than clicking it.
         var toggle = page.GetByLabel("Open Auton8 assistant");

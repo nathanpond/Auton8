@@ -17,7 +17,7 @@ namespace AutoNate.Web.Services.Pipelines.Execution;
 // Why not a plain RequestAsync: a request takes the FIRST message on the
 // inbox, and if any JetStream stream captures the request subject the server
 // answers first with a PubAck (`{"stream":…,"seq":…}`), which then parses as
-// a failed CodeNodeReply while the sidecar's real answer is discarded (#141).
+// a failed CodeNodeReply while the sidecar's real answer is discarded (archived-141).
 // The stream that used to do exactly that (`pipeline-code-runs`) is gone, but
 // the runner stays defensive: it reads the inbox until it sees a message
 // shaped like a CodeNodeReply.

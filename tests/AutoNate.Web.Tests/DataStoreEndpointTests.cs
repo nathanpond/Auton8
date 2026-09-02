@@ -14,7 +14,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
-// #81: the file sub-surface of /api/datastores — multipart upload, single-file
+// archived-81: the file sub-surface of /api/datastores — multipart upload, single-file
 // copy, recursive folder copy and the CSV table preview — had no endpoint test,
 // and EntityKinds.DataStore appeared in no *EnforcementTests.cs at all. Nothing
 // proved that the one storage kind holding arbitrary user bytes actually
@@ -69,7 +69,7 @@ public sealed class DataStoreEndpointTests
             Assert.Contains(rootListing.Folders, f => f.FolderPath == "/reports");
 
             // Read-back #3: the stored bytes come back byte-identical, as an
-            // attachment, with sniffing disabled (#65).
+            // attachment, with sniffing disabled (archived-65).
             var download = await client.GetAsync($"/api/datastores/{storeId}/files/{uploaded.Id}");
             download.EnsureSuccessStatusCode();
             Assert.Equal(payload, await download.Content.ReadAsStringAsync());
@@ -87,7 +87,7 @@ public sealed class DataStoreEndpointTests
     }
 
     // The uploader controls the multipart Content-Type, so same-origin
-    // text/html bytes must not be echoed back as text/html (#65).
+    // text/html bytes must not be echoed back as text/html (archived-65).
     [Fact]
     public async Task GetFile_WithHtmlContentType_DowngradesResponseTypeAndSetsNoSniff()
     {
@@ -388,7 +388,7 @@ public sealed class DataStoreEndpointTests
         }
     }
 
-    // ---- enforcement (#81: EntityKinds.DataStore had no enforcement test) -----
+    // ---- enforcement (archived-81: EntityKinds.DataStore had no enforcement test) -----
 
     // Upload is gated on (DataStore, Edit) per store — a create grant alone,
     // which is what a "can make their own stores" role would carry, must not
@@ -442,7 +442,7 @@ public sealed class DataStoreEndpointTests
         }
     }
 
-    // The exfiltration case from #81: holding a file id is not read access.
+    // The exfiltration case from archived-81: holding a file id is not read access.
     // Download is gated on (DataStore, View), which the uploader does not
     // implicitly acquire by having written the file.
     [Fact]

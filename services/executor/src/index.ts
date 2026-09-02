@@ -14,7 +14,7 @@ import { CodeNodeReply, CodeNodeRequest } from "./wire.js";
 // It also answers `executor.health` (see healthcheck.ts) so docker-compose
 // and `infra/ensure-up.sh` can tell "process is up" from "actually connected
 // and serving". That subject deliberately lives outside the
-// `pipeline-code-run.>` prefix, which a JetStream stream captures (#141).
+// `pipeline-code-run.>` prefix, which a JetStream stream captures (archived-141).
 
 const NATS_URL = process.env.NATS_URL ?? "nats://localhost:4222";
 const SUBJECT = "pipeline-code-run.>";
@@ -25,7 +25,7 @@ const codec = StringCodec();
 
 async function main(): Promise<void> {
   // Start loading a warm Pyodide interpreter now so the first Python
-  // request does not pay the ~0.8 s cold start (#58).
+  // request does not pay the ~0.8 s cold start (archived-58).
   prewarmPython();
 
   // nats.js defaults to maxReconnectAttempts: 10, so a NATS restart that takes
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   // iterator completes normally, main() resolves, and the process either exits
   // 0 or idles with an empty loop while every code-node pipeline fails with the
   // generic 30 s timeout. -1 means keep trying, which is the right posture for
-  // a sidecar whose only job is to serve that subject (#69).
+  // a sidecar whose only job is to serve that subject (archived-69).
   const nc: NatsConnection = await connect({
     servers: NATS_URL,
     maxReconnectAttempts: -1,
@@ -119,7 +119,7 @@ function fail(message: string): CodeNodeReply {
 // A rejected promise nobody awaited used to take the default action for the
 // Node version rather than being reported; the same for a synchronous throw
 // off the event loop. Both mean this sidecar is no longer serving, so make
-// them loud and let the restart policy handle it (#69).
+// them loud and let the restart policy handle it (archived-69).
 process.on("unhandledRejection", (reason) => {
   console.error("[executor] Unhandled rejection:", reason);
   process.exit(1);

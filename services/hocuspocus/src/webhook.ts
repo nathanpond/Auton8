@@ -4,7 +4,7 @@ import type { AutoNateUser } from "./auth.js";
 import { selectMaterializer } from "./materializers.js";
 
 // Cross-service calls to the .NET host get an explicit budget; undici's
-// default is 300 s, which is indistinguishable from a hang (#75).
+// default is 300 s, which is indistinguishable from a hang (archived-75).
 const AUTONATE_FETCH_TIMEOUT_MS = 5_000;
 
 export interface WebhookConfig {
@@ -38,7 +38,7 @@ export function createWebhookExtension(config: WebhookConfig): Extension {
     const response = await fetch(`${config.autonateBaseUrl}/internal/yjs-webhook`, {
       method: "POST",
       // Same budget as the auth hook — a wedged host must not pin this
-      // request for undici's 300 s default (#75).
+      // request for undici's 300 s default (archived-75).
       signal: AbortSignal.timeout(AUTONATE_FETCH_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",

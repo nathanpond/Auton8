@@ -9,7 +9,7 @@ using Xunit;
 
 namespace AutoNate.Web.Tests;
 
-// Regression coverage for #151: the SPA's comment-audit proxy
+// Regression coverage for archived-151: the SPA's comment-audit proxy
 // (lib/yjs/commentAudit.ts) POSTs `{ documentName, threadId, commentId?,
 // eventType }` — the Yjs document name it minted the ticket with — and the
 // endpoint used to require a bare `pageId`, so every comment event was a

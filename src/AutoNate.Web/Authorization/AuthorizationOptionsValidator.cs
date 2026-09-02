@@ -4,7 +4,7 @@ namespace AutoNate.Web.Authorization;
 
 /// <summary>
 /// Refuses to start the host on an authorization configuration that would
-/// silently fail open (#59). Registered with <c>ValidateOnStart()</c>, so the
+/// silently fail open (archived-59). Registered with <c>ValidateOnStart()</c>, so the
 /// failure surfaces as a startup crash with the offending keys named, the same
 /// way <c>WorkflowBehaviors:CallbackSharedSecret</c> and
 /// <c>Yjs:InternalSharedSecret</c> are handled.

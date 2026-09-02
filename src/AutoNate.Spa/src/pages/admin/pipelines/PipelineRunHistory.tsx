@@ -44,7 +44,7 @@ const STEP_COLUMN_WIDTHS = ["1fr", "140px", "140px", "100px", "2fr", "80px"];
 const ACTIVE_RUN_STATUSES: PipelineRun["status"][] = ["Queued", "Running"];
 const RETRYABLE_RUN_STATUSES: PipelineRun["status"][] = ["Failed", "Cancelled"];
 
-// Audit fix #11 — color-code known log levels; unknown levels fall
+// Audit fix archived-11 — color-code known log levels; unknown levels fall
 // back to dimmed text so plugin runners can emit whatever vocabulary
 // they want without breaking the table render.
 const LOG_LEVEL_COLOR: Record<string, string> = {
@@ -58,7 +58,7 @@ export default function PipelineRunHistory() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  // Audit fix #11 — clicking a step row in the table expands its log
+  // Audit fix archived-11 — clicking a step row in the table expands its log
   // panel below. Null = no expansion. Same pattern as the step ID
   // selector for runs above.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export default function PipelineRunHistory() {
     enabled: !!id
   });
 
-  // Audit fix #10 — cancel + retry. Cancel flips Queued/Running to
+  // Audit fix archived-10 — cancel + retry. Cancel flips Queued/Running to
   // Cancelled (backend); the orchestrator's between-node check (in
   // PipelineOrchestrator) bails on the next iteration. Retry enqueues
   // a fresh run with the original graph snapshot so a retry exercises
@@ -316,7 +316,7 @@ export default function PipelineRunHistory() {
           loadingMessage="Loading runs…"
           onRowClick={(row) => setSelectedRunId(row.id)}
           // Stable handle for E2E, which previously clicked "the first row in
-          // the body" because no semantic one existed (#92).
+          // the body" because no semantic one existed (archived-92).
           getRowTestId={(row) => `pipeline-run-row-${row.id}`}
           getRowAriaLabel={(row) => `Run ${row.id}`}
         />

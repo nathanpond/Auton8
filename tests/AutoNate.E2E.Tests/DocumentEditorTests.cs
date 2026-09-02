@@ -31,7 +31,7 @@ public sealed class DocumentEditorTests : E2ETestBase
 
         // This used to be a fixed 3 s sleep standing in for "Hocuspocus has
         // debounced and persisted the Y.Doc", which passed on a fast laptop and
-        // failed on a loaded runner — where it read as a product bug (#89).
+        // failed on a loaded runner — where it read as a product bug (archived-89).
         //
         // There is no server-side signal to poll for a *document* body:
         // persistence goes sidecar → yjs_documents with no API over it, and the

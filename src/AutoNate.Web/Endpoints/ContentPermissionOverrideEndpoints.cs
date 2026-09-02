@@ -116,7 +116,7 @@ public static class ContentPermissionOverrideEndpoints
             // but nothing narrowed it here, so a folder or document editor
             // could attach a resource grant to a role, SuperAdmin included,
             // through an endpoint whose own header comment describes user/group
-            // sharing (#186). The route is reachable by anyone with Edit on the
+            // sharing (archived-186). The route is reachable by anyone with Edit on the
             // item, which is a much lower bar than administering roles.
             if (!string.Equals(request.PrincipalKind, EntityKinds.User, StringComparison.Ordinal)
                 && !string.Equals(request.PrincipalKind, EntityKinds.Group, StringComparison.Ordinal))

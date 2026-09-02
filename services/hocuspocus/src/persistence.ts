@@ -21,7 +21,7 @@ export function createPostgresPersistence(config: pg.PoolConfig): Extension & {
   // is rethrown as an uncaughtException, which index.ts survives but only by
   // abandoning whatever hook was mid-flight — and it repeats on every idle
   // client death. Logging it keeps the pool's own reconnect behaviour and
-  // turns a process-level event into a line in the log (#74).
+  // turns a process-level event into a line in the log (archived-74).
   pool.on("error", (err) => {
     console.error("[persistence] idle client error:", err);
   });

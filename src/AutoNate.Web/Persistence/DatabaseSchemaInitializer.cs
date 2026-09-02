@@ -411,7 +411,7 @@ internal static class DatabaseSchemaInitializer
         CREATE UNIQUE INDEX IF NOT EXISTS uq_role_assignments_triple
             ON role_assignments (role_id, principal_kind, principal_id);
 
-        -- auth_cache_version is gone (#43). It was bumped on every grant,
+        -- auth_cache_version is gone (archived-43). It was bumped on every grant,
         -- role and group mutation for a process-wide auth cache that was
         -- never built: Authorizer is registered scoped, so its grant and
         -- SQL-filter caches live and die inside one request and cannot go
@@ -920,7 +920,7 @@ internal static class DatabaseSchemaInitializer
 
             -- Two shipped defaults failed WCAG and were corrected in the
             -- SPA's DEFAULT_SITE_APPEARANCE without this seed being updated,
-            -- so every install still carried the failing values (#40):
+            -- so every install still carried the failing values (archived-40):
             --   sidebar_section_color #adb5bd = 2.07:1 on the white sidebar
             --     (needs 4.5:1 — 0.78rem bold uppercase is not "large text")
             --   primary_accent_color #00acac  = 2.80:1 on the white surface
@@ -1570,7 +1570,7 @@ internal static class DatabaseSchemaInitializer
             WHERE code IS NOT NULL;
 
         -- Check-then-act on pg_roles is not safe here, and this is the same
-        -- defect #192 fixed for the datastores writer role.
+        -- defect archived-192 fixed for the datastores writer role.
         --
         -- Roles are cluster-wide: pg_roles is a shared catalog and CREATE ROLE
         -- takes no lock that serialises concurrent creates. Two hosts starting
@@ -1601,7 +1601,7 @@ internal static class DatabaseSchemaInitializer
             GRANT SELECT, USAGE ON SEQUENCES TO plg_readers;
         """;
 
-    // Runs LAST, after every table exists (#62). Reading app tables is a
+    // Runs LAST, after every table exists (archived-62). Reading app tables is a
     // documented plugin capability (IPluginDataAccess), so plg_readers keeps a
     // broad SELECT — but "app tables" was never meant to include password
     // hashes, DataProtection-encrypted provider secrets, every other plugin's
@@ -1659,7 +1659,7 @@ internal static class DatabaseSchemaInitializer
 
     // The seeded "Features" item pointed at configFeatures, and
     // SettingGroup.Features has no settings defined — so the nav item led to
-    // a form reading "No settings in this group yet." (#48). Removing the
+    // a form reading "No settings in this group yet." (archived-48). Removing the
     // seeded row rather than the template: the group is a declared extension
     // point (SiteSettingsRegistry's own "adding a new feature flag"
     // instructions name it), so the page and route stay available for
@@ -3876,7 +3876,7 @@ internal static class DatabaseSchemaInitializer
             completed_at_utc TIMESTAMPTZ NULL,
             row_count BIGINT NULL,
             error_message TEXT NULL,
-            -- Per-step log buffer (audit fix #11). JSONB array of log
+            -- Per-step log buffer (audit fix archived-11). JSONB array of log
             -- entries (timestampUtc, level, message) the orchestrator
             -- accumulates during execution and writes on step
             -- completion. Default `[]` so existing rows + concurrent
@@ -3884,7 +3884,7 @@ internal static class DatabaseSchemaInitializer
             logs_json JSONB NOT NULL DEFAULT '[]'::jsonb
         );
 
-        -- Idempotent migration for databases provisioned before fix #11.
+        -- Idempotent migration for databases provisioned before fix archived-11.
         ALTER TABLE pipeline_run_steps
             ADD COLUMN IF NOT EXISTS logs_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 
@@ -4021,7 +4021,7 @@ internal static class DatabaseSchemaInitializer
         }
 
         // Last: every table above now exists, so the credential tables can be
-        // taken back off plg_readers (#62).
+        // taken back off plg_readers (archived-62).
         await dbContext.Database.ExecuteSqlRawAsync(PluginReaderLockdownSql, cancellationToken);
     }
 
