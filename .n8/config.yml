@@ -1,12 +1,15 @@
 version: 1
 stack: dotnet            # ASP.NET Core (net10.0) host + React 19/Vite/TypeScript SPA + Node sidecars
 initialized: 2026-08-30
-wiki: opted-out          # repo is private; revisit (enable in Settings → Features → Wikis) when it goes public
-repo: nathanpond/AutoNate
-visibility: private
+wiki: enabled            # enabled at the 0.1 public flip (2026-09-02)
+repo: nathanpond/Auton8
+visibility: public
 default_branch: master   # n8SDLC docs say `main`; this repo uses `master` — skills should target the default branch, not the literal name
 context7: installed
-security_findings: issues  # private repo → issues are already maintainer-only
+security_findings: advisories  # public repo: an open sev:high issue advertises an exploit against
+                              # running deployments. Draft advisories stay maintainer-only until
+                              # published. The 26 closed security issues predate the flip and were
+                              # all closed as fixed, so they stay as a public register.
 areas: [api, spa, plugins, services, flowable, infra, ci, docs, tests]
 # area:api      → src/AutoNate.Web (ASP.NET Core host: endpoints, persistence, authorization, hooks)
 # area:spa      → src/AutoNate.Spa (React 19 + Mantine v9 SPA)
