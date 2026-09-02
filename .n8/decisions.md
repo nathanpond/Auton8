@@ -284,3 +284,26 @@ clean.
   **Issue:** #58
 - **Note:** M1 came back clean. Every Claude's Discretion item across #65–#72 is genuinely builder-level — shard counts, merge tools, sample sizes, which YAML parser. No product decision was hidden there.
 - **Note:** M0's remaining Discretion items are builder-level after the two above were lifted out.
+
+## /n8-exec M0 — 2026-09-02
+
+- **Decision:** #50's compose scanner is hand-rolled rather than built on a YAML package.
+  **Why:** The rule turns on a *comment* — an exception is valid only when a written reason sits beside the port — and YAML parsers discard comments on load. A parser would have handled the easy half and lost the half that makes the exception mechanism auditable. Listed under the story's Claude's Discretion.
+  **Issue:** #50
+- **Decision:** #50 discovers compose files by globbing `*.yml`/`*.yaml` and filtering to files with a **top-level** `services:` key.
+  **Why:** `.github/workflows/ci.yml` declares `services:` nested under a job. A naive content match would have treated it as a compose file and asserted on GitHub Actions service containers. Asserted in both directions.
+  **Issue:** #50
+- **Decision:** #50's exception marker attaches either to a whole `ports:` block or to a single entry.
+  **Why:** The story specified the block form. Per-entry matters for a service publishing several ports where only one needs exposure, and it was cheap once the block form worked.
+  **Issue:** #50
+- **Correction (Rule 1, found by running it):** #49's first version-extraction implementation was greedy and read the *last* dotted number in each tool's output. Docker reported its build hash (`0.3` from `build 4debf41`), Compose reported `24.5` from `v2.24.5-desktop.1`, dapr reported its runtime rather than its CLI version, and .NET reported `0.201`. Replaced with awk's leftmost `match()`. Every one of those shapes is now a test case, because all five tools this checks would have been mis-read.
+  **Issue:** #49
+- **Correction (Rule 1, found by running it):** #49's first port check reported the stack's own running containers as conflicts. `make infra-ensure` exists precisely to be re-runnable against a stack that is already up, so gating it on preflight would have made it refuse every time after the first. Ports belonging to services this compose project already has running are now reported as already-running and are not failures.
+  **Issue:** #49
+- **Decision:** #49's preflight is POSIX `sh`, not bash.
+  **Why:** macOS still ships bash 3.2, so a bash-first version wanting associative arrays would not run on the machines this most needs to work on. Listed under the story's Claude's Discretion.
+  **Issue:** #49
+- **Decision:** #49's port check treats a compose file that yields no ports as a failure.
+  **Why:** Same reasoning as the non-empty discovery assertion in #50 — a check that silently finds nothing reports a clean machine, which is worse than not running it.
+  **Issue:** #49
+- **Discovered work (filed, not fixed):** #119 — interrupted test runs strand `autonate_test_*` databases; 1,560 on this machine. `PostgresTestDatabase.DisposeAsync` drops correctly on the happy path, but a cancelled or timed-out run never disposes. Outside #50's scope, so filed with `needs-triage` and cross-referenced rather than fixed inline. Becomes load-bearing if M1's #67 shards the suite, since an age-gated sweep is then the only safe form of cleanup.
