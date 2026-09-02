@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -218,7 +218,7 @@ jobs:
       # deletes wwwroot first, so passing the spa job's bundle through as an
       # artifact would be thrown away. Node is needed here even though this job
       # runs no npm step of its own.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
