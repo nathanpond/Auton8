@@ -81,6 +81,7 @@ RUN groupadd --system --gid 64198 auton8 \
 
 WORKDIR /app
 COPY --from=build --chown=auton8:auton8 /app/publish ./
+COPY --chmod=0755 src/AutoNate.Web/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Runtime data: uploads, persisted plugins, public /files assets, per-plugin
 # scratch. Its content is the runtime's source of truth between restarts, so a
@@ -100,4 +101,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=4 \
     CMD ["/bin/sh", "-c", "curl -fsS http://127.0.0.1:8080/api/health/live || exit 1"]
 
 USER auton8
-ENTRYPOINT ["dotnet", "AutoNate.Web.dll"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
