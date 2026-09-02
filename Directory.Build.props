@@ -19,6 +19,21 @@
            down there; the rest run at default severity. -->
 
     <PropertyGroup>
+        <!-- Lock the resolved NuGet graph. Without this, `dotnet restore` is
+             free to resolve a different set of transitive versions tomorrow
+             than it did today, which makes "rebuild the tag and get the same
+             thing" untrue in a way nobody notices until it matters. CI restores
+             in locked mode, so a PackageReference change without a regenerated
+             lock file fails the build rather than drifting.
+
+             Regenerate after changing any PackageReference with
+             `make lockfiles`. The exact flags live in the Makefile, not here:
+             an XML comment cannot contain a double hyphen, which every one of
+             those flags starts with. -->
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    </PropertyGroup>
+
+    <PropertyGroup>
         <!-- Single source of the product version for every assembly under
              /src and /tests. 0.x: it runs and it is tested, but interfaces
              move and there is no upgrade-compatibility promise between 0.x

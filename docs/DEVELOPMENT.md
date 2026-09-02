@@ -122,6 +122,31 @@ cd infra && docker compose -p infra up -d postgres nats nats-init redis   # test
 dotnet test AutoNate.sln                       # ~8 min; integration tests hit the compose services
 ```
 
+### Pinned build inputs
+
+Every container image is pinned by content digest and every project's NuGet graph
+is locked, so rebuilding a commit resolves what it resolved the first time. Both
+have a refresh path — pinning without one just makes upgrades painful:
+
+```bash
+make lockfiles          # after changing any PackageReference
+```
+
+CI restores in locked mode, so a changed `PackageReference` without a regenerated
+lock file fails the build rather than quietly resolving a different graph.
+
+To move an image, resolve the new digest and replace it, keeping the tag as the
+trailing comment:
+
+```bash
+docker buildx imagetools inspect postgres:16-alpine | awk '/^Digest:/{print $2; exit}'
+```
+
+`PinnedImageTests` fails if any image reference loses its digest. One pin is
+load-bearing beyond reproducibility: `infra/flowable/Dockerfile` must move
+together with `<flowable.version>` in `flowable-extension/pom.xml`, or a compiled
+extension ends up on an engine it was not built for.
+
 Planning and issue workflow are managed with n8SDLC — GitHub Issues and milestones are the plan, `.n8/` holds config, the decision log and harvested audit checklists.
 
 ## First administrator

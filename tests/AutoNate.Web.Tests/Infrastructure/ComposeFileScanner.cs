@@ -70,8 +70,10 @@ internal static class ComposeFileScanner
             || relative.Contains("/obj/", StringComparison.Ordinal)
             || relative.Contains("/target/", StringComparison.Ordinal)
             || relative.Contains("/.git/", StringComparison.Ordinal)
-            // The scanner's own fixtures are deliberately non-compliant.
-            || relative.Contains("ComposeFixtures/", StringComparison.Ordinal);
+            // Test fixtures are deliberately non-compliant. Matched by the
+            // directory-name convention rather than by listing each one, so
+            // adding a fixture directory cannot silently re-break this.
+            || relative.Contains("Fixtures/", StringComparison.Ordinal);
     }
 
     /// <summary>

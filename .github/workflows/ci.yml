@@ -159,8 +159,12 @@ jobs:
           name: spa-dist
           path: src/AutoNate.Web/wwwroot
 
+      # Locked mode: the committed packages.lock.json files are the contract.
+      # A PackageReference changed without regenerating them fails here rather
+      # than resolving a different transitive graph than the one that was
+      # reviewed. Regenerate with `make lockfiles`.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore --locked-mode
 
       # Deliberately not `-warnaserror`: the tree currently carries a handful
       # of analyzer warnings (CA1512, S6667) in code this workflow does not

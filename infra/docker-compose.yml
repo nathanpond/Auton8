@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685  # postgres:16-alpine
     container_name: autonate-postgres
     environment:
       POSTGRES_USER: ${AUTONATE_POSTGRES_USER:-autonate}
@@ -62,7 +62,7 @@ services:
       start_period: 30s
 
   flowable-dapr:
-    image: daprio/daprd:1.17.5
+    image: daprio/daprd@sha256:c758db3b1ea2ba04528c4636c199405d1abe76ffe2877134b3262183dcf4ee2c  # daprio/daprd:1.17.5
     container_name: autonate-flowable-dapr
     command:
       - ./daprd
@@ -104,7 +104,7 @@ services:
       - ./mounts/flowable-dapr/components:/components:ro
 
   redis:
-    image: redis:7.4-alpine
+    image: redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf  # redis:7.4-alpine
     container_name: autonate-redis
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -118,7 +118,7 @@ services:
       retries: 10
 
   nats:
-    image: nats:2.12-alpine
+    image: nats@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6  # nats:2.12-alpine
     container_name: autonate-nats
     command:
       - --jetstream
@@ -145,7 +145,7 @@ services:
       retries: 12
 
   nats-init:
-    image: natsio/nats-box:0.16.0
+    image: natsio/nats-box@sha256:4b4fb1128c3ba46180d4510aaf2ca792c3fa997e4968a7bc9062f9554fbdb8b4  # natsio/nats-box:0.16.0
     container_name: autonate-nats-init
     depends_on:
       nats:
@@ -155,14 +155,14 @@ services:
       - ./scripts/bootstrap-jetstream.sh:/scripts/bootstrap-jetstream.sh:ro
 
   dapr-placement:
-    image: daprio/placement:1.17.5
+    image: daprio/placement@sha256:4c4b609cb0a0c0488361348eb1c4e869338c39390ee3010d727e59f6d561d544  # daprio/placement:1.17.5
     container_name: autonate-dapr-placement
     command: ["./placement", "--port", "50006"]
     ports:
       - "127.0.0.1:50006:50006"
 
   dapr-scheduler:
-    image: daprio/scheduler:1.17.5
+    image: daprio/scheduler@sha256:946f1912993355622042e174129192f199b9bf5d72a24c1e36b30e250e1a4603  # daprio/scheduler:1.17.5
     container_name: autonate-dapr-scheduler
     command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
     ports:
@@ -235,7 +235,7 @@ services:
       start_period: 20s
 
   dapr-dashboard:
-    image: daprio/dashboard:0.15.0
+    image: daprio/dashboard@sha256:4be696707bd1349b49875f8e6da0d27dad742834483740d5a7897a73abeaf83d  # daprio/dashboard:0.15.0
     container_name: autonate-dapr-dashboard
     command:
       - --docker-compose=true

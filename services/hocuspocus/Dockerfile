@@ -1,6 +1,6 @@
 # Multi-stage build. Mirrors infra/flowable/Dockerfile's pattern: a build
 # stage with the toolchain, a runtime stage with only the artifacts.
-FROM node:24-alpine AS build
+FROM node@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build  # node:24-alpine
 
 WORKDIR /src
 
@@ -13,7 +13,7 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npx tsc
 
-FROM node:24-alpine AS runtime
+FROM node@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS runtime  # node:24-alpine
 
 WORKDIR /app
 

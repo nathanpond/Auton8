@@ -8,6 +8,14 @@
          silently across AssemblyLoadContexts). -->
 
     <PropertyGroup>
+        <!-- Set here rather than inherited: this file does NOT chain to the
+             repo-root Directory.Build.props. MSBuild stops at the nearest one
+             it finds, so nothing from the root applies under /plugins (see
+             issue #120 — the root file's comment claims otherwise and is
+             wrong). Locking the graph here keeps /plugins from being the one
+             unlocked island in the repository. -->
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>

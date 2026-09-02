@@ -15,12 +15,22 @@ SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
 FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
-.PHONY: preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+.PHONY: lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
 
 # Verify the documented prerequisites and port availability before anything
 # tries to start. Reports every problem in one pass so a machine is fixed once,
 # rather than once per missing tool. Required versions live in
 # infra/prerequisites; ports are derived from the compose file.
+# Regenerate every packages.lock.json after changing a PackageReference.
+# CI restores in locked mode, so a changed reference without a regenerated lock
+# file fails the build rather than silently resolving something new.
+# The plugin projects are listed separately because plugins/Directory.Build.props
+# does not chain to the root one and they are not in the solution (see #120).
+lockfiles:
+	dotnet restore AutoNate.sln --force-evaluate
+	dotnet restore plugins/HelloPlugin --force-evaluate
+	dotnet restore plugins/Auditor --force-evaluate
+
 preflight:
 	./infra/preflight.sh
 

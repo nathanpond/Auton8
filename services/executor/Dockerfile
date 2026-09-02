@@ -2,7 +2,7 @@
 # stage carries python3 + make + g++ because isolated-vm needs a native
 # build step at install time even in the runtime image (when npm rebuilds
 # the prebuilt artifacts for the local arch).
-FROM node:24-alpine AS build
+FROM node@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build  # node:24-alpine
 
 WORKDIR /src
 
@@ -29,7 +29,7 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npx tsc
 
-FROM node:24-alpine AS runtime
+FROM node@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS runtime  # node:24-alpine
 
 WORKDIR /app
 
