@@ -7,12 +7,24 @@ PostgreSQL, Flowable, Redis, or the Dapr control plane.
 
 ## First-time setup
 
-1. Install Docker Desktop.
-2. Install the Dapr CLI.
-3. Install the .NET 10 SDK and Node 24.
-4. Copy `.env.example` to `.env` if you want to override the default local
+1. Install the prerequisites. The authoritative list, with the minimum version
+   of each and how to install it, is [`infra/prerequisites`](../infra/prerequisites)
+   — deliberately one file rather than a version restated here, in the Makefile
+   and in the script, which is how three copies come to disagree.
+2. Run `make preflight`. It checks every prerequisite for presence *and*
+   version, and checks that the ports the stack publishes are free. It reports
+   everything wrong in one pass, so a machine is fixed once rather than once per
+   missing tool:
+
+   ```bash
+   make preflight
+   ```
+
+   `make infra-up`, `make infra-ensure` and `make app` all run it first and
+   refuse to start if it fails, so you do not have to remember it.
+3. Copy `.env.example` to `.env` if you want to override the default local
    ports or PostgreSQL credentials.
-5. Set a first administrator before the first run — see
+4. Set a first administrator before the first run — see
    [First administrator](#first-administrator) below. Nothing is seeded, so
    without this there is no account to sign in with.
 

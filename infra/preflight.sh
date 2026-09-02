@@ -59,8 +59,15 @@ version_ge() {
 }
 
 first_version() {
-    # First dotted number in the input, e.g. "Docker version 27.3.1, build ..." -> 27.3.1
-    sed -n 's/.*[^0-9]\([0-9][0-9]*\.[0-9][0-9]*\(\.[0-9][0-9]*\)*\).*/\1/p' | head -n1
+    # FIRST dotted number in the input. Greedy matching grabs the wrong one on
+    # every tool here: "Docker version 25.0.3, build 4debf41" yields the build
+    # hash, "v2.24.5-desktop.1" yields "24.5", and dapr prints two versions on
+    # two lines. awk's match() is leftmost, which is the one we want.
+    awk '{
+        if (match($0, /[0-9]+\.[0-9]+(\.[0-9]+)?/)) {
+            print substr($0, RSTART, RLENGTH); exit
+        }
+    }'
 }
 
 echo "Auton8 preflight"
@@ -132,24 +139,29 @@ echo "Ports (from $(basename "$COMPOSE_FILE"))"
 if [ ! -f "$COMPOSE_FILE" ]; then
     fail "compose file not found at $COMPOSE_FILE"
 else
-    PORTS=$(awk -v want_profiles=" $PROFILES " '
-        # Track the current service, whether it declares profiles, and its ports.
+    # Services this stack already has running. Their ports being bound is
+    # expected, not a conflict — `make infra-ensure` exists precisely to be
+    # re-runnable against a stack that is already up, and reporting our own
+    # Postgres as a collision would make it refuse every time after the first.
+    RUNNING=$(docker compose -f "$COMPOSE_FILE" ps --services --status running 2>/dev/null || true)
+
+    PORT_LIST=$(mktemp)
+    awk -v want_profiles=" $PROFILES " '
         /^services:/ { in_services = 1; next }
         !in_services { next }
         /^[^[:space:]]/ { in_services = 0; next }
 
-        # A service key is exactly two spaces of indent.
         /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
             service = $1; sub(/:$/, "", service)
+            gated[service] = 0; started[service] = 1
             in_ports = 0; in_profiles = 0
-            profile_ok[service] = 1          # no profile block == always started
             next
         }
 
-        /^    profiles:/ { in_profiles = 1; in_ports = 0; profile_ok[service] = 0; next }
+        /^    profiles:/ { in_profiles = 1; in_ports = 0; gated[service] = 1; started[service] = 0; next }
         in_profiles && /^      - / {
             p = $2
-            if (index(want_profiles, " " p " ") > 0) profile_ok[service] = 1
+            if (index(want_profiles, " " p " ") > 0) started[service] = 1
             next
         }
         in_profiles && /^    [A-Za-z]/ { in_profiles = 0 }
@@ -157,90 +169,65 @@ else
         /^    ports:/ { in_ports = 1; next }
         in_ports && /^      - / {
             line = $0
-            gsub(/^[[:space:]]*-[[:space:]]*/, "", line)
-            gsub(/"/, "", line); gsub(/'\''/, "", line)
-            # Host port is the field before the final colon-separated container
-            # port. Strip ${VAR:-default} first, keeping the default.
+            sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+            gsub(/"/, "", line); gsub(/\047/, "", line)
             while (match(line, /\$\{[^}]*\}/)) {
                 token = substr(line, RSTART, RLENGTH)
                 dflt = token
                 sub(/^\$\{[^:]*:-/, "", dflt); sub(/\}$/, "", dflt)
-                if (dflt == token) dflt = ""      # ${VAR} with no default
+                if (dflt == token) dflt = ""
                 line = substr(line, 1, RSTART - 1) dflt substr(line, RSTART + RLENGTH)
             }
             n = split(line, parts, ":")
             if (n >= 2) {
                 host = parts[n - 1]
-                if (host ~ /^[0-9]+$/) print service "|" host
+                if (host ~ /^[0-9]+$/) ports[service] = ports[service] " " host
             }
             next
         }
         in_ports && /^    [A-Za-z]/ { in_ports = 0 }
-        END { }
-    ' "$COMPOSE_FILE" | while IFS='|' read -r svc port; do
-        echo "$svc|$port"
-    done)
 
-    # Re-filter by profile in the shell: awk cannot easily emit its profile map.
-    ACTIVE=$(awk -v want_profiles=" $PROFILES " '
-        /^services:/ { in_services = 1; next }
-        !in_services { next }
-        /^[^[:space:]]/ { in_services = 0; next }
-        /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
-            service = $1; sub(/:$/, "", service); active[service] = 1; in_profiles = 0; next
+        END {
+            for (s in ports) {
+                if (!started[s]) continue
+                n = split(ports[s], list, " ")
+                for (i = 1; i <= n; i++) if (list[i] != "") print s "|" list[i]
+            }
         }
-        /^    profiles:/ { in_profiles = 1; active[service] = 0; next }
-        in_profiles && /^      - / {
-            p = $2
-            if (index(want_profiles, " " p " ") > 0) active[service] = 1
-            next
-        }
-        in_profiles && /^    [A-Za-z]/ { in_profiles = 0 }
-        END { for (s in active) if (active[s]) print s }
-    ' "$COMPOSE_FILE")
+    ' "$COMPOSE_FILE" | sort > "$PORT_LIST"
 
-    CHECKED=0
-    echo "$PORTS" | while IFS='|' read -r svc port; do
+    if [ ! -s "$PORT_LIST" ]; then
+        fail "no published ports were found in $COMPOSE_FILE — the port check would pass vacuously, which is worse than not running it"
+    fi
+
+    # Read in this shell, not a pipeline: a `while read` on the right of a pipe
+    # runs in a subshell and its FAILURES increments are lost on exit.
+    while IFS='|' read -r svc port; do
         [ -n "$port" ] || continue
+
         case "
-$ACTIVE
+$RUNNING
 " in
             *"
 $svc
-"*) ;;
-            *) continue ;;
+"*)
+                printf '  %-16s %-6s in use by this stack (already running)\n' "$svc" "$port"
+                continue
+                ;;
         esac
-        CHECKED=$((CHECKED + 1))
+
         if port_in_use "$port"; then
             holder=$(port_holder "$port")
-            if [ -n "$holder" ]; then
-                printf '  %-16s %-6s IN USE by %s\n' "$svc" "$port" "$holder"
-                echo "$svc: port $port already in use by '$holder'
-    remedy: stop it, or remap the port in infra/docker-compose.override.yml" >> "$SCRIPT_DIR/.preflight-port-failures"
-            else
-                printf '  %-16s %-6s IN USE\n' "$svc" "$port"
-                echo "$svc: port $port already in use
-    remedy: stop it, or remap the port in infra/docker-compose.override.yml" >> "$SCRIPT_DIR/.preflight-port-failures"
-            fi
+            [ -n "$holder" ] || holder="an unidentified process"
+            printf '  %-16s %-6s IN USE by %s\n' "$svc" "$port" "$holder"
+            fail "$svc: port $port is already in use by '$holder'
+    remedy: stop it, or remap the port in infra/docker-compose.override.yml"
         else
             printf '  %-16s %-6s free\n' "$svc" "$port"
         fi
-    done
-fi
+    done < "$PORT_LIST"
 
-# The port loop runs in a subshell (pipeline), so its failures come back
-# through a file rather than through FAILURES.
-PORT_FAIL_FILE="$SCRIPT_DIR/.preflight-port-failures"
-if [ -f "$PORT_FAIL_FILE" ]; then
-    while IFS= read -r line; do
-        case "$line" in
-            "    remedy: "*) FAILURE_TEXT="${FAILURE_TEXT}${line}
-" ;;
-            *) FAILURES=$((FAILURES + 1)); FAILURE_TEXT="${FAILURE_TEXT}${line}
-" ;;
-        esac
-    done < "$PORT_FAIL_FILE"
-    rm -f "$PORT_FAIL_FILE"
+    rm -f "$PORT_LIST"
 fi
 
 echo ""

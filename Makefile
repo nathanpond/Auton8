@@ -15,7 +15,14 @@ SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
 FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
-.PHONY: infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+.PHONY: preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+
+# Verify the documented prerequisites and port availability before anything
+# tries to start. Reports every problem in one pass so a machine is fixed once,
+# rather than once per missing tool. Required versions live in
+# infra/prerequisites; ports are derived from the compose file.
+preflight:
+	./infra/preflight.sh
 
 infra-prepare:
 	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
@@ -27,7 +34,7 @@ infra-prepare:
 	sed 's|nats://localhost:4222|nats://host.docker.internal:4222|' ./infra/dapr/components/pubsub.yaml > $(FLOWABLE_DAPR_COMPONENTS)/pubsub.yaml
 	./infra/ensure-nats-stream.sh
 
-infra-ensure:
+infra-ensure: preflight
 	./infra/ensure-up.sh
 
 rider-sidecar: infra-ensure
@@ -42,10 +49,11 @@ rider-sidecar-stop:
 rider-sidecar-restart: infra-ensure
 	./infra/restart-autonate-web-sidecar.sh
 
-infra-up: infra-prepare
+infra-up: preflight infra-prepare
 	$(COMPOSE) up -d
 
 infra-up-dashboard: infra-prepare
+	./infra/preflight.sh --profile dashboard
 	$(COMPOSE) --profile dashboard up -d
 
 infra-down:
