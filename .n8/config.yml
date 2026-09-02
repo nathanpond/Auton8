@@ -20,7 +20,12 @@ deployment:
 ci:
   provider: github-actions
   on_pr: [spa-lint, spa-typecheck, spa-build, backend-tests, e2e]
-  release: not yet automated — no deployment pipeline in v1.0 scope
+  release: >-
+    A `v*` tag publishes four multi-arch images (autonate-web, hocuspocus,
+    executor, flowable) to GHCR with SLSA build provenance, and attaches a
+    digest-pinned compose file plus quickstart to the GitHub release
+    (planned in M0, #56/#58). Still no *deployment* pipeline in v1.0 scope —
+    nothing is deployed anywhere; a release is an artifact others run.
   notes: >-
     E2E runs 155 of 163 specs; the 8 excluded need Flowable and Dapr, which the
     runner does not host. The owner did NOT select closing that gap as part of

@@ -127,3 +127,27 @@ Ad-hoc entries (changes that deviate from what planned issues assume — differe
 - **Decision:** All 20 pre-existing open issues assigned to milestones rather than left in a backlog — the four `sev:high` hot paths pulled into the milestone whose surface they sit under, the three spikes placed where their answer is needed (schema-init → M0, executions → M3, dependency surface → Post-1.0), and the low-severity remainder swept into M7.
   **Why:** The `/n8-map` pass filed this debt so it would compete with features for milestones. Leaving it unassigned would have made it invisible to planning.
 - **Note:** `context7` is `installed` in config but its tools were not available this session, so no library choices were verified against current documentation. The consequential one is the .NET SAML library — left explicitly open for `/n8-plan M2`.
+
+## /n8-plan M0 — 2026-09-02
+
+- **Decision:** The container path is added *alongside* the host-run dev loop, not instead of it. `make app` stays the inner loop; a new `app` compose profile runs the whole product with Docker as the only prerequisite (#55, #57).
+  **Why:** The two audiences have opposite needs — a developer wants fast rebuilds and a Rider debugger attached to the process, a user wants one command. Collapsing to the container path alone would have forced every developer through an image rebuild; collapsing to the host path alone leaves v1.0 requiring the .NET SDK, Node and the Dapr CLI on the target machine, which is the barrier M0 exists to remove.
+  **Issue:** #36
+- **Decision:** A release publishes multi-architecture container images to GHCR on a `v*` tag (linux/amd64 + linux/arm64), with a digest-pinned compose file and quickstart attached as release assets (#56, #58). Not self-contained binaries.
+  **Why:** The stack is nine services; a binary still leaves the consumer assembling the rest. One compose file pinned by digest is the whole install. arm64 is included so the owner runs locally what is actually published rather than testing under emulation.
+  **Affects:** This narrowly extends the roadmap's recorded "no deployment pipeline in v1.0" decision. Publishing a release artifact is not deploying anything, and it was chosen deliberately — but a future reader comparing the two entries should read them together. `.n8/config.yml:ci.release` ("not yet automated") is now stale and is corrected by #56.
+  **Issue:** #56
+- **Decision:** "Verifiable — same input, same output" means pinned inputs plus SLSA build provenance, not byte-identical rebuilds. Digest-pinned base images, locked `dotnet restore`, `npm ci` only, and `actions/attest-build-provenance` on every published image (#52, #56).
+  **Why:** Byte-reproducible .NET and npm builds are a research project that becomes a recurring source of red builds. Provenance answers the question a consumer actually has — did this image come from that repository at that commit — and pinning answers the maintainer's, which is whether a rebuild resolves the same graph.
+  **Issue:** #52
+- **Decision:** Spike #24 resolved without a prototype: advisory lock plus a `schema_versions` ledger, keeping the existing idempotent SQL. Not EF Core migrations.
+  **Why:** The EF port is 4,127 lines of hand-written DDL plus ~20 one-shot data migrations, plus the problem of adopting existing 0.1 installs into a migration history — a milestone of its own, spent on a mechanism the project does not need yet. `dotnet-ef` stays pinned; the ledger makes a later move easier rather than harder. Follow-ups #51, #53, #54, #60.
+  **Issue:** #24
+- **Decision:** v1.0 makes **no** upgrade promise — a 1.0 install is a fresh database, and 0.1 → 1.0 is unsupported. Clean upgrade paths begin after 1.0. The `schema_versions` ledger ships in 1.0 anyway.
+  **Why:** Owner's call. The ledger is what makes post-1.0 upgrades possible at all — 1.1 can only know what a 1.0 database holds if 1.0 recorded it. Shipping the mechanism without promising the outcome is the cheap half.
+  **Affects:** The v0.1.0 release notes tell people how to upgrade an existing install; that guidance does not survive into 1.0. #59 states the reversal in the wiki, `docs/DEPLOYMENT.md` and the release notes.
+  **Issue:** #53, #59
+- **Decision:** A fifth project invariant added to CLAUDE.md — every published port in a shipped compose file binds to loopback, with documented per-port exceptions allowed.
+  **Why:** All ports are compliant today and nothing enforces it; the next service added will be written with a bare `"8080:8080"` because that is what every compose example looks like. The exception clause exists because a future Keycloak instance may legitimately need to sit outside the compose network to mimic a real IdP configuration — the requirement is that such a choice is written down next to the port, not that it is forbidden. Guard: #50.
+  **Issue:** #50
+- **Note:** #50's guard test discovers compose files by glob, and #52's floating-tag guard does the same. Both assert their discovery is non-empty — a glob matching nothing would make every other assertion in them vacuously true, which is the failure mode that makes an infrastructure guard worse than no guard.

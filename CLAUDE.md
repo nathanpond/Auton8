@@ -76,6 +76,13 @@ invariant is a user decision — log it as an `## Ad-hoc` entry in
    schema and database names, and the plugin ABI type names. Renaming any of
    them destroys existing data. See the Naming section above for the list.
    *(honor-system — a guard test is planned in the CI milestone)*
+5. **Every published port in a shipped compose file binds to loopback.** The
+   stack ships known credentials and an unauthenticated NATS, so a `0.0.0.0`
+   bind puts a writable database on whatever network the machine is attached
+   to. A service that deliberately mimics an out-of-network dependency — a
+   Keycloak instance standing in for a real IdP, say — may be excepted, but the
+   exception carries a written reason next to the port it applies to, so it is
+   impossible to make silently. *(guard: #50 — test-enforced once that lands)*
 
 Two more guards exist and should not be weakened, though they are not on the
 list above: the jsx-a11y error gate in `npm run lint`, and
