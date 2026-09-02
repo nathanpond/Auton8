@@ -232,3 +232,36 @@ Ad-hoc entries (changes that deviate from what planned issues assume — differe
   **Affects:** All four are blocked by #103 and each carries an explicit instruction to close unimplemented, with the reason recorded, if the inventory clears its elements. Epic #40 gained the matching "each child implemented or closed with the reason it will not be" criterion so that is a correct outcome rather than an abandoned story.
 - **Note:** Two elements were deliberately not given stories. `bpmn:ComplexGateway` is removed by #107 rather than implemented. Conditional event definitions have version-dependent engine support, so #103 establishes the facts before anyone writes a story against them.
 - **Note:** M3 was planned in one pass rather than deferring the implementation stories until #103 closes, at the owner's request. The inventory's role is therefore confirmation rather than discovery: the expectations were formed from enumerating the studio palette in `src/AutoNate.Spa/src/lib/bpmn/workflow.js` and checking Flowable's documented constructs via context7. They are expectations, and #103 corrects them.
+
+## /n8-plan M3 (second pass) — 2026-09-02
+
+The owner challenged whether M3 was planned to the bar and was right: the first pass
+used **Claude's Discretion** as a place to put decisions that should have been asked
+about. That section is for what the user explicitly delegated; it had things in it
+the user had never seen — most plainly #113, which said the version-binding choice
+"is decided, documented and tested — not that it is one or the other", handing a
+product decision to the executor after the equivalent question had been *asked* for
+decision tables in #110. Seven decisions taken and applied:
+
+- **Decision:** Messages address a running instance by an **explicit correlation key** configured on the message element, not by record identity or instance id.
+  **Why:** Record correlation only covers processes started from a record, so anything else would need a second mechanism anyway; instance-id-only pushes the problem onto callers who know a business identifier and not an instance id. An explicit key is visible in the diagram, so an author can see why a message did or did not arrive.
+  **Issue:** #112
+- **Decision:** A correlation value matching more than one waiting instance **refuses**, reporting the count, and advances nothing. Broadcast is explicitly not a feature.
+  **Why:** A correlation key is meant to be unique among waiting instances. A multi-match means the model or the key is wrong, and delivering to an arbitrary or oldest instance hides that until it causes something worse.
+  **Issue:** #112
+- **Decision:** Sending a message is **API only** for v1.0 — no UI. An operator who needs to unstick a process uses the existing execution admin controls.
+  **Issue:** #112
+- **Decision:** Advancing a process from outside it is gated by a **new `EntityKind`**, grantable independently of execution-operator permissions, so an integration account can hold exactly that. Decision tables likewise get their own kind.
+  **Why:** Bundling a narrow integration capability with force-complete and bulk-delete would mean over-granting every integration.
+  **Issue:** #112, #110
+- **Decision:** Version binding is **pinned at deployment** for both call activities and decision tables. Republishing a child process or a table changes only newly deployed parents.
+  **Why:** A running process never changes behaviour underneath its owner. Consistent with how #110 versions tables. The cost — propagating a fix in a shared sub-process needs parents redeployed — is documented rather than discovered.
+  **Issue:** #113, #111
+- **Decision:** A behaviour's exception is catchable by an error boundary event **only when the behaviour declares a BPMN error code**. Undeclared exceptions stay unhandled failures, surfaced and retryable.
+  **Why:** Making every exception catchable routes "the database was briefly unreachable" down the "payment declined" branch. That is the hardest class of failure to diagnose, and the opt-in keeps infrastructure failures out of business error paths.
+  **Issue:** #114
+- **Decision:** No new **mutating** agent skills in M3. The assistant does not gain message-sending or decision-table authoring; that is M6's subject. Read-only exposure via the existing `Lookup*` pattern is optional, and a test asserts no mutating skill was added so the decision cannot be quietly reversed.
+  **Why:** M3 is about the capability; the assistant surface is a milestone of its own, and the permissions just designed for these mutations deserve a deliberate confirmation-flow conversation rather than an incidental one.
+  **Issue:** #112, #110
+- **Note:** Two things were settled as conventions rather than asked: new mutations emit audit events through the existing `add-audit-event` path (#112, #110), and a compensation handler sees the variable values in scope when its compensated activity completed, per the BPMN specification (#115) — with an explicit instruction to document the limitation if the engine does not preserve that snapshot.
+- **Note:** The first pass also missed the agent-skill surface entirely across all thirteen M3 issues, despite 30+ skills existing including `OperateWorkflowExecutionsSkill`. Found by the owner's challenge, not by the plan.
