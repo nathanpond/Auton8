@@ -88,6 +88,47 @@ public sealed class PinnedImageTests
         return sb.ToString();
     }
 
+    [Fact]
+    public void No_FROM_line_carries_a_trailing_comment()
+    {
+        // Docker does not treat `#` as a comment mid-line. `FROM x AS y # tag`
+        // parses as five tokens and fails the whole build with "FROM requires
+        // either one or three arguments".
+        //
+        // This guard exists because pinning by digest (#52) shipped exactly
+        // that mistake across three Dockerfiles: the tag was kept as a trailing
+        // comment for readability, and none of them could be built afterwards.
+        // It was invisible to `make infra-up`, which reported every service
+        // healthy — because the images were already built and cached, so
+        // nothing rebuilt. Keep the tag on its own line above the FROM.
+        var violations = new List<string>();
+
+        foreach (var dockerfile in ImageReferenceScanner.DiscoverDockerfiles())
+        {
+            var relative = Path.GetRelativePath(RepoRoot.Path, dockerfile)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            var lines = File.ReadAllLines(dockerfile);
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                if (!line.TrimStart().StartsWith("FROM ", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (line.Contains('#', StringComparison.Ordinal))
+                {
+                    violations.Add($"{relative}:{i + 1} {line.Trim()}");
+                }
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "A FROM line carries a trailing `#` comment. Docker will refuse to build the file:\n  "
+            + string.Join("\n  ", violations));
+    }
+
     // ── Failure path ────────────────────────────────────────────────────────
 
     [Fact]

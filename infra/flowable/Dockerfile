@@ -1,4 +1,5 @@
-FROM maven@sha256:3a4ab3276a087bf276f79cae96b1af04f53731bec53fb2e651aca79e4b10211e AS flowable-extension-build  # maven:3.9.9-eclipse-temurin-21
+# maven:3.9.9-eclipse-temurin-21
+FROM maven@sha256:3a4ab3276a087bf276f79cae96b1af04f53731bec53fb2e651aca79e4b10211e AS flowable-extension-build
 
 WORKDIR /src
 
@@ -17,7 +18,8 @@ RUN mvn --batch-mode test package
 #
 # Upgrading is deliberate: bump the digest here AND <flowable.version> in the pom
 # together, or they diverge again.
-FROM flowable/flowable-rest@sha256:708dfa32f27b93180bb6e7a30684d881d995fe257f5b8413e14b20a55c25672d  # flowable/flowable-rest:latest == 8.0.0
+# flowable/flowable-rest:latest == 8.0.0
+FROM flowable/flowable-rest@sha256:708dfa32f27b93180bb6e7a30684d881d995fe257f5b8413e14b20a55c25672d
 
 USER root
 
