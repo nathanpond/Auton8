@@ -155,3 +155,23 @@ Ad-hoc entries (changes that deviate from what planned issues assume — differe
   **Why:** Neither subject exists yet in the form the skill would document. #53 and #54 change `DatabaseSchemaInitializer`'s ledger step names and move the base schema to an embedded resource, which are the two things a schema-change skill turns on; the release process does not exist at all until #56 and #58. `/n8-skill`'s own standing rule is to fix a skill in the same commit as the change that invalidates it — a skill written ahead of the change is a drift bug filed in advance, which is exactly what #1, #2 and #3 are. Epic #36 gained an acceptance criterion so the two stories have an owner rather than being orphans.
   **Affects:** A third candidate — a skill for adding a service to the compose stack — was considered and not filed. After M0 a new service must be registered in the compose file, the digest pins, the release template's parity check, `.env.example` and the preflight port list, which is the shape of thing that gets missed; it is worth revisiting at `/n8-plan M1` once those five places actually exist.
   **Issue:** #63, #64
+
+## /n8-plan M1 — 2026-09-02
+
+- **Decision:** Coverage is a whole-repo line threshold, set from a measured run and blocking a PR that drops below it — not diff coverage, not report-only.
+  **Why:** It is the ratchet pattern this project already uses twice (`--max-warnings=110`, the a11y directory list): set from a measurement so it lands green, and it only moves one way. The known weakness is recorded in #71 rather than left to be rediscovered — on a 1,650-test suite a small untested file may not move the aggregate. Diff coverage is the tighter instrument and the natural next ratchet turn.
+  **Issue:** #71
+- **Decision:** Semgrep arrives advisory — SARIF into code scanning, no PR blocked — with triage as its own story.
+  **Why:** A new scanner's first pass on a codebase this size is mostly noise, and a noisy blocking gate gets disabled within a week. The epic's AC asks for findings triaged rather than merely enabled, so #70 exists to make that real; #66 records the baseline count so #70's size is known before it starts.
+  **Issue:** #66, #70
+- **Decision:** Sharding (#67) is sequenced before coverage (#71).
+  **Why:** Coverage has to merge across shards. Building the plumbing first means building it twice, the second time to un-build the first.
+- **Decision:** The a11y ratchet widens only to directories whose violations are lint-level fixes. The editor surfaces — notes, documents, assistant, shell, workflow studio — are out of scope and captured as #75.
+  **Why:** Those violations are `click-events-have-key-events` and `no-static-element-interactions` on pointer-driven editing UI. Fixing them means designing keyboard equivalents, which is interaction design with UX consequences, not a lint pass. Owner's call, taken explicitly.
+  **Issue:** #68, #75
+- **Change:** #5 (`/api/auth/check` N+1) moved from M1 to M2.
+  **Why:** It is a performance fix on the authorization surface, not CI work; #9 and #10 are the same class of finding and were already in M2. The roadmap sweep put it in M1 and nothing depended on that.
+- **Change:** #15's blocked E2E journeys were re-decomposed. Two of its facts were stale — 14 blocked rows, not 19, and `RecordsAdvancedTests.cs` now exists, so two spec files are missing rather than three. More importantly the proposed fix (create the missing spec files) was aimed at the wrong axis: reading the blocker column, the rows cluster by **fixture capability**, not by file, and one hook unblocks journeys across several files. Split into six capability stories (#76–#81), each filed against the milestone that owns the surface, plus three product gaps (#82–#84) that are not test work at all. #15 stays as the umbrella.
+  **Why:** A fixture hook for the BPMN canvas is cheapest to build while someone is already in the BPMN canvas, and M3 is a full-BPMN milestone that will be there anyway. Building all six from a CI milestone means reaching into four subsystems nobody is otherwise touching. And filing "test the share-revoke control" as a test story, when no revoke control exists, would have produced a permanently-blocked issue rather than a missing feature.
+  **Affects:** M3, M4, M5 and M6 each gained one or two `area:tests` stories before being planned. `/n8-plan` treats a milestone with stories assigned as planned, so those milestones must still be planned explicitly — `/n8-plan *` would skip them. They already carried pre-existing bug and performance issues from the roadmap sweep, so this is not a new condition, but it is worth stating.
+  **Issue:** #15

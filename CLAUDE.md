@@ -75,7 +75,7 @@ invariant is a user decision — log it as an `## Ad-hoc` entry in
    the `.docx` binding markers, the BPMN namespace and delegate expression, the
    schema and database names, and the plugin ABI type names. Renaming any of
    them destroys existing data. See the Naming section above for the list.
-   *(honor-system — a guard test is planned in the CI milestone)*
+   *(guard: #65 — test-enforced once that lands; honor-system until then)*
 5. **Every published port in a shipped compose file binds to loopback.** The
    stack ships known credentials and an unauthenticated NATS, so a `0.0.0.0`
    bind puts a writable database on whatever network the machine is attached
