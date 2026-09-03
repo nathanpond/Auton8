@@ -132,9 +132,17 @@ public sealed class BackendShardingWorkflowTests
     {
         var backend = Job("backend");
 
+        // The expensive half is skipped: no compilation in a shard.
         Assert.Contains("--no-build", backend, StringComparison.Ordinal);
         Assert.DoesNotContain("dotnet build", backend);
-        Assert.DoesNotContain("dotnet restore", backend);
+
+        // Restore, however, is required even with --no-build, and removing it
+        // is silent. obj/*.nuget.g.props imports each package's build assets
+        // from ~/.nuget/packages under Condition="Exists(...)", so an
+        // unrestored shard skips xunit.runner.visualstudio.props — the VSTest
+        // adapter — and `dotnet test` exits 0 having found nothing to run.
+        // Eight shards did precisely that.
+        Assert.Contains("dotnet restore --locked-mode", backend, StringComparison.Ordinal);
     }
 
     [Fact]
