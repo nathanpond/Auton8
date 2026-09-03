@@ -347,6 +347,36 @@ jobs:
           tar -xzf backend-build.tgz
           rm -f backend-build.tgz
 
+      - name: Probe variants (temporary, #67)
+        # `dotnet test --no-build` exits 0 in 13s with no output and no trx,
+        # while the identical invocation with --list-tests works in the
+        # discovery job. This isolates which argument is responsible.
+        if: matrix.shard.index == 0
+        run: |
+          run_variant() {
+            echo "───── $1 ─────"
+            shift
+            set +e
+            output=$( "$@" 2>&1 )
+            code=$?
+            set -e
+            echo "exit=$code  bytes=$(printf %s "$output" | wc -c)"
+            printf '%s\n' "$output" | head -15
+          }
+
+          run_variant "bare (no filter, no logger)" \
+            dotnet test tests/AutoNate.Web.Tests --no-build --list-tests
+          run_variant "logger only" \
+            dotnet test tests/AutoNate.Web.Tests --no-build --logger "trx;LogFileName=v2.trx" --results-directory "$PWD/v2" --filter "FullyQualifiedName~AutoNate.Web.Tests.ModelCatalogTests."
+          run_variant "short filter, no logger" \
+            dotnet test tests/AutoNate.Web.Tests --no-build --filter "FullyQualifiedName~AutoNate.Web.Tests.ModelCatalogTests."
+          run_variant "no filter at all, console logger" \
+            dotnet test tests/AutoNate.Web.Tests --no-build --logger "console;verbosity=minimal" --filter "FullyQualifiedName~ModelCatalogTests"
+          echo "───── artefacts ─────"
+          ls -la v2 2>&1 | head -5 || true
+          ls -la tests/AutoNate.Web.Tests/bin/Debug/net10.0/*.deps.json 2>&1 | head -3 || true
+          ls -d src/AutoNate.Web/bin/Debug/net10.0 2>&1 || true
+
       - name: Test
         id: test
         # `trx` rather than `console;verbosity=minimal`. The console logger
