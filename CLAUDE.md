@@ -54,10 +54,12 @@ This project is managed by the n8SDLC workflow (GitHub Issues = the plan; `/n8-s
 ### Project invariants
 
 Load-bearing constraints. No story may breach one without an explicit
-conversation; `/n8-exec` treats an apparent breach as a blocker, and
-`/n8-audit` checks the honor-system ones and hunts weakened guards. Amending an
-invariant is a user decision — log it as an `## Ad-hoc` entry in
-`.n8/decisions.md`.
+conversation; `/n8-exec` treats an apparent breach as a blocker. Every
+invariant below now has an executable guard, so `/n8-audit`'s job here is
+hunting guards that have been weakened or narrowed — a test still passing
+because it stopped checking is the failure to look for, not an unenforced
+constraint. Amending an invariant is a user decision — log it as an
+`## Ad-hoc` entry in `.n8/decisions.md`.
 
 1. **No credential ever ships in the repository.** Configuring nothing creates
    nothing — no default password, no seeded user. *(test-enforced:
@@ -85,9 +87,20 @@ invariant is a user decision — log it as an `## Ad-hoc` entry in
    impossible to make silently. *(test-enforced:
    `ComposeLoopbackBindingTests`)*
 
-Two more guards exist and should not be weakened, though they are not on the
-list above: the jsx-a11y error gate in `npm run lint`, and
-`RoleCreationRaceTests`, which pins that cluster-wide object creation never
-check-then-acts.
+Other guards exist and should not be weakened, though they are not invariants
+on the list above:
+
+- the jsx-a11y error gate in `npm run lint`, whose `--max-warnings` budget is a
+  ratchet set to the exact current count — raise coverage of it, never raise
+  the budget;
+- `RoleCreationRaceTests`, which pins that cluster-wide object creation never
+  check-then-acts;
+- the backend test-count reconciliation in `ci.yml`, which fails the build when
+  the shards do not run every discovered test — without it, a filter matching
+  nothing reads as a faster, greener build;
+- `COVERAGE_THRESHOLD` in `ci.yml`, a ratchet measured from a real run: raise
+  it when coverage rises, never lower it to make a build pass;
+- the Semgrep rule-count floor, which fails the scan when the rule packs do not
+  resolve rather than reporting a clean bill of health against zero rules.
 
 Whole-codebase audits run via `/n8-audit`; the AutoNate-specific checklists (security, authorization, performance + hot-path inventory, stability, cleanup, 508) live in `.n8/memory/audit-*.md` and replace the former `/audit` project skills.
