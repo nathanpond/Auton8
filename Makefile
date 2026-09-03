@@ -15,7 +15,24 @@ SCHEDULER_MOUNT := $(MOUNT_ROOT)/dapr-scheduler/data
 DAPR_DASHBOARD_COMPONENTS := $(MOUNT_ROOT)/dapr-dashboard/components
 FLOWABLE_DAPR_COMPONENTS := $(MOUNT_ROOT)/flowable-dapr/components
 
-.PHONY: infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+.PHONY: app-container app-container-down lockfiles preflight infra-prepare infra-ensure infra-up infra-up-dashboard infra-down infra-reset infra-logs infra-ps app app-dapr rider-sidecar rider-sidecar-status rider-sidecar-stop rider-sidecar-restart e2e e2e-install
+
+# Verify the documented prerequisites and port availability before anything
+# tries to start. Reports every problem in one pass so a machine is fixed once,
+# rather than once per missing tool. Required versions live in
+# infra/prerequisites; ports are derived from the compose file.
+# Regenerate every packages.lock.json after changing a PackageReference.
+# CI restores in locked mode, so a changed reference without a regenerated lock
+# file fails the build rather than silently resolving something new.
+# The plugin projects are listed separately because plugins/Directory.Build.props
+# does not chain to the root one and they are not in the solution (see #120).
+lockfiles:
+	dotnet restore AutoNate.sln --force-evaluate
+	dotnet restore plugins/HelloPlugin --force-evaluate
+	dotnet restore plugins/Auditor --force-evaluate
+
+preflight:
+	./infra/preflight.sh
 
 infra-prepare:
 	mkdir -p $(POSTGRES_MOUNT) $(REDIS_MOUNT) $(NATS_MOUNT) $(SCHEDULER_MOUNT) $(DAPR_DASHBOARD_COMPONENTS) $(FLOWABLE_DAPR_COMPONENTS) $(MOUNT_ROOT)/flowable $(MOUNT_ROOT)/dapr-placement
@@ -27,7 +44,7 @@ infra-prepare:
 	sed 's|nats://localhost:4222|nats://host.docker.internal:4222|' ./infra/dapr/components/pubsub.yaml > $(FLOWABLE_DAPR_COMPONENTS)/pubsub.yaml
 	./infra/ensure-nats-stream.sh
 
-infra-ensure:
+infra-ensure: preflight
 	./infra/ensure-up.sh
 
 rider-sidecar: infra-ensure
@@ -42,10 +59,11 @@ rider-sidecar-stop:
 rider-sidecar-restart: infra-ensure
 	./infra/restart-autonate-web-sidecar.sh
 
-infra-up: infra-prepare
+infra-up: preflight infra-prepare
 	$(COMPOSE) up -d
 
 infra-up-dashboard: infra-prepare
+	./infra/preflight.sh --profile dashboard
 	$(COMPOSE) --profile dashboard up -d
 
 infra-down:
@@ -67,6 +85,38 @@ infra-logs:
 
 infra-ps:
 	$(COMPOSE) ps
+
+# Run the whole product as containers: Docker is the only prerequisite.
+#
+# Both compose files are needed. The app services live in the main file behind
+# the `app` profile; docker-compose.app.yml rewires flowable's and hocuspocus's
+# callbacks to reach the app over the compose network instead of at
+# host.docker.internal, which is only correct when the app is a host process.
+app-container: preflight infra-prepare
+	# The tracked component files address localhost, which is right for the
+	# host-run sidecar: the services publish their ports on the host. This
+	# sidecar shares the app CONTAINER's network namespace, where localhost is
+	# the app itself — so every service address has to become its compose
+	# service name. Missing one is not a warning: daprd exits with
+	# INIT_COMPONENT_FAILURE and takes the app down with it, because the app
+	# refuses to run without a sidecar.
+	#
+	# Streamed from the source files rather than edited in place, so this is
+	# idempotent — `sed -i` silently no-ops on a second run and leaves a .bak
+	# behind, the same trap infra-prepare documents.
+	mkdir -p $(MOUNT_ROOT)/autonate-web-dapr/components
+	sed -e 's|nats://localhost:4222|nats://nats:4222|' -e 's|localhost:6379|redis:6379|' \
+		./infra/dapr/components/pubsub.yaml > $(MOUNT_ROOT)/autonate-web-dapr/components/pubsub.yaml
+	sed -e 's|nats://localhost:4222|nats://nats:4222|' -e 's|localhost:6379|redis:6379|' \
+		./infra/dapr/components/statestore.yaml > $(MOUNT_ROOT)/autonate-web-dapr/components/statestore.yaml
+	$(COMPOSE) -f infra/docker-compose.app.yml --profile app up -d --build
+
+# Stop ONLY the app containers. `compose --profile app down` would tear down
+# the entire project — every supporting service with it — which is not what
+# "stop the app" means to anyone typing this, and cost a full stack restart
+# the first time it was used.
+app-container-down:
+	$(COMPOSE) -f infra/docker-compose.app.yml rm -sf autonate-web autonate-web-dapr
 
 app: app-dapr
 

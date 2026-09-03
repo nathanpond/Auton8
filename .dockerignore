@@ -1,25 +1,20 @@
-﻿**/.dockerignore
-**/.env
-**/.git
-**/.gitignore
-**/.project
-**/.settings
-**/.toolstarget
-**/.vs
-**/.vscode
-**/.idea
-**/*.*proj.user
-**/*.dbmdl
-**/*.jfm
-**/azds.yaml
-**/bin
-**/charts
-**/docker-compose*
-**/Dockerfile*
+# Keep the build context small and deterministic. Without this, `docker build`
+# uploads node_modules (hundreds of MB), every bin/ and obj/, and the
+# bind-mounted Postgres data under infra/mounts — which is both slow and a way
+# for local state to end up inside an image.
 **/node_modules
-**/npm-debug.log
+**/bin
 **/obj
-**/secrets.dev.yaml
-**/values.dev.yaml
-LICENSE
-README.md
+**/dist
+**/.vite
+infra/mounts
+temp
+.git
+.github
+.idea
+.vs
+docs
+plugins/*/dist
+tests
+**/*.user
+**/.DS_Store

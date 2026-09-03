@@ -1,0 +1,266 @@
+name: Release
+
+# A pushed `v*` tag is the whole act of cutting a release: it builds and
+# publishes every image the stack needs, attests their provenance, and (in
+# #58) attaches the artifacts a consumer actually runs.
+#
+# Publishing only — nothing is deployed anywhere. The roadmap's "no deployment
+# pipeline in v1.0" decision stands; a release artifact is something others
+# run, not something we run for them.
+on:
+  push:
+    tags:
+      - "v*"
+
+# Never cancel a release in flight. This is deliberately the opposite of
+# ci.yml, where a superseded PR build is waste — here a half-published set of
+# images is worse than a slow one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Read-only by default; each job raises only what it needs.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  validate:
+    name: Validate the tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail before anything is pushed. A tag that disagrees with the product
+      # version publishes images labelled with a version the code does not
+      # claim, and that is not fixable after the fact — a digest is immutable
+      # and the tag has already been consumed.
+      - name: Tag must match Directory.Build.props
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          base="${tag%%-*}"            # strip any -rc0 / -beta.1 suffix
+          props=$(grep -oE '<Version>[^<]+</Version>' Directory.Build.props \
+                  | head -1 | sed -E 's|</?Version>||g')
+
+          printf 'tag=%s base=%s Directory.Build.props=%s\n' "$tag" "$base" "$props"
+
+          if [ "$base" != "$props" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME resolves to $base, but Directory.Build.props says $props. Bump one to match the other." >&2
+            exit 1
+          fi
+
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish ${{ matrix.image }}
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      autonate-web: ${{ steps.digest.outputs.autonate-web }}
+      hocuspocus: ${{ steps.digest.outputs.hocuspocus }}
+      executor: ${{ steps.digest.outputs.executor }}
+      flowable: ${{ steps.digest.outputs.flowable }}
+    permissions:
+      contents: read
+      packages: write        # GHCR push
+      id-token: write        # provenance signing
+      attestations: write    # attestation upload
+    strategy:
+      # One image failing must not cancel the others — a partial set is easier
+      # to finish than to work out.
+      fail-fast: false
+      matrix:
+        include:
+          - image: autonate-web
+            context: .
+            dockerfile: src/AutoNate.Web/Dockerfile
+          - image: hocuspocus
+            context: services/hocuspocus
+            dockerfile: services/hocuspocus/Dockerfile
+          - image: executor
+            context: services/executor
+            dockerfile: services/executor/Dockerfile
+          - image: flowable
+            context: .
+            dockerfile: infra/flowable/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      # OCI repository names must be lowercase and this repository is
+      # `nathanpond/Auton8`. docker/metadata-action lowercases silently, so the
+      # push works while anything using the raw ${{ github.repository }}
+      # fails — which is precisely what happened to the verify step on the
+      # first release run: four images published successfully and four
+      # verifications failed with "repository name must be lowercase".
+      - name: Lowercase the image base
+        id: base
+        run: echo "image=${REGISTRY}/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+
+      # arm64 is built under emulation. Both platforms matter: most
+      # self-hosters are amd64, and the maintainer runs Apple Silicon — so
+      # publishing amd64 alone would mean never running locally what ships.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.base.outputs.image }}
+          # The exact version and nothing else. No `latest`, no floating major
+          # or minor: a 0.x project makes no upgrade-compatibility promise, so
+          # a moving tag would let a routine `docker compose pull` carry an
+          # unpinned deployment across a breaking change. The release compose
+          # file pins by digest for the same reason.
+          tags: |
+            type=raw,value=${{ needs.validate.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=Auton8 ${{ matrix.image }}
+            org.opencontainers.image.version=${{ needs.validate.outputs.version }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Scoped per image: four images sharing one cache scope evict each
+          # other and the cache does nothing.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Attest provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.base.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      # Verified in the same run. An attestation that does not verify is worth
+      # less than none, because it invites trust it cannot support — and
+      # finding that out from a user is the wrong way round.
+      - name: Verify the attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh attestation verify \
+            "oci://${{ steps.base.outputs.image }}@${{ steps.build.outputs.digest }}" \
+            --repo "$GITHUB_REPOSITORY"
+
+      - name: Report
+        run: |
+          # printf, not a heredoc: heredocs in workflow run blocks mangle
+          # backticks, the same failure mode recorded for `gh --body`.
+          printf '%s\n' \
+            "### ${{ matrix.image }}" \
+            "" \
+            "- reference: \`${{ steps.base.outputs.image }}:${{ needs.validate.outputs.version }}\`" \
+            "- digest: \`${{ steps.build.outputs.digest }}\`" \
+            "- platforms: linux/amd64, linux/arm64" \
+            "" \
+            "Verify:" \
+            "" \
+            "\`\`\`" \
+            "gh attestation verify oci://${{ steps.base.outputs.image }}@${{ steps.build.outputs.digest }} --repo ${GITHUB_REPOSITORY}" \
+            "\`\`\`" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # Matrix jobs cannot each set a distinct output key, so each writes its
+      # digest to an artifact and the assets job collects them. Simpler than
+      # the alternatives and it leaves the digests visible in the run.
+      - name: Record the digest
+        id: digest
+        run: |
+          mkdir -p digests
+          echo "${{ steps.build.outputs.digest }}" > "digests/${{ matrix.image }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image }}
+          path: digests/${{ matrix.image }}
+          retention-days: 1
+
+  assets:
+    name: Release assets
+    needs: [validate, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach assets to the release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: false
+          path: digests
+
+      - name: Generate the release assets
+        env:
+          # The supporting images are pinned in infra/docker-compose.yml and
+          # read from it, so the released stack and the development stack
+          # cannot drift onto different versions of Postgres or NATS.
+          COMPOSE: infra/docker-compose.yml
+        run: |
+          set -eu
+          digest() { cat "digests/digest-$1/$1"; }
+
+          from_compose() {
+            grep -oE "image: $1@sha256:[a-f0-9]+" "$COMPOSE" | head -1 | sed 's/.*@//'
+          }
+
+          export DIGEST_AUTONATEWEB="$(digest autonate-web)"
+          export DIGEST_HOCUSPOCUS="$(digest hocuspocus)"
+          export DIGEST_EXECUTOR="$(digest executor)"
+          export DIGEST_FLOWABLE="$(digest flowable)"
+          export DIGEST_POSTGRES="$(from_compose postgres)"
+          export DIGEST_REDIS="$(from_compose redis)"
+          export DIGEST_NATS="$(from_compose nats)"
+          export DIGEST_NATSBOX="$(from_compose natsio/nats-box)"
+          export DIGEST_DAPRD="$(from_compose daprio/daprd)"
+          export DIGEST_PLACEMENT="$(from_compose daprio/placement)"
+          export DIGEST_SCHEDULER="$(from_compose daprio/scheduler)"
+
+          ./infra/release/generate.sh "${{ needs.validate.outputs.version }}" release-assets
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Auton8 ${{ needs.validate.outputs.version }}" \
+            --generate-notes \
+            --verify-tag \
+            2>/dev/null || echo "release already exists; attaching to it"
+
+          gh release upload "$GITHUB_REF_NAME" \
+            release-assets/compose.yml \
+            release-assets/env.template \
+            release-assets/QUICKSTART.md \
+            --clobber
+
+      - name: Report
+        run: |
+          printf '%s\n' \
+            "### Release assets" \
+            "" \
+            "\`compose.yml\`, \`env.template\` and \`QUICKSTART.md\` attached to \`$GITHUB_REF_NAME\`." \
+            "Every image in the compose file is pinned by digest." \
+            >> "$GITHUB_STEP_SUMMARY"

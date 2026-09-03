@@ -36,9 +36,6 @@
         <Content Include="../../infra/postgres/init/01-create-autonate-db.sql" Link="Sql/01-create-autonate-db.sql">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
-        <Content Include="../../infra/postgres/init/02-create-autonate-app-schema.sql" Link="Sql/02-create-autonate-app-schema.sql">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </Content>
     </ItemGroup>
 
     <Target Name="StageSamplePluginForTests" AfterTargets="Build">

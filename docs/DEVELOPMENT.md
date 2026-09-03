@@ -7,12 +7,24 @@ PostgreSQL, Flowable, Redis, or the Dapr control plane.
 
 ## First-time setup
 
-1. Install Docker Desktop.
-2. Install the Dapr CLI.
-3. Install the .NET 10 SDK and Node 24.
-4. Copy `.env.example` to `.env` if you want to override the default local
+1. Install the prerequisites. The authoritative list, with the minimum version
+   of each and how to install it, is [`infra/prerequisites`](../infra/prerequisites)
+   — deliberately one file rather than a version restated here, in the Makefile
+   and in the script, which is how three copies come to disagree.
+2. Run `make preflight`. It checks every prerequisite for presence *and*
+   version, and checks that the ports the stack publishes are free. It reports
+   everything wrong in one pass, so a machine is fixed once rather than once per
+   missing tool:
+
+   ```bash
+   make preflight
+   ```
+
+   `make infra-up`, `make infra-ensure` and `make app` all run it first and
+   refuse to start if it fails, so you do not have to remember it.
+3. Copy `.env.example` to `.env` if you want to override the default local
    ports or PostgreSQL credentials.
-5. Set a first administrator before the first run — see
+4. Set a first administrator before the first run — see
    [First administrator](#first-administrator) below. Nothing is seeded, so
    without this there is no account to sign in with.
 
@@ -109,6 +121,31 @@ cd src/AutoNate.Spa && npm ci && npm run lint && npm run build
 cd infra && docker compose -p infra up -d postgres nats nats-init redis   # test suite needs these three
 dotnet test AutoNate.sln                       # ~8 min; integration tests hit the compose services
 ```
+
+### Pinned build inputs
+
+Every container image is pinned by content digest and every project's NuGet graph
+is locked, so rebuilding a commit resolves what it resolved the first time. Both
+have a refresh path — pinning without one just makes upgrades painful:
+
+```bash
+make lockfiles          # after changing any PackageReference
+```
+
+CI restores in locked mode, so a changed `PackageReference` without a regenerated
+lock file fails the build rather than quietly resolving a different graph.
+
+To move an image, resolve the new digest and replace it, keeping the tag as the
+trailing comment:
+
+```bash
+docker buildx imagetools inspect postgres:16-alpine | awk '/^Digest:/{print $2; exit}'
+```
+
+`PinnedImageTests` fails if any image reference loses its digest. One pin is
+load-bearing beyond reproducibility: `infra/flowable/Dockerfile` must move
+together with `<flowable.version>` in `flowable-extension/pom.xml`, or a compiled
+extension ends up on an engine it was not built for.
 
 Planning and issue workflow are managed with n8SDLC — GitHub Issues and milestones are the plan, `.n8/` holds config, the decision log and harvested audit checklists.
 

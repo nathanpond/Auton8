@@ -1,0 +1,8 @@
+services:
+  web:
+    image: example:1
+    ports:
+      - target: 80
+        published: 8080
+        host_ip: 127.0.0.1
+        protocol: tcp

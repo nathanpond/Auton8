@@ -284,3 +284,46 @@ clean.
   **Issue:** #58
 - **Note:** M1 came back clean. Every Claude's Discretion item across #65–#72 is genuinely builder-level — shard counts, merge tools, sample sizes, which YAML parser. No product decision was hidden there.
 - **Note:** M0's remaining Discretion items are builder-level after the two above were lifted out.
+
+## /n8-exec M0 — 2026-09-02
+
+- **Decision:** #50's compose scanner is hand-rolled rather than built on a YAML package.
+  **Why:** The rule turns on a *comment* — an exception is valid only when a written reason sits beside the port — and YAML parsers discard comments on load. A parser would have handled the easy half and lost the half that makes the exception mechanism auditable. Listed under the story's Claude's Discretion.
+  **Issue:** #50
+- **Decision:** #50 discovers compose files by globbing `*.yml`/`*.yaml` and filtering to files with a **top-level** `services:` key.
+  **Why:** `.github/workflows/ci.yml` declares `services:` nested under a job. A naive content match would have treated it as a compose file and asserted on GitHub Actions service containers. Asserted in both directions.
+  **Issue:** #50
+- **Decision:** #50's exception marker attaches either to a whole `ports:` block or to a single entry.
+  **Why:** The story specified the block form. Per-entry matters for a service publishing several ports where only one needs exposure, and it was cheap once the block form worked.
+  **Issue:** #50
+- **Correction (Rule 1, found by running it):** #49's first version-extraction implementation was greedy and read the *last* dotted number in each tool's output. Docker reported its build hash (`0.3` from `build 4debf41`), Compose reported `24.5` from `v2.24.5-desktop.1`, dapr reported its runtime rather than its CLI version, and .NET reported `0.201`. Replaced with awk's leftmost `match()`. Every one of those shapes is now a test case, because all five tools this checks would have been mis-read.
+  **Issue:** #49
+- **Correction (Rule 1, found by running it):** #49's first port check reported the stack's own running containers as conflicts. `make infra-ensure` exists precisely to be re-runnable against a stack that is already up, so gating it on preflight would have made it refuse every time after the first. Ports belonging to services this compose project already has running are now reported as already-running and are not failures.
+  **Issue:** #49
+- **Decision:** #49's preflight is POSIX `sh`, not bash.
+  **Why:** macOS still ships bash 3.2, so a bash-first version wanting associative arrays would not run on the machines this most needs to work on. Listed under the story's Claude's Discretion.
+  **Issue:** #49
+- **Decision:** #49's port check treats a compose file that yields no ports as a failure.
+  **Why:** Same reasoning as the non-empty discovery assertion in #50 — a check that silently finds nothing reports a clean machine, which is worse than not running it.
+  **Issue:** #49
+- **Discovered work (filed, not fixed):** #119 — interrupted test runs strand `autonate_test_*` databases; 1,560 on this machine. `PostgresTestDatabase.DisposeAsync` drops correctly on the happy path, but a cancelled or timed-out run never disposes. Outside #50's scope, so filed with `needs-triage` and cross-referenced rather than fixed inline. Becomes load-bearing if M1's #67 shards the suite, since an age-gated sweep is then the only safe form of cleanup.
+
+- **Correction (Rule 1, found by the full suite):** #53's ledger initially skipped *every* recorded batch, including the ~20 data migrations gated by `auth_seed_state`. That made the ledger a second, wrong gate: clearing an `auth_seed_state` marker to re-enable a migration would have silently done nothing. `RebrandMigrationTests` encodes exactly that operator contract and failed with `Expected: "Auton8" / Actual: "Auto Nate"`. A batch whose SQL consults `auth_seed_state` is now never ledger-skipped — its own gate wins.
+  **Affects:** the acceptance criterion "a second boot performs no schema work" is true for schema DDL and deliberately not for those migrations, which re-enter cheaply via a `NOT EXISTS` check. Stated in the closing comment rather than claimed as met.
+  **Issue:** #53
+- **Decision:** #53's back-fill lets the batches run once on the ledger-introducing boot rather than writing rows for an assumed-current database.
+  **Why:** For a database predating the ledger we cannot know which batches were applied; marking an un-applied step as applied would skip it permanently and leave a silently half-migrated schema. The batches are idempotent, which is what makes running them safe. Raised in the plan comment before implementing, so it was a stated deviation rather than a discovered one.
+  **Issue:** #53
+- **Correction (Rule 1, found by the full suite):** #54's first attempt executed every schema batch through the raw `DbConnection` to avoid EF's `string.Format` pass. That broke nine tests. The inline batches are *written for* the format pass — 34 occurrences of `'{{}}'::jsonb`, doubled so it collapses them — while the base schema is an external `.sql` file with single braces that the format pass rejects. Both directions produce loud but opaque errors (`22P02: invalid input syntax for type json`; `Failure to parse near offset 4891`). Resolved with a `bypassFormatting` flag, documented at the branch.
+  **Issue:** #54
+- **Blocker (needs-owner-action):** #56 and #58 publish container images to the public `ghcr.io/nathanpond` namespace and cut a public GitHub release. `/n8-exec M0` authorizes building the milestone; it does not, on my reading, authorize publication to a public registry under the owner's account. Three options put to the owner on #56: a throwaway prerelease tag, build-everything-and-you-trigger, or defer both out of M0. #59 and #64 are blocked through them — #64 in particular is the story that exists because a runbook for a process nobody has performed is fiction.
+  **Issue:** #56, #58, #59, #64
+- **Discovered work (filed, not fixed):** #120 — `plugins/Directory.Build.props` does not chain to the root props file, so no analyzers run on plugin projects and they are stamped `1.0.0` rather than the product version. The root file's comment asserts the opposite.
+- **Correction (Rule 1, found by the full suite):** #51's advisory lock opened a *second* dedicated connection and held it across all 71 batches. Combined with #54 lengthening `EnsureAsync`, the suite exhausted PostgreSQL's default `max_connections=100` — 903 failures reading `53300: sorry, too many clients already`. The lock now uses the DbContext's own connection. Production would have felt this too at a few instances per server, so it was not merely a test-harness concern.
+  **Issue:** #51, #58
+- **Decision:** `max_connections` raised from 100 to 300 in `infra/docker-compose.yml` and CI's Postgres service.
+  **Why:** The suite builds a database per test class and runs them in parallel, so ~100 initialisations can be in flight. Idle usage is ~16 connections, so this is headroom for a known burst rather than a leak being papered over. Recorded because raising a limit *looks* like masking and needs its reasoning attached.
+  **Affects:** It also removed what was hiding two latent test-isolation weaknesses — at 100 the classes queued rather than interleaving. Filed as #123.
+- **Correction:** I twice attributed a failing suite to "environment" without reading the error, and was wrong the second time. `console;verbosity=minimal` prints a count and a stack trace and hides the message; switching to the `trx` logger turned "951 failures" into "903 × 53300: too many clients" in one step. Both project skills written in this milestone say to use `trx`.
+- **Note:** `SystemIssueEndpointsTests.List_returns_open_issues_by_default` was verified as **pre-existing** by checking out `master` (`647dc55`), rebuilding and running it there. Filed as #122. Checked specifically because it surfaced during the schema work and looked like it might have been caused by it.
+- **Blocker resolved:** the owner authorised publishing a throwaway `v0.1.1-rc0`. The publish path was exercised for real, verified from outside the workflow, and then the tag and all four GHCR packages were deleted. Package deletion needed `delete:packages`, which the session token lacked; the owner granted it rather than my working around it.

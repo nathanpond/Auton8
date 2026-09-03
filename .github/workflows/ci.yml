@@ -91,20 +91,6 @@ jobs:
       # Matches infra/docker-compose.yml. The tests create and drop their own
       # databases against this instance, so no init scripts are needed — the
       # E2E fixture replays infra/postgres/init/02-*.sql itself.
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: autonate
-          POSTGRES_PASSWORD: Your_password123!
-          POSTGRES_DB: flowable
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U autonate -d flowable"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 12
-
       redis:
         image: redis:7-alpine
         ports:
@@ -121,6 +107,33 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+
+      - name: Start PostgreSQL
+        # Not a service container, for the same reason NATS is not one below:
+        # `options:` is passed straight to `docker create`, which has no way to
+        # supply a command. `--cmd` is not a docker flag and fails the job with
+        # `unknown flag: --cmd` before anything runs.
+        #
+        # The command matters. The suite builds a database per test class and
+        # runs those classes in parallel, so ~100 initialisations can be in
+        # flight at once. At PostgreSQL's default max_connections of 100 the run
+        # fails en masse with "53300: sorry, too many clients already", and the
+        # failures look like anything but a connection ceiling. Matches
+        # infra/docker-compose.yml.
+        run: |
+          docker run -d --name autonate-ci-postgres \
+            -e POSTGRES_USER=autonate \
+            -e POSTGRES_PASSWORD='Your_password123!' \
+            -e POSTGRES_DB=flowable \
+            -p 5432:5432 \
+            postgres:16-alpine -c max_connections=300
+          for i in $(seq 1 30); do
+            if docker exec autonate-ci-postgres pg_isready -U autonate -d flowable >/dev/null 2>&1; then
+              echo "PostgreSQL ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready"; docker logs autonate-ci-postgres; exit 1
 
       - name: Start NATS with JetStream
         # Not a service container: those cannot pass a `command`, and NATS only
@@ -159,8 +172,12 @@ jobs:
           name: spa-dist
           path: src/AutoNate.Web/wwwroot
 
+      # Locked mode: the committed packages.lock.json files are the contract.
+      # A PackageReference changed without regenerating them fails here rather
+      # than resolving a different transitive graph than the one that was
+      # reviewed. Regenerate with `make lockfiles`.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore --locked-mode
 
       # Deliberately not `-warnaserror`: the tree currently carries a handful
       # of analyzer warnings (CA1512, S6667) in code this workflow does not

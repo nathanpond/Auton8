@@ -43,26 +43,50 @@ sandboxed code execution.
 
 ## Quickstart
 
-Requires Docker, the .NET 10 SDK, Node 24, and the Dapr CLI.
+### Run it
+
+Docker is the only prerequisite. From the
+[latest release](https://github.com/nathanpond/Auton8/releases/latest),
+download `compose.yml` and `env.template` into an empty directory:
+
+```bash
+mv env.template .env
+# Set Bootstrap__AdminUsername and Bootstrap__AdminPassword, and generate the
+# three secrets the file asks for. Nothing is seeded: without an administrator
+# there is no way to sign in.
+
+docker compose up -d
+```
+
+Then open http://localhost:5108. Every image is pinned by digest and carries a
+signed provenance attestation — `QUICKSTART.md` in the release shows how to
+verify one.
+
+**Auton8 1.0 requires a fresh database.** Upgrading a 0.x install is not
+supported; releases after 1.0 will carry upgrade paths.
+
+### Develop it
+
+Requires Docker, the .NET 10 SDK, Node 24 and the Dapr CLI — the authoritative
+list with versions is [`infra/prerequisites`](infra/prerequisites), and
+`make preflight` checks all of them at once.
 
 ```bash
 git clone https://github.com/nathanpond/Auton8.git
 cd Auton8
 
-# Start Postgres, Flowable, Redis, NATS and the Dapr control plane
-make infra-up
+make infra-up    # Postgres, Flowable, Redis, NATS, the Dapr control plane
+                 # (runs `make preflight` first and stops if anything is missing)
 
-# Choose the first administrator — nothing is seeded, so without this
-# there is no account to sign in with
 export Bootstrap__AdminUsername=admin
 export Bootstrap__AdminPassword='pick something'
 
 make app
 ```
 
-Then open http://localhost:5108 and sign in with the credentials you just set.
-
-`make infra-down` stops the stack; `make infra-reset` throws away its data.
+`make app-container` runs the application as a container instead, if you would
+rather not install the SDK toolchain. `make infra-down` stops the stack;
+`make infra-reset` throws away its data.
 
 ## Documentation
 

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685  # postgres:16-alpine
     container_name: autonate-postgres
     environment:
       POSTGRES_USER: ${AUTONATE_POSTGRES_USER:-autonate}
@@ -13,8 +13,26 @@ services:
       # is on. Containers reach it as `postgres:5432` over the compose network,
       # which is unaffected.
       - "127.0.0.1:${AUTONATE_POSTGRES_PORT:-5432}:5432"
+    # PostgreSQL's default max_connections is 100, which is a conservative
+    # figure for a single application. It is not the load this server actually
+    # takes: the backend suite builds a database per test class and runs those
+    # classes in parallel, so ~100 initialisations can be in flight at once,
+    # each holding a connection for the duration of DatabaseSchemaInitializer.
+    # At 100 the suite fails en masse with "53300: sorry, too many clients
+    # already" — 732 tests in one run — and the failures look like anything but
+    # a connection ceiling.
+    #
+    # Idle usage is ~16 connections, so this is headroom for a known burst
+    # rather than a leak being papered over.
+    command: ["postgres", "-c", "max_connections=300"]
     volumes:
       - ./mounts/postgres/data:/var/lib/postgresql/data
+      # Only 01-create-autonate-db.sql lives here now, and the asymmetry is
+      # deliberate: creating the database is the one thing the application
+      # cannot do from a connection to that database. Everything else — the
+      # base schema and every migration after it — is applied by
+      # DatabaseSchemaInitializer.EnsureAsync from inside the app, so an empty
+      # database is all this mount has to produce.
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
@@ -62,7 +80,7 @@ services:
       start_period: 30s
 
   flowable-dapr:
-    image: daprio/daprd:1.17.5
+    image: daprio/daprd@sha256:c758db3b1ea2ba04528c4636c199405d1abe76ffe2877134b3262183dcf4ee2c  # daprio/daprd:1.17.5
     container_name: autonate-flowable-dapr
     command:
       - ./daprd
@@ -104,7 +122,7 @@ services:
       - ./mounts/flowable-dapr/components:/components:ro
 
   redis:
-    image: redis:7.4-alpine
+    image: redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf  # redis:7.4-alpine
     container_name: autonate-redis
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -118,7 +136,7 @@ services:
       retries: 10
 
   nats:
-    image: nats:2.12-alpine
+    image: nats@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6  # nats:2.12-alpine
     container_name: autonate-nats
     command:
       - --jetstream
@@ -145,7 +163,7 @@ services:
       retries: 12
 
   nats-init:
-    image: natsio/nats-box:0.16.0
+    image: natsio/nats-box@sha256:4b4fb1128c3ba46180d4510aaf2ca792c3fa997e4968a7bc9062f9554fbdb8b4  # natsio/nats-box:0.16.0
     container_name: autonate-nats-init
     depends_on:
       nats:
@@ -155,14 +173,14 @@ services:
       - ./scripts/bootstrap-jetstream.sh:/scripts/bootstrap-jetstream.sh:ro
 
   dapr-placement:
-    image: daprio/placement:1.17.5
+    image: daprio/placement@sha256:4c4b609cb0a0c0488361348eb1c4e869338c39390ee3010d727e59f6d561d544  # daprio/placement:1.17.5
     container_name: autonate-dapr-placement
     command: ["./placement", "--port", "50006"]
     ports:
       - "127.0.0.1:50006:50006"
 
   dapr-scheduler:
-    image: daprio/scheduler:1.17.5
+    image: daprio/scheduler@sha256:946f1912993355622042e174129192f199b9bf5d72a24c1e36b30e250e1a4603  # daprio/scheduler:1.17.5
     container_name: autonate-dapr-scheduler
     command: ["./scheduler", "--port", "50007", "--etcd-data-dir", "/data"]
     ports:
@@ -234,8 +252,126 @@ services:
       retries: 3
       start_period: 20s
 
+  # ── The application, behind the `app` profile ───────────────────────────
+  #
+  # Off by default: the ordinary stack is the supporting services only, and a
+  # developer running `make app` on the host must not also get a container
+  # serving the same database. `make app-container` starts these.
+  #
+  # Callback rewiring lives in docker-compose.app.yml, not here. A profile
+  # cannot conditionally change another service's environment, and both
+  # `flowable` and `hocuspocus` have to address the app differently depending
+  # on whether it is a container or a host process.
+  autonate-web:
+    build:
+      context: ..
+      dockerfile: src/AutoNate.Web/Dockerfile
+    container_name: autonate-web
+    profiles:
+      - app
+    # Neither the app nor its sidecar can be first: the app refuses to start
+    # without Dapr on 3500, and daprd needs this container's network namespace
+    # to exist before it can bind. The image's entrypoint resolves it by
+    # waiting on the sidecar's outbound health endpoint before starting the
+    # app — see src/AutoNate.Web/docker-entrypoint.sh. Restarting is for
+    # ordinary supervision, not for winning that race.
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      nats-init:
+        condition: service_completed_successfully
+    environment:
+      # Every one of these defaults to localhost, which is correct for the
+      # host-run path and wrong inside a container. Each was found by hitting
+      # it: the app has more than one connection string, and the datastores
+      # initialiser carries its own.
+      ConnectionStrings__Default: >-
+        Host=postgres;Port=5432;Database=AutoNate;Username=${AUTONATE_POSTGRES_USER:-autonate};Password=${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
+      ConnectionStrings__Datastores: >-
+        Host=postgres;Port=5432;Database=autonate_datastores;Username=${AUTONATE_POSTGRES_USER:-autonate};Password=${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
+      Nats__Url: nats://nats:4222
+      Flowable__BaseUrl: http://flowable:8080/flowable-rest
+      Flowable__Username: ${AUTONATE_FLOWABLE_USER:-rest-admin}
+      Flowable__Password: ${AUTONATE_FLOWABLE_PASSWORD:-test}
+      WorkflowBehaviors__CallbackSharedSecret: ${AUTONATE_BEHAVIOR_CALLBACK_SECRET:-dev-only-workflow-behavior-secret-change-me}
+      YjsServer__InternalSharedSecret: ${YJS_INTERNAL_SHARED_SECRET:-dev-only-yjs-internal-secret-change-me}
+      Dapr__HttpEndpoint: http://127.0.0.1:3500
+      Dapr__GrpcEndpoint: http://127.0.0.1:50001
+      ASPNETCORE_ENVIRONMENT: ${AUTONATE_APP_ENVIRONMENT:-Development}
+      # No default. Nothing is seeded, so an unset value means no way to sign
+      # in — which is the invariant, not an oversight.
+      Bootstrap__AdminUsername: ${Bootstrap__AdminUsername:-}
+      Bootstrap__AdminPassword: ${Bootstrap__AdminPassword:-}
+    ports:
+      - "127.0.0.1:${AUTONATE_APP_PORT:-5108}:8080"
+    volumes:
+      - autonate-web-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  autonate-web-dapr:
+    image: daprio/daprd@sha256:c758db3b1ea2ba04528c4636c199405d1abe76ffe2877134b3262183dcf4ee2c
+    container_name: autonate-web-dapr
+    profiles:
+      - app
+    command:
+      - ./daprd
+      - --app-id
+      - autonate-web
+      - --app-port
+      - "8080"
+      - --app-channel-address
+      - "127.0.0.1"
+      - --dapr-http-port
+      - "3500"
+      - --dapr-grpc-port
+      - "50001"
+      - --resources-path
+      - /components
+      - --placement-host-address
+      - dapr-placement:50006
+      - --scheduler-host-address
+      - dapr-scheduler:50007
+    depends_on:
+      # service_started, NOT service_healthy — and that difference is the
+      # whole reason this profile works.
+      #
+      # AutoNate.Web refuses to start without a reachable Dapr sidecar. Waiting
+      # for the app to be *healthy* therefore deadlocks: the app cannot become
+      # healthy until the sidecar is up, and the sidecar will not start until
+      # the app is healthy. flowable-dapr can wait for health because Flowable
+      # does not require its sidecar to boot; this one cannot.
+      #
+      # `network_mode: service:autonate-web` only needs the app's network
+      # namespace to exist, which it does as soon as the container starts. The
+      # app then retries (see its `restart` policy) until the sidecar answers
+      # on 3500.
+      #
+      # `restart: true` is kept for the same reason flowable-dapr has it: a
+      # restart of the app recreates the namespace, and without cascading this
+      # sidecar stays bound to a defunct one where nothing answers.
+      autonate-web:
+        condition: service_started
+        restart: true
+      nats:
+        condition: service_healthy
+      # The state store component is redis, and daprd exits fatally if it
+      # cannot initialise a component at boot.
+      redis:
+        condition: service_healthy
+      dapr-placement:
+        condition: service_started
+      dapr-scheduler:
+        condition: service_started
+    network_mode: "service:autonate-web"
+    volumes:
+      - ./mounts/autonate-web-dapr/components:/components:ro
+
   dapr-dashboard:
-    image: daprio/dashboard:0.15.0
+    image: daprio/dashboard@sha256:4be696707bd1349b49875f8e6da0d27dad742834483740d5a7897a73abeaf83d  # daprio/dashboard:0.15.0
     container_name: autonate-dapr-dashboard
     command:
       - --docker-compose=true
@@ -255,3 +391,10 @@ services:
         condition: service_started
       dapr-scheduler:
         condition: service_started
+
+volumes:
+  # The app's runtime data root: uploads, persisted plugins, public /files
+  # assets, per-plugin scratch. A named volume so `docker compose down` and
+  # back up keeps the install, which a bind mount into the source tree would
+  # not survive on a release deployment.
+  autonate-web-data:

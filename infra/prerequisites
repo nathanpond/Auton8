@@ -1,0 +1,18 @@
+# Prerequisites for building and running Auton8 locally.
+#
+# THE single source of truth for required tool versions. infra/preflight.sh
+# reads this file; docs/DEVELOPMENT.md and the wiki's Installation page render
+# from it. Do not restate a version anywhere else — a version repeated in three
+# places is a version that disagrees with itself within a release.
+#
+# Format, pipe-separated:
+#   name|command|version flag|minimum version|install hint
+#
+# The version flag's output is scanned for the first dotted number; a tool that
+# needs different handling gets a case in preflight.sh rather than a new column.
+
+docker|docker|--version|24.0|https://docs.docker.com/get-docker/
+docker compose|docker compose|version|2.20|ships with Docker Desktop; on Linux install the docker-compose-plugin package
+dotnet|dotnet|--version|10.0|https://dotnet.microsoft.com/download/dotnet/10.0
+node|node|--version|24.0|nvm install 24  (the repo pins Node with .nvmrc)
+dapr|dapr|--version|1.14|brew install dapr/tap/dapr-cli  —  https://docs.dapr.io/getting-started/install-dapr-cli/

@@ -853,7 +853,7 @@ public sealed class ContentDocumentBindingAndCommentEndpointTests
 
     private sealed class Harness : IAsyncDisposable
     {
-        // Seeded by infra/postgres/init/02-create-autonate-app-schema.sql; the
+        // Seeded by the base schema (src/AutoNate.Web/Persistence/Sql/BaseSchema.sql); the
         // dev auto-login middleware signs the test client in as this user.
         public static readonly Guid AdminUserId =
             Guid.Parse("11111111-1111-1111-1111-111111111111");

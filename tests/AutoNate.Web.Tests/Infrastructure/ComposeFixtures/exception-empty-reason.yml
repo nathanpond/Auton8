@@ -1,0 +1,6 @@
+services:
+  web:
+    image: example:1
+    # loopback-exception:
+    ports:
+      - "8080:8080"

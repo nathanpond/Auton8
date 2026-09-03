@@ -1,0 +1,25 @@
+# Callback rewiring for the `app` profile.
+#
+# Layered on top of docker-compose.yml when the application runs as a
+# container. It exists because a compose profile cannot conditionally change
+# *another* service's environment, and two services address the app by URL:
+#
+#   flowable    posts service-task -> behavior callbacks to it
+#   hocuspocus  posts Yjs document webhooks to it
+#
+# Without the profile the app is a host process, and both reach it at
+# host.docker.internal:5108. With the profile it is a peer container, and both
+# must use the compose network — host.docker.internal from inside a container
+# resolves to the *host*, where nothing is listening, and the failure is a
+# silent one: workflow behaviors never fire and document webhooks never
+# arrive, with no error on the app side because nothing ever reaches it.
+#
+# Applied automatically by `make app-container`.
+services:
+  flowable:
+    environment:
+      AUTONATE_FLOWABLE_EVENTS_CALLBACK_BASE_URL: http://autonate-web:8080
+
+  hocuspocus:
+    environment:
+      AUTONATE_WEB_URL: http://autonate-web:8080

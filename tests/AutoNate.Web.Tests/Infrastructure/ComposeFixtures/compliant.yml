@@ -1,0 +1,12 @@
+# Every published port bound to loopback, in the short string form,
+# including the interpolated-port shape the real stack uses.
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${AUTONATE_POSTGRES_PORT:-15432}:5432"
+  nats:
+    image: nats:2.12-alpine
+    ports:
+      - "127.0.0.1:4222:4222"

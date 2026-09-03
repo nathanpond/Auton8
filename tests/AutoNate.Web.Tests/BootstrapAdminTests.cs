@@ -8,7 +8,7 @@ namespace AutoNate.Web.Tests;
 // The first administrator on an empty install.
 //
 // This replaced a hardcoded INSERT in
-// infra/postgres/init/02-create-autonate-app-schema.sql that shipped `admin`
+// the base schema (src/AutoNate.Web/Persistence/Sql/BaseSchema.sql) that shipped `admin`
 // with its password_hash *and* password_salt committed to the repository,
 // ungated by environment. Combined with AssignSuperAdminToAllExistingUsers,
 // every install that ran that script came up with a super-admin whose password

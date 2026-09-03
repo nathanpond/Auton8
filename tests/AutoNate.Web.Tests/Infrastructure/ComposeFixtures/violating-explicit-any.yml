@@ -1,0 +1,5 @@
+services:
+  web:
+    image: example:1
+    ports:
+      - "0.0.0.0:8080:8080"

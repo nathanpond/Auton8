@@ -63,7 +63,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         // against a known-good baseline and finishes the schema (roles, menus,
         // sample project) and creates the bootstrap administrator from the
         // Bootstrap__* variables set in StartAppAsync.
-        _testConnString = await BootstrapTestDatabaseAsync(repoRoot);
+        _testConnString = await BootstrapTestDatabaseAsync();
 
         BaseUrl = await StartAppAsync(repoRoot);
 
@@ -271,27 +271,26 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Creates a fresh `AutoNate_E2E` database and replays
-    /// `infra/postgres/init/02-create-autonate-app-schema.sql` against it so
-    /// the foundational tables exist before the app boots. The app's
-    /// `DatabaseSchemaInitializer.EnsureAsync` then runs the rest (lockout
-    /// columns, roles, menus, sample project) idempotently against the new
-    /// database, and creates the `admin`/`admin` account this fixture signs in
-    /// with from the Bootstrap__* variables StartAppAsync sets. That script no
-    /// longer seeds any user — it used to ship one with its password hash
-    /// committed.
-    ///
-    /// Why we do this work ourselves rather than relying on the docker
-    /// entrypoint init: the compose file sets `POSTGRES_DB=flowable`, so the
-    /// `.sql` files in `infra/postgres/init/` only run against the Flowable
-    /// database on first volume creation. The dev `AutoNate` database has been
-    /// hand-populated over time; a brand-new database (like ours) gets nothing
-    /// from docker init. Replaying `02-...sql` directly is the most faithful
-    /// way to track the source of truth as it evolves.
+    /// Creates an empty `AutoNate_E2E` database and hands its connection string
+    /// to the app under test. Nothing else: the application's
+    /// `DatabaseSchemaInitializer.EnsureAsync` applies the base schema and
+    /// everything after it.
     /// </summary>
-    /// <returns>The full Npgsql connection string to the bootstrapped database
-    /// — to be passed as the `ConnectionStrings__Default` env override.</returns>
-    private static async Task<string> BootstrapTestDatabaseAsync(string repoRoot)
+    /// <remarks>
+    /// This used to replay `infra/postgres/init/02-...sql` from a
+    /// repo-root-relative path, because the application could not initialise an
+    /// empty database on its own — the base schema existed only as a file
+    /// mounted into the Postgres container's entrypoint. It now lives inside
+    /// AutoNate.Web as an embedded resource and is the initialiser's first
+    /// step, so replaying it here would be a second copy of the same work.
+    ///
+    /// The compose entrypoint scripts remain irrelevant here for the original
+    /// reason: the compose file sets `POSTGRES_DB=flowable`, so those files only
+    /// ever ran against the Flowable database on first volume creation.
+    /// </remarks>
+    /// <returns>The Npgsql connection string to the new database — passed as
+    /// the `ConnectionStrings__Default` env override.</returns>
+    private static async Task<string> BootstrapTestDatabaseAsync()
     {
         var port = int.TryParse(
             Environment.GetEnvironmentVariable("AUTONATE_POSTGRES_PORT"),
@@ -316,39 +315,7 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
             await cmd.ExecuteNonQueryAsync();
         }
 
-        // Replay the foundational schema script against the new database.
-        // Npgsql executes multi-statement scripts (including PL/pgSQL DO blocks
-        // and dollar-quoted strings present in `02-...sql`) in a single
-        // ExecuteNonQuery call. Strip leading psql meta-commands (e.g. the
-        // `\c "AutoNate"` that switches DBs under the docker entrypoint) —
-        // Npgsql is already connected to the target DB and the server would
-        // reject `\c` as a syntax error.
-        var initSqlPath = Path.Combine(
-            repoRoot, "infra", "postgres", "init", "02-create-autonate-app-schema.sql");
-        var initSql = StripPsqlMetaCommands(await File.ReadAllTextAsync(initSqlPath));
-
-        await using (var conn = new NpgsqlConnection(testConn))
-        {
-            await conn.OpenAsync();
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = initSql;
-            await cmd.ExecuteNonQueryAsync();
-        }
-
         return testConn;
-    }
-
-    private static string StripPsqlMetaCommands(string sql)
-    {
-        var lines = sql.Split('\n');
-        for (var i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].TrimStart().StartsWith('\\'))
-            {
-                lines[i] = string.Empty;
-            }
-        }
-        return string.Join('\n', lines);
     }
 
     /// <summary>

@@ -46,7 +46,16 @@ public sealed record ConnectionHealth(
 public sealed record SystemHealthReport(
     DateTimeOffset CheckedAtUtc,
     IReadOnlyList<ComponentHealth> Components,
-    IReadOnlyList<ConnectionHealth> Connections);
+    IReadOnlyList<ConnectionHealth> Connections,
+    SchemaHealth? Schema = null);
+
+// What the schema ledger says about this database. Surfaced here so "which
+// schema version is this install at?" is answerable from the admin UI rather
+// than only from a psql session.
+public sealed record SchemaHealth(
+    string AppVersion,
+    int AppliedStepCount,
+    DateTimeOffset? LastAppliedAtUtc);
 
 // Tiny probe contract so detectors and other consumers can depend on the
 // abstract probe instead of the concrete (sealed) SystemHealthService.
@@ -149,7 +158,46 @@ public sealed class SystemHealthService(
         return new SystemHealthReport(
             CheckedAtUtc: DateTimeOffset.UtcNow,
             Components: components,
-            Connections: connections);
+            Connections: connections,
+            Schema: await ReadSchemaHealthAsync(cancellationToken));
+    }
+
+    // Reads the schema ledger. Returns null rather than throwing when the table
+    // is absent — an install that has not yet run the ledger-introducing
+    // version is a valid state, and system health should report what it can
+    // rather than fail wholesale on one missing answer.
+    private async Task<SchemaHealth?> ReadSchemaHealthAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var context = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var connection = context.Database.GetDbConnection();
+            await context.Database.OpenConnectionAsync(cancellationToken);
+
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT count(*), max(applied_at_utc),
+                       (SELECT app_version FROM schema_versions ORDER BY applied_at_utc DESC LIMIT 1)
+                FROM schema_versions;
+                """;
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            var count = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0));
+            DateTimeOffset? last = reader.IsDBNull(1) ? null : reader.GetFieldValue<DateTimeOffset>(1);
+            var version = reader.IsDBNull(2) ? "unknown" : reader.GetString(2);
+
+            return new SchemaHealth(version, count, last);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private async Task<(ComponentHealth, ConnectionHealth)> CheckPostgresAsync(CancellationToken cancellationToken)

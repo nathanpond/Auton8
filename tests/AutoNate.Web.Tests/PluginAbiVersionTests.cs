@@ -44,7 +44,24 @@ public sealed class PluginAbiVersionTests
             .InformationalVersion;
 
         Assert.NotNull(product);
-        Assert.StartsWith("0.1.0", product);
-        Assert.NotEqual("0.1.0.0", abi.ToString());
+
+        // Read from Directory.Build.props rather than hardcoded. The literal
+        // "0.1.0" here failed the first time the product version was bumped,
+        // which is the wrong signal entirely: this test exists to catch the
+        // ABI *following* the product version, not to object to the product
+        // version moving. That is the whole point of the pin.
+        var declared = ProductVersionFromProps();
+        Assert.StartsWith(declared, product, StringComparison.Ordinal);
+        Assert.NotEqual($"{declared}.0", abi.ToString());
+    }
+
+    private static string ProductVersionFromProps()
+    {
+        var props = Path.Combine(Infrastructure.RepoRoot.Path, "Directory.Build.props");
+        var match = System.Text.RegularExpressions.Regex.Match(
+            File.ReadAllText(props), @"<Version>(?<v>[^<]+)</Version>");
+
+        Assert.True(match.Success, $"No <Version> element in {props}.");
+        return match.Groups["v"].Value;
     }
 }
