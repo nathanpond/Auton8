@@ -3653,8 +3653,11 @@ function UserTaskModal({
 
           {formNeedsPick && (
             <div className="mt-3">
-              <label className="form-label">Render mode</label>
+              <label className="form-label" htmlFor="user-form-render-mode">
+                Render mode
+              </label>
               <select
+                id="user-form-render-mode"
                 className="form-select"
                 value={editor.userFormMode}
                 onChange={(e) =>
@@ -3667,8 +3670,11 @@ function UserTaskModal({
                 </option>
               </select>
 
-              <label className="form-label mt-3">Form</label>
+              <label className="form-label mt-3" htmlFor="user-form-short-code">
+                Form
+              </label>
               <select
+                id="user-form-short-code"
                 className={`form-select${userFormError ? " is-invalid" : ""}`}
                 value={editor.userFormShortCode}
                 onChange={(e) =>

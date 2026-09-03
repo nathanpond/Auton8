@@ -129,11 +129,30 @@ export default [
   // running eslint and taking every directory with zero jsx-a11y warnings —
   // not by aspiration, so `npm run lint` passes the moment it lands.
   //
-  // Remaining (deliberately absent): src/pages/notes, src/pages/documents,
-  // src/pages/admin, src/components/documents, src/agent, src/shell,
-  // src/pages/workflow*, src/pages/dashboard, and three single-file cases in
-  // src/components. Most are keyboard-interaction findings on editor
-  // surfaces, which need real interaction design rather than a lint fix.
+  // Widened in #68: src/shell and src/pages/workflow joined the list after
+  // their remaining violations were fixed for real — an anchor-as-button
+  // became a <button>, and two <label>s were associated with their <select>s.
+  // No suppression was added to get there.
+  //
+  // Remaining (deliberately absent), and why — 38 jsx-a11y warnings in two
+  // groups, neither of which is a lint-level fix:
+  //
+  //   * Keyboard interaction (23): click-events-have-key-events,
+  //     no-static-element-interactions, no-noninteractive-element-interactions
+  //     and no-noninteractive-tabindex, in src/pages/notes (13),
+  //     src/pages/admin (4), src/agent (3), src/components (1),
+  //     src/components/agent (1) and src/pages/workflow-executions (1).
+  //     These are mouse-driven interactions on rich editing surfaces, and
+  //     fixing them means designing keyboard equivalents — interaction design
+  //     with UX consequences, not a lint pass. Tracked separately.
+  //
+  //   * no-autofocus (15): src/pages/documents (7), src/components/documents
+  //     (4), src/pages/admin (2), src/components (1), src/pages/dashboard (1).
+  //     Deliberately not swept. Removing autoFocus is not mechanical — inside
+  //     a modal it is usually the *right* behaviour, and deleting it would
+  //     make those dialogs worse for the keyboard users the rule exists to
+  //     protect. Each site needs a per-case judgement about whether focus
+  //     belongs there, which is a different piece of work from this one.
   {
     files: [
       "src/components/data-table/**/*.{ts,tsx}",
@@ -151,7 +170,11 @@ export default [
       "src/routes/**/*.{ts,tsx}",
       "src/preferences/**/*.{ts,tsx}",
       "src/hooks/**/*.{ts,tsx}",
-      "src/lib/**/*.{ts,tsx}"
+      "src/lib/**/*.{ts,tsx}",
+      // Added by #68. Note this is src/pages/workflow specifically, not
+      // src/pages/workflow-executions, which still has one keyboard finding.
+      "src/shell/**/*.{ts,tsx}",
+      "src/pages/workflow/**/*.{ts,tsx}"
     ],
     rules: {
       "jsx-a11y/alt-text": "error",

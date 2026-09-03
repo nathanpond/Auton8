@@ -24,7 +24,10 @@ public sealed class PluginSchemaProvisioner
 {
     private const int CodeLength = 8;
     private const int MaxCollisionRetries = 8;
-    private const string ProtectorPurpose = "AutoNate.Plugins.RolePassword.v1";
+    // internal, not private: see DataProtectionConnectionSecretProtector.Purpose.
+    // Renaming this makes every stored plugin role password undecryptable, which
+    // takes every installed plugin's database access with it.
+    internal const string ProtectorPurpose = "AutoNate.Plugins.RolePassword.v1";
 
     private static readonly char[] CodeFirstChars = "abcdefghijklmnopqrstuvwxyz".ToCharArray();
     private static readonly char[] CodeRestChars = "abcdefghijklmnopqrstuvwxyz0123456789".ToCharArray();

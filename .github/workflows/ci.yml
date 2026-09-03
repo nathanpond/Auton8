@@ -74,22 +74,204 @@ jobs:
           path: src/AutoNate.Spa/dist
           retention-days: 1
 
-  backend:
-    name: Backend tests
+  # ── Backend suite, sharded ────────────────────────────────────────────────
+  #
+  # One job became three: discover -> shard matrix -> reconcile. The suite is
+  # ~1,760 integration tests that each create and drop real databases, so there
+  # is no fast unit subset to carve out; the only lever on wall clock is
+  # parallelism across runners. Runner minutes are free on a public repository,
+  # which is what makes this a cheap trade rather than an expensive one.
+  #
+  # Understand this before editing any of it: the dangerous failure here is not
+  # a red build, it is a *faster, greener* one. A filter that matches nothing
+  # runs no tests and reports success. backend-reconcile exists to catch that,
+  # which is why it runs even when shards fail.
+  #
+  # The parsing and markdown live in .github/scripts/*.py rather than inline.
+  # Inline Python must stay indented under a `run: |` block or it silently ends
+  # it, and building markdown in shell puts backticks inside double quotes
+  # where the shell substitutes them. Both are tested (TestPartitionScriptTests,
+  # ShardReportScriptTests).
+  backend-discover:
+    name: Backend discovery
     runs-on: ubuntu-latest
-    # For the SPA bundle only — see the download step below.
+    # For the SPA bundle only - see the download step below.
     needs: spa
-    # The suite is ~12 minutes locally and ~40 on a CI runner — it grew from
-    # 1461 to 1648 tests over this stack, and the first master run was
-    # cancelled at exactly 45 minutes having spent 41 of them testing. The
-    # ceiling is meant to catch a hung fixture, not a slow runner, so it needs
-    # headroom above the real duration rather than a value the suite can drift
-    # into. Revisit if the suite approaches an hour.
-    timeout-minutes: 75
+    timeout-minutes: 20
+    outputs:
+      matrix: ${{ steps.partition.outputs.matrix }}
+      total: ${{ steps.partition.outputs.total }}
+    env:
+      # The one place the shard count lives, and now tuned from a real run
+      # rather than a model. At 8 the slowest shard was 8m09s against a 3m-8m
+      # spread: it held the heavy cluster and took 8m09s where its class-minute
+      # load predicted 6m42s, because a few very long classes leave little to
+      # overlap with. Under the 10-minute target, but with no room to grow and
+      # 2m36s of discovery still to add on top.
+      #
+      # 10 splits that cluster: worst-shard load drops from 44.9 to 36.0
+      # class-minutes, projecting ~5.2 minutes against the same fitted curve
+      # (wall = load / 5.8x parallelism). Runner minutes are free here, so the
+      # two extra jobs cost nothing that matters.
+      #
+      # Retune from the step summary's per-shard table, not from arithmetic:
+      # the hash is lumpy and its lumpiness moves with the class names.
+      BACKEND_SHARDS: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # Several backend tests need the SPA bundle in wwwroot/, for two
+      # different reasons:
+      #
+      #   * Program.cs wires the static-file pipeline, the SPA fallback and
+      #     the /api 404 guard inside `if (Directory.Exists(WebRootPath))`,
+      #     because in Debug the SPA is served by Vite and the directory is
+      #     normally absent. Without it `Unknown_api_path_returns_404_not_spa_index`
+      #     sees no `no-store` header.
+      #   * Tests that sign in follow the post-login redirect to "/", which is
+      #     served by MapFallbackToFile("index.html"). An empty directory is
+      #     not enough - the redirect lands on a 404 and the login assertion
+      #     fails (DataStoreListFilteringTests).
+      #
+      # Both reproduced locally, first with the directory moved aside and then
+      # with it emptied, which is what separated the two causes.
+      #
+      # Downloaded here, before the build, so the bundle is inside the build
+      # output the shards receive. Otherwise every shard needs its own copy and
+      # the copies can drift.
+      - uses: actions/download-artifact@v4
+        with:
+          name: spa-dist
+          path: src/AutoNate.Web/wwwroot
+
+      # Locked mode: the committed packages.lock.json files are the contract.
+      # A PackageReference changed without regenerating them fails here rather
+      # than resolving a different transitive graph than the one that was
+      # reviewed. Regenerate with `make lockfiles`.
+      - name: Restore
+        run: dotnet restore --locked-mode
+
+      # Deliberately not `-warnaserror`: the tree currently carries a handful
+      # of analyzer warnings (CA1512, S6667) in code this workflow does not
+      # own. Turning them fatal here would make CI red on arrival, which is
+      # how a gate gets disabled. Clearing them is its own task; this job
+      # enforces the tests.
+      #
+      # This is the only place the compiler runs for the backend - the shards
+      # receive the output.
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Discover tests and compute the partition
+        id: partition
+        # Discovery happens exactly once. Re-discovering per shard would be
+        # both wasteful and a second place for the partitions to disagree.
+        #
+        # partition_tests.py refuses to emit an empty partition or an empty
+        # shard, and hard-fails on a class-name prefix collision, which a
+        # substring filter cannot separate. It also strips theory arguments
+        # before taking the class name: `--list-tests` prints those inline, and
+        # a parse expecting Namespace.Class.Method drops every theory row. That
+        # silently lost all 24 tests of KindGateEnforcementTests during
+        # development, and left a partition that looked perfectly healthy.
+        run: |
+          dotnet test tests/AutoNate.Web.Tests --no-build --list-tests > listing.txt
+          script=.github/scripts/partition_tests.py
+
+          {
+            echo "matrix=$(python3 $script --shards "$BACKEND_SHARDS" --list-tests listing.txt --emit matrix)"
+            echo "total=$(python3 $script --shards "$BACKEND_SHARDS" --list-tests listing.txt --emit total)"
+          } >> "$GITHUB_OUTPUT"
+
+          python3 $script --shards "$BACKEND_SHARDS" --list-tests listing.txt \
+            --emit summary >> "$GITHUB_STEP_SUMMARY"
+
+      # Tarred by hand rather than handed to upload-artifact directly: the
+      # build output is ~480 MB across tens of thousands of small files, and
+      # the action's own zipping of that many entries is far slower than one
+      # already-compressed blob.
+      #
+      # This is a handoff, not a cache. It is built fresh in this run from this
+      # commit, exactly like the spa-dist artifact above, so the usual
+      # stale-cache failure mode cannot arise.
+      - name: Pack the build for the shards
+        # Every project's bin AND obj, not just the test project's.
+        #
+        # The first sharded run shipped only the test project's output, on the
+        # reasoning that its bin already contains copies of everything it
+        # references. That is true of the DLLs and false of what `dotnet test`
+        # needs: with the referenced projects' own bin directories absent,
+        # `dotnet test --no-build` on SDK 10.0.400 resolved no test source and
+        # exited **0 in silence** — no output, no trx, no error. Eight green
+        # shards that ran nothing. (SDK 10.0.201, where this was developed,
+        # tolerates it and runs the tests, which is why local repro passed.)
+        #
+        # Project directories come from git rather than `find`, which had
+        # matched node_modules/esbuild/bin and would silently miss a newly
+        # added project. The SPA has no MSBuild output and the E2E suite is a
+        # different job, so both are excluded.
+        run: |
+          git ls-files '*.csproj' \
+            | xargs -n1 dirname \
+            | grep -vE '^src/AutoNate\.Spa|^tests/AutoNate\.E2E\.Tests' \
+            | sort -u > projects.txt
+
+          echo "packing build output for these projects:"
+          sed 's/^/  /' projects.txt
+
+          : > pack-list.txt
+          while IFS= read -r project; do
+            for dir in bin obj; do
+              if [ -d "$project/$dir" ]; then
+                printf '%s\n' "$project/$dir" >> pack-list.txt
+              fi
+            done
+          done < projects.txt
+
+          if [ ! -s pack-list.txt ]; then
+            echo "::error::No build output found to pack. The shards would receive nothing."
+            exit 1
+          fi
+
+          echo "paths: $(wc -l < pack-list.txt)"
+          tar -czf backend-build.tgz -T pack-list.txt
+          ls -lh backend-build.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-build
+          path: backend-build.tgz
+          retention-days: 1
+          # Already gzipped; compressing it again buys nothing and costs time.
+          compression-level: 0
+
+  backend:
+    name: Backend tests (shard ${{ matrix.shard.index }})
+    runs-on: ubuntu-latest
+    needs: backend-discover
+    # Each shard is a fraction of a suite that takes ~40 minutes whole. The
+    # ceiling catches a hung fixture, not a slow runner, so it keeps headroom
+    # well above the real duration rather than sitting where the suite can
+    # drift into it.
+    timeout-minutes: 30
+
+    strategy:
+      # Never cancel siblings. Cancelling on the first failure hides whether
+      # other shards also failed, turning one red test into a re-run to find
+      # out - and it would starve backend-reconcile of the counts it needs to
+      # tell a lost test from a failing one.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.backend-discover.outputs.matrix) }}
 
     services:
       # Matches infra/docker-compose.yml. The tests create and drop their own
-      # databases against this instance, so no init scripts are needed — the
+      # databases against this instance, so no init scripts are needed - the
       # E2E fixture replays infra/postgres/init/02-*.sql itself.
       redis:
         image: redis:7-alpine
@@ -115,11 +297,21 @@ jobs:
         # `unknown flag: --cmd` before anything runs.
         #
         # The command matters. The suite builds a database per test class and
-        # runs those classes in parallel, so ~100 initialisations can be in
+        # runs those classes in parallel, so many initialisations can be in
         # flight at once. At PostgreSQL's default max_connections of 100 the run
         # fails en masse with "53300: sorry, too many clients already", and the
         # failures look like anything but a connection ceiling. Matches
         # infra/docker-compose.yml.
+        #
+        # One per shard, and that is the entire isolation story: each matrix leg
+        # is its own runner VM, so there is no shared server for shards to
+        # contend on. That matters specifically because the suite touches
+        # cluster-wide objects - `plg_readers` is created by
+        # PluginDataIsolationSql behind an `EXCEPTION WHEN duplicate_object`
+        # guard precisely because concurrent creation races, and
+        # RoleCreationRaceTests pins that behaviour. Those races stay *within* a
+        # shard, where the suite's existing intra-class parallelism already
+        # exercises them.
         run: |
           docker run -d --name autonate-ci-postgres \
             -e POSTGRES_USER=autonate \
@@ -152,43 +344,251 @@ jobs:
           done
           echo "NATS did not become healthy"; docker logs autonate-ci-nats; exit 1
 
-      # Several backend tests need the SPA bundle in wwwroot/, for two
-      # different reasons:
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-build
+
+      - name: Unpack the build
+        # The compiled output only — bin and obj. Notably *not* wwwroot, which
+        # is a source directory and comes from its own artifact below.
+        run: |
+          tar -xzf backend-build.tgz
+          rm -f backend-build.tgz
+
+      # The SPA bundle, for the same two reasons the discovery job needs it:
+      # Program.cs only wires the static-file pipeline, the SPA fallback and
+      # the /api 404 guard inside `if (Directory.Exists(WebRootPath))`, and
+      # tests that sign in follow the post-login redirect to "/", which
+      # MapFallbackToFile serves from here.
       #
-      #   * Program.cs wires the static-file pipeline, the SPA fallback and
-      #     the /api 404 guard inside `if (Directory.Exists(WebRootPath))`,
-      #     because in Debug the SPA is served by Vite and the directory is
-      #     normally absent. Without it `Unknown_api_path_returns_404_not_spa_index`
-      #     sees no `no-store` header.
-      #   * Tests that sign in follow the post-login redirect to "/", which is
-      #     served by MapFallbackToFile("index.html"). An empty directory is
-      #     not enough — the redirect lands on a 404 and the login assertion
-      #     fails (DataStoreListFilteringTests).
-      #
-      # Both reproduced locally, first with the directory moved aside and then
-      # with it emptied, which is what separated the two causes.
+      # It is downloaded per shard rather than carried in the build tarball
+      # because the static-web-assets manifest baked into bin/ records this
+      # path as a *content root* and resolves it on disk at startup. Without
+      # the directory the host throws
+      # `DirectoryNotFoundException: src/AutoNate.Web/wwwroot/` before any test
+      # body runs — 69 of shard 0's 251 tests failed that way.
       - uses: actions/download-artifact@v4
         with:
           name: spa-dist
           path: src/AutoNate.Web/wwwroot
 
-      # Locked mode: the committed packages.lock.json files are the contract.
-      # A PackageReference changed without regenerating them fails here rather
-      # than resolving a different transitive graph than the one that was
-      # reviewed. Regenerate with `make lockfiles`.
       - name: Restore
+        # Yes, even though the build is already unpacked and the next step
+        # passes --no-build. This is not belt and braces; without it nothing
+        # runs at all.
+        #
+        # `obj/*.nuget.g.props` imports each package's build assets from the
+        # local NuGet cache, every import guarded by `Condition="Exists(...)"`.
+        # A shard that has never restored has an empty cache, so those imports
+        # are skipped *silently* — including
+        # xunit.runner.visualstudio.props, the VSTest adapter that makes this a
+        # runnable test project. `dotnet test` then finds nothing to run and
+        # exits **0 with no output whatsoever**.
+        #
+        # That is what produced eight green shards that ran zero tests. It
+        # survived the first fix (packing every project's bin and obj) because
+        # the missing piece was never in the tarball to begin with: it lives in
+        # ~/.nuget/packages. The probe that settled it showed all four
+        # invocations returning exit 0 and zero bytes — including the
+        # discovery-style listing call, which succeeds in the discovery job.
+        #
+        # Restore is ~12 seconds against the build's ~110, so the shards still
+        # skip the expensive half.
         run: dotnet restore --locked-mode
 
-      # Deliberately not `-warnaserror`: the tree currently carries a handful
-      # of analyzer warnings (CA1512, S6667) in code this workflow does not
-      # own. Turning them fatal here would make CI red on arrival, which is
-      # how a gate gets disabled. Clearing them is its own task; this job
-      # enforces the tests.
-      - name: Build
-        run: dotnet build --no-restore
-
       - name: Test
-        run: dotnet test tests/AutoNate.Web.Tests --no-build --logger "console;verbosity=minimal"
+        id: test
+        # `trx` rather than `console;verbosity=minimal`. The console logger
+        # prints failure names without their assertion messages, which cost a
+        # whole diagnosis cycle on this suite once already; the trx carries the
+        # message, and the next step reads the executed count out of it.
+        #
+        # The exit code is captured rather than propagated so the count still
+        # gets published on a red shard - reconciliation needs it to tell "these
+        # tests failed" from "these tests never ran". The shard is failed at the
+        # end of the job instead.
+        run: |
+          started=$(date +%s)
+          set +e
+          dotnet test tests/AutoNate.Web.Tests --no-build \
+            --filter "${{ matrix.shard.filter }}" \
+            --logger "trx;LogFileName=shard.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory "$PWD/trx"
+          status=$?
+          set -e
+          elapsed=$(( $(date +%s) - started ))
+          # Echoed to the log as well as the step output. Without this the exit
+          # code is invisible: the step always succeeds by design, so a silent
+          # non-zero would look identical to a pass.
+          echo "dotnet test exited ${status} after ${elapsed}s"
+
+          # A run that produced no trx did not run tests, whatever it exited
+          # with. This is not hypothetical: with an incomplete build output,
+          # `dotnet test --no-build` exits 0 in total silence, and eight shards
+          # did exactly that. Reconciliation catches it a job later; this
+          # catches it here, where the cause is still on screen.
+          if [ ! -f trx/shard.trx ]; then
+            echo "::error::Shard ${{ matrix.shard.index }} produced no trx after ${elapsed}s (dotnet test exited ${status}). No tests ran. Check that the packed build output is complete."
+            ls -la . trx 2>&1 | head -40
+            exit 1
+          fi
+          {
+            echo "elapsed=${elapsed}"
+            echo "status=${status}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report this shard
+        # Runs whether the tests passed or not, for the reason above.
+        if: always()
+        run: |
+          python3 .github/scripts/shard_report.py \
+            --trx trx/shard.trx \
+            --shard "${{ matrix.shard.index }}" \
+            --elapsed "${{ steps.test.outputs.elapsed || 0 }}" \
+            --count-file shard-count.txt \
+            --summary-file shard-summary.md
+          cat shard-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shard-count-${{ matrix.shard.index }}
+          path: shard-count.txt
+          retention-days: 1
+
+      # coverlet writes to trx/<guid>/coverage.cobertura.xml. Uploaded per
+      # shard and merged later: a threshold applied to one shard would measure
+      # a tenth of the code against a whole-codebase number.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shard-coverage-${{ matrix.shard.index }}
+          path: trx/**/coverage.cobertura.xml
+          retention-days: 1
+          if-no-files-found: warn
+
+      - name: Fail this shard if its tests failed
+        # Deferred to here so the count is published first.
+        if: always() && steps.test.outputs.status != '0'
+        run: |
+          echo "::error::Shard ${{ matrix.shard.index }} had test failures. See the job summary."
+          exit 1
+
+  backend-reconcile:
+    name: Backend reconciliation
+    runs-on: ubuntu-latest
+    needs: [backend-discover, backend]
+    # `always()` is load-bearing. By default a failing shard skips this job,
+    # which would mask a lost test behind the very failure it caused - the one
+    # case where the count matters most.
+    if: always()
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shard-count-*
+          path: counts
+
+      - name: Every discovered test must have run somewhere
+        run: |
+          python3 .github/scripts/reconcile_shards.py \
+            --counts-dir counts \
+            --expected "${{ needs.backend-discover.outputs.total }}" \
+            --shards-result "${{ needs.backend.result }}" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+
+  backend-coverage:
+    name: Backend coverage
+    runs-on: ubuntu-latest
+    needs: [backend]
+    # `always()`, for the same reason backend-reconcile uses it: a failing
+    # shard must not hide a coverage regression. A shard that produced no
+    # report simply contributes nothing to the merge.
+    if: always()
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write   # the single, edited-in-place PR comment
+
+    env:
+      # -- The ratchet ----------------------------------------------------
+      # Line coverage, in percent, measured from a real merged run rather than
+      # chosen as an aspiration -- the same way `--max-warnings` and the a11y
+      # directory list were set, so it lands green and only ever moves one way.
+      #
+      # RAISE THIS when coverage rises. NEVER LOWER IT to make a build pass.
+      # A genuine drop worth accepting -- deleting well-covered code, say -- is
+      # a deliberate edit with a reason in the commit message, not a quiet
+      # nudge downward.
+      #
+      # Measured 2026-09-03 on run 33787184901: line 65.83%
+      # (61,539 / 93,487 lines), branch 41.70%, merged across all 10 shards.
+      # Set to 65.50 rather than 65.83 to absorb run-to-run variance -- async
+      # and timing-dependent branches are not covered identically every run,
+      # and a threshold pinned to the exact measurement fails on noise, which
+      # is how a gate earns a reputation for lying. Tighten the margin once
+      # several runs have established the real spread.
+      COVERAGE_THRESHOLD: "65.50"
+      COVERAGE_MEASURE_ONLY: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shard-coverage-*
+          path: coverage
+
+      - name: Merge the shards' reports
+        # ReportGenerator rather than a hand-rolled XML merge: every shard
+        # loads the whole assembly, so the same class appears in several
+        # reports and naively summing counters would inflate the number by
+        # roughly the shard count.
+        run: |
+          dotnet tool restore
+          found=$(find coverage -name 'coverage.cobertura.xml' | wc -l)
+          echo "shard reports found: $found"
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No shard produced a coverage report."
+            exit 1
+          fi
+
+          dotnet reportgenerator \
+            "-reports:coverage/**/coverage.cobertura.xml" \
+            "-targetdir:merged" \
+            "-reporttypes:Cobertura"
+
+      - name: Apply the ratchet
+        run: |
+          extra=""
+          if [ "$COVERAGE_MEASURE_ONLY" = "true" ]; then extra="--report-only"; fi
+          python3 .github/scripts/coverage_gate.py \
+            --report merged/Cobertura.xml \
+            --threshold "$COVERAGE_THRESHOLD" \
+            --comment-file coverage-comment.md \
+            --summary-file "$GITHUB_STEP_SUMMARY" \
+            $extra
+
+      - name: Comment on the pull request
+        # One comment per PR, edited in place across re-runs rather than added
+        # to -- a thread of twelve near-identical coverage comments is how
+        # people learn to skim past them.
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body-file coverage-comment.md \
+            --edit-last --create-if-none
 
   image:
     name: App image (build + smoke test)
