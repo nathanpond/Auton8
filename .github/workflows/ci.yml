@@ -252,6 +252,13 @@ jobs:
         # deliberately bypassed: this job hosts no sidecar, and the app's
         # requirement for one is covered by the compose profile rather than
         # here.
+        #
+        # Flowable__BaseUrl points at a closed port on purpose. The app refuses
+        # to start without the setting present — `Flowable:BaseUrl must be
+        # configured.`, which is exactly what failed the first run of this job —
+        # but it does not call Flowable during startup, so an unreachable
+        # address is enough to get the image serving. Reaching a real engine is
+        # the E2E job's business, not this one's.
         run: |
           docker run -d --name auton8-ci-smoke --network host \
             -e ConnectionStrings__Default='Host=127.0.0.1;Port=5432;Database=AutoNate;Username=autonate;Password=Your_password123!' \
@@ -260,6 +267,7 @@ jobs:
             -e ASPNETCORE_ENVIRONMENT=Development \
             -e Bootstrap__AdminUsername=ci-smoke \
             -e Bootstrap__AdminPassword='a password only this job uses' \
+            -e Flowable__BaseUrl='http://127.0.0.1:9/flowable-rest' \
             auton8:ci
 
           for i in $(seq 1 60); do
