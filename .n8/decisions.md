@@ -556,3 +556,53 @@ Comparing `Print(parse(text))` against `text` catches every structural
 difference without the false failures. Generated numbers are additionally
 constrained to values that print and re-parse exactly; extreme numeric input is
 still covered, by the totality property, where it belongs.
+
+## Ad-hoc — 2026-09-03 — #72 retargeted from records to the workflow caches (#72)
+
+#72 named `InMemorySelectorEvaluator` vs `RecordSelectorSqlCompiler` as the pair
+to cross-check. They never evaluate the same thing: the in-memory evaluator is
+constructed in exactly three places — `FlowableInstanceAuthorizers` (tasks,
+executions) and `ExecutionEndpoints` — all **WorkflowTask** and
+**WorkflowExecution**. Records have only the record compilers.
+
+The kinds that genuinely have two implementations are WorkflowTask and
+WorkflowExecution: in memory over live Flowable data, in SQL over the
+`workflow_*_cache` tables. The agreement property targets that pair instead.
+The story's instinct was right; its example was wrong.
+
+Also recorded on the issue: the grammar has **no negation and no disjunction**,
+which #72's AC asks the generator to exercise. `PredicateNode` is a flat list
+combined with AND on every path.
+
+## Ad-hoc — 2026-09-03 — Wildcard inversion found; advised, not fixed (#72, GHSA-vrw7-qxhw-m9q8)
+
+The agreement property's first run reported 69 leaks and 539 lockouts, all on
+the wildcard. `ResolveTagValue` maps `WildcardValue` to `null`, and
+`CompileStringEquals` treats a null value as "match NULL" — the branch meant for
+`tag=null`. So `assignee=*` compiles to `assignee IS NULL` while the in-memory
+evaluator reads it as `actual is not null`. Exact complements, in both
+`WorkflowTaskCacheSelectorCompiler` and `WorkflowExecutionCacheSelectorCompiler`.
+
+Filed as a **draft security advisory**, per `.n8/config.yml`'s
+`security_findings: advisories`, not a public issue.
+
+**Not fixed**, and that is the decision worth recording. The fix is small —
+give the wildcard its own representation and compile it to `IS NOT NULL` — but
+it *widens what existing grants permit*: a `tag=*` grant would begin matching
+rows it currently excludes. Changing what a stored authorization rule means is a
+Rule 4 call, so it needs a person. Pinned meanwhile by
+`The_wildcard_divergence_still_holds`, and excluded from the shared generator
+because leaving it in buries every future divergence under hundreds of known
+ones.
+
+## Ad-hoc — 2026-09-03 — The agreement property is a Fact, not an FsCheck Property (#72)
+
+It needs a real database, and a database per generated case would undo #67's
+sharding gains. So one database and one row set serve 200 generated selectors,
+and the whole thing runs in ~8 seconds.
+
+The cost is that FsCheck's shrinker never runs, so shrinking is done by hand on
+failure using the same generator-side shrinker the AQL properties use — the two
+suites behave alike on failure. The mutation check is the evidence it works: it
+reduced `/workflowtask[processkey=onboarding;assignee=bob]` to
+`/workflowtask[processkey=onboarding]`.
