@@ -16,8 +16,15 @@ export function MarkdownView({ source }: Props) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          a: ({ node, ...rest }) => (
-            <a {...rest} target="_blank" rel="noopener noreferrer" />
+          // `children` is destructured and rendered explicitly rather than
+          // arriving inside `...rest`. Behaviourally identical, but it lets
+          // both a reader and jsx-a11y/anchor-has-content see that the anchor
+          // has content — spread props are opaque to the rule, which is why it
+          // fired here.
+          a: ({ node, children, ...rest }) => (
+            <a {...rest} target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
           )
         }}
       >

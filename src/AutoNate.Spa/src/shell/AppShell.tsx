@@ -45,17 +45,18 @@ export default function AppShell() {
           <AgentSidebar />
 
           {isScrollable && (
-            <a
-              href="#"
+            // A button, not an anchor with href="#". It never navigates, and
+            // as an anchor it was announced as a link and activated only by
+            // Enter — a button is announced correctly and responds to Space
+            // as well, which is what a keyboard user will reach for.
+            <button
+              type="button"
               className="btn-scroll-to-top"
-              onClick={(e) => {
-                e.preventDefault();
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
               aria-label="Scroll to top"
             >
-              <i className="fa fa-angle-up" />
-            </a>
+              <i className="fa fa-angle-up" aria-hidden="true" />
+            </button>
           )}
 
           <PreferencesModal />
