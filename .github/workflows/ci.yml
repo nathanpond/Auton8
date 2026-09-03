@@ -341,11 +341,28 @@ jobs:
           name: backend-build
 
       - name: Unpack the build
-        # The compiled output only. The SPA bundle is inside this tarball too,
-        # because discovery downloaded it before building.
+        # The compiled output only — bin and obj. Notably *not* wwwroot, which
+        # is a source directory and comes from its own artifact below.
         run: |
           tar -xzf backend-build.tgz
           rm -f backend-build.tgz
+
+      # The SPA bundle, for the same two reasons the discovery job needs it:
+      # Program.cs only wires the static-file pipeline, the SPA fallback and
+      # the /api 404 guard inside `if (Directory.Exists(WebRootPath))`, and
+      # tests that sign in follow the post-login redirect to "/", which
+      # MapFallbackToFile serves from here.
+      #
+      # It is downloaded per shard rather than carried in the build tarball
+      # because the static-web-assets manifest baked into bin/ records this
+      # path as a *content root* and resolves it on disk at startup. Without
+      # the directory the host throws
+      # `DirectoryNotFoundException: src/AutoNate.Web/wwwroot/` before any test
+      # body runs — 69 of shard 0's 251 tests failed that way.
+      - uses: actions/download-artifact@v4
+        with:
+          name: spa-dist
+          path: src/AutoNate.Web/wwwroot
 
       - name: Restore
         # Yes, even though the build is already unpacked and the next step

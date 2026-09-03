@@ -175,6 +175,21 @@ public sealed class BackendShardingWorkflowTests
     }
 
     [Fact]
+    public void Each_shard_gets_the_spa_bundle()
+    {
+        // wwwroot is a source directory, so it is not in the build tarball —
+        // which carries bin and obj only. The static-web-assets manifest baked
+        // into bin records this path as a content root and resolves it on disk
+        // at host startup, so without it the host throws
+        // DirectoryNotFoundException before any test body runs. 69 of shard
+        // 0's 251 tests failed exactly that way.
+        var backend = Job("backend");
+
+        Assert.Contains("name: spa-dist", backend, StringComparison.Ordinal);
+        Assert.Contains("path: src/AutoNate.Web/wwwroot", backend, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_shard_that_produces_no_trx_fails_loudly()
     {
         var backend = Job("backend");
