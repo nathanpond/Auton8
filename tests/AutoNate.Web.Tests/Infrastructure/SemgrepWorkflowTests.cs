@@ -109,6 +109,49 @@ public sealed class SemgrepWorkflowTests
     }
 
     [Fact]
+    public void Every_silenced_rule_carries_a_justification()
+    {
+        // #70's triage silenced nothing: all 11 baseline findings were
+        // dismissed individually with written reasons instead. `csharp-sqli`
+        // was 6-for-6 wrong on this codebase, which by the usual guide would
+        // make it a configuration problem — but this application ships its own
+        // query language, so a genuine injection in new code is the most
+        // valuable thing this scanner could ever catch. Six one-time
+        // dismissals beat blinding the rule.
+        //
+        // This guard is therefore forward-looking, and shaped like #50's
+        // loopback exceptions: silencing a rule is allowed, silencing one
+        // wordlessly is not. Someone reaching for `--exclude-rule` in six
+        // months has to say why on the line above it.
+        var lines = File.ReadAllLines(Path.Combine(RepoRoot.Path, ".github", "workflows", "semgrep.yml"));
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].Contains("--exclude-rule", StringComparison.Ordinal)
+                && !lines[i].Contains("--exclude=", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // A justification is a comment on one of the preceding lines,
+            // before any blank line breaks the association.
+            var justified = false;
+            for (var j = i - 1; j >= 0; j--)
+            {
+                var previous = lines[j].Trim();
+                if (previous.Length == 0) break;
+                if (previous.StartsWith('#')) { justified = true; break; }
+            }
+
+            Assert.True(
+                justified,
+                $"semgrep.yml line {i + 1} silences a rule with no justification comment above it: "
+                + $"'{lines[i].Trim()}'. A silenced rule needs a stated reason — otherwise the next "
+                + "person cannot tell a considered exception from a suppressed inconvenience.");
+        }
+    }
+
+    [Fact]
     public void Both_pull_requests_and_master_are_scanned()
     {
         var workflow = Workflow();
