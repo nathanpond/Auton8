@@ -327,3 +327,187 @@ clean.
 - **Correction:** I twice attributed a failing suite to "environment" without reading the error, and was wrong the second time. `console;verbosity=minimal` prints a count and a stack trace and hides the message; switching to the `trx` logger turned "951 failures" into "903 × 53300: too many clients" in one step. Both project skills written in this milestone say to use `trx`.
 - **Note:** `SystemIssueEndpointsTests.List_returns_open_issues_by_default` was verified as **pre-existing** by checking out `master` (`647dc55`), rebuilding and running it there. Filed as #122. Checked specifically because it surfaced during the schema work and looked like it might have been caused by it.
 - **Blocker resolved:** the owner authorised publishing a throwaway `v0.1.1-rc0`. The publish path was exercised for real, verified from outside the workflow, and then the tag and all four GHCR packages were deleted. Package deletion needed `delete:packages`, which the session token lacked; the owner granted it rather than my working around it.
+
+## Ad-hoc — 2026-09-03 — Semgrep pack choice: p/typescript over p/react (#66)
+
+The story asked for "React/TypeScript" coverage and left the packs to my
+discretion. I measured rather than assumed: `p/react` is 4 rules and finds
+**zero** findings in this repository; `p/typescript` is 74 rules, a strict
+superset of `p/react`'s, and finds four real wildcard-`postMessage` sites in
+`DiagramEditor.tsx`. Same runtime cost. Shipped `p/typescript` and deliberately
+left `p/react` out, since including both would be pure duplication.
+
+`SemgrepWorkflowTests.The_chosen_packs_are_the_ones_that_were_measured` asserts
+`p/react` stays out, so re-adding it is a deliberate act rather than a drift.
+
+Affects: #70 (its baseline is 11 findings, not the 7 that `p/react` would have
+produced).
+
+## Ad-hoc — 2026-09-03 — The Semgrep engine is pinned; the rules cannot be (#66)
+
+`#52` established digest-pinning for images and the story's Discretion leaned
+toward pinning rule packs so #70's baseline would be stable. Only half of that
+is achievable: Semgrep's registry packs are rolling and have **no version
+syntax**. So the engine is pinned by digest
+(`semgrep/semgrep@sha256:b94b53d0…`, semgrep 1.175.0) and the rules are not.
+
+Rather than leave that implicit, the workflow says so, and both #66 and #70
+carry the consequence: #70 must re-count when it starts rather than diff
+against a recorded number. The alternative — vendoring the rule packs into the
+repository to freeze them — buys reproducibility at the cost of never getting
+new rules, which is the wrong trade for an advisory scanner.
+
+Affects: #70.
+
+## Ad-hoc — 2026-09-03 — Refused to bypass push protection to test a scanner (#66)
+
+#66's detection-proof AC needed a deliberately vulnerable snippet pushed to a
+scratch branch. The first attempt included a fake AWS key pair and GitHub's
+push protection rejected the push, offering an unblock link.
+
+I removed the credentials instead of clicking it. Whitelisting a credential to
+prove a credential scanner works is backwards, and the rejection is itself
+evidence the class is covered twice over. The `p/secrets` pack was proven
+locally instead.
+
+One trap worth recording: an earlier local attempt appeared to show `p/secrets`
+was broken. It was not — I had used `AKIAIOSFODNN7EXAMPLE`, which is AWS's own
+documentation key and is deliberately allowlisted by secret scanners. A
+non-allowlisted pair fires both rules.
+
+## Ad-hoc — 2026-09-03 — Semgrep's dangerouslySetInnerHTML rule is blind to this codebase (#129)
+
+Found while proving detection for #66, filed as #129 rather than fixed. The
+rule matches an untyped destructured prop but not a type-annotated one:
+
+    export function A({ c })                  -> flagged
+    export function E({ c }: { c: string })   -> NOT flagged
+
+The annotation is the only difference; the file extension is not the variable.
+Every real component here uses the annotated form, so **both** live call sites
+(`noteEmbedBlock.tsx:503`, `DynamicPageRoute.tsx:103`) are invisible to the
+scan. Confirmed under both `p/react` and `p/typescript`, so no pack choice
+fixes it.
+
+Left for triage because the scope boundary is real: #66 runs the scanner, #70
+triages the findings it reports, and a finding that never appears is neither.
+The consequence to remember is that "0 XSS findings" must not be read as "no
+XSS".
+
+## Ad-hoc — 2026-09-03 — Did NOT silence csharp-sqli despite it being 6-for-6 wrong (#70)
+
+#70's Discretion note offered this guide: "a rule wrong more often than right
+on this codebase is a configuration problem, not a triage problem." Applied
+literally, `csharp-sqli` qualified — all six of its baseline findings were false
+positives, every one the same shape (`cmd.CommandText = <variable>` inside an
+execute helper that binds parameters separately, which the rule cannot
+distinguish from real concatenation).
+
+I departed from the guide and kept the rule enabled. Auton8 ships its own query
+language (AQL) plus a records-query engine, so a genuine SQL injection in *new*
+code is the single highest-value finding this scanner could ever produce.
+Permanently blinding that rule to save six one-time dismissals is a bad trade.
+
+Instead the regression guard is forward-looking:
+`SemgrepWorkflowTests.Every_silenced_rule_carries_a_justification` permits a
+future `--exclude-rule` only with a justification comment above it — the same
+shape as #50's loopback exceptions. Reported as "0 rules silenced" with this
+reasoning on #70.
+
+## Ad-hoc — 2026-09-03 — Filed nothing and advised nothing from the first Semgrep pass (#70)
+
+All 11 baseline findings were dismissed with written reasons; zero issues, zero
+draft advisories. That is the AC applied rather than avoided: a finding is filed
+only with a **concrete failure path**, and per project convention one that
+cannot be stated that way is noise.
+
+The closest call was the four `wildcard-postmessage-configuration` hits, where
+the rule matches a genuinely real pattern. But drawio is vendored into
+`public/drawio/` and the iframe `src` is a relative same-origin path, so the
+frame cannot navigate cross-origin and there is no third party to leak to. The
+only statable failure path is conditional, so it was dismissed with that
+argument rather than filed.
+
+Recorded as a follow-up rather than a security issue: replacing `"*"` with
+`window.location.origin` in those four calls is strictly better and is not
+precluded by the existing comment's stated reason (it resolves at runtime). Left
+for the user to green-light, since SPA changes are outside a CI-triage story.
+
+Two of the six SQL findings (`DuckDbAnalyticsRunner`, `RecordsQueryEntity`) are
+only safe because their *callers* quote identifiers and parameterise values.
+That assurance is owned by #69 and #72; cross-referenced rather than duplicated.
+
+## Ad-hoc — 2026-09-03 — #70's dismissals still need confirming against master (#70)
+
+The baseline alerts exist only on `refs/pull/130/merge`, the closed throwaway PR
+from #66, because the Semgrep workflow has not merged to `master` yet — a
+repo-wide alert query returns 0. The 11 dismissals were applied to those alerts
+by number and are *expected* to carry over to `master`'s first analysis, but
+that has not been observed.
+
+Flagged rather than assumed: re-verify after the M1 PR merges, and redo the
+dismissals against `master` if they did not stick. #70's summary says so
+explicitly so a passing story does not imply a verified alert list.
+
+## Ad-hoc — 2026-09-03 — Kept the hash partition after testing the alternative (#67)
+
+#74 prescribed a stable hash of the class name. I hypothesised that weighting
+by per-class test count would balance better, because the slowest classes
+looked like the biggest ones, and measured before deciding: correlation between
+test count and duration is **0.305**, and greedy longest-processing-time on
+that weight produced 46 class-minutes on the worst shard against the hash's 45.
+
+Kept the hash. Recording it because the *hypothesis* was reasonable and wrong,
+and someone will have it again.
+
+## Ad-hoc — 2026-09-03 — Shards share discovery's build but restore for themselves (#67)
+
+#67's Discretion offered build-sharing as faster with "a cache-correctness
+failure mode". I took the speed and argued the risk away on the grounds that an
+artifact built fresh in the same run from the same commit is a handoff, not a
+cache.
+
+That reasoning was wrong, and it cost three CI cycles. `obj/*.nuget.g.props`
+imports each package's build assets from `~/.nuget/packages` under
+`Condition="Exists(...)"`. A shard that never restored has an empty cache, so
+those imports are skipped **silently** — including
+`xunit.runner.visualstudio.props`, the VSTest adapter. `dotnet test --no-build`
+then has nothing to run and exits **0 with no output**, which presented as
+eight green shards having run zero tests. The failure was a cache-correctness
+one; just not the cache I had in mind.
+
+Settled shape: shards unpack discovery's build output (every project's `bin`
+and `obj`), download `spa-dist` for `wwwroot` (a source directory, so not in
+the tarball), and run `dotnet restore --locked-mode` (~12s) before
+`dotnet test --no-build`. The expensive half — the ~110s build — is still
+skipped.
+
+Local repro passed throughout because this machine runs SDK 10.0.201 while CI
+resolves `10.0.x` to 10.0.400; the older SDK tolerates the missing adapter.
+Worth remembering the next time "works locally" argues against a CI failure.
+
+## Ad-hoc — 2026-09-03 — Silent test loss is now caught twice, not once (#67, #74)
+
+Reconciliation catches a shard that ran nothing, and did — it is the only
+reason eight green shards were not merged as a 4x speedup. But it catches it a
+job later, with the cause off screen.
+
+So a shard whose run produced no trx now fails at the step itself, whatever
+`dotnet test` exited with, and the exit code is echoed to the log rather than
+only into `$GITHUB_OUTPUT`. The test step deliberately swallows that exit code
+so a red shard still publishes its count for reconciliation, which is precisely
+what made "exited 0 having run nothing" indistinguishable from a pass.
+
+## Ad-hoc — 2026-09-03 — Retuned to 10 shards from measurement (#67)
+
+8 shards gave a slowest shard of 8m09s — inside the criterion, but with
+discovery on top the milestone's claim of a backend verdict in under ten
+minutes was still false end to end. Shard 6 held the heavy cluster and ran
+8m09s where its load predicted 6m42s.
+
+10 shards: slowest **4m20s**, spread down from 5m12s to 1m42s, end-to-end
+**7m12s** against a 23-minute median before. Runner minutes are free on a public
+repository, so the extra jobs cost nothing that matters.
+
+Read the step summary's per-shard table before changing `BACKEND_SHARDS` again;
+the hash is lumpy and its lumpiness moves with the class names.
