@@ -214,9 +214,9 @@ public sealed class BackendShardingWorkflowTests
         var occurrences = workflow.Split("BACKEND_SHARDS").Length - 1;
 
         // Once as the declaration, and the uses inside the run block.
-        Assert.Contains("BACKEND_SHARDS: 8", workflow, StringComparison.Ordinal);
+        Assert.Contains("BACKEND_SHARDS: 10", workflow, StringComparison.Ordinal);
         Assert.True(occurrences >= 2, "BACKEND_SHARDS is declared but never used.");
-        Assert.DoesNotContain("--shards 8", workflow);
+        Assert.DoesNotContain("--shards 10", workflow);
     }
 
     [Fact]

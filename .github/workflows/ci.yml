@@ -102,13 +102,21 @@ jobs:
       matrix: ${{ steps.partition.outputs.matrix }}
       total: ${{ steps.partition.outputs.total }}
     env:
-      # The one place the shard count lives. Chosen by simulating the real hash
-      # partition against per-class timings from a local run: 8 shards puts the
-      # slowest at ~7 minutes against the 10-minute target, with headroom for
-      # the suite to grow. The hash is lumpy - a 21-45 class-minute spread
-      # against a 31-minute ideal, because one class alone is 12 - so retune
-      # from the step summary rather than from arithmetic.
-      BACKEND_SHARDS: 8
+      # The one place the shard count lives, and now tuned from a real run
+      # rather than a model. At 8 the slowest shard was 8m09s against a 3m-8m
+      # spread: it held the heavy cluster and took 8m09s where its class-minute
+      # load predicted 6m42s, because a few very long classes leave little to
+      # overlap with. Under the 10-minute target, but with no room to grow and
+      # 2m36s of discovery still to add on top.
+      #
+      # 10 splits that cluster: worst-shard load drops from 44.9 to 36.0
+      # class-minutes, projecting ~5.2 minutes against the same fitted curve
+      # (wall = load / 5.8x parallelism). Runner minutes are free here, so the
+      # two extra jobs cost nothing that matters.
+      #
+      # Retune from the step summary's per-shard table, not from arithmetic:
+      # the hash is lumpy and its lumpiness moves with the class names.
+      BACKEND_SHARDS: 10
 
     steps:
       - uses: actions/checkout@v4
