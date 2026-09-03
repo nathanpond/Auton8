@@ -1,0 +1,125 @@
+name: Semgrep
+
+# A second opinion alongside CodeQL. CodeQL's default suite is one engine with
+# one set of priorities; these packs cover patterns it does not — credential
+# literals, unsafe path joins, wildcard postMessage origins, SQL assembled by
+# concatenation.
+#
+# ADVISORY BY DESIGN. A finding does not fail this job. That is a considered
+# position, not timidity: a new scanner's first pass over a codebase this size
+# is mostly false positives, and a noisy blocking gate is one somebody disables
+# within a week. Triage happens in #70, and tightening is a decision to make
+# once there is a real signal-to-noise number behind it.
+#
+# A BROKEN SCAN DOES FAIL. A scanner that reports nothing because it crashed is
+# worse than no scanner, because an empty alert list reads as "clean".
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Runs alongside ci.yml rather than after it. Nothing here gates the build, so
+# serialising the two would only lengthen the wall clock on every PR.
+concurrency:
+  group: semgrep-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only default, so a job that declares nothing can write nothing.
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # checkout
+      security-events: write  # SARIF upload to code scanning. Nothing else.
+
+    container:
+      # Engine pinned by digest, consistent with every other image in this
+      # repository (#52). Currently semgrep 1.175.0. Refresh with:
+      #   docker buildx imagetools inspect semgrep/semgrep:latest \
+      #     | awk '/^Digest:/{print $2; exit}'
+      #
+      # This pins the ENGINE, not the RULES. Registry packs are rolling and
+      # have no version syntax, so the finding set can change without this
+      # file changing. Anything that needs a stable baseline (#70) must re-read
+      # the count rather than trust a previously recorded one.
+      image: semgrep/semgrep@sha256:b94b53d02fd4a022f9eac4e2af1380f5c3c4c21400e79d3336bdff1d1db5e796
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan
+        # Packs, each with a reason:
+        #
+        #   p/csharp     the backend is C#: injection, deserialisation, crypto
+        #                misuse, unsafe path joins.
+        #
+        #   p/typescript the SPA is React 19 + TypeScript. Deliberately this
+        #                and NOT p/react: p/react is 4 rules, p/typescript is
+        #                74 and a strict superset of them. On this repository
+        #                p/react finds nothing at all, while p/typescript
+        #                catches four real wildcard-postMessage sites in
+        #                DiagramEditor.tsx. Same cost, more coverage.
+        #
+        #   p/secrets    credential-shaped literals. This repository has
+        #                shipped a committed credential before (project
+        #                invariant 1 exists because of it), so a second pair
+        #                of eyes on that class specifically is earned.
+        #
+        # `--no-error` is what makes findings advisory: semgrep exits 0 when it
+        # has findings, and non-zero only when the scan itself failed. That is
+        # exactly the split this workflow wants, so the exit code is left
+        # alone. Do not append a shell fallback to force it to zero: that
+        # would hide a crashed engine as well as the findings.
+        run: |
+          semgrep scan \
+            --config=p/csharp \
+            --config=p/typescript \
+            --config=p/secrets \
+            --sarif --output=semgrep.sarif \
+            --metrics=off \
+            --no-error
+
+      - name: The scan must actually have run
+        # Belt and braces behind the exit code above. A partial or empty SARIF
+        # still uploads cleanly and still reads as "no problems found", so the
+        # shape of the output is checked rather than assumed.
+        run: |
+          if [ ! -s semgrep.sarif ]; then
+            echo "::error::semgrep produced no SARIF output. The scan did not run."
+            exit 1
+          fi
+
+          rules=$(python3 -c "import json;d=json.load(open('semgrep.sarif'));print(len(d['runs'][0]['tool']['driver'].get('rules',[])))")
+          echo "rules loaded: $rules"
+
+          # Zero rules loaded is the signature of a silently useless scan: the
+          # packs failed to resolve, semgrep scanned everything against nothing
+          # and reported a clean bill of health.
+          if [ "$rules" -lt 100 ]; then
+            echo "::error::Only $rules rules loaded (expected ~148). The rule packs did not resolve."
+            exit 1
+          fi
+
+      - name: Summarise
+        # #70 triages these, so the size of that job should be readable from
+        # the run rather than by opening the Security tab.
+        run: |
+          count=$(python3 -c "import json;print(len(json.load(open('semgrep.sarif'))['runs'][0].get('results',[])))")
+          {
+            echo "### Semgrep"
+            echo
+            echo "- findings: **$count**"
+            echo "- packs: \`p/csharp\`, \`p/typescript\`, \`p/secrets\`"
+            echo "- advisory: a finding does not fail this job (see #70)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          # Keeps these alerts a distinct tool in the Security tab rather than
+          # interleaved with CodeQL's.
+          category: semgrep

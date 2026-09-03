@@ -88,3 +88,6 @@ secrets.json
 *.p12
 *.key
 *.jks
+
+# xUnit trx logger output (`dotnet test --logger trx`)
+TestResults/
