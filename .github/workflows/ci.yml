@@ -413,6 +413,7 @@ jobs:
           dotnet test tests/AutoNate.Web.Tests --no-build \
             --filter "${{ matrix.shard.filter }}" \
             --logger "trx;LogFileName=shard.trx" \
+            --collect:"XPlat Code Coverage" \
             --results-directory "$PWD/trx"
           status=$?
           set -e
@@ -456,6 +457,17 @@ jobs:
           path: shard-count.txt
           retention-days: 1
 
+      # coverlet writes to trx/<guid>/coverage.cobertura.xml. Uploaded per
+      # shard and merged later: a threshold applied to one shard would measure
+      # a tenth of the code against a whole-codebase number.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shard-coverage-${{ matrix.shard.index }}
+          path: trx/**/coverage.cobertura.xml
+          retention-days: 1
+          if-no-files-found: warn
+
       - name: Fail this shard if its tests failed
         # Deferred to here so the count is published first.
         if: always() && steps.test.outputs.status != '0'
@@ -489,6 +501,89 @@ jobs:
             --shards-result "${{ needs.backend.result }}" \
             --summary-file "$GITHUB_STEP_SUMMARY"
 
+
+  backend-coverage:
+    name: Backend coverage
+    runs-on: ubuntu-latest
+    needs: [backend]
+    # `always()`, for the same reason backend-reconcile uses it: a failing
+    # shard must not hide a coverage regression. A shard that produced no
+    # report simply contributes nothing to the merge.
+    if: always()
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write   # the single, edited-in-place PR comment
+
+    env:
+      # -- The ratchet ----------------------------------------------------
+      # Line coverage, in percent, measured from a real merged run rather than
+      # chosen as an aspiration -- the same way `--max-warnings` and the a11y
+      # directory list were set, so it lands green and only ever moves one way.
+      #
+      # RAISE THIS when coverage rises. NEVER LOWER IT to make a build pass.
+      # A genuine drop worth accepting -- deleting well-covered code, say -- is
+      # a deliberate edit with a reason in the commit message, not a quiet
+      # nudge downward.
+      COVERAGE_THRESHOLD: "0"
+      # Flipped to false once the number above is real. While true the job
+      # measures and reports without gating, which is how the starting value
+      # gets established without a red build on the run that establishes it.
+      COVERAGE_MEASURE_ONLY: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shard-coverage-*
+          path: coverage
+
+      - name: Merge the shards' reports
+        # ReportGenerator rather than a hand-rolled XML merge: every shard
+        # loads the whole assembly, so the same class appears in several
+        # reports and naively summing counters would inflate the number by
+        # roughly the shard count.
+        run: |
+          dotnet tool restore
+          found=$(find coverage -name 'coverage.cobertura.xml' | wc -l)
+          echo "shard reports found: $found"
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No shard produced a coverage report."
+            exit 1
+          fi
+
+          dotnet reportgenerator \
+            "-reports:coverage/**/coverage.cobertura.xml" \
+            "-targetdir:merged" \
+            "-reporttypes:Cobertura"
+
+      - name: Apply the ratchet
+        run: |
+          extra=""
+          if [ "$COVERAGE_MEASURE_ONLY" = "true" ]; then extra="--report-only"; fi
+          python3 .github/scripts/coverage_gate.py \
+            --report merged/Cobertura.xml \
+            --threshold "$COVERAGE_THRESHOLD" \
+            --comment-file coverage-comment.md \
+            --summary-file "$GITHUB_STEP_SUMMARY" \
+            $extra
+
+      - name: Comment on the pull request
+        # One comment per PR, edited in place across re-runs rather than added
+        # to -- a thread of twelve near-identical coverage comments is how
+        # people learn to skim past them.
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body-file coverage-comment.md \
+            --edit-last --create-if-none
 
   image:
     name: App image (build + smoke test)
