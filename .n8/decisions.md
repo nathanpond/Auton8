@@ -635,3 +635,38 @@ first one honest.
 
 Raising the branch number is a real piece of work and belongs to whoever takes
 it on deliberately, not to a gate that starts failing builds for it today.
+
+## Ad-hoc — 2026-09-03 — Did not sweep no-autofocus for the a11y ratchet (#68)
+
+#68 asked for "the violations that are lint-level fixes". After the four
+genuinely mechanical ones, the largest remaining group is `no-autofocus` (15
+sites). I left every one.
+
+Removing `autoFocus` is not a mechanical fix. Inside a modal it is usually the
+*right* behaviour, and stripping it would make those dialogs worse for exactly
+the keyboard users the rule exists to protect. Each site needs a per-case
+judgement about whether focus belongs there — which is a different piece of work
+from a lint pass, and sweeping them to reach a number would have been the
+suppression this story forbids wearing a different hat.
+
+Consequence worth stating: after the mechanical fixes, **no directory remains
+whose violations are purely mechanical**. The two that moved onto the error list
+(`src/shell`, `src/pages/workflow`) were the only two that had any. The story's
+premise — several mechanically-fixable directories — turned out to be one
+directory more optimistic than the code.
+
+## Ad-hoc — 2026-09-03 — #68's screen-reader criterion is not satisfied (#68)
+
+One acceptance criterion asks that a screen reader announcement be confirmed for
+the labelling fixes. **I did not run one** — no assistive technology is available
+in this environment, and claiming an announcement I did not hear would be worse
+than leaving the box unticked.
+
+Verified instead: the DOM contract each fix produces (a `<button aria-label>`
+yields role button with that name; `<label htmlFor>` + `<select id>` yields the
+accessible name), plus tsc, the production build, the full E2E suite, and lint
+at zero errors. The AC box is deliberately left unchecked on the issue.
+
+Remaining work is a person spending two minutes with VoiceOver or NVDA on the
+workflow studio's "Render mode"/"Form" selects and the scroll-to-top button.
+Carry it into `/n8-verify` as a manual step.
