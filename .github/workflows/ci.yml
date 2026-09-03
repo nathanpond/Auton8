@@ -68,7 +68,7 @@ jobs:
       # what normally mirrors it into AutoNate.Web/wwwroot. The backend job
       # needs those assets (see its download step) and there is no reason to
       # build the same bundle twice.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: spa-dist
           path: src/AutoNate.Spa/dist
@@ -242,7 +242,7 @@ jobs:
           tar -czf backend-build.tgz -T pack-list.txt
           ls -lh backend-build.tgz
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: backend-build
           path: backend-build.tgz
@@ -450,7 +450,7 @@ jobs:
             --summary-file shard-summary.md
           cat shard-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: shard-count-${{ matrix.shard.index }}
@@ -460,7 +460,7 @@ jobs:
       # coverlet writes to trx/<guid>/coverage.cobertura.xml. Uploaded per
       # shard and merged later: a threshold applied to one shard would measure
       # a tenth of the code against a whole-codebase number.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: shard-coverage-${{ matrix.shard.index }}
@@ -832,7 +832,7 @@ jobs:
 
       # A failed selector is close to unreadable without the page. Playwright
       # writes traces/screenshots under the test output when a spec fails.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-artifacts
