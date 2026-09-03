@@ -192,10 +192,46 @@ jobs:
       # commit, exactly like the spa-dist artifact above, so the usual
       # stale-cache failure mode cannot arise.
       - name: Pack the build for the shards
+        # Every project's bin AND obj, not just the test project's.
+        #
+        # The first sharded run shipped only the test project's output, on the
+        # reasoning that its bin already contains copies of everything it
+        # references. That is true of the DLLs and false of what `dotnet test`
+        # needs: with the referenced projects' own bin directories absent,
+        # `dotnet test --no-build` on SDK 10.0.400 resolved no test source and
+        # exited **0 in silence** — no output, no trx, no error. Eight green
+        # shards that ran nothing. (SDK 10.0.201, where this was developed,
+        # tolerates it and runs the tests, which is why local repro passed.)
+        #
+        # Project directories come from git rather than `find`, which had
+        # matched node_modules/esbuild/bin and would silently miss a newly
+        # added project. The SPA has no MSBuild output and the E2E suite is a
+        # different job, so both are excluded.
         run: |
-          tar -czf backend-build.tgz \
-            tests/AutoNate.Web.Tests/bin \
-            $(find . -maxdepth 3 -type d -name obj -not -path "./src/AutoNate.Spa/*")
+          git ls-files '*.csproj' \
+            | xargs -n1 dirname \
+            | grep -vE '^src/AutoNate\.Spa|^tests/AutoNate\.E2E\.Tests' \
+            | sort -u > projects.txt
+
+          echo "packing build output for these projects:"
+          sed 's/^/  /' projects.txt
+
+          : > pack-list.txt
+          while IFS= read -r project; do
+            for dir in bin obj; do
+              if [ -d "$project/$dir" ]; then
+                printf '%s\n' "$project/$dir" >> pack-list.txt
+              fi
+            done
+          done < projects.txt
+
+          if [ ! -s pack-list.txt ]; then
+            echo "::error::No build output found to pack. The shards would receive nothing."
+            exit 1
+          fi
+
+          echo "paths: $(wc -l < pack-list.txt)"
+          tar -czf backend-build.tgz -T pack-list.txt
           ls -lh backend-build.tgz
 
       - uses: actions/upload-artifact@v4
@@ -311,23 +347,6 @@ jobs:
           tar -xzf backend-build.tgz
           rm -f backend-build.tgz
 
-      - name: Probe (temporary, #67)
-        # The first sharded run had every shard exit 0 in 11 seconds with no
-        # output at all and no trx. Reconciliation caught it. This step exists
-        # to find out why; it comes out once the cause is known.
-        run: |
-          set -x
-          dotnet --version
-          ls -la tests/AutoNate.Web.Tests/bin/Debug/net10.0/AutoNate.Web.Tests.dll || true
-          ls tests/AutoNate.Web.Tests/obj/ || true
-          ls -d src/*/bin plugins/*/bin 2>/dev/null || echo "no src/plugin bin directories"
-          set +e
-          dotnet test tests/AutoNate.Web.Tests --no-build \
-            --filter "FullyQualifiedName~AutoNate.Web.Tests.ModelCatalogTests." \
-            --logger "trx;LogFileName=probe.trx" --results-directory "$PWD/probe"
-          echo "probe exit=$?"
-          ls -la probe/ || echo "probe produced no results directory"
-
       - name: Test
         id: test
         # `trx` rather than `console;verbosity=minimal`. The console logger
@@ -353,7 +372,17 @@ jobs:
           # code is invisible: the step always succeeds by design, so a silent
           # non-zero would look identical to a pass.
           echo "dotnet test exited ${status} after ${elapsed}s"
-          ls -la trx/ || echo "no results directory was produced"
+
+          # A run that produced no trx did not run tests, whatever it exited
+          # with. This is not hypothetical: with an incomplete build output,
+          # `dotnet test --no-build` exits 0 in total silence, and eight shards
+          # did exactly that. Reconciliation catches it a job later; this
+          # catches it here, where the cause is still on screen.
+          if [ ! -f trx/shard.trx ]; then
+            echo "::error::Shard ${{ matrix.shard.index }} produced no trx after ${elapsed}s (dotnet test exited ${status}). No tests ran. Check that the packed build output is complete."
+            ls -la . trx 2>&1 | head -40
+            exit 1
+          fi
           {
             echo "elapsed=${elapsed}"
             echo "status=${status}"

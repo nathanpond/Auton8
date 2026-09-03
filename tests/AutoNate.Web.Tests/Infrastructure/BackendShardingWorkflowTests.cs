@@ -138,6 +138,52 @@ public sealed class BackendShardingWorkflowTests
     }
 
     [Fact]
+    public void The_packed_build_covers_every_project_not_just_the_test_one()
+    {
+        var discover = Job("backend-discover");
+
+        // The regression this exists for. The first sharded run packed only
+        // `tests/AutoNate.Web.Tests/bin`, reasoning that its output already
+        // contains copies of every DLL it references. True of the DLLs, false
+        // of what `dotnet test` needs: with the referenced projects' own bin
+        // directories absent, `dotnet test --no-build` on SDK 10.0.400
+        // resolved no test source and exited 0 in total silence — no output,
+        // no trx, no error. Eight green shards that ran nothing.
+        //
+        // So the pack list is derived from the projects, and it must stay
+        // derived: a hand-written path list is how the next project silently
+        // goes missing.
+        Assert.Contains("git ls-files '*.csproj'", discover, StringComparison.Ordinal);
+        Assert.Contains("pack-list.txt", discover, StringComparison.Ordinal);
+        Assert.Contains("tar -czf backend-build.tgz -T pack-list.txt", discover, StringComparison.Ordinal);
+
+        // And it must include obj as well as bin — `--no-build` needs
+        // project.assets.json to evaluate the project at all.
+        Assert.Contains("for dir in bin obj", discover, StringComparison.Ordinal);
+
+        // An empty pack list is refused rather than shipped: the shards would
+        // receive nothing and fail in the silent way described above.
+        Assert.Contains("The shards would receive nothing", discover, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_shard_that_produces_no_trx_fails_loudly()
+    {
+        var backend = Job("backend");
+
+        // The step deliberately swallows dotnet test's exit code so the count
+        // can be published on a red shard. That makes "exited 0 having run
+        // nothing" indistinguishable from a pass unless something checks for
+        // the artefact of an actual run.
+        Assert.Contains("if [ ! -f trx/shard.trx ]", backend, StringComparison.Ordinal);
+        Assert.Contains("No tests ran", backend, StringComparison.Ordinal);
+
+        // And the exit code reaches the log, not only the step output — it was
+        // invisible on the first run, which cost a diagnosis cycle.
+        Assert.Contains("dotnet test exited", backend, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_shard_count_lives_in_exactly_one_place()
     {
         // Retuning after reading the timings should be a one-line change.
