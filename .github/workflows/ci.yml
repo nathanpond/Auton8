@@ -311,6 +311,23 @@ jobs:
           tar -xzf backend-build.tgz
           rm -f backend-build.tgz
 
+      - name: Probe (temporary, #67)
+        # The first sharded run had every shard exit 0 in 11 seconds with no
+        # output at all and no trx. Reconciliation caught it. This step exists
+        # to find out why; it comes out once the cause is known.
+        run: |
+          set -x
+          dotnet --version
+          ls -la tests/AutoNate.Web.Tests/bin/Debug/net10.0/AutoNate.Web.Tests.dll || true
+          ls tests/AutoNate.Web.Tests/obj/ || true
+          ls -d src/*/bin plugins/*/bin 2>/dev/null || echo "no src/plugin bin directories"
+          set +e
+          dotnet test tests/AutoNate.Web.Tests --no-build \
+            --filter "FullyQualifiedName~AutoNate.Web.Tests.ModelCatalogTests." \
+            --logger "trx;LogFileName=probe.trx" --results-directory "$PWD/probe"
+          echo "probe exit=$?"
+          ls -la probe/ || echo "probe produced no results directory"
+
       - name: Test
         id: test
         # `trx` rather than `console;verbosity=minimal`. The console logger
@@ -331,9 +348,15 @@ jobs:
             --results-directory "$PWD/trx"
           status=$?
           set -e
+          elapsed=$(( $(date +%s) - started ))
+          # Echoed to the log as well as the step output. Without this the exit
+          # code is invisible: the step always succeeds by design, so a silent
+          # non-zero would look identical to a pass.
+          echo "dotnet test exited ${status} after ${elapsed}s"
+          ls -la trx/ || echo "no results directory was produced"
           {
-            echo "elapsed=$(( $(date +%s) - started ))"
-            echo "status=$status"
+            echo "elapsed=${elapsed}"
+            echo "status=${status}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Report this shard
