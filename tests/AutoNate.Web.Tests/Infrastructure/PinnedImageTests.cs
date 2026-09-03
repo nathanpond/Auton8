@@ -171,6 +171,24 @@ public sealed class PinnedImageTests
         Assert.True(references[1].IsExempt);
     }
 
+    [Fact]
+    public void CI_builds_the_application_image_on_every_pull_request()
+    {
+        // Without this job the app image is built only when a release is cut,
+        // so a broken Dockerfile surfaces at the worst possible moment. That is
+        // not hypothetical — see No_FROM_line_carries_a_trailing_comment above,
+        // where all three Dockerfiles were unbuildable and `make infra-up` still
+        // reported nine healthy services because nothing rebuilt.
+        var ci = File.ReadAllText(
+            Path.Combine(RepoRoot.Path, ".github", "workflows", "ci.yml"));
+
+        Assert.Contains("src/AutoNate.Web/Dockerfile", ci, StringComparison.Ordinal);
+
+        // And it must actually run the thing, not just build it: an image that
+        // builds and cannot serve is the failure this is meant to catch.
+        Assert.Contains("/api/health/live", ci, StringComparison.Ordinal);
+    }
+
     // ── Lock files ──────────────────────────────────────────────────────────
 
     [Fact]
