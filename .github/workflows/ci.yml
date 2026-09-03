@@ -144,7 +144,7 @@ jobs:
       # Downloaded here, before the build, so the bundle is inside the build
       # output the shards receive. Otherwise every shard needs its own copy and
       # the copies can drift.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: spa-dist
           path: src/AutoNate.Web/wwwroot
@@ -344,7 +344,7 @@ jobs:
           done
           echo "NATS did not become healthy"; docker logs autonate-ci-nats; exit 1
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: backend-build
 
@@ -367,7 +367,7 @@ jobs:
       # the directory the host throws
       # `DirectoryNotFoundException: src/AutoNate.Web/wwwroot/` before any test
       # body runs — 69 of shard 0's 251 tests failed that way.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: spa-dist
           path: src/AutoNate.Web/wwwroot
@@ -488,7 +488,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: shard-count-*
           path: counts
@@ -543,7 +543,7 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: shard-coverage-*
           path: coverage
