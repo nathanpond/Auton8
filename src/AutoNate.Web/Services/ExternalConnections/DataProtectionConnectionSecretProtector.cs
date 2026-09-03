@@ -9,7 +9,11 @@ public sealed class DataProtectionConnectionSecretProtector : IConnectionSecretP
     // Purpose-string is part of the DataProtection key derivation: rotating
     // the version suffix is how you'd force an upgrade if the fingerprint
     // format ever changed in a backwards-incompatible way.
-    private const string Purpose = "AutoNate.ExternalConnections.v1";
+    // internal, not private: DoNotRenameGuardTests (#65) asserts this value,
+    // and a value a guard must read is part of the type's contract. Renaming it
+    // makes every stored provider secret permanently undecryptable — see the
+    // do-not-rename list in CLAUDE.md.
+    internal const string Purpose = "AutoNate.ExternalConnections.v1";
 
     private readonly IDataProtector _protector;
 
