@@ -606,3 +606,32 @@ failure using the same generator-side shrinker the AQL properties use — the tw
 suites behave alike on failure. The mutation check is the evidence it works: it
 reduced `/workflowtask[processkey=onboarding;assignee=bob]` to
 `/workflowtask[processkey=onboarding]`.
+
+## Ad-hoc — 2026-09-03 — Coverage ratchet set to 65.50%, below the measured 65.83% (#71)
+
+Measured 2026-09-03 on run 33787184901 with the job in measure-only mode, so
+the number establishing the ratchet could not be influenced by it: **line
+65.83%** (61,539 / 93,487), **branch 41.70%**, merged across all 10 shards.
+
+Threshold set to **65.50**, not 65.83. Async and timing-dependent branches are
+not covered identically every run, and a threshold pinned to a single
+measurement fails on noise — which is how a gate earns a reputation for lying
+and then gets turned off.
+
+The margin was vindicated immediately: the verification run measured **65.86%**
+on unchanged code, a 0.03% drift between two runs of the same suite. Tighten it
+once several runs establish the real spread.
+
+Gate proven both ways: 600 uncovered methods took it to 63.81% and failed the
+build; removing them returned 65.86% and green.
+
+## Ad-hoc — 2026-09-03 — Line coverage is gated, branch coverage only reported (#71)
+
+Both numbers appear on the pull request; only line is enforced. 65.83% line
+against 41.70% branch is exactly the gap that shows a gated number can flatter
+— code that runs without being checked. Gating branch too would be a second
+ratchet to argue about on every PR; reporting it costs nothing and keeps the
+first one honest.
+
+Raising the branch number is a real piece of work and belongs to whoever takes
+it on deliberately, not to a gate that starts failing builds for it today.
