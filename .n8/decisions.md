@@ -511,3 +511,48 @@ repository, so the extra jobs cost nothing that matters.
 
 Read the step summary's per-shard table before changing `BACKEND_SHARDS` again;
 the hash is lumpy and its lumpiness moves with the class names.
+
+## Ad-hoc — 2026-09-03 — The AQL round-trip printer lives in the test project (#69)
+
+#69's round-trip criterion says "where a printer exists". None exists in the
+product — checked, not assumed — so this story wrote one under
+`tests/.../Properties/Generators/AqlGenerators.cs`.
+
+Test-side on purpose. Production carries no code that only tests use, and
+keeping the printer independently written from the parser is what gives the
+round-trip its teeth: a printer that agreed with the parser by construction
+would prove nothing. It is deliberately dumb — every binary node fully
+parenthesised — so it cannot accidentally reimplement the parser's precedence
+rules.
+
+That independence paid on the first run: the printer had invented an infix
+`field CONTAINS "x"` where the grammar only has `CONTAINS(field, "x")`. The
+printer was wrong, but it is exactly the class of disagreement the property
+exists to find.
+
+## Ad-hoc — 2026-09-03 — Restated #69's parameter-binding criterion to match the code (#69)
+
+The AC asks that the binder "never interpolates a raw parameter value into SQL
+text". `AqlParameterBinder.Bind` emits no SQL: it returns an `AqlQuery`,
+substituting `:name` placeholders in the AST, with SQL generation happening
+later in the entity adapters.
+
+The property pins what is true and keeps the security meaning: **a bound value
+can only ever land as a leaf**. The query's shape, with all leaf values erased,
+is identical before and after binding, for payloads including `" OR "1"="1`,
+`"; DROP TABLE records; --` and `:anotherParam`. If no value can become
+structure, no parameter can become syntax regardless of what the adapter does.
+
+Recorded rather than silently redefined, since it changes what the AC asserts.
+
+## Ad-hoc — 2026-09-03 — Round-trip compares rendered text, not records (#69)
+
+`AqlAst` records give structural equality for free, which is why the story
+suggested comparing ASTs. `AqlNumber` holds a `double`, so record equality
+would fail on floating-point formatting for reasons that say nothing about the
+parser.
+
+Comparing `Print(parse(text))` against `text` catches every structural
+difference without the false failures. Generated numbers are additionally
+constrained to values that print and re-parse exactly; extreme numeric input is
+still covered, by the totality property, where it belongs.
