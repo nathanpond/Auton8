@@ -525,11 +525,16 @@ jobs:
       # A genuine drop worth accepting -- deleting well-covered code, say -- is
       # a deliberate edit with a reason in the commit message, not a quiet
       # nudge downward.
-      COVERAGE_THRESHOLD: "0"
-      # Flipped to false once the number above is real. While true the job
-      # measures and reports without gating, which is how the starting value
-      # gets established without a red build on the run that establishes it.
-      COVERAGE_MEASURE_ONLY: "true"
+      #
+      # Measured 2026-09-03 on run 33787184901: line 65.83%
+      # (61,539 / 93,487 lines), branch 41.70%, merged across all 10 shards.
+      # Set to 65.50 rather than 65.83 to absorb run-to-run variance -- async
+      # and timing-dependent branches are not covered identically every run,
+      # and a threshold pinned to the exact measurement fails on noise, which
+      # is how a gate earns a reputation for lying. Tighten the margin once
+      # several runs have established the real spread.
+      COVERAGE_THRESHOLD: "65.50"
+      COVERAGE_MEASURE_ONLY: "false"
 
     steps:
       - uses: actions/checkout@v4
