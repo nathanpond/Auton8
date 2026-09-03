@@ -190,6 +190,109 @@ jobs:
       - name: Test
         run: dotnet test tests/AutoNate.Web.Tests --no-build --logger "console;verbosity=minimal"
 
+  image:
+    name: App image (build + smoke test)
+    runs-on: ubuntu-latest
+    # The application image is otherwise built only when a release is cut, so a
+    # Dockerfile can break and nothing says so until the worst possible moment.
+    # That is not hypothetical: digest-pinning once put the image tag in a
+    # trailing `#` comment on every FROM line, which Docker rejects outright,
+    # and all three Dockerfiles were unbuildable for a while because `make
+    # infra-up` reported healthy services from cached images and nothing
+    # rebuilt. This job is the check that would have caught it the same day.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Start PostgreSQL
+        # Same reason as the backend job: a service container cannot be given a
+        # command, and the smoke test needs a database to initialise against.
+        run: |
+          docker run -d --name ci-smoke-postgres \
+            -e POSTGRES_USER=autonate \
+            -e POSTGRES_PASSWORD='Your_password123!' \
+            -e POSTGRES_DB=flowable \
+            -p 5432:5432 \
+            postgres:16-alpine -c max_connections=300
+          for i in $(seq 1 30); do
+            if docker exec ci-smoke-postgres pg_isready -U autonate -d flowable >/dev/null 2>&1; then
+              echo "PostgreSQL ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready"; docker logs ci-smoke-postgres; exit 1
+
+      - name: Create the application database
+        run: |
+          docker exec -e PGPASSWORD='Your_password123!' ci-smoke-postgres \
+            psql -U autonate -d postgres -c 'CREATE DATABASE "AutoNate"'
+          docker exec -e PGPASSWORD='Your_password123!' ci-smoke-postgres \
+            psql -U autonate -d postgres -c 'CREATE DATABASE "autonate_datastores"'
+
+      # Building IS the test. amd64 only: this gates PRs, and the arm64 build
+      # runs under emulation and takes ~45 minutes for this image. Multi-arch is
+      # the release workflow's job.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/AutoNate.Web/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: auton8:ci
+          cache-from: type=gha,scope=autonate-web-ci
+          cache-to: type=gha,mode=max,scope=autonate-web-ci
+
+      - name: Smoke-test the container
+        # Proves the image actually serves, not merely that it builds. Dapr is
+        # deliberately bypassed: this job hosts no sidecar, and the app's
+        # requirement for one is covered by the compose profile rather than
+        # here.
+        #
+        # Flowable__BaseUrl points at a closed port on purpose. The app refuses
+        # to start without the setting present — `Flowable:BaseUrl must be
+        # configured.`, which is exactly what failed the first run of this job —
+        # but it does not call Flowable during startup, so an unreachable
+        # address is enough to get the image serving. Reaching a real engine is
+        # the E2E job's business, not this one's.
+        run: |
+          docker run -d --name auton8-ci-smoke --network host \
+            -e ConnectionStrings__Default='Host=127.0.0.1;Port=5432;Database=AutoNate;Username=autonate;Password=Your_password123!' \
+            -e ConnectionStrings__Datastores='Host=127.0.0.1;Port=5432;Database=autonate_datastores;Username=autonate;Password=Your_password123!' \
+            -e AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR=true \
+            -e ASPNETCORE_ENVIRONMENT=Development \
+            -e Bootstrap__AdminUsername=ci-smoke \
+            -e Bootstrap__AdminPassword='a password only this job uses' \
+            -e Flowable__BaseUrl='http://127.0.0.1:9/flowable-rest' \
+            auton8:ci
+
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/api/health/live >/dev/null 2>&1; then
+              echo "liveness answered"
+              # And the SPA is really in the image, not just the backend.
+              code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)
+              if [ "$code" != "200" ]; then
+                echo "the app served no SPA at / (HTTP $code)"; docker logs auton8-ci-smoke; exit 1
+              fi
+              echo "SPA served"
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "the container never answered on /api/health/live"
+          docker logs auton8-ci-smoke
+          docker inspect --format='health={{.State.Health.Status}}' auton8-ci-smoke || true
+          exit 1
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs auton8-ci-smoke || true
+
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
