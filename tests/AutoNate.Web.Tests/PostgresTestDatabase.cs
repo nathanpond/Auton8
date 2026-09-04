@@ -116,7 +116,17 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         await command.ExecuteNonQueryAsync();
     }
 
-    public EfCoreLocalUserStore CreateLocalUserStore() => new(CreateDbContextFactory());
+    public EfCoreLocalUserStore CreateLocalUserStore()
+    {
+        // A cache of its own per store, so a test that writes users cannot be
+        // served another test's snapshot (#9).
+        var factory = CreateDbContextFactory();
+        return new EfCoreLocalUserStore(
+            factory,
+            new UserDirectorySnapshotCache(
+                factory,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<UserDirectorySnapshotCache>.Instance));
+    }
 
     public EfCoreWorkflowModelStore CreateWorkflowStore() =>
         CreateWorkflowStore(new RecordingWorkflowSignalRegistry(), new NoopStreamingSubscriber());

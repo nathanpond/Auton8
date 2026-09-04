@@ -514,6 +514,9 @@ builder.Services.AddScoped<AutoNate.Web.Services.Identity.IOidcSignInService,
 // services that need to reason about time take a dependency they can replace in
 // a test instead of calling DateTime.UtcNow where nothing can reach it.
 builder.Services.AddSingleton(TimeProvider.System);
+// #9. Actor-invariant, so one read serves every concurrent caller until a
+// user is written or the safety TTL expires.
+builder.Services.AddSingleton<AutoNate.Web.Services.Auth.UserDirectorySnapshotCache>();
 // #94. Scoped because it reads site settings, which are per-request state; the
 // break-glass override it applies on top is read once at construction from the
 // environment, where stored configuration cannot reach it.
