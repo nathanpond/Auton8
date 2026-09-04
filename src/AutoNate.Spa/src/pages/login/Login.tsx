@@ -201,13 +201,17 @@ export default function Login() {
           </ThemeIcon>
         </Group>
 
+        {/* The challenge path is chosen by kind, not by assuming one protocol:
+            a SAML provider sent to the OIDC challenge gets a redirect to
+            nowhere, and the symptom — "the button does nothing" — says
+            nothing about the cause. */}
         {providers.length > 0 && (
           <Stack gap="xs" mb="md">
             {providers.map((p) => (
               <Button
                 key={p.slug}
                 component="a"
-                href={`/api/auth/oidc/${encodeURIComponent(p.slug)}/challenge?returnUrl=${encodeURIComponent(returnUrl)}`}
+                href={`/api/auth/${p.kind === "saml" ? "saml" : "oidc"}/${encodeURIComponent(p.slug)}/challenge?returnUrl=${encodeURIComponent(returnUrl)}`}
                 variant="default"
                 fullWidth
                 size="md"

@@ -951,3 +951,76 @@ Carry it into `/n8-verify` as a manual step.
   The stub was wrong, not the service. A rejection test that fails for the wrong
   reason is worse than no test, because it reads as proof of a check it never
   reached.
+
+- **Discretion call (#93):** The replay store is an in-process, self-pruning
+  dictionary keyed on the assertion (`SamlReplayGuard`), plugged into ITfoxtec as
+  an `ITokenReplayCache` so detection runs inside the library's own validation
+  rather than in a parallel check that could disagree with it about which
+  assertions were accepted.
+  **Why:** The AC asks only that the store be bounded and outlive the assertion's
+  validity window. Every entry names the moment it stops mattering and each write
+  prunes what has passed, so it holds about one validity window of sign-ins with
+  no cleanup job. It is deliberately *not* the application `IMemoryCache`: a
+  shared cache is a shared eviction budget, and eviction here is not a cache miss
+  but a consumed assertion becoming acceptable again.
+  **Known limit, stated rather than discovered:** it is per-instance. Two Auton8
+  instances behind a load balancer would each accept the same assertion once.
+  Closing that needs a shared store — Redis is already in the stack — and is a
+  deployment decision rather than part of this story.
+
+- **Discretion call (#93):** Single logout **deferred**, matching #90's answer
+  for OIDC so the two federation paths behave alike.
+
+- **Discretion call (#93):** Encrypted assertions **deferred**. The story offers
+  them "unless it drags in key management this story should not own" — and it
+  does: decrypting requires an SP key pair, which #87 does not store and has no
+  UI to manage or rotate. The published SP metadata therefore advertises no
+  encryption certificate at all, rather than a placeholder an IdP might encrypt
+  to.
+
+- **Decision (#93):** `POST /api/auth/saml/{slug}/acs` is the first endpoint that
+  is anonymous *and* exempt from antiforgery. It is added to the CSRF threat
+  model in Program.cs as a documented case 4, not slipped past the existing rule.
+  **Why:** The identity provider posts the assertion cross-site, so no auth
+  cookie exists yet and no antiforgery token can accompany a form this server
+  never rendered. What substitutes is stronger than either: the body is an XML
+  document signed by the provider's certificate, refused unless the signature
+  validates and the audience, destination, validity window and one-time use all
+  hold. A forged POST fails at the signature; a captured real one fails at the
+  replay guard.
+  **Made countable rather than honour-system:** `AnonymousMutationInventoryTests`
+  pins the complete set of anonymous mutating endpoints with the reason each is
+  safe, so a future endpoint cannot join the set quietly, and asserts that the
+  "a signed body stands in for the token" argument justifies exactly one route.
+
+- **Decision (#93):** Clock-skew tolerance is an explicit three minutes, and the
+  number appears in the rejection message.
+  **Why:** ITfoxtec builds its `TokenValidationParameters` internally and exposes
+  no way to set `ClockSkew`, so the library runs at Microsoft's five-minute
+  default. Auton8's own check is narrower, which makes three minutes the
+  tolerance that actually applies whichever check fires first — and the number an
+  administrator reads is the number that applied. The relationship is pinned by a
+  test rather than described in a comment, because widening Auton8's window past
+  five minutes would silently invert it.
+
+- **Scope note (#93):** The AC "claim mapping from #92 applies to SAML attributes
+  as it does to OIDC claims" cannot be satisfied here, because #92 has not been
+  built. `SamlSignInResult` carries the assertion's attributes for exactly that
+  purpose, and #92 must feed both sources into one reconciler rather than growing
+  a second mapping surface. Left unticked on #93 and called out on #92.
+
+- **Missing functionality found during #93 (Rule 2):** the login page built every
+  provider button as `/api/auth/oidc/{slug}/challenge` regardless of kind, so a
+  SAML provider's button would have gone to the OIDC challenge and failed with a
+  symptom ("the button does nothing") that says nothing about the cause. The
+  challenge path is now chosen by `kind`.
+
+- **Missing functionality found during #93 (Rule 2):** the sign-in flow read
+  pasted metadata XML but never fetched a configured metadata *URL*, so half of
+  the AC's "a URL or pasted XML" only worked as decoration — the URL was
+  reachable by the configuration tester and by nothing else. Added
+  `SamlMetadataCache`, which fetches through the same `IProviderBaseUrlPolicy`
+  allowlist the tester uses (an administrator-supplied URL fetched server-side is
+  SSRF surface) and caches a successful parse for an hour, so an IdP's web server
+  is not in the sign-in request path. Failures are not cached: that would turn a
+  momentary outage into an hour of refused sign-ins.

@@ -185,12 +185,32 @@ builder.Services.AddAntiforgery(options =>
 //     SameSite=Strict has been supported by every evergreen browser since
 //     2017; we do not target legacy browsers.
 //
+//   4. The SAML assertion consumer service (`POST /api/auth/saml/*/acs`) can
+//      use neither. It is a cross-site form POST made by the identity
+//      provider: the auth cookie does not exist yet (this request is what
+//      creates the session), and no antiforgery token can accompany a form
+//      this server never rendered. What substitutes is stronger than either —
+//      the body is an XML document signed by the provider's certificate, and
+//      SamlSignInService refuses it unless the signature validates, the
+//      audience is this SP, the Destination is this endpoint, the assertion is
+//      inside its validity window, and it has not been presented before. A
+//      forged POST fails at the signature; a captured real one fails at the
+//      replay guard. This is the ONLY endpoint with this shape, and it is only
+//      sound while every one of those checks holds — SamlSignInServiceTests
+//      asserts each of them separately for that reason.
+//
 // When adding a NEW state-changing endpoint:
 //   * Authenticated mutation from the SPA → `.DisableAntiforgery()` is fine,
 //     SameSite=Strict carries it. Do NOT also `AllowAnonymous`.
 //   * Anonymous mutation (no auth cookie required) → MUST validate either an
 //     antiforgery token (preferred for browser-originated flows) OR a
 //     server-to-server shared secret via an endpoint filter. Never both off.
+//     Case 4 is not a licence to add a third option: an endpoint qualifies only
+//     if the request body itself is a signed credential that the endpoint
+//     verifies, replay included, before acting on any of it.
+//   * AnonymousMutationInventoryTests counts this set. A new anonymous mutating
+//     endpoint fails it until either the defence or the reason is written down,
+//     so none of the above is honour-system.
 // ---------------------------------------------------------------------------
 builder.Services.AddHttpContextAccessor();
 // IRequestContext is a thin facade over IHttpContextAccessor (singleton) — no
@@ -484,6 +504,20 @@ builder.Services.AddSingleton<AutoNate.Web.Services.Identity.IOidcConfigurationC
     AutoNate.Web.Services.Identity.OidcConfigurationCache>();
 builder.Services.AddScoped<AutoNate.Web.Services.Identity.IOidcSignInService,
     AutoNate.Web.Services.Identity.OidcSignInService>();
+// TimeProvider is the .NET clock abstraction; registering the system one lets
+// services that need to reason about time take a dependency they can replace in
+// a test instead of calling DateTime.UtcNow where nothing can reach it.
+builder.Services.AddSingleton(TimeProvider.System);
+// SAML (#93). The replay guard is a singleton because "have I seen this
+// assertion before" is only a meaningful question across requests — a scoped
+// one would forget between the first presentation and the replay.
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.SamlReplayGuard>();
+builder.Services.AddSingleton<Microsoft.IdentityModel.Tokens.ITokenReplayCache>(
+    sp => sp.GetRequiredService<AutoNate.Web.Services.Identity.SamlReplayGuard>());
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.ISamlMetadataCache,
+    AutoNate.Web.Services.Identity.SamlMetadataCache>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.ISamlSignInService,
+    AutoNate.Web.Services.Identity.SamlSignInService>();
 builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionStore>();
 // Phase 4 replaces this with kind-routed Anthropic/OpenAI testers; until then
 // the stub just confirms the secret decrypts cleanly.

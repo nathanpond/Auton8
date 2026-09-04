@@ -21,6 +21,18 @@ public interface IIdentityProviderStore
 
     /// <summary>Reveals a provider's secret for the sign-in flows. Never for an endpoint.</summary>
     Task<string?> RevealSecretAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Reads a SAML provider's stored IdP metadata document.
+    /// </summary>
+    /// <remarks>
+    /// Not on the DTO. The document is public — it is what an IdP publishes —
+    /// but it is a multi-kilobyte XML blob, and putting it on the record every
+    /// list call materialises would make the admin list pay for it. The sign-in
+    /// flow is the only caller that needs the text, so the text is fetched only
+    /// there; the DTO carries <c>HasSamlMetadataXml</c> for the admin UI.
+    /// </remarks>
+    Task<string?> GetSamlMetadataXmlAsync(Guid id, CancellationToken ct);
 }
 
 /// <summary>
@@ -205,6 +217,15 @@ public sealed class EfCoreIdentityProviderStore : IIdentityProviderStore
         await using var db = await _factory.CreateDbContextAsync(ct);
         var row = await db.IdentityProviders.FirstOrDefaultAsync(p => p.Id == id, ct);
         return row?.SecretCiphertext is null ? null : _protector.Reveal(row.SecretCiphertext);
+    }
+
+    public async Task<string?> GetSamlMetadataXmlAsync(Guid id, CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        return await db.IdentityProviders
+            .Where(p => p.Id == id)
+            .Select(p => p.SamlMetadataXml)
+            .FirstOrDefaultAsync(ct);
     }
 
     private void ApplySecret(IdentityProviderModel row, string? secret)

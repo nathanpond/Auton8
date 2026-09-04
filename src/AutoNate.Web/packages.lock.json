@@ -75,6 +75,16 @@
           "DuckDB.NET.Bindings.Full": "1.4.1"
         }
       },
+      "ITfoxtec.Identity.Saml2": {
+        "type": "Direct",
+        "requested": "[4.20.1, )",
+        "resolved": "4.20.1",
+        "contentHash": "0qVWX3Hj0zcsfOyeSl+vD+qMJCfQ2H+/LWjApGPH5jGquBGy0P7OK4WUQWSKdKAGdgHNHP9c5ppx+73A/RLaRw==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Tokens.Saml": "8.18.0",
+          "System.ServiceModel.Primitives": "10.0.652802"
+        }
+      },
       "Markdig": {
         "type": "Direct",
         "requested": "[0.37.0, )",
@@ -416,6 +426,23 @@
           "Microsoft.IdentityModel.Logging": "8.22.0"
         }
       },
+      "Microsoft.IdentityModel.Tokens.Saml": {
+        "type": "Transitive",
+        "resolved": "8.18.0",
+        "contentHash": "Fgs2wLlZm3aZAcG5QrFXEdWjN72pa47bLfUXGP260MDZ6l1jwOG7K0ug2OxYa42IqcTu5HpLNMWLXlKgbOXtrQ==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Tokens": "8.18.0",
+          "Microsoft.IdentityModel.Xml": "8.18.0"
+        }
+      },
+      "Microsoft.IdentityModel.Xml": {
+        "type": "Transitive",
+        "resolved": "8.18.0",
+        "contentHash": "SMFAk7+vBYzmgzlCOOEkcBMwmrg9f5jabKmO14ZbYh1wlR2SovPxbhSNNeFl9qO3hBea+uZUpYMQuuC5ye0RPg==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Tokens": "8.18.0"
+        }
+      },
       "Microsoft.IO.RecyclableMemoryStream": {
         "type": "Transitive",
         "resolved": "3.0.1",
@@ -510,6 +537,11 @@
         "type": "Transitive",
         "resolved": "8.0.1",
         "contentHash": "KYkIOAvPexQOLDxPO2g0BVoWInnQhPpkFzRqvNrNrMhVT6kqhVr0zEb6KCHlptLFukxnZrjuMVAnxK7pOGUYrw=="
+      },
+      "System.ServiceModel.Primitives": {
+        "type": "Transitive",
+        "resolved": "10.0.652802",
+        "contentHash": "ULfGNl75BNXkpF42wNV2CDXJ64dUZZEa8xO2mBsc4tqbW9QjruxjEB6bAr4Z/T1rNU+leOztIjCJQYsBGFWYlw=="
       },
       "ZstdSharp.Port": {
         "type": "Transitive",
