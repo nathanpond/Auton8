@@ -811,3 +811,30 @@ Carry it into `/n8-verify` as a manual step.
   (`color: cond ? "green" : "yellow"`), which were then converted by hand into
   an if/else on severity — which is the better shape anyway, since a partial
   refresh really is a warning rather than a differently-coloured success.
+
+- **Note (#89, CI):** The first version of `ToastAccessibilityTests` raised
+  toasts by dynamically importing
+  `/src/components/notifications/toast.ts`. That resolves under the Vite dev
+  server and **not** against the built bundle the E2E suite runs on — CI failed
+  with "Failed to fetch dynamically imported module".
+
+  It was also the wrong test. #89's plan says "a real action produces a toast",
+  and driving the UI proves the wrapper is wired into a page rather than merely
+  importable. Rewritten to drive the Identity Providers screen: creating a
+  provider raises a success toast, and a second with the same slug raises an
+  error toast because the backend refuses it with a reason.
+
+  That in turn meant the identity page had to follow the rule this milestone
+  just wrote down — it was rendering save failures in an in-page `Alert`, and a
+  failed save is transient feedback on an action the user just took. It now
+  toasts, and the dead error `Alert` and its state are gone.
+
+- **Note (#87, Rule 1):** The seeded template menu item carried only
+  `templateKey`, where every other template item in the table carries
+  `templateKey` **and** `path` — the migration that normalised the existing ones
+  builds both. Corrected. Worth recording how it was found: the E2E console
+  guard caught a browser error on the new route, and reproducing against the dev
+  stack showed the page rendering cleanly — because the dev backend predates
+  this batch and has neither the `page_templates` row nor the menu item, so it
+  was rendering a fallback. The non-reproduction was the clue: the only
+  difference between dev and CI on that route is the seeded row.
