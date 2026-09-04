@@ -571,6 +571,29 @@ public static class EventCatalog
                     ]),
                 new EventCatalogEntry(
                     AuthEventTopic.TopicName,
+                    AuthEventTypes.SignInMethodsChanged,
+                    "An administrator changed which sign-in methods are enabled.",
+                    "Fires from PUT /api/admin/sign-in-methods on success only — a refused "
+                    + "configuration changes nothing and emits nothing.",
+                    [
+                        "resource: { actorId }.",
+                        "details: { local, oidc, saml } — the configuration as accepted."
+                    ]),
+                new EventCatalogEntry(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.LocalSignInForcedOn,
+                    "The break-glass override was active at startup, forcing local sign-in on.",
+                    "Fires once per host start while AUTONATE_FORCE_LOCAL_SIGNIN is set. Audited as "
+                    + "well as logged: an operator forcing local sign-in back on after a bad "
+                    + "configuration is exactly the event an incident review goes looking for, and it "
+                    + "belongs in the same place as the sign-ins it made possible rather than only in "
+                    + "a log file that may have rotated.",
+                    [
+                        "resource: { variable } — the environment variable's name.",
+                        "details: { reason: \"break_glass_override_active_at_startup\" }."
+                    ]),
+                new EventCatalogEntry(
+                    AuthEventTopic.TopicName,
                     AuthEventTypes.AccessDenied,
                     "An authorization filter rejected a request before the endpoint handler ran.",
                     "Fires from RequirePermissionFilter and RequireKindPermissionFilter on every Deny path (including the missing-target-id short-circuit). Single chokepoint for endpoint authz denials.",

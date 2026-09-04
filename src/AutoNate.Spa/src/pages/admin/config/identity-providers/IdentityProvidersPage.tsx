@@ -36,6 +36,7 @@ import {
   updateIdentityProvider
 } from "@/api/identityProviders";
 import { GroupMappingsModal } from "./GroupMappingsModal";
+import { SignInMethodsCard } from "./SignInMethodsCard";
 
 const QUERY_KEY = ["identity-providers"] as const;
 
@@ -326,6 +327,8 @@ export default function IdentityProvidersPage() {
         </Stack>
         <Button onClick={openCreate}>Add provider</Button>
       </Group>
+
+      <SignInMethodsCard />
 
 
       {testResult && (

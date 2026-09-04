@@ -44,13 +44,13 @@ public sealed class IdentityProviderConfigurationTesterTests
     private static IdentityProviderDto Oidc(string? authority = null) => new(
         Guid.NewGuid(), IdentityProviderKinds.Oidc, "Corporate", "corporate", false,
         authority ?? $"https://{Host}/realms/auton8", "client-id", null,
-        null, null, false, null, false, null, DateTime.UtcNow, DateTime.UtcNow);
+        null, null, false, null, false, null, null, DateTime.UtcNow, DateTime.UtcNow);
 
     private static IdentityProviderDto Saml(string? metadataUrl = null, bool inlineXml = false) => new(
         Guid.NewGuid(), IdentityProviderKinds.Saml, "Corporate SAML", "corporate-saml", false,
         null, null, null,
         $"https://{Host}/entity", metadataUrl, inlineXml, null, false, null,
-        DateTime.UtcNow, DateTime.UtcNow);
+        null, DateTime.UtcNow, DateTime.UtcNow);
 
     private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };

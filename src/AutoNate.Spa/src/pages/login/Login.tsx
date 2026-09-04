@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { listEnabledProviders } from "@/api/identityProviders";
+import { getSignInMethods, listEnabledProviders } from "@/api/identityProviders";
 import {
   Alert,
   Box,
@@ -58,6 +58,18 @@ export default function Login() {
     retry: false
   });
   const providers = providersQuery.data ?? [];
+
+  // Which methods to draw (#94). Defaults to local-on if the call fails, for
+  // the same reason the providers query does: a request that did not come back
+  // must not be the thing that hides the last way in. The server refuses a
+  // disabled method regardless, so an optimistic default here costs a clearer
+  // error message, never a bypass.
+  const methodsQuery = useQuery({
+    queryKey: ["sign-in-methods"],
+    queryFn: ({ signal }) => getSignInMethods(signal),
+    retry: false
+  });
+  const localEnabled = methodsQuery.data?.local ?? true;
 
   // Above the early return below: hooks must run in the same order on every
   // render, and an authenticated visitor returns before this point. eslint's
@@ -220,10 +232,21 @@ export default function Login() {
                 Continue with {p.displayName}
               </Button>
             ))}
-            <Divider label="or sign in with a password" labelPosition="center" my="xs" />
+            {localEnabled && (
+              <Divider label="or sign in with a password" labelPosition="center" my="xs" />
+            )}
           </Stack>
         )}
 
+        {!localEnabled && providers.length === 0 && (
+          <Alert color="red" variant="light" title="No way to sign in">
+            This site has no sign-in method available. An administrator needs to enable
+            one, or an operator can set the break-glass environment variable documented
+            in DEPLOYMENT.md to restore password sign-in.
+          </Alert>
+        )}
+
+        {localEnabled && (
         <form onSubmit={form.onSubmit(onSubmit)}>
           <Stack gap="sm">
             {/* No autoFocus on either field: it drops a screen-reader user
@@ -254,6 +277,7 @@ export default function Login() {
             </Button>
           </Stack>
         </form>
+        )}
       </Card>
     </Box>
   );

@@ -3980,6 +3980,18 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    private const string SignInMethodsSchemaSql =
+        """
+        -- #94. Records that a provider has actually worked at least once.
+        --
+        -- A column rather than a query over audit events: the audit stream is
+        -- retained on its own schedule, and a lockout guard that silently
+        -- weakens when old events age out is worse than no guard — it would
+        -- still answer, and eventually answer wrongly.
+        ALTER TABLE identity_providers
+            ADD COLUMN IF NOT EXISTS last_successful_sign_in_at_utc TIMESTAMPTZ NULL;
+        """;
+
     private const string IdentityProviderGroupMappingsSchemaSql =
         """
         -- #92. An administrator says which IdP claim value corresponds to which
@@ -4396,6 +4408,7 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersSchemaSql), IdentityProvidersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersMenuSeedSql), IdentityProvidersMenuSeedSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProviderGroupMappingsSchemaSql), IdentityProviderGroupMappingsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SignInMethodsSchemaSql), SignInMethodsSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);
 
         // Before the SuperAdmin backfill on purpose: on a first boot the

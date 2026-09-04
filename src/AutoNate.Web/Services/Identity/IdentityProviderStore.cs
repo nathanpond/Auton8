@@ -33,6 +33,18 @@ public interface IIdentityProviderStore
     /// there; the DTO carries <c>HasSamlMetadataXml</c> for the admin UI.
     /// </remarks>
     Task<string?> GetSamlMetadataXmlAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Marks that someone has just signed in successfully through this provider.
+    /// </summary>
+    /// <remarks>
+    /// #94's lockout guard reads this: local sign-in cannot be switched off
+    /// until a federated provider has actually worked. Recorded here rather
+    /// than derived from audit events, which are retained on their own schedule
+    /// — a guard that silently weakens when old events age out would still
+    /// answer, and eventually answer wrongly.
+    /// </remarks>
+    Task RecordSuccessfulSignInAsync(Guid id, DateTime whenUtc, CancellationToken ct);
 }
 
 /// <summary>
@@ -219,6 +231,14 @@ public sealed class EfCoreIdentityProviderStore : IIdentityProviderStore
         return row?.SecretCiphertext is null ? null : _protector.Reveal(row.SecretCiphertext);
     }
 
+    public async Task RecordSuccessfulSignInAsync(Guid id, DateTime whenUtc, CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct);
+        await db.IdentityProviders
+            .Where(p => p.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.LastSuccessfulSignInAtUtc, whenUtc), ct);
+    }
+
     public async Task<string?> GetSamlMetadataXmlAsync(Guid id, CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
@@ -260,6 +280,7 @@ public sealed class EfCoreIdentityProviderStore : IIdentityProviderStore
         r.SamlSigningCertificate,
         HasSecret: r.SecretCiphertext is not null,
         r.SecretFingerprint,
+        r.LastSuccessfulSignInAtUtc,
         r.CreatedAtUtc, r.UpdatedAtUtc);
 
     private static string? Trim(string? value) =>

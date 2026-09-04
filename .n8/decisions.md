@@ -1090,3 +1090,51 @@ Carry it into `/n8-verify` as a manual step.
   duplication is not redundancy — it is what keeps a fresh install and a
   migrated one the same table, and each copy carries a comment pointing at the
   other.
+
+- **Discretion call (#94):** the break-glass variable is `AUTONATE_FORCE_LOCAL_SIGNIN`,
+  following `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR`. Read from the environment
+  rather than through configuration binding, deliberately: it must not be
+  settable by anything living in the database it exists to overrule. Parsing is
+  asymmetric — anything that is not `0`/`false`/`no`/`off` counts as on, because
+  an operator setting it during an incident has typed something meaning "yes",
+  and a strict parse that rejected their spelling would leave them locked out
+  believing they had fixed it. The failure mode of reading it too eagerly is a
+  login form that should have been hidden; of reading it too strictly, an
+  install nobody can enter.
+
+- **Discretion call (#94):** "has completed a successful sign-in" is a
+  `last_successful_sign_in_at_utc` column on `identity_providers`, written by
+  the OIDC callback and the SAML ACS before the session is issued.
+  **Why a column and not a query over audit events:** the audit stream is
+  retained on its own schedule, so a guard derived from it would silently weaken
+  as old events aged out — it would still answer, and eventually answer wrongly.
+
+- **Discretion call (#94):** disabling a sign-in method **does not** end existing
+  sessions. Revoking a method changes how people get in, not who is already
+  working; yanking sessions mid-edit would lose work, and an administrator who
+  wants that has session revocation for it. Stated on the admin screen rather
+  than left to be discovered.
+
+- **Design decision (#94), beyond what the story specified:** reachability is
+  re-checked at *read* time, not only validated at write time. `GetAsync`
+  returns local sign-in as available whenever no enabled federated provider of
+  an enabled protocol has ever completed a sign-in — regardless of what is
+  stored.
+  **Why:** the write-time guard can only see the moment somebody pressed save.
+  Stored state arrives by routes it never sees — a settings restore without the
+  matching providers, a provider switched off or deleted afterwards, a direct
+  database edit — and each of those turns a configuration that was valid into an
+  install nobody can enter. Re-checking makes "there is always a way in" true by
+  construction. It also resolves the bootstrap criterion cleanly: a fresh
+  database whose settings say local is off would otherwise create a first
+  administrator who cannot sign in, which is the guard producing exactly the
+  lockout it exists to prevent.
+  The stored configuration is **not** rewritten when this fires, so an operator
+  who fixes their provider finds their SSO-only intent intact rather than
+  silently reverted.
+
+- **Decision (#94):** the toggles live on the Identity Providers screen, not on
+  the generic site-settings Features page. That page renders any
+  registry-declared boolean as a plain toggle with no cross-field validation, so
+  switching local sign-in off there would be one click from a lockout with no
+  explanation. They also depend on the providers listed beside them.

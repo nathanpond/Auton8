@@ -27,6 +27,15 @@ public sealed record IdentityProviderDto(
     string? SamlSigningCertificate,
     bool HasSecret,
     string? SecretFingerprint,
+    /// <summary>
+    /// When this provider last completed a sign-in, if ever (#94).
+    /// </summary>
+    /// <remarks>
+    /// Surfaced so the admin screen can say "this provider is enabled but has
+    /// never been used" before someone tries to disable local sign-in, rather
+    /// than only in the refusal afterwards.
+    /// </remarks>
+    DateTime? LastSuccessfulSignInAtUtc,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);
 

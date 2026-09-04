@@ -36,13 +36,29 @@ public static class FederatedSignInEndpoints
         // authority, not the client id, and certainly not the secret — a
         // signed-out visitor gets display name, kind and slug.
         app.MapGet("/api/auth/providers", async (
-            IIdentityProviderStore store, CancellationToken ct) =>
+            IIdentityProviderStore store, ISignInMethodPolicy policy, CancellationToken ct) =>
         {
+            var methods = await policy.GetAsync(ct);
             var providers = await store.ListAsync(ct);
+
+            // Filtered by method, not merely listed: a provider whose whole
+            // protocol is switched off must not appear, or the login page draws
+            // a button whose endpoint will refuse it.
             return Results.Ok(providers
-                .Where(p => p.IsEnabled)
+                .Where(p => p.IsEnabled && MethodEnabled(methods, p.Kind))
                 .Select(p => new { p.Slug, p.DisplayName, p.Kind })
                 .ToList());
+        }).AllowAnonymous();
+
+        // What the login page needs to decide which forms to draw. Deliberately
+        // only the three booleans and nothing about how they were arrived at:
+        // whether the break-glass override is what is keeping local available
+        // is an operational fact, and a signed-out visitor learning it would
+        // learn that the install is currently in trouble.
+        app.MapGet("/api/auth/methods", async (ISignInMethodPolicy policy, CancellationToken ct) =>
+        {
+            var methods = await policy.GetAsync(ct);
+            return Results.Ok(new { methods.Local, methods.Oidc, methods.Saml });
         }).AllowAnonymous();
 
         app.MapGet("/api/auth/oidc/{slug}/challenge", async (
@@ -50,8 +66,14 @@ public static class FederatedSignInEndpoints
             string? returnUrl,
             HttpContext http,
             IOidcSignInService oidc,
+            ISignInMethodPolicy policy,
             CancellationToken ct) =>
         {
+            if (!(await policy.GetAsync(ct)).Oidc)
+            {
+                return Results.Redirect("/?error=provider_unavailable");
+            }
+
             var callback = CallbackUri(http, slug);
             var challenge = await oidc.BuildChallengeAsync(slug, callback, ct);
             if (challenge is null)
@@ -78,12 +100,25 @@ public static class FederatedSignInEndpoints
             string? error,
             HttpContext http,
             IOidcSignInService oidc,
+            IIdentityProviderStore store,
             IAuditEventPublisher audit,
             IClaimGroupReconciler reconciler,
+            ISignInMethodPolicy policy,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var log = loggerFactory.CreateLogger("AutoNate.Web.Endpoints.FederatedSignInEndpoints");
+
+            // Checked on the callback as well as the challenge. A tab that
+            // started a sign-in before the method was switched off must not be
+            // able to finish one after — the window is small, and "small" is not
+            // a property anyone should have to rely on.
+            if (!(await policy.GetAsync(ct)).Oidc)
+            {
+                ClearChallengeCookies(http);
+                await PublishFailureAsync(audit, slug, "method_disabled", ct);
+                return Results.Redirect("/?error=provider_unavailable");
+            }
 
             var expectedState = http.Request.Cookies[StateCookie];
             var verifier = http.Request.Cookies[VerifierCookie];
@@ -129,6 +164,12 @@ public static class FederatedSignInEndpoints
                     details: new { createdBy = "federated-sign-in", provider = slug, roleAssignments = 0 },
                     ct);
             }
+
+            // Before the session is issued, so a provider that works is on
+            // record as working even if something later in this request fails.
+            // #94's guard reads it to decide whether local sign-in may be
+            // switched off.
+            await store.RecordSuccessfulSignInAsync(result.ProviderId, DateTime.UtcNow, ct);
 
             await ReconcileAsync(
                 reconciler, audit, result.User, result.ProviderId, slug, "oidc", result.Claims, ct);
@@ -180,8 +221,14 @@ public static class FederatedSignInEndpoints
             string? returnUrl,
             HttpContext http,
             ISamlSignInService saml,
+            ISignInMethodPolicy policy,
             CancellationToken ct) =>
         {
+            if (!(await policy.GetAsync(ct)).Saml)
+            {
+                return Results.Redirect("/?error=provider_unavailable");
+            }
+
             var redirect = await saml.BuildAuthnRequestUrlAsync(
                 slug, AcsUri(http, slug), SpEntityId(http, slug), SafeReturn(returnUrl), ct);
 
@@ -208,12 +255,22 @@ public static class FederatedSignInEndpoints
             string slug,
             HttpContext http,
             ISamlSignInService saml,
+            IIdentityProviderStore store,
             IAuditEventPublisher audit,
             IClaimGroupReconciler reconciler,
+            ISignInMethodPolicy policy,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var log = loggerFactory.CreateLogger("AutoNate.Web.Endpoints.FederatedSignInEndpoints");
+
+            // As with the OIDC callback: an assertion in flight when the method
+            // was switched off must not still get somebody in.
+            if (!(await policy.GetAsync(ct)).Saml)
+            {
+                await PublishSamlFailureAsync(audit, slug, "method_disabled", ct);
+                return Results.Redirect("/?error=provider_unavailable");
+            }
 
             if (!http.Request.HasFormContentType)
             {
@@ -251,6 +308,8 @@ public static class FederatedSignInEndpoints
                     details: new { createdBy = "federated-sign-in", provider = slug, roleAssignments = 0 },
                     ct);
             }
+
+            await store.RecordSuccessfulSignInAsync(result.ProviderId, DateTime.UtcNow, ct);
 
             await ReconcileAsync(
                 reconciler, audit, result.User, result.ProviderId, slug, "saml", result.Attributes, ct);
@@ -347,6 +406,9 @@ public static class FederatedSignInEndpoints
                 ct);
         }
     }
+
+    private static bool MethodEnabled(SignInMethods methods, string kind) =>
+        kind == IdentityProviderKinds.Oidc ? methods.Oidc : methods.Saml;
 
     private static Task PublishSamlFailureAsync(
         IAuditEventPublisher audit, string slug, string reason, CancellationToken ct) =>

@@ -66,6 +66,17 @@ public sealed class IdentityProviderModel
     /// </summary>
     public string? SecretFingerprint { get; set; }
 
+    /// <summary>
+    /// When someone last completed a sign-in through this provider, if ever.
+    /// </summary>
+    /// <remarks>
+    /// #94's lockout guard turns on this: local sign-in cannot be switched off
+    /// until at least one federated provider has actually worked. "Configured"
+    /// is not the same as "working", and the gap between them is exactly where
+    /// an install locks itself out.
+    /// </remarks>
+    public DateTime? LastSuccessfulSignInAtUtc { get; set; }
+
     public DateTime CreatedAtUtc { get; set; }
     public Guid CreatedBy { get; set; }
     public DateTime UpdatedAtUtc { get; set; }

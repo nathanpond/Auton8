@@ -222,3 +222,49 @@ export async function previewGroupMappings(
   );
   return res.data;
 }
+
+// ---------- Which sign-in methods are enabled (#94) ----------
+
+/** Which ways in the login page should offer. */
+export type SignInMethods = {
+  local: boolean;
+  oidc: boolean;
+  saml: boolean;
+};
+
+export type StoredSignInMethods = SignInMethods & {
+  /**
+   * True while `AUTONATE_FORCE_LOCAL_SIGNIN` is set on the host.
+   *
+   * Admin-only. It tells an administrator that local sign-in is available
+   * because an operator is holding the break-glass hatch open, not because they
+   * left it on — the two look identical from the login page and mean very
+   * different things.
+   */
+  overrideActive: boolean;
+};
+
+/**
+ * Which methods are available right now, for the login page.
+ *
+ * Three booleans and nothing else. A signed-out visitor learning *why* local is
+ * available would learn that the install is currently in trouble.
+ */
+export async function getSignInMethods(signal?: AbortSignal): Promise<SignInMethods> {
+  const res = await api.get<SignInMethods>("/api/auth/methods", { signal });
+  return res.data;
+}
+
+export async function getStoredSignInMethods(
+  signal?: AbortSignal
+): Promise<StoredSignInMethods> {
+  const res = await api.get<StoredSignInMethods>("/api/admin/sign-in-methods", { signal });
+  return res.data;
+}
+
+export async function updateSignInMethods(
+  methods: SignInMethods
+): Promise<SignInMethods> {
+  const res = await api.put<SignInMethods>("/api/admin/sign-in-methods", methods);
+  return res.data;
+}

@@ -1,6 +1,8 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Services.Auth;
 using AutoNate.Web.Services.Authorization;
+using AutoNate.Web.Services.Events;
 using AutoNate.Web.Services.Identity;
 
 namespace AutoNate.Web.Endpoints;
@@ -111,6 +113,63 @@ public static class IdentityProviderEndpoints
             return Results.Ok(await tester.TestAsync(row, ct));
         }).RequireKindPermission(EntityKinds.IdentityProvider, Actions.Edit);
 
+        // ── Which sign-in methods are enabled (#94) ─────────────────────
+
+        // Under the identity-provider gate rather than the generic site
+        // settings page. That page renders any registry-declared bool as a
+        // plain toggle with no cross-field validation, so switching local
+        // sign-in off there would be one click from a lockout with no
+        // explanation. These three depend on the providers listed beside them,
+        // so they belong beside them.
+        app.MapGet("/api/admin/sign-in-methods", async (
+            ISignInMethodPolicy policy, CancellationToken ct) =>
+        {
+            var stored = await policy.GetStoredAsync(ct);
+            return Results.Ok(new
+            {
+                stored.Local,
+                stored.Oidc,
+                stored.Saml,
+                // So the screen can say "local is on because the override is
+                // set, not because you left it on" — an administrator editing
+                // this while an operator holds the escape hatch open should be
+                // able to see that they disagree.
+                overrideActive = policy.OverrideActive,
+            });
+        }).RequireAuthorization()
+          .RequireKindPermission(EntityKinds.IdentityProvider, Actions.View);
+
+        app.MapPut("/api/admin/sign-in-methods", async (
+            SignInMethodsRequest request,
+            HttpContext http,
+            ISignInMethodPolicy policy,
+            IAuditEventPublisher audit,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+
+            var result = await policy.UpdateAsync(
+                request.Local, request.Oidc, request.Saml, actorId, ct);
+
+            if (!result.Accepted)
+            {
+                return Results.BadRequest(new { error = result.Refusal });
+            }
+
+            await audit.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.SignInMethodsChanged,
+                AuthEventTopic.ResourceKind,
+                resource: new { actorId },
+                details: new { request.Local, request.Oidc, request.Saml },
+                ct);
+
+            return Results.Ok(new { request.Local, request.Oidc, request.Saml });
+        }).RequireAuthorization()
+          .RequireKindPermission(EntityKinds.IdentityProvider, Actions.Edit);
+
         // ── Claim → group mappings (#92) ────────────────────────────────
 
         group.MapGet("/{id:guid}/group-mappings", async (
@@ -197,6 +256,16 @@ public static class IdentityProviderEndpoints
 
     /// <summary>Claims to try, in the shape a sign-in produces them.</summary>
     public sealed record ClaimPreviewRequest(Dictionary<string, string[]>? Claims);
+
+    /// <summary>
+    /// The desired sign-in configuration, as a whole.
+    /// </summary>
+    /// <remarks>
+    /// All three together rather than one toggle per request: the reachability
+    /// guard has to see the whole picture, and a per-field endpoint could only
+    /// ever validate a state the caller was halfway through leaving.
+    /// </remarks>
+    public sealed record SignInMethodsRequest(bool Local, bool Oidc, bool Saml);
 
     private static async Task<IResult> SetEnabled(
         Guid id, bool enabled, HttpContext http, IIdentityProviderStore store, CancellationToken ct)

@@ -1053,7 +1053,9 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
-        });
+                    entity.Property(e => e.LastSuccessfulSignInAtUtc)
+                .HasColumnName("last_successful_sign_in_at_utc");
+});
 
         modelBuilder.Entity<ExternalConnection>(entity =>
         {

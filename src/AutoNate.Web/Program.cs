@@ -514,6 +514,11 @@ builder.Services.AddScoped<AutoNate.Web.Services.Identity.IOidcSignInService,
 // services that need to reason about time take a dependency they can replace in
 // a test instead of calling DateTime.UtcNow where nothing can reach it.
 builder.Services.AddSingleton(TimeProvider.System);
+// #94. Scoped because it reads site settings, which are per-request state; the
+// break-glass override it applies on top is read once at construction from the
+// environment, where stored configuration cannot reach it.
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.ISignInMethodPolicy,
+    AutoNate.Web.Services.Identity.SignInMethodPolicy>();
 // SAML (#93). The replay guard is a singleton because "have I seen this
 // assertion before" is only a meaningful question across requests — a scoped
 // one would forget between the first presentation and the replay.
@@ -1130,6 +1135,22 @@ var authPosture = app.Services
 
 // Fail-open-ish authorization flags that are legitimate but should never be
 // left on silently in a real environment (archived-59). Neither is a refusal: DryRun is
+// #94's break-glass override. Logged in every environment, not just outside
+// Development, and at Warning rather than Information: while it is set, the
+// site's own configuration is being overruled, and the operator who set it in
+// an incident is not always the person reading the logs a week later. It is
+// also audited (below), because "somebody forced local sign-in back on" is
+// precisely the event an incident review goes looking for.
+if (AutoNate.Web.Services.Identity.SignInMethodPolicy.IsOverrideSet(app.Configuration))
+{
+    app.Logger.LogWarning(
+        "{Variable} is set: local sign-in is forced ON regardless of the stored sign-in method " +
+        "configuration. This is the break-glass escape hatch — unset it once the intended " +
+        "sign-in methods work, or the site is permanently accepting passwords it was " +
+        "configured to refuse.",
+        AutoNate.Web.Services.Identity.SignInMethodPolicy.OverrideVariable);
+}
+
 // the documented staged-rollout tool, and the SuperAdmin backfill is the only
 // thing that grants a greenfield install its first admin.
 if (!app.Environment.IsDevelopment())
@@ -1466,11 +1487,28 @@ app.MapPost(
             HttpContext context,
             ILocalUserStore localUserStore,
             IAuditEventPublisher auditPublisher,
+            AutoNate.Web.Services.Identity.ISignInMethodPolicy signInMethods,
             CancellationToken cancellationToken) =>
         {
             username ??= string.Empty;
             password ??= string.Empty;
             returnUrl ??= string.Empty;
+
+            // Enforced here, not only hidden on the login page (#94). A hidden
+            // form is not a disabled method: without this, an administrator who
+            // switched local sign-in off would still have every password in the
+            // database working against a direct POST.
+            if (!(await signInMethods.GetAsync(cancellationToken)).Local)
+            {
+                await auditPublisher.PublishAsync(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.LoginFailed,
+                    AuthEventTopic.ResourceKind,
+                    resource: new { username },
+                    details: new { reason = "local_sign_in_disabled" },
+                    cancellationToken);
+                return Results.Redirect(BuildLoginRedirect(returnUrl, "method_disabled", username));
+            }
 
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
@@ -1727,6 +1765,35 @@ if (Directory.Exists(app.Environment.WebRootPath))
     // which is exactly how the E2E suite broke (SignInAsync starts at "/").
     // Regression guard: SpaRootFallbackTests. Refs archived-132.
     app.MapFallbackToFile("/", "index.html");
+}
+
+// The break-glass override is audited as well as logged (#94). Fire-and-forget
+// against the publisher rather than blocking startup: an audit bus that is slow
+// or briefly unavailable must not stop a host coming up, least of all the one
+// an operator is bringing up *because* they are locked out.
+if (AutoNate.Web.Services.Identity.SignInMethodPolicy.IsOverrideSet(app.Configuration))
+{
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            using var overrideScope = app.Services.CreateScope();
+            var publisher = overrideScope.ServiceProvider.GetRequiredService<IAuditEventPublisher>();
+            await publisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.LocalSignInForcedOn,
+                AuthEventTopic.ResourceKind,
+                resource: new { variable = AutoNate.Web.Services.Identity.SignInMethodPolicy.OverrideVariable },
+                details: new { reason = "break_glass_override_active_at_startup" },
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(
+                ex, "The break-glass override could not be audited. It is still active, and the " +
+                    "startup warning above records it.");
+        }
+    });
 }
 
 app.Run();
