@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,7 +20,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   DataTable,
   type DataTableColumn
@@ -107,7 +107,7 @@ export default function DataConnectorsPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Data connector created.", color: "green" });
+      toast.success("Data connector created.");
     },
     onError: (err: unknown) => {
       const message =
@@ -128,7 +128,7 @@ export default function DataConnectorsPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Data connector updated.", color: "green" });
+      toast.success("Data connector updated.");
     },
     onError: (err: unknown) => {
       const message =
@@ -142,11 +142,11 @@ export default function DataConnectorsPage() {
     mutationFn: deleteDataConnector,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      notifications.show({ message: "Data connector deleted.", color: "green" });
+      toast.success("Data connector deleted.");
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Delete failed.";
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 

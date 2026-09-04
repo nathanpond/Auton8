@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,7 +16,6 @@ import {
   Text,
   TextInput
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   type CsvColumn,
   createDataStore,
@@ -191,10 +191,7 @@ export default function CreateSqlDataStoreFromCsvModal({
       );
 
       await queryClient.invalidateQueries({ queryKey: ["datastores", "list"] });
-      notifications.show({
-        message: `Created "${newStore.name}" with ${result.rowsInserted.toLocaleString()} row(s) in ${result.tableName}.`,
-        color: "green"
-      });
+      toast.success(`Created "${newStore.name}" with ${result.rowsInserted.toLocaleString()} row(s) in ${result.tableName}.`);
       onClose();
       navigate(`/datastores/${newStore.id}`);
     } catch (err) {

@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -17,7 +18,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   DataTable,
   type DataTableColumn
@@ -177,10 +177,7 @@ export default function DatasetsPage() {
     onSuccess: (data) => {
       setColumnsJson(JSON.stringify(data.columns, null, 2));
       setPreviewError(null);
-      notifications.show({
-        message: `Inferred ${data.columns.length} column${data.columns.length === 1 ? "" : "s"}.`,
-        color: "green"
-      });
+      toast.success(`Inferred ${data.columns.length} column${data.columns.length === 1 ? "" : "s"}.`);
     },
     onError: (err: unknown) => {
       const message =
@@ -221,7 +218,7 @@ export default function DatasetsPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setCreateOpen(false);
       resetForm();
-      notifications.show({ message: "Dataset created.", color: "green" });
+      toast.success("Dataset created.");
     },
     onError: (err: unknown) => {
       const message =
@@ -235,7 +232,7 @@ export default function DatasetsPage() {
     mutationFn: deleteDataset,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      notifications.show({ message: "Dataset deleted.", color: "green" });
+      toast.success("Dataset deleted.");
     }
   });
 
@@ -243,7 +240,7 @@ export default function DatasetsPage() {
     mutationFn: refreshDataset,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      notifications.show({ message: "Dataset refreshed.", color: "green" });
+      toast.success("Dataset refreshed.");
     }
   });
 
@@ -286,7 +283,7 @@ export default function DatasetsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setEditOpen(false);
-      notifications.show({ message: "Dataset updated.", color: "green" });
+      toast.success("Dataset updated.");
     },
     onError: (err: unknown) => {
       const message =

@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,7 +17,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   DataTable,
   type DataTableColumn
@@ -80,7 +80,7 @@ export default function DataStoresPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Data store created.", color: "green" });
+      toast.success("Data store created.");
     },
     onError: (err: unknown) => {
       const message =
@@ -103,7 +103,7 @@ export default function DataStoresPage() {
       queryClient.invalidateQueries({ queryKey: ["datastores", "detail"] });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Data store updated.", color: "green" });
+      toast.success("Data store updated.");
     },
     onError: (err: unknown) => {
       const message =
@@ -117,11 +117,11 @@ export default function DataStoresPage() {
     mutationFn: deleteDataStore,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      notifications.show({ message: "Data store deleted.", color: "green" });
+      toast.success("Data store deleted.");
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Delete failed.";
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 

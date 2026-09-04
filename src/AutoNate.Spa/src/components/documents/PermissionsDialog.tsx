@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useMemo, useState } from "react";
 import {
   ActionIcon,
@@ -12,7 +13,6 @@ import {
   Text,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import type { PermissionGrantDto, PrincipalKind, ResourceKind } from "@/api/resourcePermissions";
 import {
   useCreateResourcePermission,
@@ -90,19 +90,16 @@ export default function PermissionsDialog({
 
   const submit = async () => {
     if (!principalId || !action) {
-      notifications.show({ message: "Pick a principal and an action.", color: "red" });
+      toast.error("Pick a principal and an action.");
       return;
     }
     try {
       await create.mutateAsync({ kind, resourceId, principalKind, principalId, action });
-      notifications.show({ message: "Access granted.", color: "green" });
+      toast.success("Access granted.");
       setPrincipalId(null);
       setAction(null);
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to grant access.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to grant access.");
     }
   };
 
@@ -156,12 +153,9 @@ export default function PermissionsDialog({
                         { kind, resourceId, grantId: g.id },
                         {
                           onSuccess: () =>
-                            notifications.show({ message: "Override revoked.", color: "green" }),
+                            toast.success("Override revoked."),
                           onError: (err) =>
-                            notifications.show({
-                              message: extractErrorMessage(err) ?? "Failed to revoke.",
-                              color: "red"
-                            })
+                            toast.error(extractErrorMessage(err) ?? "Failed to revoke.")
                         }
                       )
                     }

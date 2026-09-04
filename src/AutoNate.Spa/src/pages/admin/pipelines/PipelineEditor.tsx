@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
@@ -36,7 +37,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   PipelineEdge as PipelineEdgeShape,
   PipelineGraph,
@@ -355,20 +355,20 @@ function PipelineEditorInner() {
       updatePipeline(id!, { graph: encodeGraph(nodes, edges) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pipeline", id] });
-      notifications.show({ message: "Pipeline saved.", color: "green" });
+      toast.success("Pipeline saved.");
     },
     onError: (err: unknown) => {
       const message =
         (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
         (err instanceof Error ? err.message : "Save failed.");
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 
   const runMutation = useMutation({
     mutationFn: () => runPipeline(id!),
     onSuccess: () => {
-      notifications.show({ message: "Pipeline run queued.", color: "green" });
+      toast.success("Pipeline run queued.");
       navigate(`/pipelines/${id}/runs`);
     }
   });
@@ -404,7 +404,7 @@ function PipelineEditorInner() {
       queryClient.invalidateQueries({ queryKey: ["pipeline", id] });
       queryClient.invalidateQueries({ queryKey: ["pipelines", "list"] });
       setSettingsOpen(false);
-      notifications.show({ message: "Pipeline settings saved.", color: "green" });
+      toast.success("Pipeline settings saved.");
     },
     onError: (err: unknown) => {
       const message =

@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -17,7 +18,6 @@ import {
   Title,
   UnstyledButton
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import { DocumentDto, FolderDto, fetchFolder } from "@/api/documents";
 import { useQueries } from "@tanstack/react-query";
 import FolderTree from "@/components/documents/FolderTree";
@@ -448,14 +448,11 @@ function CreateFolderModal({
         parentFolderId: parent?.id ?? null,
         name: trimmed
       });
-      notifications.show({ message: `Folder "${trimmed}" created.`, color: "green" });
+      toast.success(`Folder "${trimmed}" created.`);
       setName("");
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to create folder.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to create folder.");
     }
   };
   return (
@@ -524,13 +521,10 @@ function RenameFolderModal({
         previousParentFolderId: folder.parentFolderId,
         patch: { name: trimmed }
       });
-      notifications.show({ message: `Folder renamed to "${trimmed}".`, color: "green" });
+      toast.success(`Folder renamed to "${trimmed}".`);
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to rename folder.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to rename folder.");
     }
   };
   return (
@@ -582,17 +576,11 @@ function DeleteFolderModal({
         projectId: folder.projectId,
         parentFolderId: folder.parentFolderId
       });
-      notifications.show({
-        message: `Folder "${folder.name}" deleted.`,
-        color: "green"
-      });
+      toast.success(`Folder "${folder.name}" deleted.`);
       onDeleted(folder);
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to delete folder.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to delete folder.");
     }
   };
   return (
@@ -705,7 +693,7 @@ function CreateDocumentModal({
         folderId: parent?.id ?? null,
         title: trimmed
       });
-      notifications.show({ message: `Document "${trimmed}" created.`, color: "green" });
+      toast.success(`Document "${trimmed}" created.`);
       setTitle("");
       onClose();
       // Open the new doc in a new tab so the user sees the editor while the
@@ -713,10 +701,7 @@ function CreateDocumentModal({
       // clicking a document card.
       window.open(`/documents/edit/${created.id}`, "_blank", "noopener");
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to create document.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to create document.");
     }
   };
   return (
@@ -783,13 +768,10 @@ function RenameDocumentModal({
         previousFolderId: document.folderId,
         patch: { title: trimmed }
       });
-      notifications.show({ message: `Document renamed to "${trimmed}".`, color: "green" });
+      toast.success(`Document renamed to "${trimmed}".`);
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to rename document.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to rename document.");
     }
   };
   return (
@@ -840,16 +822,10 @@ function DeleteDocumentModal({
         folderId: document.folderId,
         kind: document.kind
       });
-      notifications.show({
-        message: `Document "${document.title}" deleted.`,
-        color: "green"
-      });
+      toast.success(`Document "${document.title}" deleted.`);
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to delete document.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to delete document.");
     }
   };
   return (

@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import {
   Link,
@@ -15,7 +16,6 @@ import {
   Text,
   Title
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import { useDocument, useUpdateDocument } from "@/hooks/useDocuments";
 import {
   discardDocumentImportBuffer,
@@ -75,11 +75,7 @@ export default function DocumentEditorPage() {
       .catch((err) => {
         if (cancelled) return;
         console.error("[import] failed to fetch buffer", err);
-        notifications.show({
-          message:
-            "Import buffer not available — opening blank. The original upload may have already been processed.",
-          color: "yellow"
-        });
+        toast.warning("Import buffer not available — opening blank. The original upload may have already been processed.");
         setImportBuffer(false);
       });
     return () => {
@@ -99,15 +95,9 @@ export default function DocumentEditorPage() {
           previousFolderId: doc.folderId,
           patch: { title: trimmed }
         });
-        notifications.show({
-          message: `Renamed to "${trimmed}".`,
-          color: "green"
-        });
+        toast.success(`Renamed to "${trimmed}".`);
       } catch {
-        notifications.show({
-          message: "Failed to rename document.",
-          color: "red"
-        });
+        toast.error("Failed to rename document.");
       }
     },
     [doc, updateDocument]
@@ -136,18 +126,12 @@ export default function DocumentEditorPage() {
         } catch (err) {
           console.warn("[import] failed to discard stash", err);
         }
-        notifications.show({
-          message: "Import complete.",
-          color: "green"
-        });
+        toast.success("Import complete.");
         // Replace so the user's back button doesn't re-trigger import.
         navigate(`/documents/edit/${doc.id}`, { replace: true });
       } catch (err) {
         console.error("[import] failed to commit body_jsonb", err);
-        notifications.show({
-          message: "Failed to finalize import. Try refreshing the page.",
-          color: "red"
-        });
+        toast.error("Failed to finalize import. Try refreshing the page.");
       }
     },
     [doc, navigate, updateDocument]

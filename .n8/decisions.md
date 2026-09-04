@@ -764,3 +764,50 @@ Carry it into `/n8-verify` as a manual step.
   unwritable through this factory — that property is covered instead by
   `AuthorizationGatePresenceTests` and `KindGateEnforcementTests`, and the test
   file says so rather than omitting it silently.
+
+- **Decision (#89):** The shared surface is a **module of functions**
+  (`toast.success/error/warning/info`), not a component or a hook.
+  **Why:** Discretion. Most of the 91 call sites are inside mutation callbacks
+  and `catch` blocks, where a hook cannot be called. A module made the
+  conversion a rename rather than a restructuring of 18 files.
+
+- **Decision (#89):** Severity is expressed as an **ARIA role**, not a colour.
+  `error` → `role="alert"` (implicitly assertive) and **never auto-dismisses**;
+  everything else → `role="status"` (polite) with a timeout.
+  **Why:** The 91 existing calls distinguished severity only by colour, which is
+  precisely what a screen-reader user does not get. Both error defaults
+  deliberately fight Mantine's: an error announced politely can be missed
+  entirely, and one that vanishes before it is read is worse than no error.
+
+- **Decision (#89):** No-bypass is enforced by an **ESLint
+  `no-restricted-imports` error**, not a test.
+  **Why:** It fails in the editor the moment someone types the import, rather
+  than in CI after the habit is already written. `main.tsx` and the wrapper
+  itself are exempted — the first mounts the `<Notifications />` container, the
+  second is what encapsulates it. Red-checked: reintroducing a direct import
+  produces an error whose message explains the consequence rather than just
+  saying "restricted".
+
+- **Deviation (#89):** #89's test plan asks for **component tests**. The SPA has
+  **no unit test runner** — no vitest, no jest, no testing-library — and adding
+  one is new infrastructure rather than part of this story (Rule 4). The same
+  properties are asserted in the existing Playwright suite instead
+  (`ToastAccessibilityTests`): assertive role and non-dismissal for errors,
+  polite role for success, keyboard dismissal driven with Enter rather than a
+  click, and that focus is not stolen.
+
+  Arguably the stronger of the two — a jsdom component test can only confirm the
+  props that were passed, where Playwright asserts the role the browser actually
+  computed. But it is a deviation, and whether the SPA should gain a unit test
+  runner is a project-shaping decision that deserves its own conversation rather
+  than being settled inside a notifications story.
+
+- **Note (#89, method):** The first conversion pass used regex and corrupted
+  several files two ways — a message value captured through to the next key on
+  single-line calls, and an import inserted *inside* a multi-line import block.
+  Reverted with `git checkout` and redone with a scanner that respects balanced
+  delimiters and string literals, and that **refuses** what it cannot read
+  confidently. It refused exactly the two dynamic-colour calls
+  (`color: cond ? "green" : "yellow"`), which were then converted by hand into
+  an if/else on severity — which is the better shape anyway, since a partial
+  refresh really is a warning rather than a differently-coloured success.

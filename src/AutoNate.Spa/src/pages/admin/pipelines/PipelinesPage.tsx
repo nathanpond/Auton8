@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -14,7 +15,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import { Link } from "react-router-dom";
 import {
   DataTable,
@@ -52,7 +52,7 @@ export default function PipelinesPage() {
       setDescription("");
       setScheduleCron("");
       setSubmitError(null);
-      notifications.show({ message: "Pipeline created.", color: "green" });
+      toast.success("Pipeline created.");
     },
     onError: (err: unknown) => {
       const message =
@@ -66,23 +66,20 @@ export default function PipelinesPage() {
     mutationFn: deletePipeline,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      notifications.show({ message: "Pipeline deleted.", color: "green" });
+      toast.success("Pipeline deleted.");
     }
   });
 
   const runMutation = useMutation({
     mutationFn: runPipeline,
     onSuccess: () => {
-      notifications.show({
-        message: "Pipeline run queued. Check the run history.",
-        color: "green"
-      });
+      toast.success("Pipeline run queued. Check the run history.");
     },
     onError: (err: unknown) => {
       const message =
         (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
         (err instanceof Error ? err.message : "Run failed.");
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 

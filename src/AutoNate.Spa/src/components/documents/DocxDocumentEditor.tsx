@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DocxEditor, createEmptyDocument } from "@eigenpal/docx-editor-react";
 import type { DocxEditorRef } from "@eigenpal/docx-editor-react";
@@ -5,7 +6,6 @@ import { ySyncPlugin, yCursorPlugin } from "y-prosemirror";
 import type { EditorView } from "prosemirror-view";
 import type { Transaction } from "prosemirror-state";
 import { Box, Group, Button, ActionIcon, Tooltip } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import { useYjsDocument } from "@/lib/yjs/useYjsDocument";
 import { useMe } from "@/hooks/useMe";
 import {
@@ -672,10 +672,7 @@ export default function DocxDocumentEditor({
       const buf =
         editorRef.current && (await editorRef.current.save());
       if (!buf) {
-        notifications.show({
-          message: "Document not ready to export. Try again in a moment.",
-          color: "yellow"
-        });
+        toast.warning("Document not ready to export. Try again in a moment.");
         return;
       }
       const blob = new Blob([buf], {
@@ -695,10 +692,7 @@ export default function DocxDocumentEditor({
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("[export] failed", err);
-      notifications.show({
-        message: "Failed to export document.",
-        color: "red"
-      });
+      toast.error("Failed to export document.");
     }
   }, [documentTitle]);
 
