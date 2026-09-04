@@ -1138,3 +1138,66 @@ Carry it into `/n8-verify` as a manual step.
   registry-declared boolean as a plain toggle with no cross-field validation, so
   switching local sign-in off there would be one click from a lockout with no
   explanation. They also depend on the providers listed beside them.
+
+- **Discretion call (#98):** the issuer is `http://keycloak:8082`, resolved by the
+  compose network for containers and by one `/etc/hosts` line for the host, with
+  the port read from a single variable so host and container ports cannot drift.
+  **Why one URL rather than the obvious `localhost`:** OIDC discovery pins an
+  issuer, and it must match both the URL the browser is redirected to and the one
+  Auton8 validates against — three network positions, since a containerised app
+  under the `app` profile reaches Keycloak over the compose network. `localhost`
+  is correct for the browser and a host-run app and wrong for the third.
+  **This kept the port on loopback, so invariant 5 needed no exception.** The
+  story anticipated one might be required; not taking it is the better outcome,
+  and the exception mechanism is not left unproven by that choice —
+  `ComposeLoopbackBindingTests` exercises it through fixtures, including the
+  empty-reason rejection.
+
+- **Discretion call (#98):** realm import at startup with **no data volume**, so
+  every start re-imports from the checked-in file and the realm cannot drift from
+  its export. Verified by destroying and recreating the container and comparing a
+  fingerprint of clients, users, groups and mappers — identical.
+
+- **Decision (#98):** the OIDC client is **public with PKCE (S256) required**, so
+  the realm ships with no client secret at all. Fixture user passwords are
+  committed deliberately: they exist only inside a loopback-bound container
+  rebuilt from the file on every start, and a developer has to type them into a
+  login form. The **admin** password is the one that is not committed — it grants
+  control of the identity provider, compose interpolates it to empty, and
+  `make keycloak-up` refuses with instructions.
+
+- **Bug found by #98's demo (Rule 1), fixed in `ac27476`:** the Development
+  auto-login middleware destroyed every federated session. It allow-listed the
+  sessions to keep — `manual` and its own — and signed out everything else, which
+  was indistinguishable from correct while those were the only two authentication
+  sources. #90 and #93 added `oidc:{slug}` and `saml:{slug}`, so federated
+  sign-in has never worked in Development: account created, cookie issued,
+  nothing logged, user bounced back to the login page.
+  **Why no test caught it:** the federated suites assert that `CompleteAsync`
+  succeeded and that `SignInAsync` was called. Neither is the claim that matters —
+  *does the resulting cookie authenticate a subsequent request?* Nothing carried a
+  cookie from a callback into a second request.
+  **And the regression test nearly failed to catch it too.** Asserting
+  `authenticated: true` passes against the bug, because auto-login immediately
+  signs the request back in as `admin` — same status, same field, different user.
+  It now asserts `authSource`, `idpKey`, and that the user is *not* admin,
+  confirmed failing against the reverted fix. A regression test nobody has seen
+  fail is a test nobody should trust.
+
+- **Note (#98):** `BuildSpa` defaults on only for Release, so a Debug
+  `dotnet run` serves whatever is already in `src/AutoNate.Web/wwwroot`. A stale
+  bundle there looks like a product bug — in this case the provider button simply
+  did not render. Rebuilding needs `-p:BuildSpa=true`, and if the SPA's hashed
+  filenames have changed, the stale static-web-asset manifests under `obj/` must
+  be cleared first or the build fails with "No file exists for the asset".
+
+- **Security finding, not fixed (#98):** `IProviderBaseUrlPolicy` is described as
+  the SSRF control on administrator-supplied identity-provider URLs, but only
+  #87's pre-flight tester consults it. OIDC discovery and JWKS fetching
+  (`OidcSignInService`, `OidcConfigurationCache`) do not — so the control does not
+  hold where the server actually makes requests, and a correctly-configured
+  provider can fail its pre-flight test while working. `SamlMetadataCache` (#93)
+  *is* gated, which makes the inconsistency internal as well. Not fixed here:
+  routing discovery through the allowlist changes what existing installs can
+  reach, and any provider whose host is unlisted would stop working on upgrade.
+  That needs a migration story, so it is filed rather than folded in.
