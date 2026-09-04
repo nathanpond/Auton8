@@ -29,6 +29,49 @@ public sealed class RecordInstanceAuthorizer : IInstanceAuthorizer
         var visible = await authorizer.FilterQueryAsync(db, actor, Kind, action, query, cancellationToken);
         return await visible.AnyAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// The same question for many records, in one query (#5).
+    /// </summary>
+    /// <remarks>
+    /// Records are the kind that made this worth doing: the SPA's gated list
+    /// views send two checks per row, so a 25-row page was 50 sequential
+    /// round-trips, each opening its own DbContext.
+    ///
+    /// The filter is exactly the one the single-id path applies —
+    /// <c>FilterQueryAsync</c> over the same query shape — so the batched answer
+    /// is the single answer asked once. Ids that do not parse as GUIDs are
+    /// dropped before the query rather than silently matching nothing, which is
+    /// what the single path does with them too.
+    /// </remarks>
+    public async Task<IReadOnlySet<string>> FilterAuthorizedIdsAsync(
+        IAuthorizer authorizer,
+        ClaimsPrincipal actor,
+        string action,
+        IReadOnlyCollection<string> targetIds,
+        CancellationToken cancellationToken)
+    {
+        var parsed = targetIds
+            .Select(t => (Raw: t, Ok: Guid.TryParse(t, out var g), Id: Guid.TryParse(t, out var g2) ? g2 : Guid.Empty))
+            .Where(x => x.Ok)
+            .ToList();
+
+        if (parsed.Count == 0) return new HashSet<string>(StringComparer.Ordinal);
+
+        var ids = parsed.Select(x => x.Id).ToList();
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.Records.AsNoTracking().Where(r => ids.Contains(r.Id));
+        var visible = await authorizer.FilterQueryAsync(db, actor, Kind, action, query, cancellationToken);
+        var allowedIds = await visible.Select(r => r.Id).ToListAsync(cancellationToken);
+
+        var allowed = allowedIds.ToHashSet();
+        // Mapped back through the caller's original strings, so a differently
+        // formatted GUID ("B" vs "D" format) still matches the id it was sent as.
+        return parsed.Where(x => allowed.Contains(x.Id))
+            .Select(x => x.Raw)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 }
 
 public sealed class RoleInstanceAuthorizer : IInstanceAuthorizer

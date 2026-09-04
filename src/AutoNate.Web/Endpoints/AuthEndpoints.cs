@@ -158,21 +158,33 @@ public static class AuthEndpoints
             }
 
             var checks = request.Checks ?? Array.Empty<CheckPermissionItem>();
+
+            // Batched, not looped (#5). This endpoint is fired by every gated
+            // list view and the SPA sends two checks per row, so a 25-row page
+            // was 50 sequential round-trips — each opening its own DbContext —
+            // behind a single HTTP call. AuthorizeManyAsync reaches the same
+            // verdicts by running the same decision code and the same filter
+            // hook; only the per-entity database question is asked in groups.
+            var decisions = await authorizer.AuthorizeManyAsync(
+                http.User,
+                checks.Select(c => (
+                    c.Action ?? string.Empty,
+                    new EntityRef(c.Kind ?? string.Empty, c.Id ?? string.Empty))).ToList(),
+                ct);
+
             var results = new List<object>(checks.Count);
             var allowedCount = 0;
             var deniedCount = 0;
-            foreach (var c in checks)
+            for (var i = 0; i < checks.Count; i++)
             {
-                var decision = await authorizer.AuthorizeAsync(
-                    http.User, c.Action ?? string.Empty,
-                    new EntityRef(c.Kind ?? string.Empty, c.Id ?? string.Empty), ct);
-                if (decision.IsAllowed) allowedCount++; else deniedCount++;
+                var c = checks[i];
+                if (decisions[i].IsAllowed) allowedCount++; else deniedCount++;
                 results.Add(new
                 {
                     kind = c.Kind,
                     action = c.Action,
                     id = c.Id,
-                    allowed = decision.IsAllowed
+                    allowed = decisions[i].IsAllowed
                 });
             }
 

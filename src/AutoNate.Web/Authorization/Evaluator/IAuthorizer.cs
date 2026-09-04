@@ -12,6 +12,35 @@ public interface IAuthorizer
         EntityRef target,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Authorizes several targets at once, one query per (kind, action) group.
+    /// </summary>
+    /// <remarks>
+    /// Same verdicts as calling <see cref="AuthorizeAsync"/> per item — it runs
+    /// the same decision code and the same filter hook, and only asks the
+    /// database in groups. Added for <c>POST /api/auth/check</c>, which the SPA
+    /// fires on every gated list view with two checks per row (#5).
+    /// </remarks>
+    /// <remarks>
+    /// Defaults to looping <see cref="AuthorizeAsync"/>, so every existing
+    /// implementation keeps working untouched and any that does not batch is
+    /// merely slower, never wrong. <c>Authorizer</c> overrides it.
+    /// </remarks>
+    async Task<IReadOnlyList<AuthDecision>> AuthorizeManyAsync(
+        ClaimsPrincipal actor,
+        IReadOnlyList<(string Action, EntityRef Target)> requests,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        var results = new AuthDecision[requests.Count];
+        for (var i = 0; i < requests.Count; i++)
+        {
+            results[i] = await AuthorizeAsync(
+                actor, requests[i].Action, requests[i].Target, cancellationToken);
+        }
+        return results;
+    }
+
     // Filters an IQueryable to the entities the actor is permitted to perform
     // `action` on, given the current grant graph. The DbContext is passed
     // explicitly so compiled selectors can issue cross-table subqueries
