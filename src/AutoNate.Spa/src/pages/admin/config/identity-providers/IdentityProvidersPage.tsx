@@ -43,6 +43,11 @@ const COLUMN_WIDTHS = ["34%", "14%", "20%", "14%", "18%"];
 
 const loadAll = () => listIdentityProviders();
 
+// Every onChange here reads e.currentTarget.value into a local *before* calling
+// setForm. React nulls a synthetic event's currentTarget once the handler
+// returns, and a functional updater runs later — so reading the event inside the
+// updater throws `Cannot read properties of null (reading 'value')`. That is
+// #136: it shipped, and the E2E console guard is what caught it.
 type FormState = {
   kind: IdentityProviderKind;
   displayName: string;
@@ -379,12 +384,10 @@ export default function IdentityProvidersPage() {
               }
               disabled={!!editing}
               value={form.kind}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  kind: e.currentTarget.value as IdentityProviderKind
-                }))
-              }
+              onChange={(e) => {
+                const value = e.currentTarget.value as IdentityProviderKind;
+                setForm((f) => ({ ...f, kind: value }));
+              }}
               data={[
                 { value: "oidc", label: "OpenID Connect" },
                 { value: "saml", label: "SAML 2.0" }
@@ -396,9 +399,10 @@ export default function IdentityProvidersPage() {
               description="Appears on the login page button."
               required
               value={form.displayName}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, displayName: e.currentTarget.value }))
-              }
+              onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, displayName: value }));
+                }}
             />
 
             {!editing && (
@@ -406,7 +410,10 @@ export default function IdentityProvidersPage() {
                 label="Slug"
                 description="Used in the callback path. Derived from the display name when left blank."
                 value={form.slug}
-                onChange={(e) => setForm((f) => ({ ...f, slug: e.currentTarget.value }))}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, slug: value }));
+                }}
               />
             )}
 
@@ -416,24 +423,27 @@ export default function IdentityProvidersPage() {
                   label="Authority"
                   description="Issuer URL, or the full .well-known/openid-configuration URL."
                   value={form.oidcAuthority}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, oidcAuthority: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, oidcAuthority: value }));
+                }}
                 />
                 <TextInput
                   label="Client ID"
                   value={form.oidcClientId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, oidcClientId: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, oidcClientId: value }));
+                }}
                 />
                 <TextInput
                   label="Scopes"
                   description="Space-separated. Defaults are used when blank."
                   value={form.oidcScopes}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, oidcScopes: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, oidcScopes: value }));
+                }}
                 />
               </>
             ) : (
@@ -441,17 +451,19 @@ export default function IdentityProvidersPage() {
                 <TextInput
                   label="IdP entity ID"
                   value={form.samlEntityId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, samlEntityId: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, samlEntityId: value }));
+                }}
                 />
                 <TextInput
                   label="Metadata URL"
                   description="Fetched when you test the configuration. Leave blank if pasting metadata below."
                   value={form.samlMetadataUrl}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, samlMetadataUrl: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, samlMetadataUrl: value }));
+                }}
                 />
                 <Textarea
                   label="Metadata XML"
@@ -464,9 +476,10 @@ export default function IdentityProvidersPage() {
                   minRows={3}
                   maxRows={8}
                   value={form.samlMetadataXml}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, samlMetadataXml: e.currentTarget.value }))
-                  }
+                  onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, samlMetadataXml: value }));
+                }}
                 />
                 <Textarea
                   label="Signing certificate"
@@ -475,12 +488,10 @@ export default function IdentityProvidersPage() {
                   minRows={2}
                   maxRows={6}
                   value={form.samlSigningCertificate}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      samlSigningCertificate: e.currentTarget.value
-                    }))
-                  }
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setForm((f) => ({ ...f, samlSigningCertificate: value }));
+                  }}
                 />
               </>
             )}
@@ -496,7 +507,10 @@ export default function IdentityProvidersPage() {
                   : "Stored encrypted. It cannot be read back once saved."
               }
               value={form.secret}
-              onChange={(e) => setForm((f) => ({ ...f, secret: e.currentTarget.value }))}
+              onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setForm((f) => ({ ...f, secret: value }));
+                }}
             />
 
             <Group justify="flex-end" mt="sm">
