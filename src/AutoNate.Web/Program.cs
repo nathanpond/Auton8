@@ -1338,20 +1338,38 @@ if (app.Environment.IsDevelopment())
 
         if (isAuthenticated)
         {
-            var isManualIdentity =
-                string.Equals(authenticationSource, ManualAuthenticationSource, StringComparison.Ordinal);
             var isTaggedDevelopmentAutoLoginIdentity =
                 string.Equals(authenticationSource, DevelopmentAutoLoginAuthenticationSource, StringComparison.Ordinal) ||
                 isDevelopmentAutoLoginIdentity;
 
-            if (isManualIdentity)
+            // This middleware owns exactly one thing: the session IT created.
+            // Every other authenticated identity — a local password sign-in, an
+            // OIDC one (`oidc:{slug}`), a SAML one (`saml:{slug}`) — belongs to
+            // somebody else and is none of its business.
+            //
+            // It used to pass through only `manual` and clear everything else,
+            // which was indistinguishable from correct while `manual` and
+            // auto-login were the only two sources that existed. #90 and #93
+            // added two more, and the effect was that federated sign-in could
+            // not complete in Development at all: the callback issued a cookie,
+            // the very next GET landed here, and the session was signed out
+            // before the SPA ever saw it. The symptom — bounced back to the
+            // login page with the account created and no error anywhere — says
+            // nothing about the cause.
+            //
+            // Allow-listing the sources to KEEP is the shape of that bug.
+            // Naming the one source to clear is the shape that stays correct
+            // when a fifth arrives.
+            if (!isTaggedDevelopmentAutoLoginIdentity)
             {
                 await next();
                 return;
             }
 
-            var shouldClearDevelopmentAutoLoginCookie =
-                !isTaggedDevelopmentAutoLoginIdentity ||
+            // An auto-login session that no longer matches the configuration —
+            // the option turned off, or the username changed — is stale and is
+            // cleared so the next request can mint a current one.
+            var isStaleAutoLoginCookie =
                 !options.Enabled ||
                 string.IsNullOrWhiteSpace(configuredUsername) ||
                 !string.Equals(
@@ -1359,7 +1377,7 @@ if (app.Environment.IsDevelopment())
                     configuredUsername,
                     StringComparison.OrdinalIgnoreCase);
 
-            if (!shouldClearDevelopmentAutoLoginCookie)
+            if (!isStaleAutoLoginCookie)
             {
                 await next();
                 return;

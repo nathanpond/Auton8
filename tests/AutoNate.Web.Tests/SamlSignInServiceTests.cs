@@ -692,6 +692,85 @@ public sealed class SamlSignInServiceTests
         Assert.Contains(Uri.EscapeDataString("/records/42"), challenge!, StringComparison.Ordinal);
     }
 
+    // ── The session has to survive the request after the callback ───────────
+
+    [Fact]
+    public async Task A_federated_session_still_authenticates_on_the_next_request()
+    {
+        // The assertion this suite was missing, and the one that matters most:
+        // not "did we call SignInAsync" but "is the user actually signed in".
+        //
+        // The gap between those two hid a defect for as long as federated
+        // sign-in has existed. The Development auto-login middleware decided
+        // which sessions to keep with an allow-list — `manual` and its own — and
+        // signed out everything else. That was indistinguishable from correct
+        // while those were the only two authentication sources; #90 and #93
+        // added `oidc:{slug}` and `saml:{slug}`, and every federated session was
+        // destroyed by the next GET. Account created, nothing logged, user
+        // bounced back to the login page.
+        //
+        // So this drives the real ACS endpoint over HTTP, takes the cookie it
+        // issues, and makes a SECOND request with it. A test that stops at the
+        // sign-in call cannot see this class of bug at all.
+        var idp = new StubIdp();
+        var app = await AutoNateWebApplicationFactory.CreateAsync();
+        await using var _ = app;
+
+        var client = app.CreateClient(new Microsoft.AspNetCore.Mvc.Testing
+            .WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+
+        // The endpoint derives both from the request host, so the assertion has
+        // to be minted for what the test client will actually send.
+        var acs = $"http://localhost/api/auth/saml/{Slug}/acs";
+        var audience = $"http://localhost/api/auth/saml/{Slug}/metadata";
+
+        var store = app.Services.CreateScope().ServiceProvider
+            .GetRequiredService<IIdentityProviderStore>();
+        await store.CreateAsync(new CreateIdentityProviderRequest(
+            Kind: IdentityProviderKinds.Saml,
+            DisplayName: "Corporate SAML",
+            Slug: Slug,
+            IsEnabled: true,
+            OidcAuthority: null, OidcClientId: null, OidcScopes: null,
+            SamlEntityId: IdpEntityId,
+            SamlMetadataUrl: null, SamlMetadataXml: null,
+            SamlSigningCertificate: idp.PublicCertificateBase64(),
+            Secret: null), Guid.NewGuid(), CancellationToken.None);
+
+        var response = await client.PostAsync(acs, new FormUrlEncodedContent(
+        [
+            new KeyValuePair<string, string>(
+                "SAMLResponse",
+                Encode(idp.MintXml(destination: acs, audience: audience))),
+        ]));
+
+        Assert.Equal(System.Net.HttpStatusCode.Redirect, response.StatusCode);
+        Assert.DoesNotContain(
+            "error", response.Headers.Location!.OriginalString, StringComparison.Ordinal);
+
+        var cookie = Assert.Single(
+            response.Headers.GetValues("Set-Cookie")
+                .Where(c => c.StartsWith(".AspNetCore.Cookies=", StringComparison.Ordinal)));
+
+        var second = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
+        second.Headers.Add("Cookie", cookie.Split(';')[0]);
+        var me = await client.SendAsync(second);
+
+        me.EnsureSuccessStatusCode();
+        var body = await me.Content.ReadAsStringAsync();
+
+        // Asserting on WHO is signed in, not merely that somebody is.
+        //
+        // "authenticated: true" alone passes even with the defect present,
+        // because Development auto-login immediately signs the request back in
+        // as `admin` — the federated session is destroyed and replaced, and the
+        // weaker assertion cannot tell the difference. That is precisely how a
+        // regression test comes to pass against the bug it was written for.
+        Assert.Contains($"\"authSource\":\"saml:{Slug}\"", body, StringComparison.Ordinal);
+        Assert.Contains($"\"idpKey\":\"{Slug}:{Subject}\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"username\":\"admin\"", body, StringComparison.Ordinal);
+    }
+
     // ── Metadata and the challenge ──────────────────────────────────────────
 
     [Fact]

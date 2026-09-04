@@ -139,6 +139,13 @@ public sealed class ReleaseComposeTests
         var excluded = new HashSet<string>(StringComparer.Ordinal)
         {
             "dapr-dashboard",   // dashboard profile: a debugging aid, not part of the product
+
+            // keycloak profile: a development and testing dependency, not a
+            // product component. Auton8 federates to whatever identity provider
+            // an organisation already has and deliberately does not ship one
+            // (#98; whether it ever should is #100, Post-1.0). Shipping it would
+            // also put a second set of admin credentials in a released stack.
+            "keycloak",
         };
 
         var missing = devServices.Except(released).Except(excluded).ToList();
