@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, Navigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { listEnabledProviders } from "@/api/identityProviders";
 import {
   Alert,
   Box,
   Button,
+  Divider,
   Card,
   Group,
   PasswordInput,
@@ -45,6 +48,16 @@ export default function Login() {
       password: (v) => (v.length === 0 ? "Password is required" : null)
     }
   });
+
+  // Enabled providers, for the federated buttons. A failure here must not stop
+  // the local form rendering — an IdP being unreachable should not lock
+  // everyone out of the password path.
+  const providersQuery = useQuery({
+    queryKey: ["enabled-identity-providers"],
+    queryFn: ({ signal }) => listEnabledProviders(signal),
+    retry: false
+  });
+  const providers = providersQuery.data ?? [];
 
   // Above the early return below: hooks must run in the same order on every
   // render, and an authenticated visitor returns before this point. eslint's
@@ -187,6 +200,25 @@ export default function Login() {
             <i className="fa fa-lock" />
           </ThemeIcon>
         </Group>
+
+        {providers.length > 0 && (
+          <Stack gap="xs" mb="md">
+            {providers.map((p) => (
+              <Button
+                key={p.slug}
+                component="a"
+                href={`/api/auth/oidc/${encodeURIComponent(p.slug)}/challenge?returnUrl=${encodeURIComponent(returnUrl)}`}
+                variant="default"
+                fullWidth
+                size="md"
+                leftSection={<i className="fa fa-right-to-bracket" aria-hidden="true" />}
+              >
+                Continue with {p.displayName}
+              </Button>
+            ))}
+            <Divider label="or sign in with a password" labelPosition="center" my="xs" />
+          </Stack>
+        )}
 
         <form onSubmit={form.onSubmit(onSubmit)}>
           <Stack gap="sm">

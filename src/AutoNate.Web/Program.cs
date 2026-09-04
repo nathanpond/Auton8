@@ -480,6 +480,10 @@ builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderStore
     AutoNate.Web.Services.Identity.EfCoreIdentityProviderStore>();
 builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderConfigurationTester,
     AutoNate.Web.Services.Identity.IdentityProviderConfigurationTester>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.IOidcConfigurationCache,
+    AutoNate.Web.Services.Identity.OidcConfigurationCache>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IOidcSignInService,
+    AutoNate.Web.Services.Identity.OidcSignInService>();
 builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionStore>();
 // Phase 4 replaces this with kind-routed Anthropic/OpenAI testers; until then
 // the stub just confirms the secret decrypts cleanly.
@@ -1560,6 +1564,7 @@ app.MapAdminProjectionsEndpoints();
 app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
 app.MapIdentityProviderEndpoints();
+app.MapFederatedSignInEndpoints();
 app.MapDataStoreEndpoints();
 app.MapDataConnectorEndpoints();
 app.MapDatasetEndpoints();

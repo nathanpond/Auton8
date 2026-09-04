@@ -115,3 +115,24 @@ export async function testIdentityProvider(
   const res = await api.post<IdentityProviderTestResult>(`${BASE}/${id}/test`);
   return res.data;
 }
+
+/** What a signed-out visitor may know about a provider: enough to draw a button. */
+export type EnabledProviderSummary = {
+  slug: string;
+  displayName: string;
+  kind: IdentityProviderKind;
+};
+
+/**
+ * Enabled providers, for the login page.
+ *
+ * Deliberately a separate anonymous endpoint rather than the admin list: a
+ * signed-out visitor gets display name, kind and slug, never the authority,
+ * client id or anything about the secret.
+ */
+export async function listEnabledProviders(
+  signal?: AbortSignal
+): Promise<EnabledProviderSummary[]> {
+  const res = await api.get<EnabledProviderSummary[]>("/api/auth/providers", { signal });
+  return res.data;
+}
