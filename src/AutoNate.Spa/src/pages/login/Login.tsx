@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useSearchParams, Navigate } from "react-router-dom";
 import {
   Alert,
@@ -21,6 +22,12 @@ type FormValues = {
   username: string;
   password: string;
 };
+
+/**
+ * Shipped with the app, so it cannot itself 404 — which matters, because it is
+ * what every other failure falls back to.
+ */
+const DEFAULT_COVER = "/assets/img/login-bg/space.jpg";
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -55,15 +62,46 @@ export default function Login() {
     }
   };
 
-  // The saved SiteAppearance currently stores the old ColorAdmin demo path
-  // (`/spa/assets/...`) which 404s in dev. Until the admin re-saves the cover
-  // image via Site Configuration, fall through to the new default image when
-  // the stored URL looks like that broken legacy path.
+  // Two different ways the cover can be wrong, and they need different
+  // handling.
+  //
+  // The first is known-bad by shape: saved appearance may still hold the old
+  // ColorAdmin demo path (`/spa/assets/...`), which 404s. That is cheap to
+  // reject without asking the network.
   const storedCover = effectiveAppearance.loginCoverImageUrl;
-  const coverUrl =
+  const requestedCover =
     storedCover && !storedCover.startsWith("/spa/")
       ? storedCover
-      : "/assets/img/login-bg/space.jpg";
+      : DEFAULT_COVER;
+
+  // The second is a URL that is perfectly well-formed and simply is not there.
+  // The cover is a CSS `background-image`, and CSS has no error event — a 404
+  // renders as an empty box behind the card with nothing to indicate why. So
+  // the image is preloaded and the default swapped in if it fails to load.
+  //
+  // Starting from `requestedCover` rather than the default means the common
+  // case paints immediately and never flashes the wrong background; only a
+  // genuine failure causes a swap.
+  const [coverUrl, setCoverUrl] = useState(requestedCover);
+
+  useEffect(() => {
+    setCoverUrl(requestedCover);
+    if (requestedCover === DEFAULT_COVER) return;
+
+    let cancelled = false;
+    const probe = new Image();
+    probe.onerror = () => {
+      if (!cancelled) setCoverUrl(DEFAULT_COVER);
+    };
+    probe.src = requestedCover;
+
+    // The login page is where someone lands and leaves quickly; without this a
+    // late error from an abandoned probe would set state on an unmounted page.
+    return () => {
+      cancelled = true;
+      probe.onerror = null;
+    };
+  }, [requestedCover]);
 
   return (
     <Box
