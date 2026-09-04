@@ -93,6 +93,13 @@ keycloak-up: infra-prepare keycloak-check
 	@echo ""
 	@echo "Keycloak is starting. Admin console: http://keycloak:$(KEYCLOAK_PORT)/admin/"
 	@echo "Realm 'auton8' — OIDC discovery:"
+	# nosemgrep: generic.secrets.security.detected-username-and-password-in-uri.detected-username-and-password-in-uri
+	# False positive: `keycloak:$(KEYCLOAK_PORT)` is host-and-port, not
+	# user-and-password — there is no credential and no `@` on the line. The URL
+	# is printed verbatim so a developer can copy it, which is the whole point of
+	# the message. Suppressed narrowly rather than left failing: an advisory scan
+	# that is permanently red is one people stop reading, and a real finding would
+	# then arrive into noise.
 	@echo "  http://keycloak:$(KEYCLOAK_PORT)/realms/auton8/.well-known/openid-configuration"
 	@echo "See docs/DEVELOPMENT.md for what to put in Auton8's provider configuration."
 
