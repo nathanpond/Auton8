@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -89,7 +90,6 @@ export default function IdentityProvidersPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<IdentityProvider | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<
     { id: string; result: IdentityProviderTestResult } | null
   >(null);
@@ -129,31 +129,39 @@ export default function IdentityProvidersPage() {
         secret: form.secret || null
       });
     },
-    onSuccess: () => {
+    onSuccess: (provider) => {
       setModalOpen(false);
-      setError(null);
+      toast.success(
+        editing ? `Saved ${provider.displayName}.` : `Created ${provider.displayName}.`
+      );
       void invalidate();
     },
-    onError: (e: unknown) => setError(readError(e))
+    // Feedback on an action the user just took, so a toast rather than the
+    // in-page Alert this used to render — the rule this repository now states
+    // in CLAUDE.md, applied to the page that motivated writing it down.
+    onError: (e: unknown) => toast.error(readError(e))
   });
 
   const enabledMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       setIdentityProviderEnabled(id, enabled),
     onSuccess: () => void invalidate(),
-    onError: (e: unknown) => setError(readError(e))
+    onError: (e: unknown) => toast.error(readError(e))
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteIdentityProvider(id),
-    onSuccess: () => void invalidate(),
-    onError: (e: unknown) => setError(readError(e))
+    onSuccess: () => {
+      toast.success("Identity provider deleted.");
+      void invalidate();
+    },
+    onError: (e: unknown) => toast.error(readError(e))
   });
 
   const testMutation = useMutation({
     mutationFn: (id: string) => testIdentityProvider(id),
     onSuccess: (result, id) => setTestResult({ id, result }),
-    onError: (e: unknown) => setError(readError(e))
+    onError: (e: unknown) => toast.error(readError(e))
   });
 
   useEffect(() => {
@@ -166,7 +174,6 @@ export default function IdentityProvidersPage() {
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm);
-    setError(null);
     setModalOpen(true);
   };
 
@@ -188,7 +195,6 @@ export default function IdentityProvidersPage() {
       samlSigningCertificate: provider.samlSigningCertificate ?? "",
       secret: ""
     });
-    setError(null);
     setModalOpen(true);
   };
 
@@ -305,11 +311,6 @@ export default function IdentityProvidersPage() {
         <Button onClick={openCreate}>Add provider</Button>
       </Group>
 
-      {error && (
-        <Alert color="red" title="Something went wrong" withCloseButton onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
 
       {testResult && (
         <Alert

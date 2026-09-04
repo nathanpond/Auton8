@@ -8,137 +8,120 @@ namespace AutoNate.E2E.Tests;
 /// The shared toast wrapper's accessibility behaviour (#89).
 /// </summary>
 /// <remarks>
-/// Asserted through the accessibility tree — roles — rather than by CSS
-/// selector, because the tree is what an assistive technology sees and the
-/// colour is exactly what it does not get.
+/// Asserted through roles in the accessibility tree rather than by CSS
+/// selector, because the tree is what assistive technology sees and the colour
+/// is exactly what it does not get.
 ///
-/// #89's test plan asks for component tests as well. The SPA has no unit test
-/// runner (no vitest, no testing-library), and adding one is new infrastructure
-/// rather than part of this story, so the same properties are asserted here
-/// against the real application instead of a simulated DOM. That is a
-/// deviation, recorded in .n8/decisions.md — and arguably the stronger of the
-/// two, since a jsdom component test can only confirm the props that were
-/// passed, not the role the browser actually computed.
+/// Driven by **real actions** on the Identity Providers screen (#87), as #89's
+/// test plan asks. An earlier version reached into the module directly with a
+/// dynamic import of `/src/components/notifications/toast.ts`; that resolves
+/// under the Vite dev server and not against the built bundle these tests run
+/// on, so it failed in CI with "Failed to fetch dynamically imported module".
+/// Driving the UI is what the plan meant and is the more honest test anyway —
+/// it proves the wrapper is wired into a real page, not merely importable.
+///
+/// #89 also asks for component tests. The SPA has no unit test runner, and
+/// adding one is new infrastructure rather than part of that story; these cover
+/// the same properties against the browser's computed roles instead. Recorded
+/// in .n8/decisions.md.
 /// </remarks>
 public sealed class ToastAccessibilityTests : E2ETestBase
 {
     public ToastAccessibilityTests(AutoNateE2EFixture fixture) : base(fixture) { }
 
-    /// <summary>
-    /// An error toast is announced assertively and does not disappear.
-    /// </summary>
-    /// <remarks>
-    /// The two properties that matter most, and the two the wrapper had to
-    /// override Mantine's defaults to get: an error announced politely can be
-    /// missed entirely, and one that vanishes before it is read is worse than
-    /// no error.
-    /// </remarks>
+    private const string ProvidersUrl = "/admin/config/identity-providers";
+
     [Fact]
-    public async Task AnErrorToast_IsAnnouncedAssertively_AndDoesNotAutoDismiss()
+    public async Task ASuccessToast_IsAnnouncedPolitely_AndNotAsAnAlert()
     {
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
 
-        await RaiseToastAsync(page, "error", "Something went wrong while saving.");
-
-        // role="alert" is an implicit aria-live="assertive" region.
-        var alert = page.GetByRole(AriaRole.Alert)
-            .Filter(new() { HasText = "Something went wrong while saving." });
-        await Assertions.Expect(alert).ToBeVisibleAsync(new() { Timeout = 5_000 });
-
-        // Still there well past every other severity's timeout. A success toast
-        // would be long gone by now.
-        await page.WaitForTimeoutAsync(6_500);
-        await Assertions.Expect(alert).ToBeVisibleAsync();
-    }
-
-    [Fact]
-    public async Task ASuccessToast_IsAnnouncedPolitely()
-    {
-        await using var session = await NewSignedInAsAdminAsync();
-        var page = session.Page;
-
-        await RaiseToastAsync(page, "success", "Saved.");
+        var name = $"Polite {Guid.NewGuid():N}"[..20];
+        await CreateProviderAsync(page, name);
 
         // role="status" is an implicit polite live region: it waits for a pause
         // rather than interrupting, which is right for confirming something
-        // worked and wrong for telling someone it did not.
-        var status = page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Saved." });
-        await Assertions.Expect(status).ToBeVisibleAsync(new() { Timeout = 5_000 });
-
-        // And it is not an alert — the severities must be distinguishable to a
-        // screen reader, which is the whole point of the split.
+        // worked.
         await Assertions.Expect(
-            page.GetByRole(AriaRole.Alert).Filter(new() { HasText = "Saved." }))
+            page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Created" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // And explicitly not an alert. The severities have to be
+        // distinguishable to a screen reader — that is the whole point of the
+        // split, and it is invisible if both render the same role.
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Alert).Filter(new() { HasText = "Created" }))
             .ToHaveCountAsync(0);
     }
 
     [Fact]
-    public async Task AToast_IsDismissibleFromTheKeyboard()
+    public async Task AnErrorToast_IsAnnouncedAssertively_AndDoesNotAutoDismiss()
     {
+        // The two properties the wrapper had to override Mantine's defaults to
+        // get: an error announced politely can be missed entirely, and one that
+        // vanishes before it is read is worse than no error.
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
 
-        await RaiseToastAsync(page, "error", "Dismiss me with the keyboard.");
+        var name = $"Dup {Guid.NewGuid():N}"[..16];
+        await CreateProviderAsync(page, name);
+        await Assertions.Expect(
+            page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Created" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        var alert = page.GetByRole(AriaRole.Alert)
-            .Filter(new() { HasText = "Dismiss me with the keyboard." });
-        await Assertions.Expect(alert).ToBeVisibleAsync(new() { Timeout = 5_000 });
+        // Same slug again — the backend refuses it with a reason, which the
+        // page raises as an error toast.
+        await CreateProviderAsync(page, name);
 
-        // The close button is reachable and operable without a mouse. Activated
-        // with the keyboard rather than ClickAsync, so this fails if the
-        // control is ever swapped for something that only responds to a click.
-        var close = alert.GetByRole(AriaRole.Button);
-        await close.FocusAsync();
-        await page.Keyboard.PressAsync("Enter");
+        var alert = page.GetByRole(AriaRole.Alert).Filter(new() { HasText = "slug" });
+        await Assertions.Expect(alert).ToBeVisibleAsync(new() { Timeout = 15_000 });
 
-        await Assertions.Expect(alert).ToHaveCountAsync(0, new() { Timeout = 5_000 });
+        // Still there past every other severity's timeout — the longest is 10s.
+        await page.WaitForTimeoutAsync(11_000);
+        await Assertions.Expect(alert).ToBeVisibleAsync();
     }
 
     [Fact]
-    public async Task AToast_DoesNotStealFocus()
+    public async Task AnErrorToast_IsDismissibleFromTheKeyboard()
     {
-        // Feedback on an action must not take the user out of what they were
-        // doing. The live region is what carries the message.
         await using var session = await NewSignedInAsAdminAsync();
         var page = session.Page;
 
-        await page.GotoAsync("/admin/config");
-        await page.EvaluateAsync(
-            "() => { const el = document.createElement('input');" +
-            "  el.id = 'focus-probe'; document.body.appendChild(el); el.focus(); }");
-
-        await RaiseToastAsync(page, "error", "Focus should not move.");
+        var name = $"Kbd {Guid.NewGuid():N}"[..16];
+        await CreateProviderAsync(page, name);
         await Assertions.Expect(
-            page.GetByRole(AriaRole.Alert).Filter(new() { HasText = "Focus should not move." }))
-            .ToBeVisibleAsync(new() { Timeout = 5_000 });
+            page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Created" }))
+            .ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await CreateProviderAsync(page, name);
 
-        var focusedId = await page.EvaluateAsync<string>("() => document.activeElement?.id ?? ''");
-        Assert.Equal("focus-probe", focusedId);
+        var alert = page.GetByRole(AriaRole.Alert).Filter(new() { HasText = "slug" });
+        await Assertions.Expect(alert).ToBeVisibleAsync(new() { Timeout = 15_000 });
+
+        // Focused and activated with the keyboard rather than clicked, so this
+        // fails if the close control is ever swapped for something that only
+        // responds to a mouse.
+        var close = alert.GetByRole(AriaRole.Button).First;
+        await close.FocusAsync();
+        await page.Keyboard.PressAsync("Enter");
+
+        await Assertions.Expect(alert).ToHaveCountAsync(0, new() { Timeout = 10_000 });
     }
 
     /// <summary>
-    /// Raises a toast through the application's own wrapper.
+    /// Opens the drawer and creates a provider whose slug is derived from
+    /// <paramref name="displayName"/>.
     /// </summary>
-    /// <remarks>
-    /// Driven through the real module rather than by finding a UI action that
-    /// happens to produce one, so the test exercises the wrapper's
-    /// configuration directly and does not break when an unrelated page's copy
-    /// changes. The module is reached through the Vite dev/preview module graph
-    /// the app already loads.
-    /// </remarks>
-    private static async Task RaiseToastAsync(IPage page, string severity, string message)
+    private static async Task CreateProviderAsync(IPage page, string displayName)
     {
-        if (page.Url is null || !page.Url.Contains("/admin", StringComparison.Ordinal))
-        {
-            await page.GotoAsync("/admin/config");
-        }
+        await page.GotoAsync(ProvidersUrl);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add provider" })
+            .ClickAsync(new() { Timeout = 15_000 });
 
-        await page.EvaluateAsync(
-            @"async ([severity, message]) => {
-                const mod = await import('/src/components/notifications/toast.ts');
-                mod.toast[severity](message);
-            }",
-            new[] { severity, message });
+        await page.GetByLabel("Display name").FillAsync(displayName);
+        await page.GetByLabel("Authority").FillAsync("https://idp.example.com/realms/x");
+        await page.GetByLabel("Client ID").FillAsync("auton8");
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Create", Exact = true }).ClickAsync();
     }
 }
