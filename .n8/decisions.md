@@ -710,3 +710,57 @@ Carry it into `/n8-verify` as a manual step.
 - **Note (drift check):** `@mantine/notifications` ^9.5.2 is already a
   dependency, so #89 uses it rather than adding it. Implementation detail, not an
   AC change.
+
+- **Decision (#87):** DataProtection purpose is **`AutoNate.IdentityProviders.v1`**,
+  `internal const`, registered on CLAUDE.md's do-not-rename list and in
+  `DoNotRenameGuardTests` (guarded identifiers 9 → 10).
+  **Why:** #96 prescribed a new purpose rather than reusing
+  `AutoNate.ExternalConnections.v1`. The purpose is part of key derivation, so a
+  shared string means a rotation forced by one secret class forces re-entry of
+  the other's. The guard was red-checked: renaming it turns the suite red with a
+  message naming the consequence.
+
+- **Decision (#87):** **One table with a `kind` discriminator**, not one per
+  protocol, and **not** a reuse of `external_connections`.
+  **Why:** OIDC and SAML share display name, enabled state, secret and audit
+  columns and differ in three or four fields each; the login page needs the
+  union, which two tables would force every read path to reassemble.
+  `external_connections`' own comment anticipates an "identity provider" kind —
+  worth recording that it was considered and rejected, because a future reader
+  will find that comment. Its secrets are protected under the
+  external-connections purpose, which is exactly what #87 requires not to share.
+
+- **Decision (#87):** A **new `EntityKind` (`identityprovider`)** rather than
+  reusing `SiteConfig`.
+  **Why:** #96 laid out both. Identity configuration decides who can get into
+  the system at all, so an administrator should be able to delegate the site's
+  theme without also delegating the ability to add a provider that lets anyone
+  in. Reusing SiteConfig would make those the same grant.
+
+- **Decision (#87):** Enable and disable are **their own routes and their own
+  audit event types**, not a boolean in the edit payload.
+  **Why:** Turning a provider on changes who can reach the system. That should
+  be greppable in an audit log without reading payloads, and separately
+  grantable from other edits.
+
+- **Decision (#87, Rule 2):** The Development-only plain-http accommodation is
+  decided **inside `ProviderBaseUrlPolicy` from `IHostEnvironment`**, and scoped
+  to kinds prefixed `IdentityProvider:`.
+  **Why:** #87 requires the relaxation *cannot* be enabled in production, not
+  merely that it is not — so a caller-supplied flag would be the wrong shape,
+  since a caller could pass true in production. Scoping it to identity-provider
+  kinds keeps it from relaxing LLM connections, which carry live API keys.
+
+- **Note (#87):** The secret is write-only **by construction**: `IdentityProviderDto`
+  has no plaintext property, so the regression the story names ("a DTO gaining
+  the field later") cannot happen quietly. The test asserts against raw response
+  text rather than a typed property, so a new field under any name is caught.
+
+- **Note (#87, test infrastructure):** `AutoNateWebApplicationFactory`'s
+  Development auto-login middleware activates **only on GET**, so a POST from a
+  fresh client has no actor and the handler refuses it. Tests must prime the
+  session with one GET first, as the ExternalConnection suite does. This cost a
+  diagnosis cycle. It also makes an "unauthenticated caller is refused" test
+  unwritable through this factory — that property is covered instead by
+  `AuthorizationGatePresenceTests` and `KindGateEnforcementTests`, and the test
+  file says so rather than omitting it silently.
