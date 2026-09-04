@@ -14,7 +14,7 @@ database, the `autonate.web` event `sourceAppId`, the plugin ABI
 `AUTONATE_BINDING` / `AUTONATE_TABLE_BINDING`, the BPMN namespace
 `http://autonate.dev/workflows` and `${autonateBehaviorDelegate}`, and the
 DataProtection purposes `AutoNate.ExternalConnections.v1` /
-`AutoNate.Plugins.RolePassword.v1`.
+`AutoNate.Plugins.RolePassword.v1` / `AutoNate.IdentityProviders.v1`.
 
 That split is deliberate. Renaming the DataProtection purposes makes every
 stored provider secret undecryptable; renaming the `.docx` markers orphans
@@ -40,6 +40,39 @@ The SPA was migrated from ColorAdmin v5 (Bootstrap 5 admin theme, paid license) 
 ### Theming bridge
 
 `SiteAppearance` (admin-configured site theme) is the single source of truth. `applySiteAppearanceToDocument` in `src/AutoNate.Spa/src/lib/siteAppearance.ts` writes `--mantine-*` vars (for Mantine widgets) plus `--app-*` vars (for header / top-menu / sidebar chrome used by `shell/headerStyles.ts` and the `SiteAppearance` admin preview). It also infers `data-mantine-color-scheme` from `surfaceBg` luminance. `MantineRoot` in `src/AutoNate.Spa/src/providers/MantineRoot.tsx` builds a static module-level Mantine theme; the live brand color flows through CSS vars to avoid re-render loops.
+
+### Notifications: toast or in-page Alert?
+
+Both patterns exist and neither is wrong; what was missing was a rule for
+choosing, so both kept growing. The rule:
+
+- **Toast** — something transient the user just caused. "Saved.", "Failed to
+  grant access.", "Copied." It is feedback on an action, not part of the page,
+  and the page still makes sense once it has gone.
+- **In-page `<Alert>`** — a condition belonging to the page: validation
+  summaries, empty states, "this record is archived", "no provider configured".
+  It is still true after a reload and should still be there when the user comes
+  back to look.
+
+Raise a toast through `toast` from `@/components/notifications/toast` — never
+`notifications.show` directly. Importing `@mantine/notifications` anywhere but
+that wrapper and `main.tsx` is an ESLint **error**, because a wrapper that can
+be bypassed by habit does not hold a guarantee.
+
+What the wrapper decides, once, that 91 call sites were each deciding by
+picking a colour:
+
+| severity | role | auto-dismiss |
+|---|---|---|
+| `toast.error` | `alert` (assertive) | **never** |
+| `toast.warning` | `status` (polite) | 10s |
+| `toast.info` | `status` (polite) | 6s |
+| `toast.success` | `status` (polite) | 4s |
+
+Colour is not an accessible signal — a screen-reader user gets the role, not the
+red. An error announced politely can be missed entirely, and one that
+auto-dismisses before it is read is worse than no error, which is why those two
+defaults fight Mantine's.
 
 ### Shell
 

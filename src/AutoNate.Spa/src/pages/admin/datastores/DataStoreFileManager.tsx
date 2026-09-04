@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
@@ -12,7 +13,6 @@ import {
   Text
 } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
-import { notifications } from "@mantine/notifications";
 import {
   Filemanager,
   getMenuOptions,
@@ -291,10 +291,7 @@ export default function DataStoreFileManager({
           const listing = await listDataStoreFiles(storeId, ev.id || "/");
           api.exec("provide-data", { id: ev.id, data: listingToEntities(listing) });
         } catch (err) {
-          notifications.show({
-            message: describeError(err, "Failed to load folder."),
-            color: "red"
-          });
+          toast.error(describeError(err, "Failed to load folder."));
         }
       });
 
@@ -330,10 +327,7 @@ export default function DataStoreFileManager({
               }
             }
           } catch (err) {
-            notifications.show({
-              message: describeError(err, "Create failed."),
-              color: "red"
-            });
+            toast.error(describeError(err, "Create failed."));
             return false;
           }
         }
@@ -356,10 +350,7 @@ export default function DataStoreFileManager({
             }
           }
         } catch (err) {
-          notifications.show({
-            message: describeError(err, "Delete failed."),
-            color: "red"
-          });
+          toast.error(describeError(err, "Delete failed."));
           return false;
         }
       });
@@ -371,10 +362,7 @@ export default function DataStoreFileManager({
         const entity = api.getFile(ev.id);
         const fileId = (entity as { _fileId?: string } | null)?._fileId;
         if (!fileId) {
-          notifications.show({
-            message: "This item can't be downloaded.",
-            color: "red"
-          });
+          toast.error("This item can't be downloaded.");
           return false;
         }
         const name = nameOfPath(ev.id);
@@ -425,10 +413,7 @@ export default function DataStoreFileManager({
               await renameOrMoveDataStoreFile(storeId, fileId, null, ev.name);
             }
           } catch (err) {
-            notifications.show({
-              message: describeError(err, "Rename failed."),
-              color: "red"
-            });
+            toast.error(describeError(err, "Rename failed."));
             return false;
           }
           await refreshFolders([parent]);
@@ -459,10 +444,7 @@ export default function DataStoreFileManager({
               }
             }
           } catch (err) {
-            notifications.show({
-              message: describeError(err, "Move failed."),
-              color: "red"
-            });
+            toast.error(describeError(err, "Move failed."));
             await refreshFolders(affectedParents);
             return false;
           }
@@ -491,10 +473,7 @@ export default function DataStoreFileManager({
               }
             }
           } catch (err) {
-            notifications.show({
-              message: describeError(err, "Copy failed."),
-              color: "red"
-            });
+            toast.error(describeError(err, "Copy failed."));
             await refreshFolders([target]);
             return false;
           }
@@ -637,10 +616,7 @@ export default function DataStoreFileManager({
           uploaded += 1;
         } catch (err) {
           failed += 1;
-          notifications.show({
-            message: `${describeError(err, "Upload failed.")} ${relPath || f.name}`,
-            color: "red"
-          });
+          toast.error(`${describeError(err, "Upload failed.")} ${relPath || f.name}`);
         }
       }
       const api = apiRef.current;
@@ -664,10 +640,7 @@ export default function DataStoreFileManager({
     try {
       const result = await uploadFilesToTarget(target, uploadFiles);
       if (result.uploaded > 0) {
-        notifications.show({
-          message: `Uploaded ${result.uploaded} file${result.uploaded === 1 ? "" : "s"} to ${target}.`,
-          color: "green"
-        });
+        toast.success(`Uploaded ${result.uploaded} file${result.uploaded === 1 ? "" : "s"} to ${target}.`);
       }
       if (result.failed === 0) closeUploadModal();
     } finally {
@@ -739,19 +712,13 @@ export default function DataStoreFileManager({
           await walkEntry(entry, "", files);
         }
       } catch (err) {
-        notifications.show({
-          message: describeError(err, "Failed to read dropped folder."),
-          color: "red"
-        });
+        toast.error(describeError(err, "Failed to read dropped folder."));
         return;
       }
       if (files.length === 0) return;
       const result = await uploadFilesToTarget(target, files);
       if (result.uploaded > 0) {
-        notifications.show({
-          message: `Uploaded ${result.uploaded} file${result.uploaded === 1 ? "" : "s"} to ${target}.`,
-          color: "green"
-        });
+        toast.success(`Uploaded ${result.uploaded} file${result.uploaded === 1 ? "" : "s"} to ${target}.`);
       }
     };
     container.addEventListener("drop", handler, { capture: true });
@@ -899,10 +866,7 @@ export default function DataStoreFileManager({
             onDrop={(files) => setUploadFiles((prev) => [...prev, ...files])}
             onReject={(rejections) => {
               const first = rejections[0]?.errors?.[0];
-              notifications.show({
-                message: first?.message ?? "Some files were rejected.",
-                color: "red"
-              });
+              toast.error(first?.message ?? "Some files were rejected.");
             }}
             aria-label="File dropzone"
           >

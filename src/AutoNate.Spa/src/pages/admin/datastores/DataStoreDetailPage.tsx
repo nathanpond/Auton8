@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,7 +25,6 @@ import {
   Tooltip
 } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
-import { notifications } from "@mantine/notifications";
 import PageHeader from "@/components/PageHeader";
 import AqlEditor from "@/components/aql-editor/AqlEditor";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -242,10 +242,15 @@ function SqlPanel({ storeId }: { storeId: string }) {
             ? "Replaced (schema changed):"
             : "Replaced:"
           : "Ingested:";
-      notifications.show({
-        message: `${verb} ${result.rowsInserted.toLocaleString()} row(s) in ${result.tableName}.`,
-        color: result.schemaChanged ? "yellow" : "green"
-      });
+      // A schema change during ingest is a warning: the load worked, but the
+      // shape moved under whatever was reading it.
+      const ingestMessage =
+        `${verb} ${result.rowsInserted.toLocaleString()} row(s) in ${result.tableName}.`;
+      if (result.schemaChanged) {
+        toast.warning(ingestMessage);
+      } else {
+        toast.success(ingestMessage);
+      }
       await queryClient.invalidateQueries({ queryKey: ["datastores", storeId, "tables"] });
       setSelectedTableId(result.tableId);
     } catch (err) {

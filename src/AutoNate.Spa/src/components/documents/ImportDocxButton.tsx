@@ -1,7 +1,7 @@
+import { toast } from "@/components/notifications/toast";
 import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import { useImportDocx } from "@/hooks/useDocuments";
 
 // Shared button + hidden file input for the Phase 7 import flow. Sits
@@ -51,17 +51,11 @@ export default function ImportDocxButton({
     if (!file) return;
     const fileName = file.name.toLowerCase();
     if (accept === ".docx" && !fileName.endsWith(".docx")) {
-      notifications.show({
-        message: "Only .docx files are accepted here. Use the template gallery for .dotx.",
-        color: "yellow"
-      });
+      toast.warning("Only .docx files are accepted here. Use the template gallery for .dotx.");
       return;
     }
     if (accept === ".dotx" && !fileName.endsWith(".dotx")) {
-      notifications.show({
-        message: "Only .dotx (template) files are accepted here. Use the folder view for .docx.",
-        color: "yellow"
-      });
+      toast.warning("Only .dotx (template) files are accepted here. Use the folder view for .docx.");
       return;
     }
 
@@ -76,11 +70,7 @@ export default function ImportDocxButton({
       navigate(`/documents/edit/${created.id}?import=1`);
     } catch (err) {
       console.error("[import] upload failed", err);
-      notifications.show({
-        message:
-          "Upload failed. The server rejected the file — confirm it's a real .docx / .dotx.",
-        color: "red"
-      });
+      toast.error("Upload failed. The server rejected the file — confirm it's a real .docx / .dotx.");
     }
   };
 

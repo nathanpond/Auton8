@@ -1,7 +1,7 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -58,7 +58,6 @@ export default function EdgeTypeEditor() {
   const [cardinality, setCardinality] = useState<EdgeCardinality>("many_to_many");
   const [fromTypes, setFromTypes] = useState<string[]>([]);
   const [toTypes, setToTypes] = useState<string[]>([]);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [fieldModal, setFieldModal] = useState<FieldModalState>({ kind: "none" });
 
   useEffect(() => {
@@ -104,9 +103,9 @@ export default function EdgeTypeEditor() {
         fromRecordTypeIds: fromTypes.length === 0 ? null : fromTypes,
         toRecordTypeIds: toTypes.length === 0 ? null : toTypes
       });
-      setFlash({ kind: "success", message: "Saved." });
+      toast.success("Saved.");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -114,13 +113,13 @@ export default function EdgeTypeEditor() {
     try {
       if (type.isArchived) {
         await restore.mutateAsync(type.id);
-        setFlash({ kind: "success", message: "Restored." });
+        toast.success("Restored.");
       } else {
         await archive.mutateAsync(type.id);
-        setFlash({ kind: "success", message: "Archived." });
+        toast.success("Archived.");
       }
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -155,17 +154,6 @@ export default function EdgeTypeEditor() {
           </Button>
         }
       />
-
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="sm"
-        >
-          {flash.message}
-        </Alert>
-      )}
 
       <Card withBorder shadow="sm" mb="md">
         <Title order={5} mb="md">
@@ -314,10 +302,10 @@ export default function EdgeTypeEditor() {
           dataTypes={fieldTypes.map((ft) => ft.dataType)}
           onClose={() => setFieldModal({ kind: "none" })}
           onSuccess={(message) => {
-            setFlash({ kind: "success", message });
+            toast.success(message);
             setFieldModal({ kind: "none" });
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
     </>

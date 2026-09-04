@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,7 +20,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
@@ -130,7 +130,7 @@ export default function CodeTransformersPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Code transformer created.", color: "green" });
+      toast.success("Code transformer created.");
     },
     onError: (err: unknown) => {
       const message =
@@ -152,7 +152,7 @@ export default function CodeTransformersPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Code transformer updated.", color: "green" });
+      toast.success("Code transformer updated.");
     },
     onError: (err: unknown) => {
       const message =
@@ -166,7 +166,7 @@ export default function CodeTransformersPage() {
     mutationFn: deleteCodeTransformer,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      notifications.show({ message: "Code transformer deleted.", color: "green" });
+      toast.success("Code transformer deleted.");
     }
   });
 
@@ -458,6 +458,9 @@ export default function CodeTransformersPage() {
                 />
               </Box>
             </Box>
+            {/* In-page, not a toast (#91): this sits inside an open form and the
+            user has to fix the input it describes. A toast would vanish
+            mid-correction — it is a validation summary by another name. */}
             {submitError ? <Alert color="red">{submitError}</Alert> : null}
             <Group justify="flex-end" mt="sm">
               <Button variant="default" onClick={() => setModalOpen(false)}>

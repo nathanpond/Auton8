@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Box, Button, Card, Code, Grid, Group, Switch, Text, TextInput, Title } from "@mantine/core";
@@ -35,9 +36,6 @@ export default function FormEditor() {
   const [devPropsRaw, setDevPropsRaw] = useState(DEFAULT_DEV_PROPS);
   const [devPropsOpen, setDevPropsOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(
-    null
-  );
 
   // Hydrate the buffer once the form loads (or after a save/restore that
   // changes the canonical shape). Also restore any per-form dev-props from
@@ -102,9 +100,9 @@ export default function FormEditor() {
     };
     try {
       await save.mutateAsync({ id: form.id, request });
-      setFlash({ kind: "success", message: "Saved." });
+      toast.success("Saved.");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -121,9 +119,9 @@ export default function FormEditor() {
     }
     try {
       await publish.mutateAsync(form.id);
-      setFlash({ kind: "success", message: "Published." });
+      toast.success("Published.");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -202,17 +200,6 @@ export default function FormEditor() {
           </Group>
         }
       />
-
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="sm"
-        >
-          {flash.message}
-        </Alert>
-      )}
 
       <Card withBorder shadow="sm" mb="md">
         <Title order={5} mb="md">
@@ -347,7 +334,7 @@ export default function FormEditor() {
           onClose={() => setVersionsOpen(false)}
           onRestored={() => {
             setVersionsOpen(false);
-            setFlash({ kind: "success", message: "Restored — buffer reloaded." });
+            toast.success("Restored — buffer reloaded.");
           }}
         />
       )}

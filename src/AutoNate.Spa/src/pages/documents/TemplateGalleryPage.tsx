@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -18,7 +19,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import PageHeader from "@/components/PageHeader";
 import ImportDocxButton from "@/components/documents/ImportDocxButton";
 import { DocumentDto } from "@/api/documents";
@@ -303,19 +303,13 @@ function CreateTemplateModal({
         kind: "template",
         title: trimmed
       });
-      notifications.show({
-        message: `Template "${trimmed}" created.`,
-        color: "green"
-      });
+      toast.success(`Template "${trimmed}" created.`);
       close();
       // Open the new template in the editor so the user can immediately
       // fill in the body + add bindings.
       window.open(`/documents/edit/${created.id}`, "_blank", "noopener");
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to create template.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to create template.");
     }
   };
 
@@ -409,19 +403,13 @@ function UseTemplateModal({
         folderId: null,
         title: trimmed
       });
-      notifications.show({
-        message: `Document "${trimmed}" created from template.`,
-        color: "green"
-      });
+      toast.success(`Document "${trimmed}" created from template.`);
       close();
       // Land the user in the new document so they can immediately review +
       // refresh bindings against the destination project's data.
       navigate(`/documents/edit/${created.id}`);
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to clone template.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to clone template.");
     }
   };
 
@@ -498,16 +486,10 @@ function RenameTemplateModal({
         previousFolderId: template.folderId,
         patch: { title: trimmed }
       });
-      notifications.show({
-        message: `Template renamed to "${trimmed}".`,
-        color: "green"
-      });
+      toast.success(`Template renamed to "${trimmed}".`);
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to rename template.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to rename template.");
     }
   };
   return (
@@ -558,16 +540,10 @@ function DeleteTemplateModal({
         folderId: template.folderId,
         kind: template.kind
       });
-      notifications.show({
-        message: `Template "${template.title}" deleted.`,
-        color: "green"
-      });
+      toast.success(`Template "${template.title}" deleted.`);
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to delete template.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to delete template.");
     }
   };
   return (

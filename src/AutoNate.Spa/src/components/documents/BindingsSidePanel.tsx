@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActionIcon,
@@ -17,7 +18,6 @@ import {
   TextInput,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import type {
   AqlTableBindingConfig,
   AqlTableResolvedValue,
@@ -113,18 +113,18 @@ export default function BindingsSidePanel({
                 try {
                   const res = await refreshAll.mutateAsync({ documentId });
                   const failed = res.failures.length;
-                  notifications.show({
-                    message:
-                      failed === 0
-                        ? `Refreshed ${res.items.length} bindings.`
-                        : `Refreshed ${res.items.length - failed}/${res.items.length}; ${failed} failed.`,
-                    color: failed === 0 ? "green" : "yellow"
-                  });
+                  // Severity is the branch rather than a colour: a partial
+                  // refresh is a warning the user may need to act on, and it
+                  // earns the longer timeout that carries.
+                  if (failed === 0) {
+                    toast.success(`Refreshed ${res.items.length} bindings.`);
+                  } else {
+                    toast.warning(
+                      `Refreshed ${res.items.length - failed}/${res.items.length}; ${failed} failed.`
+                    );
+                  }
                 } catch {
-                  notifications.show({
-                    message: "Refresh all failed.",
-                    color: "red"
-                  });
+                  toast.error("Refresh all failed.");
                 }
               }}
             >
@@ -189,10 +189,7 @@ export default function BindingsSidePanel({
                     { documentId, bindingId: b.id },
                     {
                       onSuccess: () =>
-                        notifications.show({
-                          message: "Binding deleted.",
-                          color: "green"
-                        })
+                        toast.success("Binding deleted.")
                     }
                   )
                 }
@@ -454,10 +451,7 @@ function BindingConfigFields({
       const result = await suggest.mutateAsync(desc);
       onChange({ queryText: result.query });
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Couldn't suggest a query.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Couldn't suggest a query.");
     }
   };
   return (
@@ -575,7 +569,7 @@ function InsertBindingModal({
   const submit = async () => {
     const built = buildConfigJsonb(kind, form);
     if ("error" in built) {
-      notifications.show({ message: built.error, color: "red" });
+      toast.error(built.error);
       return;
     }
     try {
@@ -585,14 +579,11 @@ function InsertBindingModal({
         configJsonb: built.configJsonb,
         label: form.label.trim() || undefined
       });
-      notifications.show({ message: "Binding created.", color: "green" });
+      toast.success("Binding created.");
       setForm(EMPTY_FORM);
       onCreated(created);
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to create binding.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to create binding.");
     }
   };
 
@@ -653,7 +644,7 @@ function EditBindingModal({
     if (!binding) return;
     const built = buildConfigJsonb(binding.kind, form);
     if ("error" in built) {
-      notifications.show({ message: built.error, color: "red" });
+      toast.error(built.error);
       return;
     }
     try {
@@ -664,13 +655,10 @@ function EditBindingModal({
         // Empty string clears the label back to null server-side.
         label: form.label.trim()
       });
-      notifications.show({ message: "Binding updated.", color: "green" });
+      toast.success("Binding updated.");
       onClose();
     } catch (err) {
-      notifications.show({
-        message: extractErrorMessage(err) ?? "Failed to update binding.",
-        color: "red"
-      });
+      toast.error(extractErrorMessage(err) ?? "Failed to update binding.");
     }
   };
 

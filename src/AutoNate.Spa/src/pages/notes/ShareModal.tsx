@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -42,7 +43,6 @@ export function ShareModal({ pageId, pageTitle, onClose }: Props) {
 
   const [selected, setSelected] = useState<string[]>([]);
   const [grantAccess, setGrantAccess] = useState(false);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   // Preview query — fires on every selection change. The endpoint is cheap
   // (one auth eval per id) and the result drives every per-row indicator,
@@ -119,12 +119,9 @@ export function ShareModal({ pageId, pageTitle, onClose }: Props) {
       if (notified > 0) parts.push(`Notified ${notified}`);
       if (granted > 0) parts.push(`granted access to ${granted}`);
       if (skipped > 0) parts.push(`skipped ${skipped} without access`);
-      setFlash({
-        kind: "success",
-        text: parts.length > 0
+      toast.success(parts.length > 0
           ? parts.join(", ") + "."
-          : "No recipients."
-      });
+          : "No recipients.");
       // Clear selection so the modal can be reused, but keep it open so the
       // sharer sees the result line.
       setSelected([]);
@@ -134,7 +131,7 @@ export function ShareModal({ pageId, pageTitle, onClose }: Props) {
         typeof err === "object" && err !== null && "response" in err
           ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
           : null;
-      setFlash({ kind: "error", text: msg ?? "Share failed." });
+      toast.error(msg ?? "Share failed.");
     }
   });
 
@@ -248,16 +245,6 @@ export function ShareModal({ pageId, pageTitle, onClose }: Props) {
             {deniedCount === 1 ? "1 user" : `${deniedCount} users`} can&apos;t view
             this page yet. Only a project owner can grant access — they will
             not receive a share notification.
-          </Alert>
-        )}
-
-        {flash && (
-          <Alert
-            color={flash.kind === "success" ? "green" : "red"}
-            variant="light"
-            role={flash.kind === "success" ? "status" : "alert"}
-          >
-            {flash.text}
           </Alert>
         )}
 

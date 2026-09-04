@@ -3908,6 +3908,229 @@ internal static class DatabaseSchemaInitializer
     // plan). The code itself executes in `services/executor/` under V8 or
     // Pyodide isolates unless `is_unsafe` flips the runtime to host-side
     // CPython (which the `transformer:executeunsafe` permission gates).
+    // Identity providers (#87). One table with a `kind` discriminator rather
+    // than one per protocol: OIDC and SAML share display name, enabled state,
+    // the encrypted secret and the audit columns, and differ in three or four
+    // fields each. The login page needs the union of both, which two tables
+    // would force every read path to reassemble.
+    //
+    // Deliberately NOT reusing `external_connections`, whose own comment
+    // anticipates an "identity provider" kind. That table's secrets are
+    // protected under AutoNate.ExternalConnections.v1, and #87 requires a
+    // dedicated purpose so a rotation forced by one secret class does not
+    // force re-entry of the other's.
+    //
+    // Nothing is seeded here. Project invariant 1: configuring nothing creates
+    // nothing, and an install with no provider behaves exactly as it does today.
+    // Makes the Identity Providers admin screen reachable (#87).
+    //
+    // A separate batch rather than an edit to the original template/menu seeds:
+    // those are recorded in schema_versions and will not re-run, so editing
+    // them would add the row on fresh installs only and leave every existing
+    // one with an unreachable page. Written idempotently so it is safe on both.
+    //
+    // Note the doubled braces in the jsonb literal — inline batches go through
+    // EF's string.Format pass, which collapses them to single. See the
+    // add-schema-change skill.
+    private const string IdentityProvidersMenuSeedSql =
+        """
+        INSERT INTO page_templates (id, key, name, description, is_enabled, created_at_utc, updated_at_utc)
+        SELECT gen_random_uuid(), 'configIdentityProviders', 'Identity Providers (Site Config)',
+               'Federated sign-in: OIDC and SAML providers.', TRUE, NOW(), NOW()
+        WHERE NOT EXISTS (SELECT 1 FROM page_templates WHERE key = 'configIdentityProviders');
+
+        DO $$
+        DECLARE
+            site_menu_id UUID;
+            config_group_id UUID;
+        BEGIN
+            -- Hang it off the same Site Config group External Connections is in,
+            -- found by that template key rather than by display name so a
+            -- renamed menu item does not orphan this.
+            SELECT mi.menu_id, mi.parent_id INTO site_menu_id, config_group_id
+            FROM menu_items mi
+            WHERE mi.config->>'templateKey' = 'configExternalConnections'
+            LIMIT 1;
+
+            IF site_menu_id IS NULL THEN
+                -- No Site Config menu on this install; nothing to attach to.
+                RETURN;
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM menu_items
+                WHERE config->>'templateKey' = 'configIdentityProviders'
+            ) THEN
+                RETURN;
+            END IF;
+
+            INSERT INTO menu_items (
+                id, menu_id, parent_id, sort_order, display_name, icon,
+                item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
+            VALUES (
+                gen_random_uuid(), site_menu_id, config_group_id, 6,
+                'Identity Providers', 'fa fa-id-card', 'template',
+                -- Both keys, matching every other template menu item. The
+                -- migration that normalised the existing ones builds
+                -- jsonb_build_object('templateKey', ..., 'path', ...), and a
+                -- template item carrying only the key is a shape nothing else
+                -- in the table has.
+                '{{"templateKey":"configIdentityProviders","path":"/admin/config/identity-providers"}}'::jsonb,
+                TRUE, TRUE, NOW(), NOW());
+        END $$;
+        """;
+
+    private const string SignInMethodsSchemaSql =
+        """
+        -- #94. Records that a provider has actually worked at least once.
+        --
+        -- A column rather than a query over audit events: the audit stream is
+        -- retained on its own schedule, and a lockout guard that silently
+        -- weakens when old events age out is worse than no guard — it would
+        -- still answer, and eventually answer wrongly.
+        ALTER TABLE identity_providers
+            ADD COLUMN IF NOT EXISTS last_successful_sign_in_at_utc TIMESTAMPTZ NULL;
+        """;
+
+    // #92's provenance columns, deliberately in a step of their own.
+    //
+    // PostgreSQL parses EVERY statement of a multi-statement command before it
+    // executes any of them, so `CREATE INDEX ... (source)` in the same batch as
+    // the `ALTER TABLE ... ADD COLUMN source` fails at parse time with
+    // "column \"source\" does not exist" — on an existing database only. A
+    // fresh one bootstraps from BaseSchema.sql, which already declares the
+    // columns, so the ALTER is a no-op and the index resolves; the whole test
+    // suite is fresh databases, and this failed on the first real dev database
+    // it met.
+    //
+    // Splitting the ALTERs into their own command is what makes the column
+    // exist by the time the next command is parsed.
+    private const string GroupMemberProvenanceColumnsSql =
+        """
+        -- Provenance on the membership itself. Without it reconciliation cannot
+        -- tell what it is allowed to remove, and the first claim to disappear
+        -- would take an administrator's manual grant with it.
+        --
+        -- The default is 'manual', which is not a convenience — it is true.
+        -- Every row in this table before this migration was put there by a
+        -- person, and none of them may be revoked by a claim going missing.
+        ALTER TABLE group_members
+            ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+
+        -- Which provider owns an idp-derived row. Two identity providers
+        -- configured against one Auton8 must not be able to revoke each other's
+        -- grants, and without this column a sign-in through either would
+        -- reconcile away the other's memberships.
+        ALTER TABLE group_members
+            ADD COLUMN IF NOT EXISTS source_provider_id UUID NULL;
+        """;
+
+    // Separate command, so the columns above already exist when this is parsed.
+    private const string GroupMemberProvenanceConstraintsSql =
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'ck_group_members_source'
+            ) THEN
+                ALTER TABLE group_members
+                    ADD CONSTRAINT ck_group_members_source
+                    CHECK (
+                        (source = 'manual' AND source_provider_id IS NULL)
+                        OR (source = 'idp' AND source_provider_id IS NOT NULL)
+                    );
+            END IF;
+        END $$;
+
+        -- Reconciliation asks "which of this user's memberships does this
+        -- provider own?" on every federated sign-in.
+        CREATE INDEX IF NOT EXISTS ix_group_members_source
+            ON group_members (user_id, source, source_provider_id);
+        """;
+
+    private const string IdentityProviderGroupMappingsSchemaSql =
+        """
+        -- #92. An administrator says which IdP claim value corresponds to which
+        -- Auton8 group. Nothing here invents a new authorization concept: groups
+        -- already hold role assignments, so the group→role path stays the single
+        -- place authorization is reasoned about.
+        --
+        -- An unmapped IdP group grants nothing. Mapping is the whole gate: a
+        -- group created in the identity provider has no effect until someone
+        -- here decides it should.
+        CREATE TABLE IF NOT EXISTS identity_provider_group_mappings (
+            id UUID PRIMARY KEY,
+            provider_id UUID NOT NULL REFERENCES identity_providers (id) ON DELETE CASCADE,
+            claim_type TEXT NOT NULL,
+            claim_value TEXT NOT NULL,
+            group_id UUID NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        -- Cascades from both parents on purpose. A mapping that outlived its
+        -- group would point at nothing, and reconciliation would have to decide
+        -- what a dangling grant means — a question better not to have.
+
+        -- The same claim may grant several groups, and several claims may grant
+        -- one group; what must not exist twice is the same edge.
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_idp_group_mappings_edge
+            ON identity_provider_group_mappings (provider_id, claim_type, claim_value, group_id);
+
+        -- Reconciliation loads every mapping for one provider on each sign-in.
+        CREATE INDEX IF NOT EXISTS ix_idp_group_mappings_provider
+            ON identity_provider_group_mappings (provider_id);
+
+        """;
+
+    private const string IdentityProvidersSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS identity_providers (
+            id UUID PRIMARY KEY,
+            kind TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+
+            -- OIDC: the authority (issuer or discovery base) and client id.
+            -- The client secret lives in secret_ciphertext below.
+            oidc_authority TEXT NULL,
+            oidc_client_id TEXT NULL,
+            oidc_scopes TEXT NULL,
+
+            -- SAML: the IdP entity id plus either a metadata URL to fetch or
+            -- pasted metadata, and the signing certificate used to validate
+            -- assertions.
+            saml_entity_id TEXT NULL,
+            saml_metadata_url TEXT NULL,
+            saml_metadata_xml TEXT NULL,
+            saml_signing_certificate TEXT NULL,
+
+            -- Shared secret storage, same shape as external_connections:
+            -- ciphertext is never returned by any read endpoint, and the
+            -- fingerprint is the redacted value safe to show in admin UI and
+            -- audit events.
+            secret_ciphertext BYTEA NULL,
+            secret_fingerprint TEXT NULL,
+
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        -- The slug is what appears in a callback path and identifies the
+        -- provider on the login page, so it has to be unique and stable.
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_identity_providers_slug
+            ON identity_providers (LOWER(slug));
+
+        -- The login page asks "which providers are enabled?" on every render.
+        CREATE INDEX IF NOT EXISTS ix_identity_providers_enabled
+            ON identity_providers (is_enabled);
+        """;
+
     private const string CodeTransformersSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS code_transformers (
@@ -4203,6 +4426,12 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(SavedQueryShareTokensSchemaSql), SavedQueryShareTokensSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(PipelinesSchemaSql), PipelinesSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(CodeTransformersSchemaSql), CodeTransformersSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersSchemaSql), IdentityProvidersSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersMenuSeedSql), IdentityProvidersMenuSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(GroupMemberProvenanceColumnsSql), GroupMemberProvenanceColumnsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(GroupMemberProvenanceConstraintsSql), GroupMemberProvenanceConstraintsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(IdentityProviderGroupMappingsSchemaSql), IdentityProviderGroupMappingsSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(SignInMethodsSchemaSql), SignInMethodsSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);
 
         // Before the SuperAdmin backfill on purpose: on a first boot the

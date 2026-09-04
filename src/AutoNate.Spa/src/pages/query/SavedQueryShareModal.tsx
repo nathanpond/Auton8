@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -17,7 +18,6 @@ import {
   TextInput,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   IssuedShareToken,
   SavedQuery,
@@ -79,13 +79,13 @@ export default function SavedQueryShareModal({ savedQuery, opened, onClose }: Pr
       setExpiresAt("");
       setHasExpiry(false);
       queryClient.invalidateQueries({ queryKey: ["saved-queries", id, "shares"] });
-      notifications.show({ message: "Share link generated.", color: "green" });
+      toast.success("Share link generated.");
     },
     onError: (err: unknown) => {
       const message =
         (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
         (err instanceof Error ? err.message : "Failed to issue share link.");
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 
@@ -93,11 +93,11 @@ export default function SavedQueryShareModal({ savedQuery, opened, onClose }: Pr
     mutationFn: (tokenId: string) => revokeSavedQueryShare(id!, tokenId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["saved-queries", id, "shares"] });
-      notifications.show({ message: "Share link revoked.", color: "green" });
+      toast.success("Share link revoked.");
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Revoke failed.";
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 

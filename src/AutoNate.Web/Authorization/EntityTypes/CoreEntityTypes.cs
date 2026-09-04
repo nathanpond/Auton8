@@ -28,6 +28,7 @@ public static class CoreEntityTypes
             User!, Group!, Role!, RecordType!, Record!,
             WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
             Form!, ExternalConnection!, SystemIssue!, SiteConfig!,
+            IdentityProvider!,
             Project!, Cabinet!, Notebook!, Page!, Document!, Folder!
         });
 
@@ -186,6 +187,17 @@ public static class CoreEntityTypes
         clrType: typeof(object),
         idClrType: typeof(Guid),
         actions: new[] { Actions.View, Actions.Edit, Actions.Delete },
+        tags: Array.Empty<string>());
+
+    // Identity providers. Kind-only enforcement: there is no per-provider
+    // visibility story — an administrator who may configure federation may
+    // configure all of it — but the kind is separate from SiteConfig so the
+    // grant can be withheld independently. See #96 for the argument.
+    public static EntityTypeDefinition IdentityProvider { get; } = new(
+        kind: EntityKinds.IdentityProvider,
+        clrType: typeof(Models.IdentityProviderModel),
+        idClrType: typeof(Guid),
+        actions: new[] { Actions.View, Actions.Create, Actions.Edit, Actions.Delete },
         tags: Array.Empty<string>());
 
     // Content hierarchy kinds. Authorization for these is handled by

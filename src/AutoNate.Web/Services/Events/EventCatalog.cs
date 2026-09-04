@@ -8,6 +8,7 @@ using AutoNate.Web.Services.Dashboards;
 using AutoNate.Web.Services.DataStores;
 using AutoNate.Web.Services.Query;
 using AutoNate.Web.Services.ExternalConnections;
+using AutoNate.Web.Services.Identity;
 using AutoNate.Web.Services.Records;
 using AutoNate.Web.Services.Notifications;
 using AutoNate.Web.Services.SiteSettings;
@@ -145,6 +146,13 @@ public static class EventCatalog
         new("auditContext", "object", "Shared audit context — actor (the user driving the chatbot), IP, user-agent, request id, route template.")
     ];
 
+    private static readonly EventCatalogPayloadField[] IdentityProviderPayloadFields =
+    [
+        new("resourceKind", "string", "Always 'identity-provider' — the bus subject already disambiguates."),
+        new("resource", "object", "Identifies the provider: { id, kind ('oidc' | 'saml'), displayName, slug, secretFingerprint }. The fingerprint is the redacted value (first/last 4 chars + sha256 prefix); the secret itself never appears."),
+        new("details", "object | null", "Event-specific extras: { hasSecret } on created, { secretChanged } on updated, { actorId } on deleted, { success, summary } on configuration_tested. null on enabled and disabled, where the event type carries the whole meaning."),
+    ];
+
     private static readonly EventCatalogPayloadField[] ExternalConnectionPayloadFields =
     [
         new("resourceKind", "string", "Always 'external-connection' — the bus subject already disambiguates."),
@@ -253,6 +261,10 @@ public static class EventCatalog
             ExternalConnectionEventTopic.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
             "AutoNate.Web — published from the External Connections admin surface whenever an integration credential is created, edited, deleted, viewed, tested, or set as default for its kind. Plaintext api keys are never carried — only the secret fingerprint (first/last 4 chars + sha256 prefix)."),
+        new(
+            IdentityProviderEventTopic.TopicName,
+            "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
+            "AutoNate.Web — published from the Identity Providers admin surface whenever a provider is created, edited, enabled, disabled, deleted, or has its configuration tested. Changing who can sign in is the most audit-worthy mutation the product has, so enable and disable are distinct event types rather than an edit with a diff. Provider secrets are never carried — only the fingerprint."),
         new(
             ContentEventTopic.TopicName,
             "Dapr pub/sub (NATS JetStream in the default deployment). Raw JSON payload, no CloudEvents envelope.",
@@ -559,6 +571,29 @@ public static class EventCatalog
                     ]),
                 new EventCatalogEntry(
                     AuthEventTopic.TopicName,
+                    AuthEventTypes.SignInMethodsChanged,
+                    "An administrator changed which sign-in methods are enabled.",
+                    "Fires from PUT /api/admin/sign-in-methods on success only — a refused "
+                    + "configuration changes nothing and emits nothing.",
+                    [
+                        "resource: { actorId }.",
+                        "details: { local, oidc, saml } — the configuration as accepted."
+                    ]),
+                new EventCatalogEntry(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.LocalSignInForcedOn,
+                    "The break-glass override was active at startup, forcing local sign-in on.",
+                    "Fires once per host start while AUTONATE_FORCE_LOCAL_SIGNIN is set. Audited as "
+                    + "well as logged: an operator forcing local sign-in back on after a bad "
+                    + "configuration is exactly the event an incident review goes looking for, and it "
+                    + "belongs in the same place as the sign-ins it made possible rather than only in "
+                    + "a log file that may have rotated.",
+                    [
+                        "resource: { variable } — the environment variable's name.",
+                        "details: { reason: \"break_glass_override_active_at_startup\" }."
+                    ]),
+                new EventCatalogEntry(
+                    AuthEventTopic.TopicName,
                     AuthEventTypes.AccessDenied,
                     "An authorization filter rejected a request before the endpoint handler ran.",
                     "Fires from RequirePermissionFilter and RequireKindPermissionFilter on every Deny path (including the missing-target-id short-circuit). Single chokepoint for endpoint authz denials.",
@@ -638,6 +673,40 @@ public static class EventCatalog
                     "A user was removed from a group.",
                     "Fires from DELETE /api/admin/groups/{id}/members/{userId} on success.",
                     ["resource: { groupId, userId }."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.GroupMappingCreated,
+                    "A claim value was mapped to a group.",
+                    "Fires from POST /api/admin/identity-providers/{id}/group-mappings.",
+                    ["resource: { mappingId, providerId, groupId }.",
+                     "details: { claimType, claimValue } — a mapping is an access-control rule, and an "
+                     + "auditor asking why someone had a group needs the claim believed to grant it."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.GroupMappingUpdated,
+                    "A claim-to-group mapping was changed.",
+                    "Fires from PUT /api/admin/identity-providers/{id}/group-mappings/{mappingId}.",
+                    ["resource: { mappingId, providerId, groupId }.", "details: { claimType, claimValue }."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.GroupMappingDeleted,
+                    "A claim-to-group mapping was removed.",
+                    "Fires from DELETE /api/admin/identity-providers/{id}/group-mappings/{mappingId}. "
+                    + "Deleting a mapping revokes nothing on its own — the memberships it granted go at "
+                    + "the affected users' next sign-in, down the same reconciliation path every other "
+                    + "revocation takes.",
+                    ["resource: { mappingId, providerId, groupId }.", "details: { claimType, claimValue }."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.ClaimGroupGranted,
+                    "A federated sign-in granted a group from an IdP claim.",
+                    "Fires from the OIDC callback and the SAML assertion consumer, once per group added. "
+                    + "A reconciliation that changes nothing emits nothing, or the steady state — someone "
+                    + "signing in with the claims they had yesterday — would be almost every event.",
+                    ["resource: { groupId, userId }.", "details: { source: \"idp\", provider, protocol }."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.ClaimGroupRevoked,
+                    "A federated sign-in revoked a group whose claim had gone.",
+                    "Fires from the OIDC callback and the SAML assertion consumer, once per group removed. "
+                    + "Only ever removes idp-sourced memberships belonging to that provider: an "
+                    + "administrator's manual grant is never revoked by a claim disappearing.",
+                    ["resource: { groupId, userId }.", "details: { source: \"idp\", provider, protocol }."]),
                 new EventCatalogEntry(
                     IamEventTopic.TopicName, IamEventTypes.RoleCreated,
                     "A new role was created.",
@@ -1267,6 +1336,36 @@ public static class EventCatalog
                     "A tool invocation reported an error or threw.",
                     "Fires from AgentSession after the tool's UpdateToolCallAsync commits with a failure status. The loop may continue if the model can recover.",
                     ["resource: { conversationId, toolCallId, toolUseId }. details: { durationMs, error } — error text is the tool's message or exception."])
+            ]),
+        new(
+            "Identity providers",
+            "Federated sign-in configuration (OIDC and SAML) managed from the Identity Providers admin surface. Mutation events fire post-commit. Provider secrets never appear in a payload — only the fingerprint, and only where identifying which secret is in play matters.",
+            IdentityProviderPayloadFields,
+            [
+                new EventCatalogEntry(IdentityProviderEventTopic.TopicName, IdentityProviderEventTypes.Created,
+                    "An identity provider was configured.",
+                    "Fires from EfCoreIdentityProviderStore.CreateAsync after the row commits. Triggered by POST /api/admin/identity-providers.",
+                    ["resource: { id, kind, displayName, slug, secretFingerprint }. details: { hasSecret }."]),
+                new EventCatalogEntry(IdentityProviderEventTopic.TopicName, IdentityProviderEventTypes.Updated,
+                    "A provider's configuration or secret was edited.",
+                    "Fires from EfCoreIdentityProviderStore.UpdateAsync after the row commits. Triggered by PATCH /api/admin/identity-providers/{id}.",
+                    ["resource: { id, kind, displayName, slug, secretFingerprint }. details: { secretChanged } — true when the secret was replaced or cleared."]),
+                new EventCatalogEntry(IdentityProviderEventTopic.TopicName, IdentityProviderEventTypes.Enabled,
+                    "A provider was enabled, so its users can now sign in.",
+                    "Fires from EfCoreIdentityProviderStore.SetEnabledAsync after the row commits. Triggered by POST /api/admin/identity-providers/{id}/enable. Its own event type rather than an update, because it changes who can reach the system and should be greppable without reading payloads.",
+                    ["resource: { id, kind, displayName, slug, secretFingerprint }. details: null."]),
+                new EventCatalogEntry(IdentityProviderEventTopic.TopicName, IdentityProviderEventTypes.Disabled,
+                    "A provider was disabled; its users can no longer sign in through it.",
+                    "Fires from EfCoreIdentityProviderStore.SetEnabledAsync after the row commits. Triggered by POST /api/admin/identity-providers/{id}/disable.",
+                    ["resource: { id, kind, displayName, slug, secretFingerprint }. details: null."]),
+                new EventCatalogEntry(IdentityProviderEventTopic.TopicName, IdentityProviderEventTypes.Deleted,
+                    "A provider was removed.",
+                    "Fires from EfCoreIdentityProviderStore.DeleteAsync after the row commits. Triggered by DELETE /api/admin/identity-providers/{id}.",
+                    ["resource: { id, kind, displayName, slug, secretFingerprint } — captured pre-delete so consumers can identify what was removed. details: { actorId }."]),
+                new EventCatalogEntry(IdentityProviderEventTopic.TopicName, IdentityProviderEventTypes.ConfigurationTested,
+                    "An administrator ran the pre-flight configuration test against a provider.",
+                    "Triggered by POST /api/admin/identity-providers/{id}/test. Reaches the provider's discovery or metadata endpoint and reports what it found, so a typo surfaces at configuration time rather than at a user's first sign-in.",
+                    ["resource: { id, kind, displayName, slug }. details: { success, summary }."]),
             ]),
         new(
             "External connections",

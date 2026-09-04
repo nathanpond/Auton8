@@ -1,9 +1,9 @@
+import { toast } from "@/components/notifications/toast";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   ActionIcon,
-  Alert,
   Anchor,
   Badge,
   Box,
@@ -32,14 +32,13 @@ export default function EdgeTypeList() {
   const restore = useRestoreEdgeType();
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const onRestore = async (t: EdgeType) => {
     try {
       await restore.mutateAsync(t.id);
-      setFlash({ kind: "success", message: `Restored ${t.shortCode}.` });
+      toast.success(`Restored ${t.shortCode}.`);
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -125,17 +124,6 @@ export default function EdgeTypeList() {
         }
       />
 
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="sm"
-        >
-          {flash.message}
-        </Alert>
-      )}
-
       <DataTable<EdgeType>
         mode="client"
         loadAll={() => listEdgeTypes(includeArchived)}
@@ -181,10 +169,10 @@ export default function EdgeTypeList() {
         <CreateModal
           onClose={() => setModalOpen(false)}
           onSuccess={(t) => {
-            setFlash({ kind: "success", message: `Created relationship type ${t.shortCode}.` });
+            toast.success(`Created relationship type ${t.shortCode}.`);
             setModalOpen(false);
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
     </>

@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
@@ -71,7 +72,6 @@ export default function WorkflowExecutions() {
   const { data: executions = [], isLoading, error, refetch } = useExecutions();
   const { data: statusAppearance = [] } = useStatusAppearance();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [pendingAction, setPendingAction] = useState<
     | { kind: "cancel" | "delete"; execution: WorkflowExecutionSummary }
     | { kind: "delete-all" }
@@ -154,27 +154,24 @@ export default function WorkflowExecutions() {
       if (pendingAction.kind === "delete-all") {
         const { deleted } = await deleteAllExecutions.mutateAsync();
         setSelectedId(null);
-        setFlash({
-          kind: "success",
-          message: deleted === 0
+        toast.success(deleted === 0
             ? "There were no executions to delete."
-            : `Deleted ${deleted} execution${deleted === 1 ? "" : "s"} from Auton8 and Flowable.`
-        });
+            : `Deleted ${deleted} execution${deleted === 1 ? "" : "s"} from Auton8 and Flowable.`);
       } else if (pendingAction.kind === "delete") {
         const { execution } = pendingAction;
         await deleteExecution.mutateAsync(execution.id);
         if (selectedId === execution.id) {
           setSelectedId(null);
         }
-        setFlash({ kind: "success", message: `Execution '${execution.id}' was deleted.` });
+        toast.success(`Execution '${execution.id}' was deleted.`);
       } else {
         const { execution } = pendingAction;
         await cancelExecution.mutateAsync(execution.id);
-        setFlash({ kind: "success", message: `Execution '${execution.id}' was cancelled.` });
+        toast.success(`Execution '${execution.id}' was cancelled.`);
       }
       setPendingAction(null);
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
       setPendingAction(null);
     }
   };
@@ -372,16 +369,6 @@ export default function WorkflowExecutions() {
           />
         </SimpleGrid>
 
-        {flash && (
-          <Alert
-            color={flash.kind === "success" ? "green" : "red"}
-            variant="light"
-            role={flash.kind === "success" ? "status" : "alert"}
-          >
-            {flash.message}
-          </Alert>
-        )}
-
         {error && (
           <Alert color="red" variant="light" role="alert">
             {describeError(error)}
@@ -454,8 +441,8 @@ export default function WorkflowExecutions() {
             <ExecutionContent
               processInstanceId={selectedId}
               onClose={() => setSelectedId(null)}
-              onTaskCompleted={(message) => setFlash({ kind: "success", message })}
-              onError={(message) => setFlash({ kind: "error", message })}
+              onTaskCompleted={(message) => toast.success(message)}
+              onError={(message) => toast.error(message)}
             />
           )}
         </Modal>

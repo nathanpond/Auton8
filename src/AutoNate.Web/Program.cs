@@ -185,12 +185,32 @@ builder.Services.AddAntiforgery(options =>
 //     SameSite=Strict has been supported by every evergreen browser since
 //     2017; we do not target legacy browsers.
 //
+//   4. The SAML assertion consumer service (`POST /api/auth/saml/*/acs`) can
+//      use neither. It is a cross-site form POST made by the identity
+//      provider: the auth cookie does not exist yet (this request is what
+//      creates the session), and no antiforgery token can accompany a form
+//      this server never rendered. What substitutes is stronger than either —
+//      the body is an XML document signed by the provider's certificate, and
+//      SamlSignInService refuses it unless the signature validates, the
+//      audience is this SP, the Destination is this endpoint, the assertion is
+//      inside its validity window, and it has not been presented before. A
+//      forged POST fails at the signature; a captured real one fails at the
+//      replay guard. This is the ONLY endpoint with this shape, and it is only
+//      sound while every one of those checks holds — SamlSignInServiceTests
+//      asserts each of them separately for that reason.
+//
 // When adding a NEW state-changing endpoint:
 //   * Authenticated mutation from the SPA → `.DisableAntiforgery()` is fine,
 //     SameSite=Strict carries it. Do NOT also `AllowAnonymous`.
 //   * Anonymous mutation (no auth cookie required) → MUST validate either an
 //     antiforgery token (preferred for browser-originated flows) OR a
 //     server-to-server shared secret via an endpoint filter. Never both off.
+//     Case 4 is not a licence to add a third option: an endpoint qualifies only
+//     if the request body itself is a signed credential that the endpoint
+//     verifies, replay included, before acting on any of it.
+//   * AnonymousMutationInventoryTests counts this set. A new anonymous mutating
+//     endpoint fails it until either the defence or the reason is written down,
+//     so none of the above is honour-system.
 // ---------------------------------------------------------------------------
 builder.Services.AddHttpContextAccessor();
 // IRequestContext is a thin facade over IHttpContextAccessor (singleton) — no
@@ -471,6 +491,44 @@ builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlSuggestionService,
 // IDataProtectionProvider through the standard test factory.
 builder.Services.AddDataProtection();
 builder.Services.AddSingleton<IConnectionSecretProtector, DataProtectionConnectionSecretProtector>();
+// Identity providers (#87). A dedicated protector with its own DataProtection
+// purpose — see DataProtectionIdentityProviderSecretProtector for why sharing
+// the external-connections purpose would be a mistake.
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.IIdentityProviderSecretProtector,
+    AutoNate.Web.Services.Identity.DataProtectionIdentityProviderSecretProtector>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderStore,
+    AutoNate.Web.Services.Identity.EfCoreIdentityProviderStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderGroupMappingStore,
+    AutoNate.Web.Services.Identity.EfCoreIdentityProviderGroupMappingStore>();
+// #92. Runs on every federated sign-in, OIDC and SAML alike — one reconciler
+// fed from both, because two would eventually disagree about who gets what.
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IClaimGroupReconciler,
+    AutoNate.Web.Services.Identity.ClaimGroupReconciler>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderConfigurationTester,
+    AutoNate.Web.Services.Identity.IdentityProviderConfigurationTester>();
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.IOidcConfigurationCache,
+    AutoNate.Web.Services.Identity.OidcConfigurationCache>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IOidcSignInService,
+    AutoNate.Web.Services.Identity.OidcSignInService>();
+// TimeProvider is the .NET clock abstraction; registering the system one lets
+// services that need to reason about time take a dependency they can replace in
+// a test instead of calling DateTime.UtcNow where nothing can reach it.
+builder.Services.AddSingleton(TimeProvider.System);
+// #94. Scoped because it reads site settings, which are per-request state; the
+// break-glass override it applies on top is read once at construction from the
+// environment, where stored configuration cannot reach it.
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.ISignInMethodPolicy,
+    AutoNate.Web.Services.Identity.SignInMethodPolicy>();
+// SAML (#93). The replay guard is a singleton because "have I seen this
+// assertion before" is only a meaningful question across requests — a scoped
+// one would forget between the first presentation and the replay.
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.SamlReplayGuard>();
+builder.Services.AddSingleton<Microsoft.IdentityModel.Tokens.ITokenReplayCache>(
+    sp => sp.GetRequiredService<AutoNate.Web.Services.Identity.SamlReplayGuard>());
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.ISamlMetadataCache,
+    AutoNate.Web.Services.Identity.SamlMetadataCache>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.ISamlSignInService,
+    AutoNate.Web.Services.Identity.SamlSignInService>();
 builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionStore>();
 // Phase 4 replaces this with kind-routed Anthropic/OpenAI testers; until then
 // the stub just confirms the secret decrypts cleanly.
@@ -1077,6 +1135,22 @@ var authPosture = app.Services
 
 // Fail-open-ish authorization flags that are legitimate but should never be
 // left on silently in a real environment (archived-59). Neither is a refusal: DryRun is
+// #94's break-glass override. Logged in every environment, not just outside
+// Development, and at Warning rather than Information: while it is set, the
+// site's own configuration is being overruled, and the operator who set it in
+// an incident is not always the person reading the logs a week later. It is
+// also audited (below), because "somebody forced local sign-in back on" is
+// precisely the event an incident review goes looking for.
+if (AutoNate.Web.Services.Identity.SignInMethodPolicy.IsOverrideSet(app.Configuration))
+{
+    app.Logger.LogWarning(
+        "{Variable} is set: local sign-in is forced ON regardless of the stored sign-in method " +
+        "configuration. This is the break-glass escape hatch — unset it once the intended " +
+        "sign-in methods work, or the site is permanently accepting passwords it was " +
+        "configured to refuse.",
+        AutoNate.Web.Services.Identity.SignInMethodPolicy.OverrideVariable);
+}
+
 // the documented staged-rollout tool, and the SuperAdmin backfill is the only
 // thing that grants a greenfield install its first admin.
 if (!app.Environment.IsDevelopment())
@@ -1264,20 +1338,38 @@ if (app.Environment.IsDevelopment())
 
         if (isAuthenticated)
         {
-            var isManualIdentity =
-                string.Equals(authenticationSource, ManualAuthenticationSource, StringComparison.Ordinal);
             var isTaggedDevelopmentAutoLoginIdentity =
                 string.Equals(authenticationSource, DevelopmentAutoLoginAuthenticationSource, StringComparison.Ordinal) ||
                 isDevelopmentAutoLoginIdentity;
 
-            if (isManualIdentity)
+            // This middleware owns exactly one thing: the session IT created.
+            // Every other authenticated identity — a local password sign-in, an
+            // OIDC one (`oidc:{slug}`), a SAML one (`saml:{slug}`) — belongs to
+            // somebody else and is none of its business.
+            //
+            // It used to pass through only `manual` and clear everything else,
+            // which was indistinguishable from correct while `manual` and
+            // auto-login were the only two sources that existed. #90 and #93
+            // added two more, and the effect was that federated sign-in could
+            // not complete in Development at all: the callback issued a cookie,
+            // the very next GET landed here, and the session was signed out
+            // before the SPA ever saw it. The symptom — bounced back to the
+            // login page with the account created and no error anywhere — says
+            // nothing about the cause.
+            //
+            // Allow-listing the sources to KEEP is the shape of that bug.
+            // Naming the one source to clear is the shape that stays correct
+            // when a fifth arrives.
+            if (!isTaggedDevelopmentAutoLoginIdentity)
             {
                 await next();
                 return;
             }
 
-            var shouldClearDevelopmentAutoLoginCookie =
-                !isTaggedDevelopmentAutoLoginIdentity ||
+            // An auto-login session that no longer matches the configuration —
+            // the option turned off, or the username changed — is stale and is
+            // cleared so the next request can mint a current one.
+            var isStaleAutoLoginCookie =
                 !options.Enabled ||
                 string.IsNullOrWhiteSpace(configuredUsername) ||
                 !string.Equals(
@@ -1285,7 +1377,7 @@ if (app.Environment.IsDevelopment())
                     configuredUsername,
                     StringComparison.OrdinalIgnoreCase);
 
-            if (!shouldClearDevelopmentAutoLoginCookie)
+            if (!isStaleAutoLoginCookie)
             {
                 await next();
                 return;
@@ -1413,11 +1505,28 @@ app.MapPost(
             HttpContext context,
             ILocalUserStore localUserStore,
             IAuditEventPublisher auditPublisher,
+            AutoNate.Web.Services.Identity.ISignInMethodPolicy signInMethods,
             CancellationToken cancellationToken) =>
         {
             username ??= string.Empty;
             password ??= string.Empty;
             returnUrl ??= string.Empty;
+
+            // Enforced here, not only hidden on the login page (#94). A hidden
+            // form is not a disabled method: without this, an administrator who
+            // switched local sign-in off would still have every password in the
+            // database working against a direct POST.
+            if (!(await signInMethods.GetAsync(cancellationToken)).Local)
+            {
+                await auditPublisher.PublishAsync(
+                    AuthEventTopic.TopicName,
+                    AuthEventTypes.LoginFailed,
+                    AuthEventTopic.ResourceKind,
+                    resource: new { username },
+                    details: new { reason = "local_sign_in_disabled" },
+                    cancellationToken);
+                return Results.Redirect(BuildLoginRedirect(returnUrl, "method_disabled", username));
+            }
 
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
@@ -1550,6 +1659,8 @@ app.MapAdminPluginsEndpoints();
 app.MapAdminProjectionsEndpoints();
 app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
+app.MapIdentityProviderEndpoints();
+app.MapFederatedSignInEndpoints();
 app.MapDataStoreEndpoints();
 app.MapDataConnectorEndpoints();
 app.MapDatasetEndpoints();
@@ -1672,6 +1783,35 @@ if (Directory.Exists(app.Environment.WebRootPath))
     // which is exactly how the E2E suite broke (SignInAsync starts at "/").
     // Regression guard: SpaRootFallbackTests. Refs archived-132.
     app.MapFallbackToFile("/", "index.html");
+}
+
+// The break-glass override is audited as well as logged (#94). Fire-and-forget
+// against the publisher rather than blocking startup: an audit bus that is slow
+// or briefly unavailable must not stop a host coming up, least of all the one
+// an operator is bringing up *because* they are locked out.
+if (AutoNate.Web.Services.Identity.SignInMethodPolicy.IsOverrideSet(app.Configuration))
+{
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            using var overrideScope = app.Services.CreateScope();
+            var publisher = overrideScope.ServiceProvider.GetRequiredService<IAuditEventPublisher>();
+            await publisher.PublishAsync(
+                AuthEventTopic.TopicName,
+                AuthEventTypes.LocalSignInForcedOn,
+                AuthEventTopic.ResourceKind,
+                resource: new { variable = AutoNate.Web.Services.Identity.SignInMethodPolicy.OverrideVariable },
+                details: new { reason = "break_glass_override_active_at_startup" },
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(
+                ex, "The break-glass override could not be audited. It is still active, and the " +
+                    "startup warning above records it.");
+        }
+    });
 }
 
 app.Run();

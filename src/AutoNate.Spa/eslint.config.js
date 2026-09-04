@@ -105,6 +105,25 @@ export default [
       "no-extra-boolean-cast": "warn",
       "no-empty": ["warn", { allowEmptyCatch: true }],
 
+      // ── One way to raise a notification (#89) ───────────────────────────
+      // The toast wrapper decides the accessibility behaviour that call sites
+      // kept getting wrong: errors announced assertively and never
+      // auto-dismissed, success announced politely, every toast keyboard
+      // dismissible. A wrapper is only worth having if it cannot be routed
+      // around by habit, so importing Mantine's notifications directly is an
+      // error rather than a convention. The two files that legitimately do it
+      // are exempted below.
+      "no-restricted-imports": ["error", {
+        paths: [{
+          name: "@mantine/notifications",
+          message:
+            "Use `toast` from @/components/notifications/toast instead. It fixes the "
+            + "live-region role and dismissal behaviour in one place — an error raised "
+            + "through notifications.show is announced politely and auto-dismisses, "
+            + "which is how an error message gets missed entirely."
+        }]
+      }],
+
       // ── Suppressions must say why ───────────────────────────────────────
       // A bare `eslint-disable-next-line react-hooks/exhaustive-deps` is
       // indistinguishable from a stale-closure bug someone silenced (#32), and
@@ -113,6 +132,19 @@ export default [
       // cheap to satisfy at the moment you add the directive, and the repo is
       // currently at zero.
       "eslint-comments/require-description": ["error", { ignore: [] }]
+    }
+  },
+
+  // The two files that may import Mantine's notifications directly: the
+  // wrapper that exists to encapsulate it, and main.tsx, which mounts the
+  // <Notifications /> container the wrapper renders into.
+  {
+    files: [
+      "src/components/notifications/toast.ts",
+      "src/main.tsx"
+    ],
+    rules: {
+      "no-restricted-imports": "off"
     }
   },
 

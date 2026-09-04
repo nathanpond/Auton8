@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,7 +20,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   DataTable,
   type DataTableColumn
@@ -107,7 +107,7 @@ export default function DataConnectorsPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Data connector created.", color: "green" });
+      toast.success("Data connector created.");
     },
     onError: (err: unknown) => {
       const message =
@@ -128,7 +128,7 @@ export default function DataConnectorsPage() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setModalOpen(false);
       resetForm();
-      notifications.show({ message: "Data connector updated.", color: "green" });
+      toast.success("Data connector updated.");
     },
     onError: (err: unknown) => {
       const message =
@@ -142,11 +142,11 @@ export default function DataConnectorsPage() {
     mutationFn: deleteDataConnector,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      notifications.show({ message: "Data connector deleted.", color: "green" });
+      toast.success("Data connector deleted.");
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Delete failed.";
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 
@@ -364,6 +364,9 @@ export default function DataConnectorsPage() {
               onChange={(e) => setConfigJson(e.currentTarget.value)}
               styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)", fontSize: 13 } }}
             />
+            {/* In-page, not a toast (#91): this sits inside an open form and the
+            user has to fix the input it describes. A toast would vanish
+            mid-correction — it is a validation summary by another name. */}
             {submitError ? <Alert color="red">{submitError}</Alert> : null}
             <Group justify="flex-end" mt="sm">
               <Button variant="default" onClick={() => setModalOpen(false)}>

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace AutoNate.Web.Services.ExternalConnections;
@@ -54,12 +55,47 @@ public sealed class ProviderBaseUrlPolicy : IProviderBaseUrlPolicy
         ["WebSearchProvider:Tavily"] = ["api.tavily.com"],
     };
 
-    private readonly IOptions<ExternalConnectionUrlOptions> _options;
+    /// <summary>
+    /// Kinds whose host is typed in by an administrator pointing at their own
+    /// infrastructure, rather than a known SaaS endpoint.
+    /// </summary>
+    /// <remarks>
+    /// These are the only kinds eligible for the Development plain-http
+    /// accommodation below. Scoped deliberately: a relaxation that applied to
+    /// every kind would also let a developer point an LLM connection carrying a
+    /// real API key at an http host.
+    /// </remarks>
+    public const string IdentityProviderKindPrefix = "IdentityProvider:";
 
-    public ProviderBaseUrlPolicy(IOptions<ExternalConnectionUrlOptions> options)
+    private readonly IOptions<ExternalConnectionUrlOptions> _options;
+    private readonly IHostEnvironment? _environment;
+
+    public ProviderBaseUrlPolicy(
+        IOptions<ExternalConnectionUrlOptions> options,
+        IHostEnvironment? environment = null)
     {
         _options = options;
+        _environment = environment;
     }
+
+    /// <summary>
+    /// Whether an allowlisted identity-provider host may be reached over plain
+    /// http.
+    /// </summary>
+    /// <remarks>
+    /// True only in Development, and only for identity-provider kinds. The
+    /// decision is made here from <see cref="IHostEnvironment"/> rather than
+    /// passed in by a caller, because a caller could pass true in production —
+    /// #87 requires that this relaxation *cannot* be enabled outside
+    /// Development, not merely that it is not.
+    ///
+    /// Without it the seeded Keycloak in #98 cannot be configured as a provider
+    /// at all: it serves plain http on a loopback address in the local stack.
+    /// </remarks>
+    private bool PlainHttpPermitted(string kind) =>
+        _environment is not null
+        && _environment.IsDevelopment()
+        && kind.StartsWith(IdentityProviderKindPrefix, StringComparison.OrdinalIgnoreCase);
 
     public Uri Resolve(string kind, string? baseUrl, string defaultBaseUrl)
     {
@@ -77,7 +113,8 @@ public sealed class ProviderBaseUrlPolicy : IProviderBaseUrlPolicy
                 $"Connection base URL '{baseUrl}' is not an absolute URI.");
         }
 
-        if (uri.Scheme != Uri.UriSchemeHttps)
+        if (uri.Scheme != Uri.UriSchemeHttps
+            && !(uri.Scheme == Uri.UriSchemeHttp && PlainHttpPermitted(kind)))
         {
             throw new InvalidOperationException(
                 $"Connection base URL must use https so the credential is not sent in the clear; got '{uri.Scheme}'.");

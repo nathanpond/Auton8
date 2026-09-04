@@ -670,3 +670,534 @@ at zero errors. The AC box is deliberately left unchecked on the issue.
 Remaining work is a person spending two minutes with VoiceOver or NVDA on the
 workflow studio's "Render mode"/"Form" selects and the scroll-to-top button.
 Carry it into `/n8-verify` as a manual step.
+
+## /n8-exec M2 — 2026-09-03
+
+- **Decision (#86, spike):** SAML library is **ITfoxtec.Identity.Saml2** (+
+  `.MvcCore`) **4.20.1**, licensed **BSD-3-Clause**. Rejected candidate:
+  Sustainsys.Saml2 2.11.0, MIT.
+  **Why:** Both licences are permissive and both permit redistribution inside an
+  Apache-2.0 product that third parties self-host, so the owner's licence
+  constraint did not decide it — worth recording, because that was the question
+  the spike was created to answer and the answer turned out to be "either".
+  Both also cover the full SP-side surface (SP-initiated login, IdP metadata,
+  signed and encrypted assertions, SP metadata generation, single logout),
+  verified against the shipped assembly's public types rather than the docs.
+
+  What decided it was the criterion the issue predicted would: **multiple
+  database-configured IdPs**. ITfoxtec is endpoint-driven — `Saml2Configuration`
+  is a plain object built per request, so constructing it from a database row is
+  the ordinary usage. Sustainsys is `Saml2Handler` + `PostConfigureSaml2Options`,
+  registered per scheme at startup; it *can* be driven dynamically, but that is
+  precisely the work #95 exists to do for OIDC, and choosing ITfoxtec means not
+  needing a second copy of that mechanism.
+
+  Framework currency was the independent tiebreak: ITfoxtec ships an explicit
+  **net10.0** target and released 2026-06-27; Sustainsys stops at net8.0 and last
+  released 2025-03-02.
+
+  **Gives up:** no `AuthenticationHandler` integration (Auton8 writes its own ACS
+  endpoint — which suits an app that already builds its own `ClaimsIdentity` and
+  owns its cookie sign-in), an unusable `CreateSessionAsync` helper, and a
+  smaller community than Sustainsys.
+
+  **Note on the AC as written:** it asked for the licence "quoted or linked to
+  the licence file in the package". Neither package ships a licence file — both
+  declare an SPDX `licenseExpression` in metadata instead. Recorded rather than
+  glossed, since it means the AC cannot be satisfied literally for either
+  candidate.
+
+- **Note (drift check):** `@mantine/notifications` ^9.5.2 is already a
+  dependency, so #89 uses it rather than adding it. Implementation detail, not an
+  AC change.
+
+- **Decision (#87):** DataProtection purpose is **`AutoNate.IdentityProviders.v1`**,
+  `internal const`, registered on CLAUDE.md's do-not-rename list and in
+  `DoNotRenameGuardTests` (guarded identifiers 9 → 10).
+  **Why:** #96 prescribed a new purpose rather than reusing
+  `AutoNate.ExternalConnections.v1`. The purpose is part of key derivation, so a
+  shared string means a rotation forced by one secret class forces re-entry of
+  the other's. The guard was red-checked: renaming it turns the suite red with a
+  message naming the consequence.
+
+- **Decision (#87):** **One table with a `kind` discriminator**, not one per
+  protocol, and **not** a reuse of `external_connections`.
+  **Why:** OIDC and SAML share display name, enabled state, secret and audit
+  columns and differ in three or four fields each; the login page needs the
+  union, which two tables would force every read path to reassemble.
+  `external_connections`' own comment anticipates an "identity provider" kind —
+  worth recording that it was considered and rejected, because a future reader
+  will find that comment. Its secrets are protected under the
+  external-connections purpose, which is exactly what #87 requires not to share.
+
+- **Decision (#87):** A **new `EntityKind` (`identityprovider`)** rather than
+  reusing `SiteConfig`.
+  **Why:** #96 laid out both. Identity configuration decides who can get into
+  the system at all, so an administrator should be able to delegate the site's
+  theme without also delegating the ability to add a provider that lets anyone
+  in. Reusing SiteConfig would make those the same grant.
+
+- **Decision (#87):** Enable and disable are **their own routes and their own
+  audit event types**, not a boolean in the edit payload.
+  **Why:** Turning a provider on changes who can reach the system. That should
+  be greppable in an audit log without reading payloads, and separately
+  grantable from other edits.
+
+- **Decision (#87, Rule 2):** The Development-only plain-http accommodation is
+  decided **inside `ProviderBaseUrlPolicy` from `IHostEnvironment`**, and scoped
+  to kinds prefixed `IdentityProvider:`.
+  **Why:** #87 requires the relaxation *cannot* be enabled in production, not
+  merely that it is not — so a caller-supplied flag would be the wrong shape,
+  since a caller could pass true in production. Scoping it to identity-provider
+  kinds keeps it from relaxing LLM connections, which carry live API keys.
+
+- **Note (#87):** The secret is write-only **by construction**: `IdentityProviderDto`
+  has no plaintext property, so the regression the story names ("a DTO gaining
+  the field later") cannot happen quietly. The test asserts against raw response
+  text rather than a typed property, so a new field under any name is caught.
+
+- **Note (#87, test infrastructure):** `AutoNateWebApplicationFactory`'s
+  Development auto-login middleware activates **only on GET**, so a POST from a
+  fresh client has no actor and the handler refuses it. Tests must prime the
+  session with one GET first, as the ExternalConnection suite does. This cost a
+  diagnosis cycle. It also makes an "unauthenticated caller is refused" test
+  unwritable through this factory — that property is covered instead by
+  `AuthorizationGatePresenceTests` and `KindGateEnforcementTests`, and the test
+  file says so rather than omitting it silently.
+
+- **Decision (#89):** The shared surface is a **module of functions**
+  (`toast.success/error/warning/info`), not a component or a hook.
+  **Why:** Discretion. Most of the 91 call sites are inside mutation callbacks
+  and `catch` blocks, where a hook cannot be called. A module made the
+  conversion a rename rather than a restructuring of 18 files.
+
+- **Decision (#89):** Severity is expressed as an **ARIA role**, not a colour.
+  `error` → `role="alert"` (implicitly assertive) and **never auto-dismisses**;
+  everything else → `role="status"` (polite) with a timeout.
+  **Why:** The 91 existing calls distinguished severity only by colour, which is
+  precisely what a screen-reader user does not get. Both error defaults
+  deliberately fight Mantine's: an error announced politely can be missed
+  entirely, and one that vanishes before it is read is worse than no error.
+
+- **Decision (#89):** No-bypass is enforced by an **ESLint
+  `no-restricted-imports` error**, not a test.
+  **Why:** It fails in the editor the moment someone types the import, rather
+  than in CI after the habit is already written. `main.tsx` and the wrapper
+  itself are exempted — the first mounts the `<Notifications />` container, the
+  second is what encapsulates it. Red-checked: reintroducing a direct import
+  produces an error whose message explains the consequence rather than just
+  saying "restricted".
+
+- **Deviation (#89):** #89's test plan asks for **component tests**. The SPA has
+  **no unit test runner** — no vitest, no jest, no testing-library — and adding
+  one is new infrastructure rather than part of this story (Rule 4). The same
+  properties are asserted in the existing Playwright suite instead
+  (`ToastAccessibilityTests`): assertive role and non-dismissal for errors,
+  polite role for success, keyboard dismissal driven with Enter rather than a
+  click, and that focus is not stolen.
+
+  Arguably the stronger of the two — a jsdom component test can only confirm the
+  props that were passed, where Playwright asserts the role the browser actually
+  computed. But it is a deviation, and whether the SPA should gain a unit test
+  runner is a project-shaping decision that deserves its own conversation rather
+  than being settled inside a notifications story.
+
+- **Note (#89, method):** The first conversion pass used regex and corrupted
+  several files two ways — a message value captured through to the next key on
+  single-line calls, and an import inserted *inside* a multi-line import block.
+  Reverted with `git checkout` and redone with a scanner that respects balanced
+  delimiters and string literals, and that **refuses** what it cannot read
+  confidently. It refused exactly the two dynamic-colour calls
+  (`color: cond ? "green" : "yellow"`), which were then converted by hand into
+  an if/else on severity — which is the better shape anyway, since a partial
+  refresh really is a warning rather than a differently-coloured success.
+
+- **Note (#89, CI):** The first version of `ToastAccessibilityTests` raised
+  toasts by dynamically importing
+  `/src/components/notifications/toast.ts`. That resolves under the Vite dev
+  server and **not** against the built bundle the E2E suite runs on — CI failed
+  with "Failed to fetch dynamically imported module".
+
+  It was also the wrong test. #89's plan says "a real action produces a toast",
+  and driving the UI proves the wrapper is wired into a page rather than merely
+  importable. Rewritten to drive the Identity Providers screen: creating a
+  provider raises a success toast, and a second with the same slug raises an
+  error toast because the backend refuses it with a reason.
+
+  That in turn meant the identity page had to follow the rule this milestone
+  just wrote down — it was rendering save failures in an in-page `Alert`, and a
+  failed save is transient feedback on an action the user just took. It now
+  toasts, and the dead error `Alert` and its state are gone.
+
+- **Note (#87, Rule 1):** The seeded template menu item carried only
+  `templateKey`, where every other template item in the table carries
+  `templateKey` **and** `path` — the migration that normalised the existing ones
+  builds both. Corrected. Worth recording how it was found: the E2E console
+  guard caught a browser error on the new route, and reproducing against the dev
+  stack showed the page rendering cleanly — because the dev backend predates
+  this batch and has neither the `page_templates` row nor the menu item, so it
+  was rendering a fallback. The non-reproduction was the clue: the only
+  difference between dev and CI on that route is the seeded row.
+
+- **Note (#136, method):** The Identity Providers page shipped with a real
+  runtime bug — eleven `onChange` handlers read `e.currentTarget.value` *inside*
+  a `setForm` updater, which React runs after nulling the synthetic event. The
+  E2E console guard caught it; the guard earned its keep.
+
+  What is worth remembering is how it was found. Two reproduction attempts
+  produced confident **non**-reproductions: the dev backend predates the feature's
+  schema batch, so the route rendered a fallback rather than the page; and the
+  dev server on :5173 turned out to be serving a different application entirely.
+  Both looked like evidence that the page was fine.
+
+  The answer was in a file the build already emits. `vite.config.ts` sets
+  `sourcemap: true`, and the locally built chunk hashed identically to CI's
+  (`index-C7HdVlmM.js`), so resolving generated `957:15479` gave
+  `IdentityProvidersPage.tsx:427` exactly — the Client ID handler.
+
+  **Rule for next time:** when a browser stack has coordinates and the build is
+  reproducible, resolve the frame through the sourcemap before standing up an
+  environment. It is one step, it needs nothing running, and it does not lie the
+  way a wrong environment does.
+
+- **Decision (#88):** Implemented only the two things actually missing, rather
+  than the story as written.
+  **Why:** The story assumed the login page could not be branded. On `master` it
+  already could — `loginTagline` and `loginCoverImageUrl` are declared fields
+  with a live preview, `Login.tsx` renders `<SiteBrand>` and the tagline from
+  `useSiteAppearance()`, and `/api/appearance` is already `AllowAnonymous` and
+  returns appearance only. What was missing: a cover image that 404s degraded to
+  a blank box (CSS `background-image` has no error event, so it is preloaded
+  now), and nothing stopped the four field declarations drifting. Recorded on
+  the issue rather than quietly narrowing scope.
+
+  Also **no migration**, deliberately: the AC asks for one "for the new
+  appearance fields" and there are none. Login colours already flow from the
+  existing surface tokens; adding fields nobody asked for to justify a migration
+  would be the wrong reading.
+
+- **Mistake (#88):** I committed and pushed with `npm run lint` reporting
+  "106 problems (2 errors, 104 warnings)" in output I had just read. The errors
+  were real — the new cover hooks sat below the `me?.authenticated` early
+  return, so a signed-in visitor rendered a different number of hooks than a
+  signed-out one. `rules-of-hooks` is an error in this repo precisely because
+  that is a crash waiting for the render where the answer changes. Fixed in the
+  follow-up commit.
+  **Rule for next time:** a non-zero error count in lint output is a stop, not a
+  line to skim past on the way to `git commit`.
+
+- **Decision (#91):** 137 `<Alert>` occurrences classified; **13 converted, 124
+  stay**.
+  **Why:** The only notification pattern was `flash` — local state shaped
+  `{kind, message}` set after an action, which is a toast by #89's rule and
+  which even duplicated the wrapper's `role` split inline. Everything else is
+  in-page: 60 contextual guidance, 26 empty states, 20 load failures, 9 form
+  submit errors, 5 validation summaries, 4 persistent conditions.
+
+  The nine form submit errors are the call worth recording. They look like
+  notifications — they fire on a failed action — but they sit inside an open
+  modal beside the input the user must fix, so a toast would vanish
+  mid-correction. They are validation summaries by another name, and converting
+  them is the specific error #91 says not to make.
+
+- **Deviation (#91):** The AC asks that every retained `<Alert>` carry a comment
+  saying why. I annotated five — the form-submit ones, the only category that
+  reads as a notification and the only ones likely to be "finished" by mistake.
+  Annotating all 124 would be noise that makes those five harder to find. The
+  category table on the issue is the reviewable record the AC's first bullet
+  asks for.
+
+- **Decision (#90 / #95):** Implemented the OIDC authorization-code flow
+  directly (option B), **but delegated all cryptography to
+  `Microsoft.IdentityModel.Protocols.OpenIdConnect` 8.22.0**.
+  **Why:** #95 named the deciding constraint — providers live in the database
+  and are edited at runtime, so a scheme registry must be kept in sync across
+  instances, a provider edited on one is unknown to another until its cache
+  expires, and `RemoveScheme` mid-request has sharp edges. But #95's warning
+  about option B is equally right, so the split is: this code owns the flow
+  (challenge, callback, per-request provider lookup), and the library owns
+  discovery, JWKS rollover and signature/issuer/audience/lifetime validation.
+  Hand-rolling a redirect is fine; hand-rolling JWT signature validation is how
+  a hole ships. Also matches the endpoint-driven shape #86 chose for SAML, so
+  both federated paths look alike.
+
+- **Decision (#90):** Single logout **deferred**, stated rather than left
+  ambiguous (the AC permits either). Sign-out clears the Auton8 session only.
+  RP-initiated logout needs `end_session_endpoint` handling and a post-logout
+  redirect allowlist — its own slice, and an open redirect there would be a
+  phishing gift.
+
+- **Decision (#90):** A federated account stores an **empty** password hash and
+  salt, not a random one.
+  **Why:** There is no plaintext that produces an empty hash, so the local
+  password path cannot authenticate the account even by accident. A random hash
+  would be indistinguishable from a real one to anything reading the column.
+
+- **Bug found by the tests (#90, Rule 1):** The OIDC configuration cache was a
+  `static` dictionary keyed on the metadata URL, living inside the sign-in
+  service. Symptom: every test passed alone and half failed together, because
+  one test's signing keys were served to the next. Extracted to an injected
+  singleton `IOidcConfigurationCache`.
+
+  Worth recording beyond the test fix: as a static it was process-wide mutable
+  state keyed only on a URL, so two *providers* sharing an authority would have
+  crossed in production too. The test suite found a real design flaw, not a test
+  artefact.
+
+- **Note (#90, test method):** The expired-token test initially failed as a
+  code-exchange error. The stub built tokens with `notBefore` relative to now
+  while `expires` was in the past, and a token whose notBefore follows its expiry
+  is rejected by the constructor — so the failure happened before validation.
+  The stub was wrong, not the service. A rejection test that fails for the wrong
+  reason is worse than no test, because it reads as proof of a check it never
+  reached.
+
+- **Discretion call (#93):** The replay store is an in-process, self-pruning
+  dictionary keyed on the assertion (`SamlReplayGuard`), plugged into ITfoxtec as
+  an `ITokenReplayCache` so detection runs inside the library's own validation
+  rather than in a parallel check that could disagree with it about which
+  assertions were accepted.
+  **Why:** The AC asks only that the store be bounded and outlive the assertion's
+  validity window. Every entry names the moment it stops mattering and each write
+  prunes what has passed, so it holds about one validity window of sign-ins with
+  no cleanup job. It is deliberately *not* the application `IMemoryCache`: a
+  shared cache is a shared eviction budget, and eviction here is not a cache miss
+  but a consumed assertion becoming acceptable again.
+  **Known limit, stated rather than discovered:** it is per-instance. Two Auton8
+  instances behind a load balancer would each accept the same assertion once.
+  Closing that needs a shared store — Redis is already in the stack — and is a
+  deployment decision rather than part of this story.
+
+- **Discretion call (#93):** Single logout **deferred**, matching #90's answer
+  for OIDC so the two federation paths behave alike.
+
+- **Discretion call (#93):** Encrypted assertions **deferred**. The story offers
+  them "unless it drags in key management this story should not own" — and it
+  does: decrypting requires an SP key pair, which #87 does not store and has no
+  UI to manage or rotate. The published SP metadata therefore advertises no
+  encryption certificate at all, rather than a placeholder an IdP might encrypt
+  to.
+
+- **Decision (#93):** `POST /api/auth/saml/{slug}/acs` is the first endpoint that
+  is anonymous *and* exempt from antiforgery. It is added to the CSRF threat
+  model in Program.cs as a documented case 4, not slipped past the existing rule.
+  **Why:** The identity provider posts the assertion cross-site, so no auth
+  cookie exists yet and no antiforgery token can accompany a form this server
+  never rendered. What substitutes is stronger than either: the body is an XML
+  document signed by the provider's certificate, refused unless the signature
+  validates and the audience, destination, validity window and one-time use all
+  hold. A forged POST fails at the signature; a captured real one fails at the
+  replay guard.
+  **Made countable rather than honour-system:** `AnonymousMutationInventoryTests`
+  pins the complete set of anonymous mutating endpoints with the reason each is
+  safe, so a future endpoint cannot join the set quietly, and asserts that the
+  "a signed body stands in for the token" argument justifies exactly one route.
+
+- **Decision (#93):** Clock-skew tolerance is an explicit three minutes, and the
+  number appears in the rejection message.
+  **Why:** ITfoxtec builds its `TokenValidationParameters` internally and exposes
+  no way to set `ClockSkew`, so the library runs at Microsoft's five-minute
+  default. Auton8's own check is narrower, which makes three minutes the
+  tolerance that actually applies whichever check fires first — and the number an
+  administrator reads is the number that applied. The relationship is pinned by a
+  test rather than described in a comment, because widening Auton8's window past
+  five minutes would silently invert it.
+
+- **Scope note (#93):** The AC "claim mapping from #92 applies to SAML attributes
+  as it does to OIDC claims" cannot be satisfied here, because #92 has not been
+  built. `SamlSignInResult` carries the assertion's attributes for exactly that
+  purpose, and #92 must feed both sources into one reconciler rather than growing
+  a second mapping surface. Left unticked on #93 and called out on #92.
+
+- **Missing functionality found during #93 (Rule 2):** the login page built every
+  provider button as `/api/auth/oidc/{slug}/challenge` regardless of kind, so a
+  SAML provider's button would have gone to the OIDC challenge and failed with a
+  symptom ("the button does nothing") that says nothing about the cause. The
+  challenge path is now chosen by `kind`.
+
+- **Missing functionality found during #93 (Rule 2):** the sign-in flow read
+  pasted metadata XML but never fetched a configured metadata *URL*, so half of
+  the AC's "a URL or pasted XML" only worked as decoration — the URL was
+  reachable by the configuration tester and by nothing else. Added
+  `SamlMetadataCache`, which fetches through the same `IProviderBaseUrlPolicy`
+  allowlist the tester uses (an administrator-supplied URL fetched server-side is
+  SSRF surface) and caches a successful parse for an hour, so an IdP's web server
+  is not in the sign-in request path. Failures are not cached: that would turn a
+  momentary outage into an hour of refused sign-ins.
+
+- **Discretion call (#92):** Provenance is two columns on `group_members` —
+  `source` (`manual` | `idp`) and `source_provider_id` — rather than a side
+  table or a synthetic group per provider.
+  **Why:** The smallest change that satisfies the stated constraint, which is
+  only that reconciliation can tell what it may remove. A synthetic group per
+  provider would double the group list an administrator reads; a side table
+  would let the two disagree about who is a member. The existing rows default
+  to `manual`, which is not a convenience but a fact — everything in that table
+  before this story was put there by a person, and none of it may be revoked by
+  a claim going missing. `source_provider_id` exists so two providers configured
+  against one Auton8 cannot revoke each other's grants; without it, signing in
+  through either would reconcile away the other's memberships and it would look
+  like a random loss of access.
+
+- **Discretion call (#92):** Exact claim-value matching, **no patterns.** The
+  story already calls a pattern a footgun on an authorization path and that is
+  right: a wildcard is one typo away from granting every group in the install.
+  Matching is `StringComparison.Ordinal` rather than culture-aware, so an
+  install does not decide who gets in differently depending on the server's
+  culture.
+
+- **Discretion call (#92):** The preview takes pasted claims JSON rather than a
+  claim-value picker. A picker can only offer values Auton8 has already seen,
+  which is exactly backwards — the mapping most in need of checking is the one
+  for a group nobody has signed in with yet. It accepts both shapes a provider
+  might produce (a bare string, or a list), so a real token payload can be
+  pasted without reshaping.
+
+- **Decision (#92):** The preview and the sign-in path share one pure
+  `ClaimGroupReconciler.ComputeDesiredGroups`.
+  **Why:** The test plan asks that the preview "cannot drift into being
+  decorative". A second copy of the rule can drift; there is no second copy. A
+  preview an administrator trusts and that can be wrong is worse than no preview
+  at all.
+
+- **Behaviour change (#92, Rule 2):** `IGroupStore.AddMemberAsync` now
+  **upgrades** an idp-derived membership to `manual` and reports success, where
+  it previously reported "already a member" and changed nothing.
+  **Why:** Otherwise an administrator sees the membership, tries to make it
+  permanent, is told it already exists, and watches it disappear at the user's
+  next sign-in — because the row was never theirs and reconciliation was always
+  free to remove it. Re-adding a genuinely manual member still reports no
+  change, so the 409 path that callers rely on is unaffected.
+
+- **Decision (#92):** Reconciliation failure does not fail the sign-in. The user
+  authenticated correctly; refusing them entry because a membership row could
+  not be written would turn a database hiccup into an outage, and the
+  reconciliation is idempotent, so their next sign-in fixes it.
+
+- **Decision (#92):** An archived group is never granted afresh, though an
+  existing membership of one is left alone. Archiving is a decision to stop
+  using a group, and handing out fresh membership on every sign-in would quietly
+  undo it; unwinding the memberships that predate the archive is an
+  administrator's call, not reconciliation's.
+
+- **Trap worth recording (#92):** a column added to a table that lives in
+  `BaseSchema.sql` has to be added **twice** — once in the base schema, so a
+  fresh database has it, and once as `ADD COLUMN IF NOT EXISTS` in a migration
+  step, so an existing one gets it. The migration alone is not enough:
+  `PostgresTestDatabase` bootstraps from the base schema only, so five
+  group-membership tests failed with `column g.source does not exist` while
+  every test going through `AutoNateWebApplicationFactory` passed. The
+  duplication is not redundancy — it is what keeps a fresh install and a
+  migrated one the same table, and each copy carries a comment pointing at the
+  other.
+
+- **Discretion call (#94):** the break-glass variable is `AUTONATE_FORCE_LOCAL_SIGNIN`,
+  following `AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR`. Read from the environment
+  rather than through configuration binding, deliberately: it must not be
+  settable by anything living in the database it exists to overrule. Parsing is
+  asymmetric — anything that is not `0`/`false`/`no`/`off` counts as on, because
+  an operator setting it during an incident has typed something meaning "yes",
+  and a strict parse that rejected their spelling would leave them locked out
+  believing they had fixed it. The failure mode of reading it too eagerly is a
+  login form that should have been hidden; of reading it too strictly, an
+  install nobody can enter.
+
+- **Discretion call (#94):** "has completed a successful sign-in" is a
+  `last_successful_sign_in_at_utc` column on `identity_providers`, written by
+  the OIDC callback and the SAML ACS before the session is issued.
+  **Why a column and not a query over audit events:** the audit stream is
+  retained on its own schedule, so a guard derived from it would silently weaken
+  as old events aged out — it would still answer, and eventually answer wrongly.
+
+- **Discretion call (#94):** disabling a sign-in method **does not** end existing
+  sessions. Revoking a method changes how people get in, not who is already
+  working; yanking sessions mid-edit would lose work, and an administrator who
+  wants that has session revocation for it. Stated on the admin screen rather
+  than left to be discovered.
+
+- **Design decision (#94), beyond what the story specified:** reachability is
+  re-checked at *read* time, not only validated at write time. `GetAsync`
+  returns local sign-in as available whenever no enabled federated provider of
+  an enabled protocol has ever completed a sign-in — regardless of what is
+  stored.
+  **Why:** the write-time guard can only see the moment somebody pressed save.
+  Stored state arrives by routes it never sees — a settings restore without the
+  matching providers, a provider switched off or deleted afterwards, a direct
+  database edit — and each of those turns a configuration that was valid into an
+  install nobody can enter. Re-checking makes "there is always a way in" true by
+  construction. It also resolves the bootstrap criterion cleanly: a fresh
+  database whose settings say local is off would otherwise create a first
+  administrator who cannot sign in, which is the guard producing exactly the
+  lockout it exists to prevent.
+  The stored configuration is **not** rewritten when this fires, so an operator
+  who fixes their provider finds their SSO-only intent intact rather than
+  silently reverted.
+
+- **Decision (#94):** the toggles live on the Identity Providers screen, not on
+  the generic site-settings Features page. That page renders any
+  registry-declared boolean as a plain toggle with no cross-field validation, so
+  switching local sign-in off there would be one click from a lockout with no
+  explanation. They also depend on the providers listed beside them.
+
+- **Discretion call (#98):** the issuer is `http://keycloak:8082`, resolved by the
+  compose network for containers and by one `/etc/hosts` line for the host, with
+  the port read from a single variable so host and container ports cannot drift.
+  **Why one URL rather than the obvious `localhost`:** OIDC discovery pins an
+  issuer, and it must match both the URL the browser is redirected to and the one
+  Auton8 validates against — three network positions, since a containerised app
+  under the `app` profile reaches Keycloak over the compose network. `localhost`
+  is correct for the browser and a host-run app and wrong for the third.
+  **This kept the port on loopback, so invariant 5 needed no exception.** The
+  story anticipated one might be required; not taking it is the better outcome,
+  and the exception mechanism is not left unproven by that choice —
+  `ComposeLoopbackBindingTests` exercises it through fixtures, including the
+  empty-reason rejection.
+
+- **Discretion call (#98):** realm import at startup with **no data volume**, so
+  every start re-imports from the checked-in file and the realm cannot drift from
+  its export. Verified by destroying and recreating the container and comparing a
+  fingerprint of clients, users, groups and mappers — identical.
+
+- **Decision (#98):** the OIDC client is **public with PKCE (S256) required**, so
+  the realm ships with no client secret at all. Fixture user passwords are
+  committed deliberately: they exist only inside a loopback-bound container
+  rebuilt from the file on every start, and a developer has to type them into a
+  login form. The **admin** password is the one that is not committed — it grants
+  control of the identity provider, compose interpolates it to empty, and
+  `make keycloak-up` refuses with instructions.
+
+- **Bug found by #98's demo (Rule 1), fixed in `ac27476`:** the Development
+  auto-login middleware destroyed every federated session. It allow-listed the
+  sessions to keep — `manual` and its own — and signed out everything else, which
+  was indistinguishable from correct while those were the only two authentication
+  sources. #90 and #93 added `oidc:{slug}` and `saml:{slug}`, so federated
+  sign-in has never worked in Development: account created, cookie issued,
+  nothing logged, user bounced back to the login page.
+  **Why no test caught it:** the federated suites assert that `CompleteAsync`
+  succeeded and that `SignInAsync` was called. Neither is the claim that matters —
+  *does the resulting cookie authenticate a subsequent request?* Nothing carried a
+  cookie from a callback into a second request.
+  **And the regression test nearly failed to catch it too.** Asserting
+  `authenticated: true` passes against the bug, because auto-login immediately
+  signs the request back in as `admin` — same status, same field, different user.
+  It now asserts `authSource`, `idpKey`, and that the user is *not* admin,
+  confirmed failing against the reverted fix. A regression test nobody has seen
+  fail is a test nobody should trust.
+
+- **Note (#98):** `BuildSpa` defaults on only for Release, so a Debug
+  `dotnet run` serves whatever is already in `src/AutoNate.Web/wwwroot`. A stale
+  bundle there looks like a product bug — in this case the provider button simply
+  did not render. Rebuilding needs `-p:BuildSpa=true`, and if the SPA's hashed
+  filenames have changed, the stale static-web-asset manifests under `obj/` must
+  be cleared first or the build fails with "No file exists for the asset".
+
+- **Security finding, not fixed (#98):** `IProviderBaseUrlPolicy` is described as
+  the SSRF control on administrator-supplied identity-provider URLs, but only
+  #87's pre-flight tester consults it. OIDC discovery and JWKS fetching
+  (`OidcSignInService`, `OidcConfigurationCache`) do not — so the control does not
+  hold where the server actually makes requests, and a correctly-configured
+  provider can fail its pre-flight test while working. `SamlMetadataCache` (#93)
+  *is* gated, which makes the inconsistency internal as well. Not fixed here:
+  routing discovery through the allowlist changes what existing installs can
+  reach, and any provider whose host is unlisted would stop working on upgrade.
+  That needs a migration story, so it is filed rather than folded in.

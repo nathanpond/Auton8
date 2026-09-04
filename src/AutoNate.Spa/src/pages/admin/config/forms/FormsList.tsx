@@ -1,9 +1,9 @@
+import { toast } from "@/components/notifications/toast";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   ActionIcon,
-  Alert,
   Anchor,
   Badge,
   Box,
@@ -25,18 +25,15 @@ const COLUMN_WIDTHS = ["14%", "30%", "16%", "13%", "17%", "10%"];
 
 export default function FormsList() {
   const [modalOpen, setModalOpen] = useState(false);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(
-    null
-  );
   const deleteForm = useDeleteForm();
 
   const onDelete = async (form: FormSummary) => {
     if (!window.confirm(`Delete form "${form.name}" (${form.shortCode})?`)) return;
     try {
       await deleteForm.mutateAsync(form.id);
-      setFlash({ kind: "success", message: `Deleted ${form.shortCode}.` });
+      toast.success(`Deleted ${form.shortCode}.`);
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -138,17 +135,6 @@ export default function FormsList() {
         }
       />
 
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="sm"
-        >
-          {flash.message}
-        </Alert>
-      )}
-
       <DataTable<FormSummary>
         mode="client"
         loadAll={() => listForms()}
@@ -181,7 +167,7 @@ export default function FormsList() {
       {modalOpen && (
         <CreateModal
           onClose={() => setModalOpen(false)}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
     </>

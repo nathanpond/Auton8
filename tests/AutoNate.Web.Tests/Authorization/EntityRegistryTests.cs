@@ -12,7 +12,7 @@ public sealed class EntityRegistryTests
         var registry = new EntityRegistry(CoreEntityTypes.All);
         var kinds = registry.All.Select(t => t.Kind).ToHashSet();
 
-        Assert.Equal(19, kinds.Count);
+        Assert.Equal(20, kinds.Count);
         Assert.Contains(EntityKinds.User, kinds);
         Assert.Contains(EntityKinds.Group, kinds);
         Assert.Contains(EntityKinds.Role, kinds);
@@ -26,6 +26,10 @@ public sealed class EntityRegistryTests
         Assert.Contains(EntityKinds.ExternalConnection, kinds);
         Assert.Contains(EntityKinds.SystemIssue, kinds);
         Assert.Contains(EntityKinds.SiteConfig, kinds);
+        // IdentityProvider joined with #87. Deliberately its own kind rather
+        // than folded into SiteConfig: it decides who can get into the system
+        // at all, so it should be delegable — or withheld — on its own.
+        Assert.Contains(EntityKinds.IdentityProvider, kinds);
         Assert.Contains(EntityKinds.Project, kinds);
         Assert.Contains(EntityKinds.Cabinet, kinds);
         // Document and Folder joined the registry with archived-25 — they were enforced

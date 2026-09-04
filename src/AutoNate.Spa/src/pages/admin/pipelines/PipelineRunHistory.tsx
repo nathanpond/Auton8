@@ -1,3 +1,4 @@
+import { toast } from "@/components/notifications/toast";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
@@ -14,7 +15,6 @@ import {
   Title,
   Tooltip
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   DataTable,
   type DataTableColumn
@@ -81,13 +81,13 @@ export default function PipelineRunHistory() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", id] });
       queryClient.invalidateQueries({ queryKey: ["pipeline-run-detail", id] });
-      notifications.show({ message: "Run cancellation requested.", color: "yellow" });
+      toast.warning("Run cancellation requested.");
     },
     onError: (err: unknown) => {
       const message =
         (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
         (err instanceof Error ? err.message : "Cancel failed.");
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 
@@ -95,13 +95,13 @@ export default function PipelineRunHistory() {
     mutationFn: (runId: string) => retryPipelineRun(id!, runId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs", id] });
-      notifications.show({ message: "Pipeline run re-queued.", color: "green" });
+      toast.success("Pipeline run re-queued.");
     },
     onError: (err: unknown) => {
       const message =
         (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason ??
         (err instanceof Error ? err.message : "Retry failed.");
-      notifications.show({ message, color: "red" });
+      toast.error(message);
     }
   });
 
