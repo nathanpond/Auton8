@@ -838,3 +838,24 @@ Carry it into `/n8-verify` as a manual step.
   this batch and has neither the `page_templates` row nor the menu item, so it
   was rendering a fallback. The non-reproduction was the clue: the only
   difference between dev and CI on that route is the seeded row.
+
+- **Note (#136, method):** The Identity Providers page shipped with a real
+  runtime bug — eleven `onChange` handlers read `e.currentTarget.value` *inside*
+  a `setForm` updater, which React runs after nulling the synthetic event. The
+  E2E console guard caught it; the guard earned its keep.
+
+  What is worth remembering is how it was found. Two reproduction attempts
+  produced confident **non**-reproductions: the dev backend predates the feature's
+  schema batch, so the route rendered a fallback rather than the page; and the
+  dev server on :5173 turned out to be serving a different application entirely.
+  Both looked like evidence that the page was fine.
+
+  The answer was in a file the build already emits. `vite.config.ts` sets
+  `sourcemap: true`, and the locally built chunk hashed identically to CI's
+  (`index-C7HdVlmM.js`), so resolving generated `957:15479` gave
+  `IdentityProvidersPage.tsx:427` exactly — the Client ID handler.
+
+  **Rule for next time:** when a browser stack has coordinates and the build is
+  reproducible, resolve the frame through the sourcemap before standing up an
+  environment. It is one step, it needs nothing running, and it does not lie the
+  way a wrong environment does.
