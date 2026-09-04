@@ -859,3 +859,50 @@ Carry it into `/n8-verify` as a manual step.
   reproducible, resolve the frame through the sourcemap before standing up an
   environment. It is one step, it needs nothing running, and it does not lie the
   way a wrong environment does.
+
+- **Decision (#88):** Implemented only the two things actually missing, rather
+  than the story as written.
+  **Why:** The story assumed the login page could not be branded. On `master` it
+  already could — `loginTagline` and `loginCoverImageUrl` are declared fields
+  with a live preview, `Login.tsx` renders `<SiteBrand>` and the tagline from
+  `useSiteAppearance()`, and `/api/appearance` is already `AllowAnonymous` and
+  returns appearance only. What was missing: a cover image that 404s degraded to
+  a blank box (CSS `background-image` has no error event, so it is preloaded
+  now), and nothing stopped the four field declarations drifting. Recorded on
+  the issue rather than quietly narrowing scope.
+
+  Also **no migration**, deliberately: the AC asks for one "for the new
+  appearance fields" and there are none. Login colours already flow from the
+  existing surface tokens; adding fields nobody asked for to justify a migration
+  would be the wrong reading.
+
+- **Mistake (#88):** I committed and pushed with `npm run lint` reporting
+  "106 problems (2 errors, 104 warnings)" in output I had just read. The errors
+  were real — the new cover hooks sat below the `me?.authenticated` early
+  return, so a signed-in visitor rendered a different number of hooks than a
+  signed-out one. `rules-of-hooks` is an error in this repo precisely because
+  that is a crash waiting for the render where the answer changes. Fixed in the
+  follow-up commit.
+  **Rule for next time:** a non-zero error count in lint output is a stop, not a
+  line to skim past on the way to `git commit`.
+
+- **Decision (#91):** 137 `<Alert>` occurrences classified; **13 converted, 124
+  stay**.
+  **Why:** The only notification pattern was `flash` — local state shaped
+  `{kind, message}` set after an action, which is a toast by #89's rule and
+  which even duplicated the wrapper's `role` split inline. Everything else is
+  in-page: 60 contextual guidance, 26 empty states, 20 load failures, 9 form
+  submit errors, 5 validation summaries, 4 persistent conditions.
+
+  The nine form submit errors are the call worth recording. They look like
+  notifications — they fire on a failed action — but they sit inside an open
+  modal beside the input the user must fix, so a toast would vanish
+  mid-correction. They are validation summaries by another name, and converting
+  them is the specific error #91 says not to make.
+
+- **Deviation (#91):** The AC asks that every retained `<Alert>` carry a comment
+  saying why. I annotated five — the form-submit ones, the only category that
+  reads as a notification and the only ones likely to be "finished" by mistake.
+  Annotating all 124 would be noise that makes those five harder to find. The
+  category table on the issue is the reviewable record the AC's first bullet
+  asks for.
