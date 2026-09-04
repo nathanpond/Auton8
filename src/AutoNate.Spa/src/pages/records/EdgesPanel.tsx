@@ -1,5 +1,6 @@
+import { toast } from "@/components/notifications/toast";
 import { useState } from "react";
-import { Alert, Button, Group, Stack, Table, Text, Title } from "@mantine/core";
+import { Button, Group, Stack, Table, Text, Title } from "@mantine/core";
 import { useDeleteEdge, useEdgeTypes, useRecordEdges } from "@/hooks/useRecordEdges";
 import { useRecordTypes } from "@/hooks/useRecordTypes";
 import { RecordModel } from "@/types/records";
@@ -18,15 +19,14 @@ export default function EdgesPanel({ record }: Props) {
   const del = useDeleteEdge(record.id);
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const onDelete = async (edgeId: string) => {
     if (!window.confirm("Remove this edge?")) return;
     try {
       await del.mutateAsync(edgeId);
-      setFlash({ kind: "success", message: "Removed." });
+      toast.success("Removed.");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -45,16 +45,6 @@ export default function EdgesPanel({ record }: Props) {
           New link
         </Button>
       </Group>
-
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-        >
-          {flash.message}
-        </Alert>
-      )}
 
       {isLoading && (
         <Text size="sm" c="dimmed">
@@ -111,10 +101,10 @@ export default function EdgesPanel({ record }: Props) {
           thisRecordType={recordType}
           onClose={() => setDialogOpen(false)}
           onSuccess={(message) => {
-            setFlash({ kind: "success", message });
+            toast.success(message);
             setDialogOpen(false);
           }}
-          onError={(message) => setFlash({ kind: "error", message })}
+          onError={(message) => toast.error(message)}
         />
       )}
     </Stack>

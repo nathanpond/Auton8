@@ -1,6 +1,6 @@
+import { toast } from "@/components/notifications/toast";
 import { useState } from "react";
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -37,7 +37,6 @@ export default function CommentsPanel({ recordId }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState("");
   const [revisionsTarget, setRevisionsTarget] = useState<RecordCommentModel | null>(null);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const submitNew = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,7 +45,7 @@ export default function CommentsPanel({ recordId }: Props) {
       await create.mutateAsync(draft);
       setDraft("");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -62,7 +61,7 @@ export default function CommentsPanel({ recordId }: Props) {
       setEditingId(null);
       setEditingBody("");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -70,9 +69,9 @@ export default function CommentsPanel({ recordId }: Props) {
     if (!window.confirm("Delete this comment? It will be hidden but its history is preserved.")) return;
     try {
       await del.mutateAsync(id);
-      setFlash({ kind: "success", message: "Deleted." });
+      toast.success("Deleted.");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -86,16 +85,6 @@ export default function CommentsPanel({ recordId }: Props) {
           size="sm"
         />
       </Group>
-
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-        >
-          {flash.message}
-        </Alert>
-      )}
 
       {isLoading && (
         <Text size="sm" c="dimmed">

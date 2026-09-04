@@ -1,9 +1,9 @@
+import { toast } from "@/components/notifications/toast";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import {
   ActionIcon,
-  Alert,
   Anchor,
   Box,
   Button,
@@ -32,7 +32,6 @@ export default function RecordTypeList() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const columns = useMemo<DataTableColumn<RecordType>[]>(
     () => [
@@ -113,17 +112,6 @@ export default function RecordTypeList() {
         description="Define the records your app manages. Each record type has a short code (used as the key prefix) and a set of fields that every record of that type will have."
       />
 
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="sm"
-        >
-          {flash.message}
-        </Alert>
-      )}
-
       <DataTable<RecordType>
         mode="client"
         loadAll={() => listRecordTypes(includeArchived)}
@@ -169,10 +157,10 @@ export default function RecordTypeList() {
         <CreateModal
           onClose={() => setModalOpen(false)}
           onSuccess={(t) => {
-            setFlash({ kind: "success", message: `Created record type ${t.shortCode}.` });
+            toast.success(`Created record type ${t.shortCode}.`);
             setModalOpen(false);
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
     </>

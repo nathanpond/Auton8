@@ -1,8 +1,8 @@
+import { toast } from "@/components/notifications/toast";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ActionIcon,
-  Alert,
   Badge,
   Box,
   Button,
@@ -58,7 +58,6 @@ export default function RecordDetail() {
   const unwatch = useUnwatchRecord(record?.id ?? "");
 
   const [tab, setTab] = useState<Tab>("details");
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // The delete affordance used to render unconditionally (archived-85). The backend
@@ -119,13 +118,13 @@ export default function RecordDetail() {
     try {
       if (isWatching) {
         await unwatch.mutateAsync();
-        setFlash({ kind: "success", message: "Unwatched." });
+        toast.success("Unwatched.");
       } else {
         await watch.mutateAsync();
-        setFlash({ kind: "success", message: "Watching." });
+        toast.success("Watching.");
       }
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -137,7 +136,7 @@ export default function RecordDetail() {
       navigate(`/records/${code}`);
     } catch (err) {
       setDeleteOpen(false);
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -189,17 +188,6 @@ export default function RecordDetail() {
         }
       />
 
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="sm"
-        >
-          {flash.message}
-        </Alert>
-      )}
-
       <Tabs value={tab} onChange={(value) => value && setTab(value as Tab)} mb="md">
         <Tabs.List>
           <Tabs.Tab value="details">Details</Tabs.Tab>
@@ -223,9 +211,9 @@ export default function RecordDetail() {
               onSubmit={async ({ name, status, dueDate, values, assigneeIds }) => {
                 try {
                   await update.mutateAsync({ name, status, dueDate, values, assigneeIds });
-                  setFlash({ kind: "success", message: "Saved." });
+                  toast.success("Saved.");
                 } catch (err) {
-                  setFlash({ kind: "error", message: describeError(err) });
+                  toast.error(describeError(err));
                 }
               }}
             />

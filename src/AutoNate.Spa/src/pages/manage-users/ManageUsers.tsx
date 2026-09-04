@@ -1,10 +1,10 @@
+import { toast } from "@/components/notifications/toast";
 import { useMemo, useState } from "react";
 import type { DataTableColumn } from "@/components/data-table/DataTable";
 import { useForm } from "@mantine/form";
 import { zod4Resolver as zodResolver } from "mantine-form-zod-resolver";
 import {
   ActionIcon,
-  Alert,
   Box,
   Button,
   Group,
@@ -67,7 +67,6 @@ const COLUMN_WIDTHS = ["22%", "22%", "22%", "20%", "14%", "90px"];
 
 export default function ManageUsers() {
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const unlockCheck = useMemo(
     () => [{ kind: "user", action: "unlock", id: "*" }],
@@ -200,17 +199,6 @@ export default function ManageUsers() {
         description="Manage local users with search, sorting, paging, and quick account actions."
       />
 
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="sm"
-        >
-          {flash.message}
-        </Alert>
-      )}
-
       <DataTable<LocalUser>
         mode="auto"
         autoThreshold={1000}
@@ -251,10 +239,10 @@ export default function ManageUsers() {
         <AddUserModal
           onClose={close}
           onSuccess={(u) => {
-            setFlash({ kind: "success", message: `Added ${u.username}.` });
+            toast.success(`Added ${u.username}.`);
             close();
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
       {modal.kind === "edit" && (
@@ -263,13 +251,13 @@ export default function ManageUsers() {
           canUnlock={canUnlock}
           onClose={close}
           onSuccess={(u) => {
-            setFlash({ kind: "success", message: `Updated ${u.username}.` });
+            toast.success(`Updated ${u.username}.`);
             close();
           }}
           onUnlocked={(u) => {
-            setFlash({ kind: "success", message: `Unlocked ${u.username}.` });
+            toast.success(`Unlocked ${u.username}.`);
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
       {modal.kind === "reset" && (
@@ -277,10 +265,10 @@ export default function ManageUsers() {
           user={modal.user}
           onClose={close}
           onSuccess={() => {
-            setFlash({ kind: "success", message: `Reset password for ${modal.user.username}.` });
+            toast.success(`Reset password for ${modal.user.username}.`);
             close();
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
       {modal.kind === "delete" && (
@@ -288,10 +276,10 @@ export default function ManageUsers() {
           user={modal.user}
           onClose={close}
           onSuccess={() => {
-            setFlash({ kind: "success", message: `Deleted ${modal.user.username}.` });
+            toast.success(`Deleted ${modal.user.username}.`);
             close();
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
     </>

@@ -1,7 +1,7 @@
+import { toast } from "@/components/notifications/toast";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  Alert,
   Badge,
   Box,
   Button,
@@ -11,7 +11,6 @@ import {
   Group,
   Modal,
   NativeSelect,
-  Stack,
   Switch,
   Table,
   Text,
@@ -61,7 +60,6 @@ export default function RecordTypeEditor() {
   const [descDraft, setDescDraft] = useState("");
   const [iconDraft, setIconDraft] = useState("");
   const [colorDraft, setColorDraft] = useState("");
-  const [flash, setFlash] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [fieldModal, setFieldModal] = useState<FieldModalState>({ kind: "none" });
 
   useEffect(() => {
@@ -102,9 +100,9 @@ export default function RecordTypeEditor() {
         icon: iconDraft.trim() || null,
         color: colorDraft.trim() || null
       });
-      setFlash({ kind: "success", message: "Saved." });
+      toast.success("Saved.");
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -112,13 +110,13 @@ export default function RecordTypeEditor() {
     try {
       if (type.isArchived) {
         await restore.mutateAsync(type.id);
-        setFlash({ kind: "success", message: `Restored ${type.shortCode}.` });
+        toast.success(`Restored ${type.shortCode}.`);
       } else {
         await archive.mutateAsync(type.id);
-        setFlash({ kind: "success", message: `Archived ${type.shortCode}.` });
+        toast.success(`Archived ${type.shortCode}.`);
       }
     } catch (err) {
-      setFlash({ kind: "error", message: describeError(err) });
+      toast.error(describeError(err));
     }
   };
 
@@ -163,17 +161,6 @@ export default function RecordTypeEditor() {
           </Group>
         }
       />
-
-      {flash && (
-        <Alert
-          color={flash.kind === "success" ? "green" : "red"}
-          variant="light"
-          role={flash.kind === "success" ? "status" : "alert"}
-          mb="md"
-        >
-          {flash.message}
-        </Alert>
-      )}
 
       <Card withBorder shadow="sm" mb="md">
         <Title order={5} mb="md">
@@ -307,10 +294,10 @@ export default function RecordTypeEditor() {
           dataTypes={fieldTypes.map((ft) => ft.dataType)}
           onClose={() => setFieldModal({ kind: "none" })}
           onSuccess={(message) => {
-            setFlash({ kind: "success", message });
+            toast.success(message);
             setFieldModal({ kind: "none" });
           }}
-          onError={(m) => setFlash({ kind: "error", message: m })}
+          onError={(m) => toast.error(m)}
         />
       )}
 
