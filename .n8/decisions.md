@@ -906,3 +906,48 @@ Carry it into `/n8-verify` as a manual step.
   Annotating all 124 would be noise that makes those five harder to find. The
   category table on the issue is the reviewable record the AC's first bullet
   asks for.
+
+- **Decision (#90 / #95):** Implemented the OIDC authorization-code flow
+  directly (option B), **but delegated all cryptography to
+  `Microsoft.IdentityModel.Protocols.OpenIdConnect` 8.22.0**.
+  **Why:** #95 named the deciding constraint — providers live in the database
+  and are edited at runtime, so a scheme registry must be kept in sync across
+  instances, a provider edited on one is unknown to another until its cache
+  expires, and `RemoveScheme` mid-request has sharp edges. But #95's warning
+  about option B is equally right, so the split is: this code owns the flow
+  (challenge, callback, per-request provider lookup), and the library owns
+  discovery, JWKS rollover and signature/issuer/audience/lifetime validation.
+  Hand-rolling a redirect is fine; hand-rolling JWT signature validation is how
+  a hole ships. Also matches the endpoint-driven shape #86 chose for SAML, so
+  both federated paths look alike.
+
+- **Decision (#90):** Single logout **deferred**, stated rather than left
+  ambiguous (the AC permits either). Sign-out clears the Auton8 session only.
+  RP-initiated logout needs `end_session_endpoint` handling and a post-logout
+  redirect allowlist — its own slice, and an open redirect there would be a
+  phishing gift.
+
+- **Decision (#90):** A federated account stores an **empty** password hash and
+  salt, not a random one.
+  **Why:** There is no plaintext that produces an empty hash, so the local
+  password path cannot authenticate the account even by accident. A random hash
+  would be indistinguishable from a real one to anything reading the column.
+
+- **Bug found by the tests (#90, Rule 1):** The OIDC configuration cache was a
+  `static` dictionary keyed on the metadata URL, living inside the sign-in
+  service. Symptom: every test passed alone and half failed together, because
+  one test's signing keys were served to the next. Extracted to an injected
+  singleton `IOidcConfigurationCache`.
+
+  Worth recording beyond the test fix: as a static it was process-wide mutable
+  state keyed only on a URL, so two *providers* sharing an authority would have
+  crossed in production too. The test suite found a real design flaw, not a test
+  artefact.
+
+- **Note (#90, test method):** The expired-token test initially failed as a
+  code-exchange error. The stub built tokens with `notBefore` relative to now
+  while `expires` was in the past, and a token whose notBefore follows its expiry
+  is rejected by the constructor — so the failure happened before validation.
+  The stub was wrong, not the service. A rejection test that fails for the wrong
+  reason is worse than no test, because it reads as proof of a check it never
+  reached.
