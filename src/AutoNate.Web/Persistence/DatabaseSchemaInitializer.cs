@@ -3970,7 +3970,12 @@ internal static class DatabaseSchemaInitializer
             VALUES (
                 gen_random_uuid(), site_menu_id, config_group_id, 6,
                 'Identity Providers', 'fa fa-id-card', 'template',
-                '{{"templateKey":"configIdentityProviders"}}'::jsonb,
+                -- Both keys, matching every other template menu item. The
+                -- migration that normalised the existing ones builds
+                -- jsonb_build_object('templateKey', ..., 'path', ...), and a
+                -- template item carrying only the key is a shape nothing else
+                -- in the table has.
+                '{{"templateKey":"configIdentityProviders","path":"/admin/config/identity-providers"}}'::jsonb,
                 TRUE, TRUE, NOW(), NOW());
         END $$;
         """;
