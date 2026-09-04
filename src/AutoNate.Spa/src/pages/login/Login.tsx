@@ -46,22 +46,9 @@ export default function Login() {
     }
   });
 
-  if (!meLoading && me?.authenticated) {
-    return <Navigate to="/home" replace />;
-  }
-
-  const onSubmit = async (values: FormValues) => {
-    try {
-      await submitLoginForm({ ...values, returnUrl });
-    } catch (err) {
-      // Token fetch failed (network glitch / server down). Redirect to
-      // /?error=invalid so the existing error banner surfaces something
-      // instead of leaving the submit button silently hung.
-      console.error("Failed to obtain antiforgery token before login submit", err);
-      window.location.href = "/?error=invalid";
-    }
-  };
-
+  // Above the early return below: hooks must run in the same order on every
+  // render, and an authenticated visitor returns before this point. eslint's
+  // rules-of-hooks caught this when the block sat lower down.
   // Two different ways the cover can be wrong, and they need different
   // handling.
   //
@@ -102,6 +89,23 @@ export default function Login() {
       probe.onerror = null;
     };
   }, [requestedCover]);
+
+  if (!meLoading && me?.authenticated) {
+    return <Navigate to="/home" replace />;
+  }
+
+  const onSubmit = async (values: FormValues) => {
+    try {
+      await submitLoginForm({ ...values, returnUrl });
+    } catch (err) {
+      // Token fetch failed (network glitch / server down). Redirect to
+      // /?error=invalid so the existing error banner surfaces something
+      // instead of leaving the submit button silently hung.
+      console.error("Failed to obtain antiforgery token before login submit", err);
+      window.location.href = "/?error=invalid";
+    }
+  };
+
 
   return (
     <Box
