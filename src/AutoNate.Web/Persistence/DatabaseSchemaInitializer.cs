@@ -3922,6 +3922,59 @@ internal static class DatabaseSchemaInitializer
     //
     // Nothing is seeded here. Project invariant 1: configuring nothing creates
     // nothing, and an install with no provider behaves exactly as it does today.
+    // Makes the Identity Providers admin screen reachable (#87).
+    //
+    // A separate batch rather than an edit to the original template/menu seeds:
+    // those are recorded in schema_versions and will not re-run, so editing
+    // them would add the row on fresh installs only and leave every existing
+    // one with an unreachable page. Written idempotently so it is safe on both.
+    //
+    // Note the doubled braces in the jsonb literal — inline batches go through
+    // EF's string.Format pass, which collapses them to single. See the
+    // add-schema-change skill.
+    private const string IdentityProvidersMenuSeedSql =
+        """
+        INSERT INTO page_templates (id, key, name, description, is_enabled, created_at_utc, updated_at_utc)
+        SELECT gen_random_uuid(), 'configIdentityProviders', 'Identity Providers (Site Config)',
+               'Federated sign-in: OIDC and SAML providers.', TRUE, NOW(), NOW()
+        WHERE NOT EXISTS (SELECT 1 FROM page_templates WHERE key = 'configIdentityProviders');
+
+        DO $$
+        DECLARE
+            site_menu_id UUID;
+            config_group_id UUID;
+        BEGIN
+            -- Hang it off the same Site Config group External Connections is in,
+            -- found by that template key rather than by display name so a
+            -- renamed menu item does not orphan this.
+            SELECT mi.menu_id, mi.parent_id INTO site_menu_id, config_group_id
+            FROM menu_items mi
+            WHERE mi.config->>'templateKey' = 'configExternalConnections'
+            LIMIT 1;
+
+            IF site_menu_id IS NULL THEN
+                -- No Site Config menu on this install; nothing to attach to.
+                RETURN;
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM menu_items
+                WHERE config->>'templateKey' = 'configIdentityProviders'
+            ) THEN
+                RETURN;
+            END IF;
+
+            INSERT INTO menu_items (
+                id, menu_id, parent_id, sort_order, display_name, icon,
+                item_type, config, is_visible, is_system, created_at_utc, updated_at_utc)
+            VALUES (
+                gen_random_uuid(), site_menu_id, config_group_id, 6,
+                'Identity Providers', 'fa fa-id-card', 'template',
+                '{{"templateKey":"configIdentityProviders"}}'::jsonb,
+                TRUE, TRUE, NOW(), NOW());
+        END $$;
+        """;
+
     private const string IdentityProvidersSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS identity_providers (
@@ -4264,6 +4317,7 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(PipelinesSchemaSql), PipelinesSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(CodeTransformersSchemaSql), CodeTransformersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersSchemaSql), IdentityProvidersSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersMenuSeedSql), IdentityProvidersMenuSeedSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);
 
         // Before the SuperAdmin backfill on purpose: on a first boot the

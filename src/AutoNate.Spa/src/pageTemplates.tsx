@@ -34,6 +34,7 @@ import SystemHealth from "@/pages/admin/config/SystemHealth";
 import SystemIssues from "@/pages/admin/config/SystemIssues";
 import PluginDocumentation from "@/pages/admin/config/PluginDocumentation";
 import FormsList from "@/pages/admin/config/forms/FormsList";
+import IdentityProvidersPage from "@/pages/admin/config/identity-providers/IdentityProvidersPage";
 import {
   SitewideChatbotSettings,
   SitewideExternalConnections,
@@ -62,6 +63,7 @@ export const PAGE_TEMPLATES: Record<string, ReactElement> = {
   configAppearance: <SiteAppearancePage />,
   configStatusAppearance: <StatusAppearance />,
   configExternalConnections: <SitewideExternalConnections />,
+  configIdentityProviders: <IdentityProvidersPage />,
   configPagesMenus: <PagesMenus />,
   configBusWatcher: <BusWatcher />,
   configEvents: <Events />,

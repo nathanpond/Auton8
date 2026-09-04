@@ -82,6 +82,7 @@ const CONFIG_TEMPLATE_ANCHORS: readonly { path: string; templateKey: string }[] 
   { path: "appearance", templateKey: "configAppearance" },
   { path: "status-appearance", templateKey: "configStatusAppearance" },
   { path: "external-connections", templateKey: "configExternalConnections" },
+  { path: "identity-providers", templateKey: "configIdentityProviders" },
   { path: "pages-menus", templateKey: "configPagesMenus" },
   { path: "bus-watcher", templateKey: "configBusWatcher" },
   { path: "events", templateKey: "configEvents" },
