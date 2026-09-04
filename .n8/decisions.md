@@ -670,3 +670,43 @@ at zero errors. The AC box is deliberately left unchecked on the issue.
 Remaining work is a person spending two minutes with VoiceOver or NVDA on the
 workflow studio's "Render mode"/"Form" selects and the scroll-to-top button.
 Carry it into `/n8-verify` as a manual step.
+
+## /n8-exec M2 — 2026-09-03
+
+- **Decision (#86, spike):** SAML library is **ITfoxtec.Identity.Saml2** (+
+  `.MvcCore`) **4.20.1**, licensed **BSD-3-Clause**. Rejected candidate:
+  Sustainsys.Saml2 2.11.0, MIT.
+  **Why:** Both licences are permissive and both permit redistribution inside an
+  Apache-2.0 product that third parties self-host, so the owner's licence
+  constraint did not decide it — worth recording, because that was the question
+  the spike was created to answer and the answer turned out to be "either".
+  Both also cover the full SP-side surface (SP-initiated login, IdP metadata,
+  signed and encrypted assertions, SP metadata generation, single logout),
+  verified against the shipped assembly's public types rather than the docs.
+
+  What decided it was the criterion the issue predicted would: **multiple
+  database-configured IdPs**. ITfoxtec is endpoint-driven — `Saml2Configuration`
+  is a plain object built per request, so constructing it from a database row is
+  the ordinary usage. Sustainsys is `Saml2Handler` + `PostConfigureSaml2Options`,
+  registered per scheme at startup; it *can* be driven dynamically, but that is
+  precisely the work #95 exists to do for OIDC, and choosing ITfoxtec means not
+  needing a second copy of that mechanism.
+
+  Framework currency was the independent tiebreak: ITfoxtec ships an explicit
+  **net10.0** target and released 2026-06-27; Sustainsys stops at net8.0 and last
+  released 2025-03-02.
+
+  **Gives up:** no `AuthenticationHandler` integration (Auton8 writes its own ACS
+  endpoint — which suits an app that already builds its own `ClaimsIdentity` and
+  owns its cookie sign-in), an unusable `CreateSessionAsync` helper, and a
+  smaller community than Sustainsys.
+
+  **Note on the AC as written:** it asked for the licence "quoted or linked to
+  the licence file in the package". Neither package ships a licence file — both
+  declare an SPDX `licenseExpression` in metadata instead. Recorded rather than
+  glossed, since it means the AC cannot be satisfied literally for either
+  candidate.
+
+- **Note (drift check):** `@mantine/notifications` ^9.5.2 is already a
+  dependency, so #89 uses it rather than adding it. Implementation detail, not an
+  AC change.

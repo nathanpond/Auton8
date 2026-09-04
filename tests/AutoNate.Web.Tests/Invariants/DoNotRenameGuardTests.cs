@@ -3,6 +3,7 @@ using System.Text.Json;
 using AutoNate.Plugins.Abstractions;
 using AutoNate.Web.Plugins;
 using AutoNate.Web.Services.ExternalConnections;
+using AutoNate.Web.Services.Identity;
 using AutoNate.Web.Tests.Infrastructure;
 using Npgsql;
 using Xunit;
@@ -31,7 +32,7 @@ public sealed class DoNotRenameGuardTests
 {
     // The inventory. One place, so the CLAUDE.md prose list and this guard
     // cannot drift apart without the count assertion at the bottom noticing.
-    private const int GuardedIdentifierCount = 9;
+    private const int GuardedIdentifierCount = 10;
 
     private static string Consequence(string identifier, string effect) =>
         $"'{identifier}' has been renamed. {effect} It is on the do-not-rename list in "
@@ -71,6 +72,23 @@ public sealed class DoNotRenameGuardTests
     }
 
     [Fact]
+    public void The_identity_provider_dataprotection_purpose_is_unchanged()
+    {
+        const string Expected = "AutoNate.IdentityProviders.v1";
+
+        Assert.True(
+            string.Equals(Expected, DataProtectionIdentityProviderSecretProtector.Purpose,
+                StringComparison.Ordinal),
+            Consequence(Expected,
+                "Every stored identity-provider secret becomes permanently undecryptable, so an "
+                + "organisation's single sign-on stops working — and there is no recovery short of "
+                + "re-entering the secret at every provider, which for SAML may mean re-issuing "
+                + "certificates.")
+            + $" Found '{DataProtectionIdentityProviderSecretProtector.Purpose}' in "
+            + "DataProtectionIdentityProviderSecretProtector.");
+    }
+
+    [Fact]
     public void The_dataprotection_purposes_are_read_from_the_shipping_constants()
     {
         // Not a tautology: this asserts the guard is wired to the values the
@@ -80,9 +98,12 @@ public sealed class DoNotRenameGuardTests
             .GetField("Purpose", BindingFlags.NonPublic | BindingFlags.Static)!;
         var plugins = typeof(PluginSchemaProvisioner)
             .GetField("ProtectorPurpose", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var identity = typeof(DataProtectionIdentityProviderSecretProtector)
+            .GetField("Purpose", BindingFlags.NonPublic | BindingFlags.Static)!;
 
         Assert.True(external.IsLiteral, "Purpose must stay a compile-time constant.");
         Assert.True(plugins.IsLiteral, "ProtectorPurpose must stay a compile-time constant.");
+        Assert.True(identity.IsLiteral, "Purpose must stay a compile-time constant.");
     }
 
     [Fact]
@@ -304,6 +325,7 @@ public sealed class DoNotRenameGuardTests
                  {
                      "AutoNate.ExternalConnections.v1",
                      "AutoNate.Plugins.RolePassword.v1",
+                     "AutoNate.IdentityProviders.v1",
                      "AUTONATE_BINDING",
                      "AUTONATE_TABLE_BINDING",
                      "http://autonate.dev/workflows",
@@ -318,6 +340,6 @@ public sealed class DoNotRenameGuardTests
                 + "The prose list and the guard must agree.");
         }
 
-        Assert.Equal(9, GuardedIdentifierCount);
+        Assert.Equal(10, GuardedIdentifierCount);
     }
 }

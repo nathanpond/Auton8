@@ -13,6 +13,14 @@ public static class EntityKinds
     public const string SiteConfig = "siteconfig";
     public const string Plugin = "plugin";
 
+    // Identity providers (rows in identity_providers). Deliberately its own
+    // kind rather than folded into SiteConfig: this configuration decides who
+    // can get into the system at all, so an administrator should be able to
+    // delegate the site's theme without also delegating the ability to add a
+    // provider that lets anyone in. #96 laid out both options; the precision
+    // is worth one registry entry.
+    public const string IdentityProvider = "identityprovider";
+
     // Self-healing platform: rows in system_issues. Kind-only gate (no
     // instance authorizer) — every issue is administrative and we
     // currently grant access at the kind level. If per-row visibility is

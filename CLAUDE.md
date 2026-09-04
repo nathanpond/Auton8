@@ -14,7 +14,7 @@ database, the `autonate.web` event `sourceAppId`, the plugin ABI
 `AUTONATE_BINDING` / `AUTONATE_TABLE_BINDING`, the BPMN namespace
 `http://autonate.dev/workflows` and `${autonateBehaviorDelegate}`, and the
 DataProtection purposes `AutoNate.ExternalConnections.v1` /
-`AutoNate.Plugins.RolePassword.v1`.
+`AutoNate.Plugins.RolePassword.v1` / `AutoNate.IdentityProviders.v1`.
 
 That split is deliberate. Renaming the DataProtection purposes makes every
 stored provider secret undecryptable; renaming the `.docx` markers orphans

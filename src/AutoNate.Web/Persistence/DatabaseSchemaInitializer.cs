@@ -3908,6 +3908,66 @@ internal static class DatabaseSchemaInitializer
     // plan). The code itself executes in `services/executor/` under V8 or
     // Pyodide isolates unless `is_unsafe` flips the runtime to host-side
     // CPython (which the `transformer:executeunsafe` permission gates).
+    // Identity providers (#87). One table with a `kind` discriminator rather
+    // than one per protocol: OIDC and SAML share display name, enabled state,
+    // the encrypted secret and the audit columns, and differ in three or four
+    // fields each. The login page needs the union of both, which two tables
+    // would force every read path to reassemble.
+    //
+    // Deliberately NOT reusing `external_connections`, whose own comment
+    // anticipates an "identity provider" kind. That table's secrets are
+    // protected under AutoNate.ExternalConnections.v1, and #87 requires a
+    // dedicated purpose so a rotation forced by one secret class does not
+    // force re-entry of the other's.
+    //
+    // Nothing is seeded here. Project invariant 1: configuring nothing creates
+    // nothing, and an install with no provider behaves exactly as it does today.
+    private const string IdentityProvidersSchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS identity_providers (
+            id UUID PRIMARY KEY,
+            kind TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+
+            -- OIDC: the authority (issuer or discovery base) and client id.
+            -- The client secret lives in secret_ciphertext below.
+            oidc_authority TEXT NULL,
+            oidc_client_id TEXT NULL,
+            oidc_scopes TEXT NULL,
+
+            -- SAML: the IdP entity id plus either a metadata URL to fetch or
+            -- pasted metadata, and the signing certificate used to validate
+            -- assertions.
+            saml_entity_id TEXT NULL,
+            saml_metadata_url TEXT NULL,
+            saml_metadata_xml TEXT NULL,
+            saml_signing_certificate TEXT NULL,
+
+            -- Shared secret storage, same shape as external_connections:
+            -- ciphertext is never returned by any read endpoint, and the
+            -- fingerprint is the redacted value safe to show in admin UI and
+            -- audit events.
+            secret_ciphertext BYTEA NULL,
+            secret_fingerprint TEXT NULL,
+
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        -- The slug is what appears in a callback path and identifies the
+        -- provider on the login page, so it has to be unique and stable.
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_identity_providers_slug
+            ON identity_providers (LOWER(slug));
+
+        -- The login page asks "which providers are enabled?" on every render.
+        CREATE INDEX IF NOT EXISTS ix_identity_providers_enabled
+            ON identity_providers (is_enabled);
+        """;
+
     private const string CodeTransformersSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS code_transformers (
@@ -4203,6 +4263,7 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(SavedQueryShareTokensSchemaSql), SavedQueryShareTokensSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(PipelinesSchemaSql), PipelinesSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(CodeTransformersSchemaSql), CodeTransformersSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersSchemaSql), IdentityProvidersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);
 
         // Before the SuperAdmin backfill on purpose: on a first boot the

@@ -471,6 +471,15 @@ builder.Services.AddScoped<AutoNate.Web.Services.Query.IAqlSuggestionService,
 // IDataProtectionProvider through the standard test factory.
 builder.Services.AddDataProtection();
 builder.Services.AddSingleton<IConnectionSecretProtector, DataProtectionConnectionSecretProtector>();
+// Identity providers (#87). A dedicated protector with its own DataProtection
+// purpose — see DataProtectionIdentityProviderSecretProtector for why sharing
+// the external-connections purpose would be a mistake.
+builder.Services.AddSingleton<AutoNate.Web.Services.Identity.IIdentityProviderSecretProtector,
+    AutoNate.Web.Services.Identity.DataProtectionIdentityProviderSecretProtector>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderStore,
+    AutoNate.Web.Services.Identity.EfCoreIdentityProviderStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderConfigurationTester,
+    AutoNate.Web.Services.Identity.IdentityProviderConfigurationTester>();
 builder.Services.AddScoped<IExternalConnectionStore, EfCoreExternalConnectionStore>();
 // Phase 4 replaces this with kind-routed Anthropic/OpenAI testers; until then
 // the stub just confirms the secret decrypts cleanly.
@@ -1550,6 +1559,7 @@ app.MapAdminPluginsEndpoints();
 app.MapAdminProjectionsEndpoints();
 app.MapFormEndpoints();
 app.MapExternalConnectionEndpoints();
+app.MapIdentityProviderEndpoints();
 app.MapDataStoreEndpoints();
 app.MapDataConnectorEndpoints();
 app.MapDatasetEndpoints();

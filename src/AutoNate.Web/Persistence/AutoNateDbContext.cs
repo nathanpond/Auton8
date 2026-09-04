@@ -82,6 +82,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<ExternalConnection> ExternalConnections { get; set; }
 
+    public virtual DbSet<Models.IdentityProviderModel> IdentityProviders { get; set; }
+
     public virtual DbSet<AgentConversation> AgentConversations { get; set; }
 
     public virtual DbSet<AgentMessage> AgentMessages { get; set; }
@@ -989,6 +991,43 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.Note).HasColumnName("note");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+        });
+
+        modelBuilder.Entity<Models.IdentityProviderModel>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("identity_providers_pkey");
+
+            entity.ToTable("identity_providers");
+
+            // Matches the unique index in IdentityProvidersSchemaSql, which is
+            // on LOWER(slug) — the slug appears in callback paths, so two
+            // providers differing only in case would be indistinguishable
+            // there.
+            entity.HasIndex(e => e.Slug, "ux_identity_providers_slug").IsUnique();
+            entity.HasIndex(e => e.IsEnabled, "ix_identity_providers_enabled");
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.DisplayName).HasColumnName("display_name");
+            entity.Property(e => e.Slug).HasColumnName("slug");
+            entity.Property(e => e.IsEnabled).HasColumnName("is_enabled");
+
+            entity.Property(e => e.OidcAuthority).HasColumnName("oidc_authority");
+            entity.Property(e => e.OidcClientId).HasColumnName("oidc_client_id");
+            entity.Property(e => e.OidcScopes).HasColumnName("oidc_scopes");
+
+            entity.Property(e => e.SamlEntityId).HasColumnName("saml_entity_id");
+            entity.Property(e => e.SamlMetadataUrl).HasColumnName("saml_metadata_url");
+            entity.Property(e => e.SamlMetadataXml).HasColumnName("saml_metadata_xml");
+            entity.Property(e => e.SamlSigningCertificate).HasColumnName("saml_signing_certificate");
+
+            entity.Property(e => e.SecretCiphertext).HasColumnName("secret_ciphertext");
+            entity.Property(e => e.SecretFingerprint).HasColumnName("secret_fingerprint");
+
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         modelBuilder.Entity<ExternalConnection>(entity =>
