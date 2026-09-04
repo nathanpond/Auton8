@@ -1201,3 +1201,52 @@ Carry it into `/n8-verify` as a manual step.
   routing discovery through the allowlist changes what existing installs can
   reach, and any provider whose host is unlisted would stop working on upgrade.
   That needs a migration story, so it is filed rather than folded in.
+
+- **Decision (#5):** the batch methods on `IInstanceAuthorizer` and `IAuthorizer`
+  are **default interface methods**, defaulting to the existing loop.
+  **Why:** `IInstanceAuthorizer` has 15 implementers and `IAuthorizer` had 6 test
+  stubs. A required member meant editing 21 places in the code that decides who
+  may do what, to gain speed in one of them. With a default, an untouched kind
+  can only be slower, never wrong. `ComputeDecisionAsync` was split so the
+  batched path shares its pre-database half rather than copying the
+  enforcement-mode, super-admin and kind-level rules — a copy would have been
+  three ways to disagree about access.
+  **The guard is equivalence, not speed.** Only equivalence can fail silently: a
+  batch that is fast and wrong still returns 200 with a plausible list.
+  **Stated limitation:** the query-count test does not count SQL round-trips
+  (that needs an EF interceptor). It pins the grouping contract and that the
+  override exists — a floor, and its comment says so.
+
+- **Deviation (#9):** the issue said to project the user directory to
+  `(id, username, displayName)`. **Not done** — the SPA reads `firstName` and
+  `lastName` across 16 call sites, so that projection would have emptied names in
+  assignee pickers and comment authorship while shipping as a pure optimisation.
+  The response shape is unchanged and a test pins the fields consumers read.
+  Blanking of admin-only fields moved *into* the snapshot: a cache holding full
+  rows plus one forgetful caller would serve every user's email to any
+  authenticated account, and the call site would look fine.
+
+- **Deviation (#10):** the issue said to add `?countOnly=true` to six paged
+  endpoints so the count probe becomes cheap. **The probe was removed instead** —
+  the first real page response already carries `totalCount`, so the probe was
+  fetching a number the table was about to receive. Server-mode tables go from
+  two requests to one, with no endpoint contract changed. The mode decision is
+  latched rather than recomputed, or a filter narrowing results below the
+  threshold would flip a table into client mode mid-interaction.
+
+- **Deviation and a caught regression (#17):** the issue suggested `manualChunks`.
+  Applied faithfully it produced a chunk list that looked like success — entry
+  3.72 MB → 1.33 MB — while the **eager first-paint payload went 4.50 MB →
+  13.91 MB**. Named chunks that are still statically imported are all fetched
+  anyway, and forcing every `node_modules` file into one defeats the bundler's
+  own splitting. Reverted; the fix is lazy routes (4.50 → 3.42 MB, −24%).
+  **The lesson worth keeping: measure what index.html loads, not the chunk
+  list.** Reporting the entry-chunk number alone would have claimed a 64% win
+  that was a 3× regression. Remainder filed as #140 with the measurement command.
+
+- **Pattern across the four `/n8-audit performance` findings:** every one was
+  accurate about the **cost** and unreliable about the **remedy** — #9's
+  projection would have broken 16 call sites, #10 proposed six contract changes
+  for something one component solved better, #17's suggestion actively made
+  things worse. Audit findings are findings, not specifications. Read the
+  measurement, re-derive the fix.

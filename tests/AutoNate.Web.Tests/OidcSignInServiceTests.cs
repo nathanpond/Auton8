@@ -158,7 +158,18 @@ public sealed class OidcSignInServiceTests
 
     private sealed class StubFactory(StubIdp idp, Func<string>? tokenFactory) : IHttpClientFactory
     {
-        public HttpClient CreateClient(string name) => new(new StubHandler(idp, tokenFactory));
+        /// <summary>
+        /// Settable so a test can re-mint against the nonce the server issued.
+        /// </summary>
+        /// <remarks>
+        /// The endpoint-level test cannot know the nonce before the challenge
+        /// runs, and fabricating one to match would skip the nonce check —
+        /// which is a real defence, and skipping it silently is how a test
+        /// stops covering what it claims to.
+        /// </remarks>
+        public Func<string>? TokenFactory { get; set; } = tokenFactory;
+
+        public HttpClient CreateClient(string name) => new(new StubHandler(idp, TokenFactory));
     }
 
     // ── Harness ─────────────────────────────────────────────────────────────
@@ -419,4 +430,103 @@ public sealed class OidcSignInServiceTests
         // The verifier must never be in the redirect — only its hash.
         Assert.DoesNotContain(challenge.CodeVerifier, challenge.RedirectUri, StringComparison.Ordinal);
     }
+    // ── The session has to survive the request after the callback ───────────
+
+    [Fact]
+    public async Task An_oidc_session_still_authenticates_on_the_next_request()
+    {
+        // The assertion this suite was missing (#139), and the one that matters:
+        // not "did CompleteAsync succeed" or "was SignInAsync called", but "is
+        // the user actually signed in on the request after".
+        //
+        // Every other test here calls CompleteAsync directly, so none of them
+        // goes through the HTTP pipeline — which is where the principal is
+        // turned into a cookie and where the middleware that broke this lives.
+        // Federated sign-in was unusable in Development for as long as it
+        // existed and this suite stayed green throughout.
+        var idp = new StubIdp();
+        const string Nonce = "nonce-endpoint";
+
+        await using var app = await AutoNateWebApplicationFactory.CreateAsync();
+        var httpFactory = new StubFactory(idp, () => idp.MintToken(Nonce));
+
+        // The stub reaches the app's own DI, so the callback endpoint runs the
+        // real service against a real signed token rather than a fake service.
+        using var scoped = app.WithWebHostBuilder(b => b.ConfigureServices(services =>
+        {
+            services.AddSingleton<IHttpClientFactory>(httpFactory);
+            services.AddSingleton<IOidcConfigurationCache>(new OidcConfigurationCache(httpFactory));
+        }));
+
+        var client = scoped.CreateClient(new Microsoft.AspNetCore.Mvc.Testing
+            .WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+
+        var store = scoped.Services.CreateScope().ServiceProvider
+            .GetRequiredService<IIdentityProviderStore>();
+        await store.CreateAsync(new CreateIdentityProviderRequest(
+            Kind: IdentityProviderKinds.Oidc,
+            DisplayName: "Corporate",
+            Slug: Slug,
+            IsEnabled: true,
+            OidcAuthority: Authority,
+            OidcClientId: ClientId,
+            OidcScopes: null,
+            SamlEntityId: null, SamlMetadataUrl: null, SamlMetadataXml: null,
+            SamlSigningCertificate: null,
+            Secret: "client-secret"), Guid.NewGuid(), CancellationToken.None);
+
+        // Drive the real challenge so the state/verifier/nonce cookies are the
+        // ones the server issued, rather than values fabricated to match.
+        var challenge = await client.GetAsync($"/api/auth/oidc/{Slug}/challenge?returnUrl=%2Fhome");
+        var challengeCookies = challenge.Headers.GetValues("Set-Cookie")
+            .Select(c => c.Split(';')[0])
+            .ToList();
+        var state = challengeCookies
+            .First(c => c.StartsWith("auton8_oidc_state=", StringComparison.Ordinal))
+            .Split('=')[1];
+
+        // The stub mints a token carrying this nonce, so the challenge's nonce
+        // cookie has to be the same value or the callback rejects it — which is
+        // correct behaviour and would mask the thing under test.
+        var nonceCookie = challengeCookies
+            .First(c => c.StartsWith("auton8_oidc_nonce=", StringComparison.Ordinal));
+        var issuedNonce = nonceCookie.Split('=')[1];
+
+        var callback = new HttpRequestMessage(
+            HttpMethod.Get, $"/api/auth/oidc/{Slug}/callback?code=the-code&state={state}");
+        foreach (var c in challengeCookies)
+        {
+            callback.Headers.Add("Cookie", c.StartsWith("auton8_oidc_nonce=", StringComparison.Ordinal)
+                ? $"auton8_oidc_nonce={issuedNonce}"
+                : c);
+        }
+
+        // Re-mint against the nonce the server actually issued.
+        httpFactory.TokenFactory = () => idp.MintToken(issuedNonce);
+
+        var response = await client.SendAsync(callback);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.DoesNotContain("error=", response.Headers.Location!.OriginalString, StringComparison.Ordinal);
+
+        var cookie = Assert.Single(
+            response.Headers.GetValues("Set-Cookie")
+                .Where(c => c.StartsWith(".AspNetCore.Cookies=", StringComparison.Ordinal)));
+
+        var second = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
+        second.Headers.Add("Cookie", cookie.Split(';')[0]);
+        var me = await client.SendAsync(second);
+
+        me.EnsureSuccessStatusCode();
+        var body = await me.Content.ReadAsStringAsync();
+
+        // Naming WHO, not merely that somebody is signed in. "authenticated:
+        // true" passes against the defect, because Development auto-login
+        // immediately signs the request back in as `admin` — the federated
+        // session is destroyed and replaced, and the weaker assertion cannot
+        // tell the difference.
+        Assert.Contains($"\"authSource\":\"oidc:{Slug}\"", body, StringComparison.Ordinal);
+        Assert.Contains($"\"idpKey\":\"{Slug}:{Subject}\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"username\":\"admin\"", body, StringComparison.Ordinal);
+    }
+
 }

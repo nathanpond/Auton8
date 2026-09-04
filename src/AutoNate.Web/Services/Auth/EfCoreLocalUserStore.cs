@@ -5,7 +5,9 @@ using Npgsql;
 
 namespace AutoNate.Web.Services.Auth;
 
-public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> dbContextFactory) : ILocalUserStore
+public sealed class EfCoreLocalUserStore(
+    IDbContextFactory<AutoNateDbContext> dbContextFactory,
+    UserDirectorySnapshotCache directoryCache) : ILocalUserStore
 {
     public const int FailedLoginLockoutThreshold = 3;
 
@@ -244,6 +246,10 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
             throw new InvalidOperationException("A user with that username already exists.", exception);
         }
 
+        // Every write drops the directory snapshot (#9): a user created in
+        // the admin screen must appear in an assignee picker at once, and
+        // waiting out the TTL would read as the create having failed.
+        directoryCache.Invalidate();
         return entity.ToModel();
     }
 
@@ -276,6 +282,10 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
             throw new InvalidOperationException("A user with that username already exists.", exception);
         }
 
+        // Every write drops the directory snapshot (#9): a user created in
+        // the admin screen must appear in an assignee picker at once, and
+        // waiting out the TTL would read as the create having failed.
+        directoryCache.Invalidate();
         return entity.ToModel();
     }
 
@@ -293,6 +303,10 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
         entity.PasswordSalt = salt;
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        // Every write drops the directory snapshot (#9): a user created in
+        // the admin screen must appear in an assignee picker at once, and
+        // waiting out the TTL would read as the create having failed.
+        directoryCache.Invalidate();
         return true;
     }
 
@@ -307,6 +321,10 @@ public sealed class EfCoreLocalUserStore(IDbContextFactory<AutoNateDbContext> db
 
         dbContext.LocalUsers.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
+        // Every write drops the directory snapshot (#9): a user created in
+        // the admin screen must appear in an assignee picker at once, and
+        // waiting out the TTL would read as the create having failed.
+        directoryCache.Invalidate();
         return true;
     }
 

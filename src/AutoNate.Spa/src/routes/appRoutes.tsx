@@ -4,7 +4,6 @@ import ProtectedRoute from "@/shell/ProtectedRoute";
 
 import WorkflowExecutions from "@/pages/workflow-executions/WorkflowExecutions";
 import ExecutionPage from "@/pages/workflow-executions/ExecutionPage";
-import WorkflowStudio from "@/pages/workflow/WorkflowStudio";
 import RecordTypeList from "@/pages/record-types/RecordTypeList";
 import RecordTypeEditor from "@/pages/record-types/RecordTypeEditor";
 import RecordList from "@/pages/records/RecordList";
@@ -20,6 +19,24 @@ import { lazy, Suspense } from "react";
 const PipelineEditor = lazy(() => import("@/pages/admin/pipelines/PipelineEditor"));
 const PipelineRunHistory = lazy(() => import("@/pages/admin/pipelines/PipelineRunHistory"));
 const DataStoreDetail = lazy(() => import("@/pages/admin/datastores/DataStoreDetailPage"));
+
+// #17: these four carried the editor stacks into the entry chunk. NotesPage
+// reaches @blocknote through lib/yjs, and the documents pages reach
+// @eigenpal/docx-editor-react — together roughly 2.5 MB that every first load
+// paid for whether or not the visitor opened an editor.
+//
+// Lazy at the route boundary, using the same lazy + Suspense pattern the three
+// routes above already use.
+const NotesPage = lazy(() => import("@/pages/notes/NotesPage"));
+const DocumentsHomePage = lazy(() => import("@/pages/documents/DocumentsHomePage"));
+const ProjectDocumentsPage = lazy(() => import("@/pages/documents/ProjectDocumentsPage"));
+const TemplateGalleryPage = lazy(() => import("@/pages/documents/TemplateGalleryPage"));
+// Carries the CodeMirror editor and its language modes, on a single route.
+const WorkflowStudio = lazy(() => import("@/pages/workflow/WorkflowStudio"));
+
+// One wrapper rather than four: the pattern above predates these and repeating
+// it verbatim four more times would be four more places to forget a Suspense.
+const deferred = (element: React.ReactNode) => <Suspense fallback={null}>{element}</Suspense>;
 const PipelineEditorRoute = () => (
   <Suspense fallback={null}>
     <PipelineEditor />
@@ -39,11 +56,7 @@ import FormDevView from "@/pages/forms/FormDevView";
 import FormPublicView from "@/pages/forms/FormPublicView";
 import TaskFormPage from "@/pages/workflow-tasks/TaskFormPage";
 import Notifications from "@/pages/notifications/Notifications";
-import NotesPage from "@/pages/notes/NotesPage";
 import AllProjects from "@/pages/notes/AllProjects";
-import DocumentsHomePage from "@/pages/documents/DocumentsHomePage";
-import ProjectDocumentsPage from "@/pages/documents/ProjectDocumentsPage";
-import TemplateGalleryPage from "@/pages/documents/TemplateGalleryPage";
 import DynamicPageRoute from "@/pages/dynamic-page/DynamicPageRoute";
 import { PAGE_TEMPLATES } from "@/pageTemplates";
 
@@ -135,7 +148,7 @@ const template = (key: string) => protect(PAGE_TEMPLATES[key]);
 // PAGE_TEMPLATES and is reachable only when an admin places it on a menu.
 export const APP_ROUTES: AppRoute[] = [
   // Workflow domain (parameterized + tightly coupled siblings)
-  { path: "workflow", title: "Workflow Studio", element: protect(<WorkflowStudio />) },
+  { path: "workflow", title: "Workflow Studio", element: protect(deferred(<WorkflowStudio />)) },
   { path: "workflow-executions", title: "Workflow Executions", element: protect(<WorkflowExecutions />) },
   { path: "executions/:id", title: "Execution", element: protect(<ExecutionPage />) },
 
@@ -175,7 +188,7 @@ export const APP_ROUTES: AppRoute[] = [
   // semantics turn into setState loops in Mantine's ref-merging utilities.
   // The first splat segment is the entity locator (any kind) and the optional
   // second segment is the page-scoped note index.
-  { path: "notes/*", title: "Notes", element: protect(<NotesPage />) },
+  { path: "notes/*", title: "Notes", element: protect(deferred(<NotesPage />)) },
 
   // Read-only datatable view of every project the user can access. Reached
   // from the project picker in /notes; clicking a row jumps back to /notes
@@ -191,15 +204,15 @@ export const APP_ROUTES: AppRoute[] = [
   // The folder view uses a custom side-tree layout; the editor route (later
   // phases) will live OUTSIDE this AppShell so the editor can render full-
   // bleed without the nav chrome.
-  { path: "documents", title: "Documents", element: protect(<DocumentsHomePage />) },
+  { path: "documents", title: "Documents", element: protect(deferred(<DocumentsHomePage />)) },
   // Cross-project template gallery. Templates are stored in the documents
   // table (kind='template') but filtered out of regular folder listings —
   // this is the only navigable surface that lists them.
-  { path: "documents/templates", title: "Document Templates", element: protect(<TemplateGalleryPage />) },
-  { path: "documents/p/:projectId", title: "Project Documents", element: protect(<ProjectDocumentsPage />) },
+  { path: "documents/templates", title: "Document Templates", element: protect(deferred(<TemplateGalleryPage />)) },
+  { path: "documents/p/:projectId", title: "Project Documents", element: protect(deferred(<ProjectDocumentsPage />)) },
   {
     path: "documents/p/:projectId/folder/:folderId",
-    element: protect(<ProjectDocumentsPage />)
+    element: protect(deferred(<ProjectDocumentsPage />))
   },
 
   // Forms feature: dev preview (draft) and runtime render (published).

@@ -84,7 +84,18 @@ public sealed class Authorizer : IAuthorizer
         return await ApplyAuthorizeFilterAsync(actor, action, target, raw, cancellationToken);
     }
 
-    private async Task<AuthDecision> ComputeDecisionAsync(
+    /// <summary>
+    /// Everything <see cref="ComputeDecisionAsync"/> settles before it needs to
+    /// ask the database about a specific entity.
+    /// </summary>
+    /// <remarks>
+    /// Extracted so the batched path (<see cref="AuthorizeManyAsync"/>) reaches
+    /// the same verdicts by running the same code, rather than by a second copy
+    /// of these rules that could drift. A copy here would be a copy of the
+    /// enforcement mode, the super-admin short-circuit and the kind-level
+    /// branch — three ways to quietly disagree about access.
+    /// </remarks>
+    private async Task<(AuthDecision? Decided, IInstanceAuthorizer? Handler)> PrepareDecisionAsync(
         ClaimsPrincipal actor,
         string action,
         EntityRef target,
@@ -92,45 +103,126 @@ public sealed class Authorizer : IAuthorizer
     {
         if (!_options.Value.Enabled)
         {
-            return AuthDecision.Allow("authorization disabled");
+            return (AuthDecision.Allow("authorization disabled"), null);
         }
 
         var userId = actor.TryGetUserId();
         if (userId is null)
         {
-            return MaybeDryRun(AuthDecision.Deny("no user identity"), action, target);
+            return (MaybeDryRun(AuthDecision.Deny("no user identity"), action, target), null);
         }
 
         var ctx = await GetActorContextAsync(userId.Value, cancellationToken);
         if (ctx.IsSuperAdmin)
         {
-            return AuthDecision.Allow("super admin");
+            return (AuthDecision.Allow("super admin"), null);
         }
 
-        // In read-only enforcement, list filtering still happens via FilterQueryAsync
-        // but instance writes pass — that's the deliberate "filter reads first,
-        // then enforce writes" rollout.
         if (_options.Value.Enforcement != AuthorizationEnforcement.Full)
         {
-            return AuthDecision.Allow("write enforcement disabled");
+            return (AuthDecision.Allow("write enforcement disabled"), null);
         }
 
-        // Kind-level check (e.g. "create"): no specific entity exists yet, so
-        // approve if any allow grant for the kind+action exists without a
-        // blanket deny.
         if (string.IsNullOrEmpty(target.Id) || target.Id == Actions.Wildcard)
         {
-            return await AuthorizeKindLevelAsync(ctx, action, target.Kind, cancellationToken);
+            return (await AuthorizeKindLevelAsync(ctx, action, target.Kind, cancellationToken), null);
         }
 
         if (!_instanceAuthorizers.TryGetValue(target.Kind, out var handler))
         {
-            return MaybeDryRun(
+            return (MaybeDryRun(
                 AuthDecision.Deny($"no instance handler for kind '{target.Kind}'"),
-                action, target);
+                action, target), null);
         }
 
-        var allowed = await handler.ExistsAndAuthorizedAsync(
+        return (null, handler);
+    }
+
+    /// <summary>
+    /// Authorizes several targets at once, one query per (kind, action) group.
+    /// </summary>
+    /// <remarks>
+    /// <c>POST /api/auth/check</c> is fired by every gated list view and the SPA
+    /// sends two checks per row, so a 25-row page was 50 sequential round-trips
+    /// — each opening its own DbContext — behind one HTTP call (#5).
+    ///
+    /// Every decision still goes through <see cref="PrepareDecisionAsync"/> and
+    /// <see cref="ApplyAuthorizeFilterAsync"/>, the same as the single-target
+    /// path. Only the database question in the middle is asked in groups.
+    /// </remarks>
+    public async Task<IReadOnlyList<AuthDecision>> AuthorizeManyAsync(
+        ClaimsPrincipal actor,
+        IReadOnlyList<(string Action, EntityRef Target)> requests,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+
+        var decisions = new AuthDecision?[requests.Count];
+        var pending = new List<(int Index, string Action, EntityRef Target, IInstanceAuthorizer Handler)>();
+
+        for (var i = 0; i < requests.Count; i++)
+        {
+            var (action, target) = requests[i];
+            var (decided, handler) = await PrepareDecisionAsync(actor, action, target, cancellationToken);
+            if (decided is not null) decisions[i] = decided;
+            else pending.Add((i, action, target, handler!));
+        }
+
+        foreach (var group in pending.GroupBy(p => (p.Target.Kind, p.Action), StringTupleComparer.Instance))
+        {
+            var handler = group.First().Handler;
+            var ids = group.Select(p => p.Target.Id).Distinct(StringComparer.Ordinal).ToList();
+
+            var allowed = await handler.FilterAuthorizedIdsAsync(
+                this, actor, group.Key.Item2, ids, cancellationToken);
+
+            foreach (var item in group)
+            {
+                decisions[item.Index] = allowed.Contains(item.Target.Id)
+                    ? AuthDecision.Allow("matched grant")
+                    : MaybeDryRun(AuthDecision.Deny("no matching grant"), item.Action, item.Target);
+            }
+        }
+
+        var results = new AuthDecision[requests.Count];
+        for (var i = 0; i < requests.Count; i++)
+        {
+            var (action, target) = requests[i];
+            results[i] = await ApplyAuthorizeFilterAsync(
+                actor, action, target, decisions[i]!, cancellationToken);
+        }
+
+        return results;
+    }
+
+    /// <summary>Compares (kind, action) pairs ordinally, so grouping matches the dictionary lookups.</summary>
+    private sealed class StringTupleComparer : IEqualityComparer<(string, string)>
+    {
+        internal static readonly StringTupleComparer Instance = new();
+
+        public bool Equals((string, string) x, (string, string) y) =>
+            string.Equals(x.Item1, y.Item1, StringComparison.Ordinal)
+            && string.Equals(x.Item2, y.Item2, StringComparison.Ordinal);
+
+        public int GetHashCode((string, string) obj) =>
+            HashCode.Combine(
+                StringComparer.Ordinal.GetHashCode(obj.Item1),
+                StringComparer.Ordinal.GetHashCode(obj.Item2));
+    }
+
+    private async Task<AuthDecision> ComputeDecisionAsync(
+        ClaimsPrincipal actor,
+        string action,
+        EntityRef target,
+        CancellationToken cancellationToken)
+    {
+        // The rules up to the per-entity database question live in
+        // PrepareDecisionAsync, shared with the batched path so the two cannot
+        // disagree about enforcement mode, super admin or kind-level checks.
+        var (decided, handler) = await PrepareDecisionAsync(actor, action, target, cancellationToken);
+        if (decided is not null) return decided;
+
+        var allowed = await handler!.ExistsAndAuthorizedAsync(
             this, actor, action, target.Id, cancellationToken);
 
         return allowed

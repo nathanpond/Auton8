@@ -40,19 +40,16 @@ public static class UserEndpoints
         // any project member, not just admins with User.View. Intentionally
         // not audited — called on every editor mount, would flood the log.
         group.MapGet("/directory", async (
-            ILocalUserStore store,
+            AutoNate.Web.Services.Auth.UserDirectorySnapshotCache directory,
             CancellationToken cancellationToken) =>
         {
-            var users = await store.ListAsync(cancellationToken);
-            return Results.Ok(users.Select(u => u with
-            {
-                Email = string.Empty,
-                IdpKey = string.Empty,
-                LastLoginDate = null,
-                FailedLoginAttempts = 0,
-                IsLocked = false,
-                LockedAtUtc = null
-            }));
+            // Served from a singleton snapshot (#9). This read every row of
+            // local_users on every editor mount, assignee picker and comment
+            // render — O(users) per call, across 16 SPA call sites.
+            //
+            // The admin-only fields are blanked inside the snapshot rather than
+            // here, so a future caller that forgets cannot leak them.
+            return Results.Ok(await directory.GetAsync(cancellationToken));
         }).OpenToAuthenticated(
             "Authenticated-only minimal user directory used by collab UI " +
             "(Yjs cursor names, comment authors, member pickers); admin-" +

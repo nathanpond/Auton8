@@ -238,22 +238,26 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
 
-  // Count probe — only fires in auto mode, decides client vs. server based on
-  // total. Stale time keeps it from re-running on every interaction.
-  const probe = useQuery({
-    queryKey: [...queryKey, "count-probe"],
-    queryFn: () => loadPage!({ page: 0, pageSize: 0, search: "", sort: null, filter: null }),
-    enabled: mode === "auto" && !!loadPage,
-    staleTime: 30_000
-  });
+  // Auto mode used to fire a dedicated `pageSize: 0` count probe alongside the
+  // real request, doubling server work on every mount of the six auto tables.
+  // On endpoints that do their work before slicing — /api/executions/page most
+  // of all — the probe paid the full cost and returned zero rows (#10).
+  //
+  // There is no probe now. The first real page already carries `totalCount`,
+  // so the mode is read from the response the table needed anyway. Server-mode
+  // tables drop from two requests to one; client-mode tables trade an expensive
+  // probe for a cheap first page they discard.
+  //
+  // The alternative in the issue — a `?countOnly=true` branch on each paged
+  // endpoint — would have made the second request cheap instead of removing
+  // it, at the cost of a new contract on six endpoints.
+  const [autoResolved, setAutoResolved] = useState<"client" | "server" | null>(null);
 
   const effectiveMode: "client" | "server" | "loading" = useMemo(() => {
     if (mode === "client") return "client";
     if (mode === "server") return "server";
-    if (probe.data) return probe.data.totalCount <= autoThreshold ? "client" : "server";
-    if (probe.isError && loadAll) return "client";
-    return "loading";
-  }, [mode, autoThreshold, probe.data, probe.isError, loadAll]);
+    return autoResolved ?? "loading";
+  }, [mode, autoResolved]);
 
   // Client mode: apply search instantly since filtering is in-memory and free.
   // Server mode: debounce 400ms so typing doesn't refetch on every keystroke.
@@ -304,10 +308,30 @@ export function DataTable<T>(props: DataTableProps<T>) {
           : null,
         filter
       }),
-    enabled: effectiveMode === "server" && !!loadPage,
+    // Also enabled while auto mode is unresolved: its response is what
+    // resolves it. Without this the table would wait for a probe that no
+    // longer exists.
+    enabled: (effectiveMode === "server" || effectiveMode === "loading") && !!loadPage,
     placeholderData: (prev) => prev,
     refetchInterval
   });
+
+  // Resolve auto mode from the first page's totalCount, once.
+  //
+  // Latched rather than recomputed: re-deriving on every response would flip a
+  // table into client mode the moment a filter narrowed the result below the
+  // threshold, refetching everything mid-interaction. The decision is about the
+  // dataset, not about the current view of it.
+  useEffect(() => {
+    if (mode !== "auto" || autoResolved !== null) return;
+    if (serverQuery.data) {
+      setAutoResolved(serverQuery.data.totalCount <= autoThreshold ? "client" : "server");
+    } else if (serverQuery.isError && loadAll) {
+      // Same fallback the probe had: if paging is broken but loadAll works,
+      // a client-side table beats an empty one.
+      setAutoResolved("client");
+    }
+  }, [mode, autoResolved, serverQuery.data, serverQuery.isError, autoThreshold, loadAll]);
 
   const allRows: T[] = clientQuery.data ?? [];
 
@@ -404,10 +428,12 @@ export function DataTable<T>(props: DataTableProps<T>) {
     return m;
   }, [effectiveMode, filters, allRows]);
 
+  // Server mode's total comes from the page response itself, which is where
+  // the probe used to read it from anyway.
   const allCount =
     effectiveMode === "client"
       ? allRows.length
-      : (probe.data?.totalCount ?? totalRecords);
+      : (serverQuery.data?.totalCount ?? totalRecords);
 
   // Stabilize callbacks passed to mantine-datatable so its internal effects
   // (some of which iterate ref arrays) don't refire on every parent render
