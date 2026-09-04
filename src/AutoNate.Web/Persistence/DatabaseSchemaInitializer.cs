@@ -3992,6 +3992,62 @@ internal static class DatabaseSchemaInitializer
             ADD COLUMN IF NOT EXISTS last_successful_sign_in_at_utc TIMESTAMPTZ NULL;
         """;
 
+    // #92's provenance columns, deliberately in a step of their own.
+    //
+    // PostgreSQL parses EVERY statement of a multi-statement command before it
+    // executes any of them, so `CREATE INDEX ... (source)` in the same batch as
+    // the `ALTER TABLE ... ADD COLUMN source` fails at parse time with
+    // "column \"source\" does not exist" — on an existing database only. A
+    // fresh one bootstraps from BaseSchema.sql, which already declares the
+    // columns, so the ALTER is a no-op and the index resolves; the whole test
+    // suite is fresh databases, and this failed on the first real dev database
+    // it met.
+    //
+    // Splitting the ALTERs into their own command is what makes the column
+    // exist by the time the next command is parsed.
+    private const string GroupMemberProvenanceColumnsSql =
+        """
+        -- Provenance on the membership itself. Without it reconciliation cannot
+        -- tell what it is allowed to remove, and the first claim to disappear
+        -- would take an administrator's manual grant with it.
+        --
+        -- The default is 'manual', which is not a convenience — it is true.
+        -- Every row in this table before this migration was put there by a
+        -- person, and none of them may be revoked by a claim going missing.
+        ALTER TABLE group_members
+            ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+
+        -- Which provider owns an idp-derived row. Two identity providers
+        -- configured against one Auton8 must not be able to revoke each other's
+        -- grants, and without this column a sign-in through either would
+        -- reconcile away the other's memberships.
+        ALTER TABLE group_members
+            ADD COLUMN IF NOT EXISTS source_provider_id UUID NULL;
+        """;
+
+    // Separate command, so the columns above already exist when this is parsed.
+    private const string GroupMemberProvenanceConstraintsSql =
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'ck_group_members_source'
+            ) THEN
+                ALTER TABLE group_members
+                    ADD CONSTRAINT ck_group_members_source
+                    CHECK (
+                        (source = 'manual' AND source_provider_id IS NULL)
+                        OR (source = 'idp' AND source_provider_id IS NOT NULL)
+                    );
+            END IF;
+        END $$;
+
+        -- Reconciliation asks "which of this user's memberships does this
+        -- provider own?" on every federated sign-in.
+        CREATE INDEX IF NOT EXISTS ix_group_members_source
+            ON group_members (user_id, source, source_provider_id);
+        """;
+
     private const string IdentityProviderGroupMappingsSchemaSql =
         """
         -- #92. An administrator says which IdP claim value corresponds to which
@@ -4027,41 +4083,6 @@ internal static class DatabaseSchemaInitializer
         CREATE INDEX IF NOT EXISTS ix_idp_group_mappings_provider
             ON identity_provider_group_mappings (provider_id);
 
-        -- Provenance on the membership itself. Without it reconciliation cannot
-        -- tell what it is allowed to remove, and the first claim to disappear
-        -- would take an administrator's manual grant with it.
-        --
-        -- The default is 'manual', which is not a convenience — it is true.
-        -- Every row in this table before this migration was put there by a
-        -- person, and none of them may be revoked by a claim going missing.
-        ALTER TABLE group_members
-            ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
-
-        -- Which provider owns an idp-derived row. Two identity providers
-        -- configured against one Auton8 must not be able to revoke each other's
-        -- grants, and without this column a sign-in through either would
-        -- reconcile away the other's memberships.
-        ALTER TABLE group_members
-            ADD COLUMN IF NOT EXISTS source_provider_id UUID NULL;
-
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'ck_group_members_source'
-            ) THEN
-                ALTER TABLE group_members
-                    ADD CONSTRAINT ck_group_members_source
-                    CHECK (
-                        (source = 'manual' AND source_provider_id IS NULL)
-                        OR (source = 'idp' AND source_provider_id IS NOT NULL)
-                    );
-            END IF;
-        END $$;
-
-        -- Reconciliation asks "which of this user's memberships does this
-        -- provider own?" on every federated sign-in.
-        CREATE INDEX IF NOT EXISTS ix_group_members_source
-            ON group_members (user_id, source, source_provider_id);
         """;
 
     private const string IdentityProvidersSchemaSql =
@@ -4407,6 +4428,8 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(CodeTransformersSchemaSql), CodeTransformersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersSchemaSql), IdentityProvidersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersMenuSeedSql), IdentityProvidersMenuSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(GroupMemberProvenanceColumnsSql), GroupMemberProvenanceColumnsSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(GroupMemberProvenanceConstraintsSql), GroupMemberProvenanceConstraintsSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProviderGroupMappingsSchemaSql), IdentityProviderGroupMappingsSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(SignInMethodsSchemaSql), SignInMethodsSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);

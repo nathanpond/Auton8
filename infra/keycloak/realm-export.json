@@ -1,0 +1,188 @@
+{
+  "realm": "auton8",
+  "enabled": true,
+  "displayName": "Auton8 (local development)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "groups": [
+    {
+      "name": "engineering",
+      "path": "/engineering",
+      "attributes": {}
+    },
+    {
+      "name": "sales",
+      "path": "/sales",
+      "attributes": {}
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "alice@auton8.local",
+      "firstName": "Alice",
+      "lastName": "Engineer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/engineering"
+      ],
+      "realmRoles": [
+        "default-roles-auton8"
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "bob@auton8.local",
+      "firstName": "Bob",
+      "lastName": "Seller",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/sales",
+        "/engineering"
+      ],
+      "realmRoles": [
+        "default-roles-auton8"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "auton8-oidc",
+      "name": "Auton8 (OIDC)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "auton8-local-dev-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5108/api/auth/oidc/*",
+        "http://127.0.0.1:5108/api/auth/oidc/*",
+        "http://keycloak:5108/api/auth/oidc/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5108",
+        "http://127.0.0.1:5108"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:5108/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "http://localhost:5108/api/auth/saml/keycloak/metadata",
+      "name": "Auton8 (SAML)",
+      "enabled": true,
+      "protocol": "saml",
+      "publicClient": true,
+      "frontchannelLogout": true,
+      "redirectUris": [
+        "http://localhost:5108/api/auth/saml/*",
+        "http://127.0.0.1:5108/api/auth/saml/*"
+      ],
+      "adminUrl": "http://localhost:5108/api/auth/saml/keycloak/acs",
+      "attributes": {
+        "saml.assertion.signature": "true",
+        "saml.server.signature": "false",
+        "saml.client.signature": "false",
+        "saml.encrypt": "false",
+        "saml.force.post.binding": "true",
+        "saml_name_id_format": "persistent",
+        "saml_assertion_consumer_url_post": "http://localhost:5108/api/auth/saml/keycloak/acs",
+        "saml_single_logout_service_url_post": "http://localhost:5108/api/auth/saml/keycloak/acs",
+        "saml.signature.algorithm": "RSA_SHA256"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "saml",
+          "protocolMapper": "saml-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "attribute.name": "groups",
+            "attribute.nameformat": "Basic",
+            "single": "false"
+          }
+        },
+        {
+          "name": "email",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "friendly.name": "email",
+            "attribute.name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            "attribute.nameformat": "Basic"
+          }
+        },
+        {
+          "name": "given name",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "firstName",
+            "friendly.name": "givenName",
+            "attribute.name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            "attribute.nameformat": "Basic"
+          }
+        },
+        {
+          "name": "family name",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "lastName",
+            "friendly.name": "surname",
+            "attribute.name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            "attribute.nameformat": "Basic"
+          }
+        }
+      ]
+    }
+  ]
+}

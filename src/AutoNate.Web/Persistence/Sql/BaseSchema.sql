@@ -433,10 +433,18 @@ CREATE TABLE IF NOT EXISTS group_members (
     -- identity providers configured against one Auton8 cannot revoke each
     -- other's grants.
     --
-    -- Repeated here as well as in IdentityProviderGroupMappingsSchemaSql, which
-    -- adds them to databases that predate this: a fresh install and a migrated
-    -- one must end up with the same table, and the migration's
+    -- Repeated here as well as in GroupMemberProvenanceColumnsSql, which adds
+    -- them to databases that predate this: a fresh install and a migrated one
+    -- must end up with the same table, and the migration's
     -- ADD COLUMN IF NOT EXISTS makes it a no-op here.
+    --
+    -- NOTE: this whole file RE-RUNS ON EVERY BOOT — it mentions auth_seed_state,
+    -- which ApplyStepAsync reads as "owns its own re-run gate" — so every
+    -- statement in it must be safe against a database that predates it. That is
+    -- why the columns live inside CREATE TABLE IF NOT EXISTS (skipped on an
+    -- existing table, where the migration adds them instead) and why the index
+    -- on them does NOT live here: a standalone CREATE INDEX naming `source`
+    -- fails at parse time on an old database, on every start, forever.
     source TEXT NOT NULL DEFAULT 'manual',
     source_provider_id UUID NULL,
 
@@ -447,11 +455,6 @@ CREATE TABLE IF NOT EXISTS group_members (
         OR (source = 'idp' AND source_provider_id IS NOT NULL)
     )
 );
-
--- Reconciliation asks "which of this user's memberships does this provider
--- own?" on every federated sign-in.
-CREATE INDEX IF NOT EXISTS ix_group_members_source
-    ON group_members (user_id, source, source_provider_id);
 
 CREATE INDEX IF NOT EXISTS ix_group_members_user
     ON group_members (user_id);
