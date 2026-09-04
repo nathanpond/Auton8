@@ -38,6 +38,7 @@ PostgreSQL, Flowable, Redis, or the Dapr control plane.
 - `hocuspocus` on `ws://localhost:1234` — Yjs collaboration sidecar (`services/hocuspocus`)
 - `executor` — code-transformer / analyzer sandbox (`services/executor`); no ports, it serves `pipeline-code-run.>` over NATS and reports health via a NATS probe
 - `dapr-dashboard` on `http://localhost:8081` when you start the `dashboard` profile, reading components from `infra/mounts/dapr-dashboard/components`
+- `keycloak` on `http://keycloak:8082` when you start the `keycloak` profile — a real OIDC and SAML identity provider for the federated sign-in work. See [Keycloak](#keycloak-a-real-identity-provider) below; the hostname is not a typo.
 
 ## Daily workflow
 
@@ -148,6 +149,133 @@ together with `<flowable.version>` in `flowable-extension/pom.xml`, or a compile
 extension ends up on an engine it was not built for.
 
 Planning and issue workflow are managed with n8SDLC — GitHub Issues and milestones are the plan, `.n8/` holds config, the decision log and harvested audit checklists.
+
+## Keycloak: a real identity provider
+
+Federated sign-in (OIDC and SAML) is developed against a real Keycloak rather
+than a stub, because a stub written from the same reading of the specifications
+that produced the code agrees with the code by construction. It is a
+**development and testing dependency, not a product component** — Auton8
+federates to whatever identity provider an organisation already has, and does
+not ship one.
+
+It runs under its own compose profile, off by default, so nobody pays for a JVM
+they are not using.
+
+### One-time setup
+
+**1.** Set admin credentials in `.env`. There is deliberately no default that
+works:
+
+```bash
+echo "AUTONATE_KEYCLOAK_ADMIN_USER=kcadmin" >> .env
+echo "AUTONATE_KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 18)" >> .env
+```
+
+**2.** Add one line to `/etc/hosts`:
+
+```bash
+echo '127.0.0.1 keycloak' | sudo tee -a /etc/hosts
+```
+
+`make keycloak-up` checks both and refuses with instructions if either is
+missing, so you do not have to remember this.
+
+### Why `keycloak:8082` and not `localhost`
+
+**This is the detail that eats an afternoon if it is wrong.** OIDC discovery
+pins an *issuer*, and every library validates tokens against it. Keycloak's
+issuer must therefore match the URL the browser is redirected to **and** the URL
+Auton8 validates against — and those sit in three different network positions:
+
+| Who | How they reach Keycloak |
+|---|---|
+| The browser | the published port on the host |
+| Auton8 as a host process (`make app`) | the published port on the host |
+| Auton8 as a container (`make app-container`) | the compose network |
+
+`localhost:8082` is correct for the first two and wrong for the third: inside
+the app's own container, `localhost` is the app. Any URL that differs by network
+position produces an issuer mismatch, which surfaces deep inside an OIDC library
+rather than as "cannot connect".
+
+So there is **one** URL, `http://keycloak:8082`, made to resolve everywhere:
+
+- on the compose network, `keycloak` is the service's own name;
+- on the host, the `/etc/hosts` line above points it at the published port.
+
+The port is the same **inside and outside** the container, both read from
+`AUTONATE_KEYCLOAK_PORT`. If they differed, the issuer would differ by network
+position again — which is why they are one variable and not two. The port still
+binds to `127.0.0.1` like every other service, so this arrangement needs no
+exception to project invariant 5.
+
+### Running it
+
+```bash
+make keycloak-up      # start it (checks the two preconditions first)
+make keycloak-logs    # follow its log
+make keycloak-down    # stop just Keycloak
+```
+
+Admin console: <http://keycloak:8082/admin/>, with the credentials from `.env`.
+
+### What is seeded
+
+From `infra/keycloak/realm-export.json`, imported at every start. There is
+**no data volume on purpose**: each start re-imports from the file, so the realm
+cannot drift away from its checked-in export. A realm that has drifted is worse
+than no export, because the next person trusts the file.
+
+| | |
+|---|---|
+| Realm | `auton8` |
+| OIDC client | `auton8-oidc` — public client, PKCE (S256) required |
+| SAML client | `http://localhost:5108/api/auth/saml/keycloak/metadata` (the SP entity ID Auton8 publishes) |
+| Users | `alice` / `alice` (in `engineering`), `bob` / `bob` (in `sales` and `engineering`) |
+| Groups | `engineering`, `sales` |
+
+Group membership is exposed **both** as an OIDC `groups` claim and as a SAML
+`groups` attribute, because claim mapping has to work identically through both
+and a realm that only did one would leave half of it untestable.
+
+The user passwords and the SAML client are fixture values and are committed on
+purpose — they exist only inside a loopback-bound container that is rebuilt from
+this file on every start, and a developer has to be able to type them into a
+login form. The **admin** password is the one that is not committed: it is the
+credential that grants control of the identity provider, and it comes from
+`.env` with no working fallback. The OIDC client needs no secret at all, because
+it is a public client using PKCE.
+
+### Configuring Auton8 against it
+
+In **Site Configuration → Identity Providers**, add a provider:
+
+**OIDC**
+
+| Field | Value |
+|---|---|
+| Kind | OIDC |
+| Slug | `keycloak` |
+| Authority | `http://keycloak:8082/realms/auton8` |
+| Client ID | `auton8-oidc` |
+| Secret | *leave blank* — it is a public client |
+
+**SAML**
+
+| Field | Value |
+|---|---|
+| Kind | SAML 2.0 |
+| Slug | `keycloak` |
+| IdP entity ID | `http://keycloak:8082/realms/auton8` |
+| Metadata URL | `http://keycloak:8082/realms/auton8/protocol/saml/descriptor` |
+
+The SAML client in the realm is registered under Auton8's own SP entity ID,
+which is the metadata URL Auton8 publishes for that slug —
+`http://localhost:5108/api/auth/saml/keycloak/metadata`. If you run Auton8 on a
+different port, that entity ID changes and the realm export needs the same edit.
+
+Enable the provider, sign out, and the login page offers it.
 
 ## First administrator
 

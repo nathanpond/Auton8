@@ -66,6 +66,42 @@ infra-up-dashboard: infra-prepare
 	./infra/preflight.sh --profile dashboard
 	$(COMPOSE) --profile dashboard up -d
 
+# ── The `keycloak` profile: a real OIDC + SAML identity provider ────────────
+#
+# Off by default. Two things have to be true before it is useful, and both fail
+# late and confusingly if left to chance, so they are checked here:
+#
+#   1. Admin credentials exist. There is no working default (invariant 1 holds
+#      for development dependencies too), and compose cannot enforce it without
+#      breaking `make infra-up` for everyone who never touches Keycloak — a
+#      `:?` guard is evaluated at parse time, not at profile start.
+#
+#   2. `keycloak` resolves to 127.0.0.1 on this machine. The issuer URL is
+#      http://keycloak:PORT so that it is identical from the browser, from a
+#      host-run Auton8, and from a containerised one; without the hosts entry
+#      the browser cannot reach it, and the symptom is an issuer mismatch deep
+#      inside an OIDC library rather than a name that does not resolve.
+KEYCLOAK_PORT ?= $(shell sed -n 's/^AUTONATE_KEYCLOAK_PORT=//p' .env 2>/dev/null | tail -1)
+KEYCLOAK_PORT := $(if $(KEYCLOAK_PORT),$(KEYCLOAK_PORT),8082)
+
+keycloak-check:
+	@sh infra/keycloak/check.sh
+
+keycloak-up: infra-prepare keycloak-check
+	./infra/preflight.sh --profile keycloak
+	$(COMPOSE) --profile keycloak up -d keycloak
+	@echo ""
+	@echo "Keycloak is starting. Admin console: http://keycloak:$(KEYCLOAK_PORT)/admin/"
+	@echo "Realm 'auton8' — OIDC discovery:"
+	@echo "  http://keycloak:$(KEYCLOAK_PORT)/realms/auton8/.well-known/openid-configuration"
+	@echo "See docs/DEVELOPMENT.md for what to put in Auton8's provider configuration."
+
+keycloak-down:
+	$(COMPOSE) --profile keycloak rm -sf keycloak
+
+keycloak-logs:
+	$(COMPOSE) --profile keycloak logs -f keycloak
+
 infra-down:
 	$(COMPOSE) down
 

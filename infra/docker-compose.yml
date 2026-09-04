@@ -370,6 +370,78 @@ services:
     volumes:
       - ./mounts/autonate-web-dapr/components:/components:ro
 
+  # A real identity provider for developing and demonstrating #90 / #93 / #92
+  # against software that actually implements the specifications, rather than
+  # against a stub written from the same reading of them that produced the code.
+  #
+  # A development and testing dependency, not a product component: Auton8
+  # federates to whatever IdP an organisation already has and does not ship one.
+  #
+  # ── The issuer URL, which is the whole difficulty ─────────────────────────
+  #
+  # OIDC discovery pins an issuer, and Keycloak's must match the URL the browser
+  # is redirected to AND the URL Auton8 validates against. Those sit in three
+  # different network positions: the browser and a host-run app reach Keycloak
+  # through a published port; a containerised app under the `app` profile
+  # reaches it over the compose network. `localhost` satisfies the first two and
+  # is wrong for the third.
+  #
+  # So there is one URL — http://keycloak:8082 — made to resolve everywhere:
+  #
+  #   * over the compose network, `keycloak` is this service's name, which
+  #     covers the containerised app for nothing;
+  #   * on the host, one line in /etc/hosts (`127.0.0.1 keycloak`) points the
+  #     browser and a host-run app at the published port. `make keycloak-up`
+  #     checks for it and prints the line to add.
+  #
+  # The port number is deliberately the SAME inside and outside the container,
+  # both read from one variable. If they differed, the issuer would differ by
+  # network position again — which is the failure this arrangement exists to
+  # prevent, and it would be one careless edit away.
+  keycloak:
+    image: quay.io/keycloak/keycloak@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007  # 26.4
+    container_name: autonate-keycloak
+    profiles:
+      - keycloak
+    command:
+      - start-dev
+      - --import-realm
+    environment:
+      # No default that works — invariant 1 holds for development dependencies
+      # too, and a committed admin password is the defect this project already
+      # shipped once. Empty rather than compose's `:?` guard, deliberately:
+      # `:?` is evaluated when the file is *parsed*, not when the profile is
+      # started, so it would break `make infra-up` for everyone who has never
+      # touched Keycloak. The guard therefore lives in `make keycloak-up`,
+      # where the error message can say what to do; Keycloak itself also
+      # refuses to start with no admin password, so there is no working default
+      # by either route.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${AUTONATE_KEYCLOAK_ADMIN_USER:-}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${AUTONATE_KEYCLOAK_ADMIN_PASSWORD:-}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: ${AUTONATE_KEYCLOAK_PORT:-8082}
+      # The full issuer, so Keycloak advertises the same URL it is reached on.
+      KC_HOSTNAME: http://keycloak:${AUTONATE_KEYCLOAK_PORT:-8082}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      # Host port equals container port, both from one variable — see above.
+      - "127.0.0.1:${AUTONATE_KEYCLOAK_PORT:-8082}:${AUTONATE_KEYCLOAK_PORT:-8082}"
+    volumes:
+      # Read-only, and there is deliberately NO data volume. Every start
+      # re-imports from this file, so the realm cannot drift away from its
+      # checked-in export — which a persisted database would quietly allow, and
+      # the next person would trust the file anyway.
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      # The distroless image has no curl or wget; Keycloak ships a JVM, and
+      # `start-dev` opens the management port on 9000 with /health/ready.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
   dapr-dashboard:
     image: daprio/dashboard@sha256:4be696707bd1349b49875f8e6da0d27dad742834483740d5a7897a73abeaf83d  # daprio/dashboard:0.15.0
     container_name: autonate-dapr-dashboard

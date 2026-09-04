@@ -68,8 +68,7 @@
       "name": "Auton8 (OIDC)",
       "enabled": true,
       "protocol": "openid-connect",
-      "publicClient": false,
-      "secret": "auton8-local-dev-secret",
+      "publicClient": true,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
@@ -84,7 +83,8 @@
         "http://127.0.0.1:5108"
       ],
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:5108/*"
+        "post.logout.redirect.uris": "http://localhost:5108/*",
+        "pkce.code.challenge.method": "S256"
       },
       "defaultClientScopes": [
         "web-origins",
