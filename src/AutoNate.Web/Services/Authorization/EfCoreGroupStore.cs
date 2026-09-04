@@ -1,3 +1,4 @@
+using AutoNate.Web.Models;
 using System.Security.Claims;
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.Evaluator;
@@ -195,11 +196,27 @@ public sealed class EfCoreGroupStore(
             throw new GroupNotFoundException(groupId);
         }
 
-        var alreadyMember = await db.GroupMembers
-            .AnyAsync(m => m.GroupId == groupId && m.UserId == userId, cancellationToken);
-        if (alreadyMember)
+        var existing = await db.GroupMembers
+            .SingleOrDefaultAsync(m => m.GroupId == groupId && m.UserId == userId, cancellationToken);
+
+        if (existing is not null)
         {
-            return false;
+            // Already theirs by hand: genuinely nothing to do.
+            if (existing.Source == GroupMembershipSources.Manual) return false;
+
+            // Held from an identity provider's claim, and an administrator has
+            // now granted it deliberately. Take ownership of the row rather than
+            // reporting a conflict (#92): otherwise the administrator sees the
+            // membership, tries to make it permanent, is told it already exists,
+            // and watches it disappear at the user's next sign-in — because the
+            // row was never theirs and reconciliation was always free to remove
+            // it. Reporting success is accurate; something did change.
+            existing.Source = GroupMembershipSources.Manual;
+            existing.SourceProviderId = null;
+            existing.AddedAtUtc = DateTime.UtcNow;
+            existing.AddedBy = actorId;
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
         }
 
         db.GroupMembers.Add(new GroupMemberEntity
@@ -207,7 +224,8 @@ public sealed class EfCoreGroupStore(
             GroupId = groupId,
             UserId = userId,
             AddedAtUtc = DateTime.UtcNow,
-            AddedBy = actorId
+            AddedBy = actorId,
+            Source = GroupMembershipSources.Manual,
         });
         await db.SaveChangesAsync(cancellationToken);
         return true;

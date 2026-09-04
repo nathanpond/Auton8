@@ -1024,3 +1024,69 @@ Carry it into `/n8-verify` as a manual step.
   SSRF surface) and caches a successful parse for an hour, so an IdP's web server
   is not in the sign-in request path. Failures are not cached: that would turn a
   momentary outage into an hour of refused sign-ins.
+
+- **Discretion call (#92):** Provenance is two columns on `group_members` —
+  `source` (`manual` | `idp`) and `source_provider_id` — rather than a side
+  table or a synthetic group per provider.
+  **Why:** The smallest change that satisfies the stated constraint, which is
+  only that reconciliation can tell what it may remove. A synthetic group per
+  provider would double the group list an administrator reads; a side table
+  would let the two disagree about who is a member. The existing rows default
+  to `manual`, which is not a convenience but a fact — everything in that table
+  before this story was put there by a person, and none of it may be revoked by
+  a claim going missing. `source_provider_id` exists so two providers configured
+  against one Auton8 cannot revoke each other's grants; without it, signing in
+  through either would reconcile away the other's memberships and it would look
+  like a random loss of access.
+
+- **Discretion call (#92):** Exact claim-value matching, **no patterns.** The
+  story already calls a pattern a footgun on an authorization path and that is
+  right: a wildcard is one typo away from granting every group in the install.
+  Matching is `StringComparison.Ordinal` rather than culture-aware, so an
+  install does not decide who gets in differently depending on the server's
+  culture.
+
+- **Discretion call (#92):** The preview takes pasted claims JSON rather than a
+  claim-value picker. A picker can only offer values Auton8 has already seen,
+  which is exactly backwards — the mapping most in need of checking is the one
+  for a group nobody has signed in with yet. It accepts both shapes a provider
+  might produce (a bare string, or a list), so a real token payload can be
+  pasted without reshaping.
+
+- **Decision (#92):** The preview and the sign-in path share one pure
+  `ClaimGroupReconciler.ComputeDesiredGroups`.
+  **Why:** The test plan asks that the preview "cannot drift into being
+  decorative". A second copy of the rule can drift; there is no second copy. A
+  preview an administrator trusts and that can be wrong is worse than no preview
+  at all.
+
+- **Behaviour change (#92, Rule 2):** `IGroupStore.AddMemberAsync` now
+  **upgrades** an idp-derived membership to `manual` and reports success, where
+  it previously reported "already a member" and changed nothing.
+  **Why:** Otherwise an administrator sees the membership, tries to make it
+  permanent, is told it already exists, and watches it disappear at the user's
+  next sign-in — because the row was never theirs and reconciliation was always
+  free to remove it. Re-adding a genuinely manual member still reports no
+  change, so the 409 path that callers rely on is unaffected.
+
+- **Decision (#92):** Reconciliation failure does not fail the sign-in. The user
+  authenticated correctly; refusing them entry because a membership row could
+  not be written would turn a database hiccup into an outage, and the
+  reconciliation is idempotent, so their next sign-in fixes it.
+
+- **Decision (#92):** An archived group is never granted afresh, though an
+  existing membership of one is left alone. Archiving is a decision to stop
+  using a group, and handing out fresh membership on every sign-in would quietly
+  undo it; unwinding the memberships that predate the archive is an
+  administrator's call, not reconciliation's.
+
+- **Trap worth recording (#92):** a column added to a table that lives in
+  `BaseSchema.sql` has to be added **twice** — once in the base schema, so a
+  fresh database has it, and once as `ADD COLUMN IF NOT EXISTS` in a migration
+  step, so an existing one gets it. The migration alone is not enough:
+  `PostgresTestDatabase` bootstraps from the base schema only, so five
+  group-membership tests failed with `column g.source does not exist` while
+  every test going through `AutoNateWebApplicationFactory` passed. The
+  duplication is not redundancy — it is what keeps a fresh install and a
+  migrated one the same table, and each copy carries a comment pointing at the
+  other.

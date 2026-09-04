@@ -136,3 +136,89 @@ export async function listEnabledProviders(
   const res = await api.get<EnabledProviderSummary[]>("/api/auth/providers", { signal });
   return res.data;
 }
+
+// ---------- Claim → group mappings (#92) ----------
+
+/**
+ * One edge: "this claim value, from this provider, grants this group".
+ *
+ * An unmapped IdP group grants nothing. The mapping is the whole gate — a group
+ * created at the identity provider has no effect in Auton8 until someone here
+ * decides it should.
+ */
+export type GroupMapping = {
+  id: string;
+  providerId: string;
+  claimType: string;
+  claimValue: string;
+  groupId: string;
+  groupName: string;
+  groupIsArchived: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+};
+
+export type UpsertGroupMappingRequest = {
+  claimType: string;
+  claimValue: string;
+  groupId: string;
+};
+
+/** A group the previewed claims would grant. */
+export type PreviewedGroup = {
+  id: string;
+  name: string;
+  isArchived: boolean;
+};
+
+export async function listGroupMappings(
+  providerId: string,
+  signal?: AbortSignal
+): Promise<GroupMapping[]> {
+  const res = await api.get<GroupMapping[]>(`${BASE}/${providerId}/group-mappings`, { signal });
+  return res.data;
+}
+
+export async function createGroupMapping(
+  providerId: string,
+  request: UpsertGroupMappingRequest
+): Promise<GroupMapping> {
+  const res = await api.post<GroupMapping>(`${BASE}/${providerId}/group-mappings`, request);
+  return res.data;
+}
+
+export async function updateGroupMapping(
+  providerId: string,
+  mappingId: string,
+  request: UpsertGroupMappingRequest
+): Promise<GroupMapping> {
+  const res = await api.put<GroupMapping>(
+    `${BASE}/${providerId}/group-mappings/${mappingId}`,
+    request
+  );
+  return res.data;
+}
+
+export async function deleteGroupMapping(
+  providerId: string,
+  mappingId: string
+): Promise<void> {
+  await api.delete(`${BASE}/${providerId}/group-mappings/${mappingId}`);
+}
+
+/**
+ * What a claim set would grant, without asking anyone to sign in.
+ *
+ * Answered by the same code the sign-in path uses, so this cannot drift into
+ * being decorative — there is nothing for it to drift from.
+ */
+export async function previewGroupMappings(
+  providerId: string,
+  claims: Record<string, string[]>
+): Promise<PreviewedGroup[]> {
+  const res = await api.post<PreviewedGroup[]>(
+    `${BASE}/${providerId}/group-mappings/preview`,
+    { claims }
+  );
+  return res.data;
+}

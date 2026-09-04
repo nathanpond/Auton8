@@ -41,7 +41,16 @@ public sealed record SamlSignInResult(
     bool AccountCreated,
     IReadOnlyDictionary<string, string[]> Attributes,
     SamlFailureReason Reason,
-    string? Diagnostic);
+    string? Diagnostic)
+{
+    /// <summary>The provider this sign-in went through, once one was found.</summary>
+    /// <remarks>
+    /// Carried so #92's reconciliation is scoped to the provider the user
+    /// actually signed in through: two providers configured against one Auton8
+    /// must not be able to revoke each other's grants.
+    /// </remarks>
+    public Guid ProviderId { get; init; }
+}
 
 public interface ISamlSignInService
 {
@@ -329,7 +338,10 @@ public sealed class SamlSignInService : ISamlSignInService
             .ToDictionary(g => g.Key, g => g.Select(c => c.Value).ToArray(), StringComparer.Ordinal);
 
         var (user, created) = await MapToLocalUserAsync(provider, subject!, attributes, ct);
-        return new SamlSignInResult(true, user, created, attributes, SamlFailureReason.None, null);
+        return new SamlSignInResult(true, user, created, attributes, SamlFailureReason.None, null)
+        {
+            ProviderId = provider.Id,
+        };
     }
 
     /// <summary>

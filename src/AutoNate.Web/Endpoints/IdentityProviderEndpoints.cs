@@ -1,5 +1,6 @@
 using AutoNate.Web.Authorization;
 using AutoNate.Web.Authorization.EndpointFilters;
+using AutoNate.Web.Services.Authorization;
 using AutoNate.Web.Services.Identity;
 
 namespace AutoNate.Web.Endpoints;
@@ -110,8 +111,92 @@ public static class IdentityProviderEndpoints
             return Results.Ok(await tester.TestAsync(row, ct));
         }).RequireKindPermission(EntityKinds.IdentityProvider, Actions.Edit);
 
+        // ── Claim → group mappings (#92) ────────────────────────────────
+
+        group.MapGet("/{id:guid}/group-mappings", async (
+            Guid id, IIdentityProviderGroupMappingStore store, CancellationToken ct) =>
+            Results.Ok(await store.ListAsync(id, ct)))
+            .RequireKindPermission(EntityKinds.IdentityProvider, Actions.View);
+
+        group.MapPost("/{id:guid}/group-mappings", async (
+            Guid id,
+            UpsertGroupMappingRequest request,
+            HttpContext http,
+            IIdentityProviderGroupMappingStore store,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+
+            try
+            {
+                return Results.Ok(await store.CreateAsync(id, request, actorId, ct));
+            }
+            catch (IdentityProviderValidationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireKindPermission(EntityKinds.IdentityProvider, Actions.Edit);
+
+        group.MapPut("/{id:guid}/group-mappings/{mappingId:guid}", async (
+            Guid id,
+            Guid mappingId,
+            UpsertGroupMappingRequest request,
+            HttpContext http,
+            IIdentityProviderGroupMappingStore store,
+            CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest();
+            var actorId = http.GetActorId();
+            if (actorId == Guid.Empty) return Results.Unauthorized();
+
+            try
+            {
+                var updated = await store.UpdateAsync(id, mappingId, request, actorId, ct);
+                return updated is null ? Results.NotFound() : Results.Ok(updated);
+            }
+            catch (IdentityProviderValidationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireKindPermission(EntityKinds.IdentityProvider, Actions.Edit);
+
+        group.MapDelete("/{id:guid}/group-mappings/{mappingId:guid}", async (
+            Guid id, Guid mappingId, IIdentityProviderGroupMappingStore store, CancellationToken ct) =>
+            await store.DeleteAsync(id, mappingId, ct) ? Results.NoContent() : Results.NotFound())
+            .RequireKindPermission(EntityKinds.IdentityProvider, Actions.Delete);
+
+        // "What would these claims grant?" — so a mapping can be checked
+        // without asking a user to sign in repeatedly, which is the only other
+        // way to find out and a miserable way to iterate.
+        //
+        // It answers through the same ComputeDesiredGroups the sign-in path
+        // uses. A preview with its own copy of the rule is a preview that can
+        // be wrong, and wrong in the direction nobody checks.
+        group.MapPost("/{id:guid}/group-mappings/preview", async (
+            Guid id,
+            ClaimPreviewRequest request,
+            IClaimGroupReconciler reconciler,
+            IGroupStore groups,
+            CancellationToken ct) =>
+        {
+            if (request?.Claims is null) return Results.BadRequest();
+
+            var granted = await reconciler.PreviewAsync(id, request.Claims, ct);
+            var all = await groups.ListAsync(includeArchived: true, ct);
+
+            return Results.Ok(all
+                .Where(g => granted.Contains(g.Id))
+                .Select(g => new { g.Id, g.Name, g.IsArchived })
+                .ToList());
+        }).RequireKindPermission(EntityKinds.IdentityProvider, Actions.View);
+
         return app;
     }
+
+    /// <summary>Claims to try, in the shape a sign-in produces them.</summary>
+    public sealed record ClaimPreviewRequest(Dictionary<string, string[]>? Claims);
 
     private static async Task<IResult> SetEnabled(
         Guid id, bool enabled, HttpContext http, IIdentityProviderStore store, CancellationToken ct)

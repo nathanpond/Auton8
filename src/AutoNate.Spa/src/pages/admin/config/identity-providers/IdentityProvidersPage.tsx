@@ -35,11 +35,12 @@ import {
   testIdentityProvider,
   updateIdentityProvider
 } from "@/api/identityProviders";
+import { GroupMappingsModal } from "./GroupMappingsModal";
 
 const QUERY_KEY = ["identity-providers"] as const;
 
 // Provider, kind, secret, enabled, actions.
-const COLUMN_WIDTHS = ["34%", "14%", "20%", "14%", "18%"];
+const COLUMN_WIDTHS = ["30%", "13%", "19%", "13%", "25%"];
 
 const loadAll = () => listIdentityProviders();
 
@@ -93,6 +94,7 @@ const emptyForm: FormState = {
 export default function IdentityProvidersPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [mappingsFor, setMappingsFor] = useState<IdentityProvider | null>(null);
   const [editing, setEditing] = useState<IdentityProvider | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [testResult, setTestResult] = useState<
@@ -273,6 +275,15 @@ export default function IdentityProvidersPage() {
                 onClick={() => testMutation.mutate(row.original.id)}
               >
                 <i className="fa fa-plug" aria-hidden="true" />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Group mappings">
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Group mappings for ${row.original.displayName}`}
+                onClick={() => setMappingsFor(row.original)}
+              >
+                <i className="fa fa-users-gear" aria-hidden="true" />
               </ActionIcon>
             </Tooltip>
             <Tooltip label="Edit">
@@ -524,6 +535,15 @@ export default function IdentityProvidersPage() {
           </Stack>
         </form>
       </Modal>
+
+      <GroupMappingsModal
+        providerId={mappingsFor?.id ?? null}
+        providerName={mappingsFor?.displayName ?? ""}
+        // OIDC calls it a claim, SAML an attribute. Using the caller's own word
+        // saves an administrator translating between the screen and their IdP.
+        claimWord={mappingsFor?.kind === "saml" ? "attribute" : "claim"}
+        onClose={() => setMappingsFor(null)}
+      />
     </Stack>
   );
 }

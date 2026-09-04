@@ -41,7 +41,28 @@ public sealed record OidcSignInResult(
     LocalUser? User,
     bool AccountCreated,
     OidcFailureReason Reason,
-    string? Diagnostic);
+    string? Diagnostic)
+{
+    /// <summary>The provider this sign-in went through, once one was found.</summary>
+    /// <remarks>
+    /// Carried so #92's reconciliation is scoped to the provider the user
+    /// actually signed in through: two providers configured against one Auton8
+    /// must not be able to revoke each other's grants.
+    /// </remarks>
+    public Guid ProviderId { get; init; }
+
+    /// <summary>
+    /// The validated id_token's claims, grouped by type.
+    /// </summary>
+    /// <remarks>
+    /// The same shape <see cref="SamlSignInResult.Attributes"/> uses, so #92's
+    /// reconciler can be fed from either without a second mapping surface.
+    /// Multi-valued by construction: <c>groups</c> is the claim this exists for
+    /// and it is almost always repeated.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string[]> Claims { get; init; } =
+        new Dictionary<string, string[]>(StringComparer.Ordinal);
+}
 
 public interface IOidcSignInService
 {
@@ -236,7 +257,13 @@ public sealed class OidcSignInService : IOidcSignInService
         }
 
         var (user, created) = await MapToLocalUserAsync(provider, subject!, jwt, ct);
-        return new OidcSignInResult(true, user, created, OidcFailureReason.None, null);
+        return new OidcSignInResult(true, user, created, OidcFailureReason.None, null)
+        {
+            ProviderId = provider.Id,
+            Claims = jwt.Claims
+                .GroupBy(c => c.Type, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Select(c => c.Value).ToArray(), StringComparer.Ordinal),
+        };
     }
 
     /// <summary>

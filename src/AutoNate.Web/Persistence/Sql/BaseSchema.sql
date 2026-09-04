@@ -423,8 +423,35 @@ CREATE TABLE IF NOT EXISTS group_members (
     user_id UUID NOT NULL,
     added_at_utc TIMESTAMPTZ NOT NULL,
     added_by UUID NOT NULL,
-    PRIMARY KEY (group_id, user_id)
+
+    -- How this membership came to exist (#92). Claim reconciliation removes
+    -- memberships whose IdP claim has disappeared, so it has to know which rows
+    -- are its to remove; without this, the first claim to go missing would take
+    -- an administrator's manual grant with it.
+    --
+    -- source_provider_id names which provider owns an idp-derived row, so two
+    -- identity providers configured against one Auton8 cannot revoke each
+    -- other's grants.
+    --
+    -- Repeated here as well as in IdentityProviderGroupMappingsSchemaSql, which
+    -- adds them to databases that predate this: a fresh install and a migrated
+    -- one must end up with the same table, and the migration's
+    -- ADD COLUMN IF NOT EXISTS makes it a no-op here.
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_provider_id UUID NULL,
+
+    PRIMARY KEY (group_id, user_id),
+
+    CONSTRAINT ck_group_members_source CHECK (
+        (source = 'manual' AND source_provider_id IS NULL)
+        OR (source = 'idp' AND source_provider_id IS NOT NULL)
+    )
 );
+
+-- Reconciliation asks "which of this user's memberships does this provider
+-- own?" on every federated sign-in.
+CREATE INDEX IF NOT EXISTS ix_group_members_source
+    ON group_members (user_id, source, source_provider_id);
 
 CREATE INDEX IF NOT EXISTS ix_group_members_user
     ON group_members (user_id);

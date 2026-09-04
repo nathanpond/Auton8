@@ -3980,6 +3980,78 @@ internal static class DatabaseSchemaInitializer
         END $$;
         """;
 
+    private const string IdentityProviderGroupMappingsSchemaSql =
+        """
+        -- #92. An administrator says which IdP claim value corresponds to which
+        -- Auton8 group. Nothing here invents a new authorization concept: groups
+        -- already hold role assignments, so the group→role path stays the single
+        -- place authorization is reasoned about.
+        --
+        -- An unmapped IdP group grants nothing. Mapping is the whole gate: a
+        -- group created in the identity provider has no effect until someone
+        -- here decides it should.
+        CREATE TABLE IF NOT EXISTS identity_provider_group_mappings (
+            id UUID PRIMARY KEY,
+            provider_id UUID NOT NULL REFERENCES identity_providers (id) ON DELETE CASCADE,
+            claim_type TEXT NOT NULL,
+            claim_value TEXT NOT NULL,
+            group_id UUID NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+            created_at_utc TIMESTAMPTZ NOT NULL,
+            created_by UUID NOT NULL,
+            updated_at_utc TIMESTAMPTZ NOT NULL,
+            updated_by UUID NOT NULL
+        );
+
+        -- Cascades from both parents on purpose. A mapping that outlived its
+        -- group would point at nothing, and reconciliation would have to decide
+        -- what a dangling grant means — a question better not to have.
+
+        -- The same claim may grant several groups, and several claims may grant
+        -- one group; what must not exist twice is the same edge.
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_idp_group_mappings_edge
+            ON identity_provider_group_mappings (provider_id, claim_type, claim_value, group_id);
+
+        -- Reconciliation loads every mapping for one provider on each sign-in.
+        CREATE INDEX IF NOT EXISTS ix_idp_group_mappings_provider
+            ON identity_provider_group_mappings (provider_id);
+
+        -- Provenance on the membership itself. Without it reconciliation cannot
+        -- tell what it is allowed to remove, and the first claim to disappear
+        -- would take an administrator's manual grant with it.
+        --
+        -- The default is 'manual', which is not a convenience — it is true.
+        -- Every row in this table before this migration was put there by a
+        -- person, and none of them may be revoked by a claim going missing.
+        ALTER TABLE group_members
+            ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+
+        -- Which provider owns an idp-derived row. Two identity providers
+        -- configured against one Auton8 must not be able to revoke each other's
+        -- grants, and without this column a sign-in through either would
+        -- reconcile away the other's memberships.
+        ALTER TABLE group_members
+            ADD COLUMN IF NOT EXISTS source_provider_id UUID NULL;
+
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'ck_group_members_source'
+            ) THEN
+                ALTER TABLE group_members
+                    ADD CONSTRAINT ck_group_members_source
+                    CHECK (
+                        (source = 'manual' AND source_provider_id IS NULL)
+                        OR (source = 'idp' AND source_provider_id IS NOT NULL)
+                    );
+            END IF;
+        END $$;
+
+        -- Reconciliation asks "which of this user's memberships does this
+        -- provider own?" on every federated sign-in.
+        CREATE INDEX IF NOT EXISTS ix_group_members_source
+            ON group_members (user_id, source, source_provider_id);
+        """;
+
     private const string IdentityProvidersSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS identity_providers (
@@ -4323,6 +4395,7 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(CodeTransformersSchemaSql), CodeTransformersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersSchemaSql), IdentityProvidersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersMenuSeedSql), IdentityProvidersMenuSeedSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(IdentityProviderGroupMappingsSchemaSql), IdentityProviderGroupMappingsSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(DataMainMenuSeedSql), DataMainMenuSeedSql, cancellationToken);
 
         // Before the SuperAdmin backfill on purpose: on a first boot the

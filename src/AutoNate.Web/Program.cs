@@ -498,6 +498,12 @@ builder.Services.AddSingleton<AutoNate.Web.Services.Identity.IIdentityProviderSe
     AutoNate.Web.Services.Identity.DataProtectionIdentityProviderSecretProtector>();
 builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderStore,
     AutoNate.Web.Services.Identity.EfCoreIdentityProviderStore>();
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderGroupMappingStore,
+    AutoNate.Web.Services.Identity.EfCoreIdentityProviderGroupMappingStore>();
+// #92. Runs on every federated sign-in, OIDC and SAML alike — one reconciler
+// fed from both, because two would eventually disagree about who gets what.
+builder.Services.AddScoped<AutoNate.Web.Services.Identity.IClaimGroupReconciler,
+    AutoNate.Web.Services.Identity.ClaimGroupReconciler>();
 builder.Services.AddScoped<AutoNate.Web.Services.Identity.IIdentityProviderConfigurationTester,
     AutoNate.Web.Services.Identity.IdentityProviderConfigurationTester>();
 builder.Services.AddSingleton<AutoNate.Web.Services.Identity.IOidcConfigurationCache,

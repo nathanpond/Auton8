@@ -651,6 +651,40 @@ public static class EventCatalog
                     "Fires from DELETE /api/admin/groups/{id}/members/{userId} on success.",
                     ["resource: { groupId, userId }."]),
                 new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.GroupMappingCreated,
+                    "A claim value was mapped to a group.",
+                    "Fires from POST /api/admin/identity-providers/{id}/group-mappings.",
+                    ["resource: { mappingId, providerId, groupId }.",
+                     "details: { claimType, claimValue } — a mapping is an access-control rule, and an "
+                     + "auditor asking why someone had a group needs the claim believed to grant it."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.GroupMappingUpdated,
+                    "A claim-to-group mapping was changed.",
+                    "Fires from PUT /api/admin/identity-providers/{id}/group-mappings/{mappingId}.",
+                    ["resource: { mappingId, providerId, groupId }.", "details: { claimType, claimValue }."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.GroupMappingDeleted,
+                    "A claim-to-group mapping was removed.",
+                    "Fires from DELETE /api/admin/identity-providers/{id}/group-mappings/{mappingId}. "
+                    + "Deleting a mapping revokes nothing on its own — the memberships it granted go at "
+                    + "the affected users' next sign-in, down the same reconciliation path every other "
+                    + "revocation takes.",
+                    ["resource: { mappingId, providerId, groupId }.", "details: { claimType, claimValue }."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.ClaimGroupGranted,
+                    "A federated sign-in granted a group from an IdP claim.",
+                    "Fires from the OIDC callback and the SAML assertion consumer, once per group added. "
+                    + "A reconciliation that changes nothing emits nothing, or the steady state — someone "
+                    + "signing in with the claims they had yesterday — would be almost every event.",
+                    ["resource: { groupId, userId }.", "details: { source: \"idp\", provider, protocol }."]),
+                new EventCatalogEntry(
+                    IamEventTopic.TopicName, IdentityEventTypes.ClaimGroupRevoked,
+                    "A federated sign-in revoked a group whose claim had gone.",
+                    "Fires from the OIDC callback and the SAML assertion consumer, once per group removed. "
+                    + "Only ever removes idp-sourced memberships belonging to that provider: an "
+                    + "administrator's manual grant is never revoked by a claim disappearing.",
+                    ["resource: { groupId, userId }.", "details: { source: \"idp\", provider, protocol }."]),
+                new EventCatalogEntry(
                     IamEventTopic.TopicName, IamEventTypes.RoleCreated,
                     "A new role was created.",
                     "Fires from POST /api/admin/roles.",

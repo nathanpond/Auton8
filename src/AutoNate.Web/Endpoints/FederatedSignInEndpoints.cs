@@ -79,6 +79,7 @@ public static class FederatedSignInEndpoints
             HttpContext http,
             IOidcSignInService oidc,
             IAuditEventPublisher audit,
+            IClaimGroupReconciler reconciler,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -128,6 +129,9 @@ public static class FederatedSignInEndpoints
                     details: new { createdBy = "federated-sign-in", provider = slug, roleAssignments = 0 },
                     ct);
             }
+
+            await ReconcileAsync(
+                reconciler, audit, result.User, result.ProviderId, slug, "oidc", result.Claims, ct);
 
             // The same principal construction the local and dev-auto-login paths
             // use, so the session shape and everything authorization reads from
@@ -205,6 +209,7 @@ public static class FederatedSignInEndpoints
             HttpContext http,
             ISamlSignInService saml,
             IAuditEventPublisher audit,
+            IClaimGroupReconciler reconciler,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
@@ -247,6 +252,9 @@ public static class FederatedSignInEndpoints
                     ct);
             }
 
+            await ReconcileAsync(
+                reconciler, audit, result.User, result.ProviderId, slug, "saml", result.Attributes, ct);
+
             var principal = PrincipalFactory.Build(result.User, $"saml:{slug}");
             await http.SignInAsync(
                 CookieAuthenticationDefaults.AuthenticationScheme,
@@ -276,6 +284,68 @@ public static class FederatedSignInEndpoints
         }).AllowAnonymous().DisableAntiforgery();
 
         return app;
+    }
+
+    /// <summary>
+    /// Brings the user's IdP-derived group memberships into line with the claims
+    /// this sign-in carried, and audits any change.
+    /// </summary>
+    /// <remarks>
+    /// One helper for both protocols, called from both callbacks. #93's
+    /// acceptance criteria ask for claim mapping "without a parallel mapping
+    /// surface", and two call sites into one reconciler is what that means in
+    /// practice — two reconcilers would eventually disagree about who gets what,
+    /// and the lenient one would win.
+    ///
+    /// It runs on <em>every</em> sign-in, not only the first. A reconciler
+    /// invoked once at provisioning would never revoke, so removing someone from
+    /// a group at the identity provider would leave their access here intact.
+    ///
+    /// A failure here does not fail the sign-in. The user authenticated
+    /// correctly; refusing them entry because a membership could not be written
+    /// would turn a database hiccup into an outage, and the reconciliation is
+    /// idempotent — their next sign-in fixes it.
+    /// </remarks>
+    private static async Task ReconcileAsync(
+        IClaimGroupReconciler reconciler,
+        IAuditEventPublisher audit,
+        LocalUser user,
+        Guid providerId,
+        string slug,
+        string protocol,
+        IReadOnlyDictionary<string, string[]> claims,
+        CancellationToken ct)
+    {
+        if (providerId == Guid.Empty) return;
+
+        var result = await reconciler.ReconcileAsync(user.UserId, providerId, claims, ct);
+        if (!result.ChangedAnything) return;
+
+        // Only changes are audited. The steady state is somebody signing in with
+        // the claims they had yesterday, so auditing every reconciliation would
+        // make almost every event a non-event — and a log nobody reads is not a
+        // record, whatever it contains.
+        foreach (var groupId in result.Added)
+        {
+            await audit.PublishAsync(
+                IamEventTopic.TopicName,
+                IdentityEventTypes.ClaimGroupGranted,
+                IamResourceKinds.GroupMember,
+                resource: new { groupId, userId = user.UserId },
+                details: new { source = "idp", provider = slug, protocol },
+                ct);
+        }
+
+        foreach (var groupId in result.Removed)
+        {
+            await audit.PublishAsync(
+                IamEventTopic.TopicName,
+                IdentityEventTypes.ClaimGroupRevoked,
+                IamResourceKinds.GroupMember,
+                resource: new { groupId, userId = user.UserId },
+                details: new { source = "idp", provider = slug, protocol },
+                ct);
+        }
     }
 
     private static Task PublishSamlFailureAsync(

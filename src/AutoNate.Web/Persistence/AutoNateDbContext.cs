@@ -84,6 +84,8 @@ public partial class AutoNateDbContext : DbContext
 
     public virtual DbSet<Models.IdentityProviderModel> IdentityProviders { get; set; }
 
+    public virtual DbSet<Models.IdentityProviderGroupMappingModel> IdentityProviderGroupMappings { get; set; }
+
     public virtual DbSet<AgentConversation> AgentConversations { get; set; }
 
     public virtual DbSet<AgentMessage> AgentMessages { get; set; }
@@ -634,6 +636,29 @@ public partial class AutoNateDbContext : DbContext
             entity.Property(e => e.UserId).HasColumnName("user_id");
             entity.Property(e => e.AddedAtUtc).HasColumnName("added_at_utc");
             entity.Property(e => e.AddedBy).HasColumnName("added_by");
+            entity.Property(e => e.Source).HasColumnName("source");
+            entity.Property(e => e.SourceProviderId).HasColumnName("source_provider_id");
+        });
+
+        modelBuilder.Entity<Models.IdentityProviderGroupMappingModel>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("identity_provider_group_mappings_pkey");
+
+            entity.ToTable("identity_provider_group_mappings");
+
+            entity.HasIndex(
+                e => new { e.ProviderId, e.ClaimType, e.ClaimValue, e.GroupId },
+                "ux_idp_group_mappings_edge").IsUnique();
+
+            entity.Property(e => e.Id).ValueGeneratedNever().HasColumnName("id");
+            entity.Property(e => e.ProviderId).HasColumnName("provider_id");
+            entity.Property(e => e.ClaimType).HasColumnName("claim_type");
+            entity.Property(e => e.ClaimValue).HasColumnName("claim_value");
+            entity.Property(e => e.GroupId).HasColumnName("group_id");
+            entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
         });
 
         modelBuilder.Entity<PermissionGrant>(entity =>
