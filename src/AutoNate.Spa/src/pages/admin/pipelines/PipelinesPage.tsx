@@ -218,6 +218,9 @@ export default function PipelinesPage() {
               value={scheduleCron}
               onChange={setScheduleCron}
             />
+            {/* In-page, not a toast (#91): this sits inside an open form and the
+            user has to fix the input it describes. A toast would vanish
+            mid-correction — it is a validation summary by another name. */}
             {submitError ? <Alert color="red">{submitError}</Alert> : null}
             <Group justify="flex-end" mt="sm">
               <Button variant="default" onClick={() => setCreateOpen(false)}>
