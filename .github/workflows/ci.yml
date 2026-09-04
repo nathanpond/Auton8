@@ -815,19 +815,28 @@ jobs:
         run: pwsh tests/AutoNate.E2E.Tests/bin/Debug/net10.0/playwright.ps1 install --with-deps chromium
 
       # Excludes the specs that need services this job does not host: the
-      # Flowable engine (workflow execution and studio) and the Dapr sidecar
-      # (the bus-event log). They are traited rather than named, so a new
-      # Flowable-dependent spec is excluded automatically instead of turning
-      # the job red until someone updates a list here.
+      # Flowable engine (workflow execution and studio), the Dapr sidecar
+      # (the bus-event log), and Keycloak (the OIDC/SAML interop journeys,
+      # #99). They are traited rather than named, so a new spec depending on
+      # any of the three is excluded automatically instead of turning the job
+      # red until someone updates a list here.
       #
-      # This is a real coverage gap, not a cleanup: 155 of 163 specs run.
-      # Standing up Flowable — a Spring Boot service built from source — and
-      # Dapr in CI is its own piece of work, tracked on archived-79. Until then the
-      # full suite remains the local and pre-release gate.
+      # This is a real coverage gap, not a cleanup. Standing up Flowable — a
+      # Spring Boot service built from source — and Dapr in CI is its own
+      # piece of work, tracked on archived-79. Keycloak is a JVM whose realm
+      # has to be imported and reachable at an issuer URL that resolves the
+      # same from the browser and the app; #98 documents why that is fiddly
+      # even locally. Until then the full suite remains the local and
+      # pre-release gate.
+      #
+      # The interop specs fail loudly rather than skipping when Keycloak is
+      # absent, so a local run without the profile says so instead of passing
+      # for the wrong reason. Reaching that assertion in CI would mean this
+      # filter had stopped matching.
       - name: Test
         run: |
           dotnet test tests/AutoNate.E2E.Tests --no-build \
-            --filter "RequiresService!=Flowable&RequiresService!=Dapr" \
+            --filter "RequiresService!=Flowable&RequiresService!=Dapr&RequiresService!=Keycloak" \
             --logger "console;verbosity=minimal"
 
       # A failed selector is close to unreadable without the page. Playwright
