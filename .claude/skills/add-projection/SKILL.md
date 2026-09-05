@@ -13,7 +13,7 @@ code contributes the *what* and the *where-from*.
 
 Full framework docs: `docs/projection-framework/`. This skill is the
 condensed checklist; consult the docs (especially
-`recipe-add-a-projection.md` and `examples.md`) when the steps below feel
+`docs/projection-framework/recipe-add-a-projection.md` and `examples.md`) when the steps below feel
 under-specified.
 
 ## When to invoke this
@@ -40,7 +40,7 @@ its skeleton rather than building from scratch.
 
 | You need… | Copy from |
 |---|---|
-| External API + per-row upsert + own permission tags | `FlowableExecutionProjection` (+ `FlowableExecutionPollingFeed`, `WorkflowExecutionsQueryEntity`, `WorkflowExecutionCacheSelectorCompiler`) |
+| External API + per-row upsert + own permission tags | `FlowableExecutionProjection` (+ `FlowableExecutionPollingFeed`, `WorkflowExecutionsQueryEntity`, and `WorkflowExecutionCacheSelectorCompiler` — ⚠️ **do not copy its wildcard handling, see step 8**) |
 | Per-parent-instance snapshot, child rows | `FlowableVariableProjection` (+ `FlowableVariablePollingFeed`, `WorkflowVariablesQueryEntity`) — uses parent-auth inheritance |
 | Append-only event log with deterministic IDs | `FlowableHistoryProjection` (+ `FlowableHistoryPollingFeed`, `WorkflowHistoryQueryEntity`) — `ON CONFLICT DO NOTHING`, watermark-driven |
 | Internal aggregate from our own DB | `RecordActivityRollupProjection` (+ `RecordActivityRollupFeed`, `RecordActivityRollupQueryEntity`) — auth-gated via parent kind |
@@ -53,7 +53,18 @@ its skeleton rather than building from scratch.
 File: `src/AutoNate.Web/Persistence/DatabaseSchemaInitializer.cs`
 
 Add a `private const string XxxCacheSchemaSql = """ ... """;` block and a
-matching `ExecuteSqlRawAsync` call inside `EnsureAsync`. The table must
+matching `ApplyStepAsync(dbContext, applied, nameof(XxxCacheSchemaSql),
+XxxCacheSchemaSql, cancellationToken)` call inside `EnsureAsync` — **not**
+`ExecuteSqlRawAsync` directly. Route the batch through `ApplyStepAsync` so it lands in
+the `schema_versions` ledger — but note `ApplyStepAsync` still executes your SQL *via*
+`ExecuteSqlRawAsync` underneath, which is why the `{{}}` rule below applies. (See the
+`add-schema-change` skill, which owns this mechanism.)
+
+⚠️ **Use a new const; do not append to an existing one.** `ApplyStepAsync` keys the
+ledger on `nameof(...)` and early-returns when that name is already applied. Appending
+your table to, say, `WorkflowCacheSchemaSql` — the natural move, since it *is* the
+Flowable cache SQL — therefore never runs on any existing install, while passing every
+test, because every test database is fresh. The table must
 include:
 
 - A primary key matching what your `ChangeEvent.SourceId` will be.
@@ -148,8 +159,9 @@ Copy `WorkflowExecutionsQueryEntity` as a skeleton. Adjust:
   the parent kind (Pattern B).
 
 If you need `COUNT/SUM/AVG/...` over the data, also handle the GROUP
-path inside `ExecuteAsync` — see `RecordActivityRollupQueryEntity` for
-a simple case.
+path inside `ExecuteAsync` — see `RecordsQueryEntity` or `NotesQueryEntity`.
+**Not** `RecordActivityRollupQueryEntity` — it does not handle GROUP at all and does
+not reject it either, so a `GROUP(...)` query there silently returns ungrouped rows.
 
 For scalar-per-row functions like `NUMEXECUTIONS()` (no GROUP required),
 declare them in the entity's `RowFunctions` property and implement
@@ -164,6 +176,25 @@ Implement `ISelectorCompiler<XxxCache>`. Map each tag in your cache's
 `auth_tags` column to a LINQ predicate expression. Reuses the existing
 selector AST and grant evaluator — see
 `WorkflowExecutionCacheSelectorCompiler`.
+
+> ⚠️ **Do not copy that exemplar's wildcard handling — it carries GHSA-vrw7-qxhw-m9q8.**
+>
+> `WorkflowExecutionCacheSelectorCompiler` maps `WildcardValue => null`, and a null
+> value compiles to `Expression.Equal(column, null)` → SQL `IS NULL`. But
+> `InMemorySelectorEvaluator` reads `WildcardValue => actual is not null`. They are
+> exact complements: `[startedby=*]` means "any non-null starter" in memory and
+> "started_by IS NULL" in SQL. Measured at 69 leaks and 539 lockouts.
+> `WorkflowTaskCacheSelectorCompiler` has the same defect.
+>
+> In your compiler, `WildcardValue` means **match-any** — `AlwaysTrue`, or at most
+> `column != null`. It must **not** share the `value is null` branch with `tag=null`
+> or an unresolvable `$me`.
+>
+> Check case semantics too: the compiler emits `Expression.Equal` (Postgres `=`,
+> case-**sensitive**) while `InMemorySelectorEvaluator` uses `OrdinalIgnoreCase`.
+> Whatever you choose, the two paths must agree — a grant that behaves differently
+> depending on which path evaluates it is an authorization bug, not a performance
+> detail.
 
 If you go with Pattern B (parent-auth inheritance), skip this step
 entirely — the parent kind's selector compiler does the work.
@@ -194,6 +225,28 @@ builder.Services.AddSingleton<ISelectorCompiler, XxxSelectorCompiler>();  // Pat
 builder.Services.AddScoped<XxxQueryEntity>();
 builder.Services.AddScoped<IQueryEntity>(sp => sp.GetRequiredService<XxxQueryEntity>());
 ```
+
+### Also register the backfill source — or Rebuild returns 400
+
+`IProjectionBackfillSource<TSource>` is **not** optional if you want the Rebuild
+button this skill's description promises. `BackfillRunner` resolves it and throws
+when absent; `AdminProjectionsEndpoints`' `POST /{name}/rebuild` maps that to a 400.
+
+```csharp
+builder.Services.AddScoped<IProjectionBackfillSource<TSource>, XxxBackfillSource>();
+```
+
+`EnumerateAllAsync` re-emits everything, minus the per-tick windowing your change
+feed does.
+
+This has shipped broken twice, and both fixes left a note saying so —
+`FlowableBackfillSources.cs:12-16` ("the Rebuild button on the Projections admin page
+returned 'No IProjectionBackfillSource<…> registered' for every projection") and
+`RecordActivityRollupBackfillSource.cs:11-13` ("which did not exist, so the Rebuild
+button returned 400 and old buckets could never be repaired").
+
+Note `ProjectionName` on that interface is read by nothing — resolution is by
+`TSource`, so two projections over the same `TSource` collide.
 
 **Don't forget the double registration** for the AQL entity — once as
 concrete, once as `IQueryEntity`. Forgetting the second produces a
@@ -269,3 +322,49 @@ After wiring, check:
   the safety net; sub-minute freshness should come from a push/event
   feed once the bridge is wired up. If your business case actually
   needs sub-minute poll, document it and lower the interval explicitly.
+
+
+## Gotchas the steps above gloss over
+
+**An AQL entity is two classes.** `IQueryEntity` has no `ExecuteAsync` — its surface
+is `Name` / `StaticSchema` / `AllowedFunctions` / `PrepareAsync`. `ExecuteAsync` lives
+on a separate `IPreparedQuery` implementation (see `WorkflowExecutionsPreparedQuery`),
+which must supply `Schema`, `ValidationErrors`, `Entity` and `Query`. There is no
+ambient `db`: the entity injects `IDbContextFactory<AutoNateDbContext>` and creates
+its own context.
+
+**Pattern B is not a one-token change.** Passing the parent kind to `FilterQueryAsync`
+without a compiler for the `(kind, CLR type)` pair makes `Authorizer` log a warning
+and return `source.Where(_ => false)` — **zero rows, no error**. Real Pattern B
+changes the *queryable*: filter the parent's table, then semi-join the child. See
+`WorkflowVariablesQueryEntity` and `RecordActivityRollupQueryEntity`.
+
+**Every column needs an explicit `HasColumnName`.** There is no snake-case naming
+convention configured anywhere in `AutoNate.Web`. Omit them and every query fails at
+runtime. Renames included — see `AutoNateDbContext.ProjectionCaches.cs`
+(`LastSyncAtUtc → "last_sync_at"`).
+
+**"Retention" in the description is not covered here.** It is a separate hosted
+service (`WorkflowCacheRetentionService`).
+
+
+## Two things that will stop you before your tests run
+
+**`StubFlowableClient` implements `IFlowableClient`.** If your source type comes from
+Flowable, adding a method to that interface breaks the whole `AutoNate.Web.Tests`
+assembly at compile time — `AutoNateWebApplicationFactory` removes the real client and
+substitutes the stub. Extend the stub in the same change. This bites the decision
+table's *first* row, the headline case.
+
+**The test factory turns authorization off.** `AutoNateWebApplicationFactory` sets
+`Authorization:Enabled=false` and `Enforcement=off` alongside the
+`Projections:WorkerEnabled=false` this skill already quotes. So the standard recipe
+proves the read path and **nothing about authorization**. That matters most for
+Pattern B, whose failure mode is *silent zero rows* — indistinguishable from an empty
+cache in a test with auth disabled. Write at least one test that flips
+`Authorization:Enabled=true` and `Enforcement=full`, grants a selector, and asserts
+both that the visible rows come back **and** that another actor's rows do not.
+
+**There is already a guard for the backfill source.** `ProjectionFrameworkPhase4Tests`
+enumerates the live registry and rebuilds every projection, so a missing
+`IProjectionBackfillSource` fails automatically. Do not weaken it.

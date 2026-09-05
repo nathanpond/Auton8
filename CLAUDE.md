@@ -27,6 +27,7 @@ The SPA was migrated from ColorAdmin v5 (Bootstrap 5 admin theme, paid license) 
 
 ### Mantine references for AI agents
 
+- **Offline copy, checked in**: `docs/mantine/llms.txt` — reach for this first; it needs no network.
 - **Authoritative API + components**: https://mantine.dev/llms.txt
 - **Full reference (large)**: https://mantine.dev/llms-full.txt
 - Pull `llms.txt` first; fall back to `llms-full.txt` only for components missing from the short list.

@@ -37,7 +37,7 @@ Do **not** use this skill for state that's already saved and reachable via an au
 
 File: `src/AutoNate.Spa/src/agent/usePageKey.ts`
 
-Every snapshot is tagged with a `pageKey`, and the server enforces that the snapshot's pageKey matches the conversation's pageKey. If your route isn't already mapped (for example, a brand-new admin page), add an entry to `PATTERNS`. Reuse an existing key when the new route is just another view of the same page family — conversations are scoped by pageKey, so a new key splits chat history.
+Every snapshot is tagged with a `pageKey`, and the pageKey must match what `usePageKey()` returns for the current URL — but note the **server does not enforce this**. `AgentEndpoints.cs` deliberately stopped enforcing it ("a chat opened from another page must still be able to see + act on whatever page the user is currently viewing"); the only 400 is for a *blank* pageKey. If your route isn't already mapped (for example, a brand-new admin page), add an entry to `PATTERNS`. Reuse an existing key when the new route is just another view of the same page family — conversations are scoped by pageKey, so a new key splits chat history.
 
 ### 2. Create a `useXyzPageContext` hook for the page
 
@@ -87,7 +87,7 @@ export function useMyPagePageContext(args: { /* live state */ }): void {
 }
 ```
 
-Then call it once from the page component, **above every conditional early return**. `useXyzPageContext` is itself a hook that triggers ~11 nested hooks (`useRef`, `useCallback`, `useMemo`, `useRegisterPageContext`'s own `useSyncExternalStore`, etc.), so if it sits below an `if (query.isLoading) return <Loader/>` on the first render those hooks are skipped, and on the second render when the query resolves they appear out of nowhere — React tears the component down with *"rendered more hooks than during the previous render"* and the page goes white. Inline any values it needs straight from the queries (`query.data ?? []`) rather than from `const`s declared below the early returns. Form-fill works without registering at all — only register when you need page-specific data, custom actions, or to opt fields out of form-fill.
+Then call it once from the page component, **above every conditional early return**. `useXyzPageContext` is itself a hook that triggers ~11 nested hooks (`useRef`, `useCallback`, `useMemo`, `useRegisterPageContext`'s `useEffect`, etc.), so if it sits below an `if (query.isLoading) return <Loader/>` on the first render those hooks are skipped, and on the second render when the query resolves they appear out of nowhere — React tears the component down with *"rendered more hooks than during the previous render"* and the page goes white. Inline any values it needs straight from the queries (`query.data ?? []`) rather than from `const`s declared below the early returns. Form-fill works without registering at all — only register when you need page-specific data, custom actions, or to opt fields out of form-fill.
 
 ### 3. Design the snapshot shape (`data`)
 
@@ -223,12 +223,20 @@ There is no automated SPA test for this — run it manually:
 - **Unstable hook references.** If `getSnapshot` or `onPageQuery` are rebuilt on every render (no `useCallback`, or deps that change too often), `useRegisterPageContext` will unregister/re-register on every render. The framework still works (last-mounted wins) but the active-summary subscription churns. Always memoize.
 - **Async work in `getSnapshot`.** It must be synchronous — it runs at the moment the user clicks send. If you need to compute something async, do it on a timer in a `useEffect` and stash the result in a ref that `getSnapshot` reads. Never `await` inside `getSnapshot`.
 - **Reading state directly instead of via refs.** Closures captured by `useCallback` see state at the moment the callback was created, not at the moment it's called. Always read mutable state through `argsRef.current` (or similar) so the snapshot reflects the latest values.
-- **PageKey mismatch with `usePageKey.ts`.** The `pageKey` in your provider entry must equal what `usePageKey()` returns for the URL the user is on. The server rejects mismatches with a 400 (so the message goes out without context but the user has to reload to fix it).
-- **Forgetting size cap.** Pages with rich state (lots of nodes, big text bodies) will silently get truncated by the server's 64KB cap and the model will see only `safetyHints.truncated`. Implement explicit degradation in `getSnapshot` so you control which fields get dropped first.
+- **PageKey mismatch with `usePageKey.ts`.** The `pageKey` in your provider entry must equal what `usePageKey()` returns for the URL the user is on. A mismatch is a **client-side** failure with no error anywhere: `AgentSidebar` keys `getActiveSnapshot`/`dispatchPageQuery`/`dispatchPageAction` on `usePageKey()`, so your provider is simply never found — the snapshot degrades to forms-only and queries/actions return `page_unreachable`. No server error, nothing in the network tab.
+- **Forgetting size cap.** Pages with rich state (lots of nodes, big text bodies) is **dropped entirely** — `AgentSession` discards the whole snapshot over the 64KB cap and logs; nothing truncates `data`, and `safetyHints` is a page-authored convention the framework never writes. Over the cap the model gets **no page context at all**. Separately, `InspectPageSkill` caps every `inspect_page`/`query_page` *result* at 32KB with a `_truncated` marker, so a legal 60KB snapshot still truncates on read. Implement explicit degradation in `getSnapshot` so you control which fields get dropped first.
 - **Multiple registrations on the same page.** Only one provider per pageKey is active at a time (last-mounted wins). If two components both call `useRegisterPageContext({ pageKey: "x" })`, mounting order decides — that's brittle. Compose state into a single hook called from the page-level component.
 - **Topics that say what you want, not what the model needs.** `bpmn.xml` is fine because it's a noun the model already understands. `getCurrentSnapshot` is bad because it sounds like it should be the default action. Pick topics that read like data fields, not RPCs.
 - **Trusting the snapshot the model used to compose its preview.** By the time `confirmed=true` reaches your handler, the user may have clicked elsewhere or edited something. Validate preconditions (id still exists, type still matches, dirty state still allows the change) and fail with a precise error code so the model can re-narrate. Don't blindly mutate.
-- **Persisting in an action handler.** Mutations are in-memory only. Do not call save / publish / post APIs from inside `onPageAction`. The user must click Save themselves — that's the trust contract this whole system rests on.
+- **Persisting in an action handler.** Mutations are in-memory only. **This rule has been overtaken by the corpus — read it as a default, not a law.**
+`useDatasetsPagePageContext` ships `submit_create`, `submit_edit` and `delete_dataset`,
+and `useDataStoresPagePageContext`'s own action description says it "calls the same
+/api/datastores DELETE". Two of the eight shipped providers persist.
+
+The real contract is the **confirmation gate**: a mutating action must go through the
+two-call `confirmed` flow, so the model proposes and a human accepts. Prefer staging
+into page state and letting the user click Save where that is natural; where the page
+has no such affordance, a persisting action behind the gate is an accepted pattern.
 - **Forgetting `data-agent-exclude` on credential fields.** Password fields are excluded by default, but `type=text` API-key inputs, secret-question answers, OTP codes, etc. need the attribute explicitly. If a sensitive field uses a custom widget that renders something other than a `<password>` input, opt it out.
 
 ## What you do NOT need to touch
@@ -241,3 +249,27 @@ There is no automated SPA test for this — run it manually:
 - `src/AutoNate.Web/Services/Agent/Loop/SystemPromptBuilder.cs` — already includes the summary string and the tool hint when a snapshot is present.
 
 If you find yourself editing any of those files, you're either fixing the framework (different change) or you've taken a wrong turn.
+
+
+## `schemaVersion` is required
+
+`PageSnapshot.schemaVersion` is a non-optional `number` and is threaded all the way
+through to the server. It is not mentioned anywhere else in this skill, and without
+it your `getSnapshot` will not typecheck. Follow the exemplar:
+
+```ts
+const SCHEMA_VERSION = 1;   // useWorkflowStudioPageContext.ts
+```
+
+Bump it when the snapshot's shape changes.
+
+**Two other conventions worth matching:** real providers use a module-level
+`const PAGE_KEY` (which makes the value greppable against `usePageKey.ts`) rather than
+an inline literal, and seven of the nine are named `use<Page>PagePageContext.ts` —
+match the corpus, not this skill's shorter form.
+
+**Error codes** also include `unsupported`, `unsupported_action` and `handler_threw`
+alongside `page_unreachable`.
+
+**No framework-level size check exists.** The client-side bail is something you
+implement yourself; individual hooks self-limit with their own `MAX_DATA_BYTES`.

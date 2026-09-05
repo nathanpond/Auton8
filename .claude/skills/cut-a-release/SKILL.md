@@ -169,3 +169,62 @@ not carry: `gh auth refresh -h github.com -s read:packages,delete:packages`.
 ## What this does not do
 
 It publishes; it does not deploy. Auton8 v1.0 ships artifacts other people run.
+
+
+## Corrections (audit, 2026-09-05)
+
+⚠️ **Do NOT run `gh release create`.** The tag-triggered workflow already does it, in
+the `assets` job:
+
+```bash
+gh release create "$GITHUB_REF_NAME" --title "Auton8 <version>" --generate-notes --verify-tag \
+  2>/dev/null || echo "release already exists; attaching to it"
+```
+
+Running it yourself either races the workflow or gets silently swallowed by that
+fallback, and it is then non-obvious whose notes survived. To add a summary, use
+`gh release edit vX.Y.Z --notes-file notes.md` on the release the workflow made.
+
+**When the publish job fails, re-run it before changing anything.** The one failure
+that has actually happened was `apt-get update` exiting 100 against a stale Debian
+mirror (`src/AutoNate.Web/Dockerfile:71`, issue #143 — still open, no retry logic).
+It is transient and external; `gh run rerun <id> --failed` succeeded with no code change. Use `--failed`, not a bare rerun — the latter rebuilds all four images for another ~45 minutes. Two things
+to know while diagnosing: `Release assets` is gated on the publishes, so **no release
+object exists at all** — a `gh release download` will 404 and look like a different
+problem — and some images may already have been pushed under that tag.
+
+**The `autonate-web` job takes ~45 minutes** (v0.1.1-rc1: 47m11s; v0.2.0's successful
+attempt: 43m33s). Only an immediate re-tag hits the warm path — GHA cache scopes evict
+between releases.
+
+But do not read that as the release duration. **v0.2.0's run took 8h32m wall-clock**,
+because attempt 1 failed on apt-get at ~01:58Z and then sat for 7h43m until a person
+pressed re-run at 09:41Z. **Nothing tells you.** A failed release does not retry itself
+and does not notify — the stall is silent and unbounded. Watch the run, or you will
+discover it the next morning.
+
+**The SPA version is on the honour system.** The workflow validates only
+`Directory.Build.props` against the tag; nothing checks
+`src/AutoNate.Spa/package.json`, and no test does either.
+
+**The release ships three assets, not two** — `compose.yml`, `env.template` **and
+`QUICKSTART.md`**. Since the smoke test exists to prove a stranger can run it, follow
+QUICKSTART.md rather than a hand-written recipe that can drift from it.
+
+**Smoke-test Production too.** The documented run uses the template default
+`APP_ENVIRONMENT=Development`, which the template itself describes as permissive
+hosts and relaxed startup checks. Add a pass with `APP_ENVIRONMENT=Production` and a
+real `ALLOWED_HOSTS` — that is the path an operator actually uses.
+
+**`release.yml` is shape-tested.** `ReleaseWorkflowTests` pins
+`cancel-in-progress: false`, per-job permissions, all four images, both platforms, no
+moving tag, the lowercasing step and in-run attestation verification. Editing the
+workflow to fix a release will trip them, and that is the point.
+
+**Relationship to `/n8-release`:** that command owns the generic half — preconditions,
+version choice, tagging, watching the workflow, the decision log. This skill owns what
+it cannot know: the two version files, the lowercase-GHCR incident, the external
+`gh attestation verify` loop, the released-compose smoke test, and the three-part undo.
+Use `/n8-release` to cut; use this to verify and to recover.
+
+<!-- verify-ignore: compose.yml env.template QUICKSTART.md -->

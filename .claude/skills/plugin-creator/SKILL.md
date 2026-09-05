@@ -113,7 +113,7 @@ public sealed class <PluginName> : IAutoNatePlugin
     {
         // Override only when there's state OUTSIDE the host's automatic
         // cleanup paths to remove. The host already (1) FK-CASCADE-removes
-        // every menu_items / page_templates / workflow_behavior_registrations
+        // every menu_items / page_templates row
         // row tagged with this plugin's id, (2) DROP SCHEMA CASCADE the
         // entire plg_<code> schema, and (3) deletes the plugin's bin folder.
         // So a no-op default is correct for plugins that don't reach beyond
@@ -239,7 +239,7 @@ var rows = await context.Data.QueryAsync<Widget>(
 
 // App table reads — qualified or unqualified (search_path includes public):
 var users = await context.Data.QuerySingleOrDefaultAsync<long>(
-    "SELECT COUNT(*) FROM public.local_users;", ct: ct);
+    "SELECT COUNT(*) FROM public.pages;", ct: ct);   // NOT local_users — see the revoke list below
 ```
 
 The plugin's `NpgsqlDataSource` connects as `plg_<code>` with `search_path = plg_<code>,public`. Any write to `public.*` will throw `PostgresException` with `SqlState = "42501"` — that's the database refusing the privilege. To mutate app data, register a hook on the relevant filter point and let the host apply your change.
@@ -360,7 +360,7 @@ Per-template metadata (display name, description, category, thumbnail) is source
 
 Conflict handling: if the same `templateKey` is already owned by the host or another plugin, the host **logs a warning and skips** the conflicting file — yours doesn't trample the existing row. Pick stems that namespace your plugin (e.g. `Auditor.AuditLog` rather than just `AuditLog`) when you suspect collisions.
 
-Lifecycle: identical to menu items. The host wipes plugin-owned `page_templates` rows on disable, the FK CASCADE handles delete. Your `Configure()` doesn't have to do anything for templates — the folder scan is implicit.
+Lifecycle: identical to menu items. Page templates **survive** disable (they are reference data; the menu items pointing at them are removed instead). They are upserted in place on the next enable, and deleted only when the source file disappears or the plugin is deleted, the FK CASCADE handles delete. Your `Configure()` doesn't have to do anything for templates — the folder scan is implicit.
 
 ### 7. Add workflow behaviors (optional)
 
@@ -421,9 +421,59 @@ Before reporting the plugin done:
 - **Adding a "remove on disable" cleanup for menu items by hand** — unnecessary; the host does it.
 - **Idempotency in `Configure()`** — also unnecessary; the host gives you a clean slate.
 - **Catching exceptions silently in a hook** — log them. A `try { } catch { }` with no log will hide bugs forever.
-- **Hardcoding another plugin's `code`** — codes are random per install. Look the code up by plugin name from `public.plugins`.
+- **Trying to read `public.plugins`** — it is revoked from `plg_readers`, so there is currently **no supported way** for a plugin to discover another plugin's code. Do not hardcode one either; codes are random per install. If you need cross-plugin coordination, ask for a host hook.
 - **Putting JSX content in a path outside `/admin/config/*`** — it'll render without the sidebar. Stay under the prefix unless you specifically don't want the shell.
 - **Cleaning up menu items inside `Cleanup`** — usually unnecessary. The FK `ON DELETE CASCADE` on the `plugins` row sweeps every menu/template/behavior row this plugin owned. Override `Cleanup` only when there's state OUTSIDE the host's view (third-party services, files written outside `plg_<code>`, etc.). For surgical menu sweeps (e.g. "drop a trailing separator I left under a sibling group"), `context.Menus.RemoveMenuItem(id)` is ownership-checked.
 - **Hardcoding the plugin's own code in a `PageTemplates/` JSX file** — won't work; codes are random per install. Use the `{{pluginCode}}` / `{{pluginId}}` placeholders the host substitutes at registration time.
 - **Forgetting to filter on `req.View` inside a `PluginDataHookFor` handler** — the hook fires for *every* `/data/{view}` call on this plugin's namespace, not just yours. Always early-return the unmodified `current` (which defaults to `404`) when the view isn't one you handle.
 - **Doing I/O on the request thread inside an `AuditEventPublished` handler** — the firehose runs synchronously inside the publish path. Push slow work onto a `Task.Run`, a per-plugin `Channel<T>` worker, or a `BackgroundService`-equivalent the plugin owns. Otherwise every audited request waits on you.
+
+
+## Corrections and gaps (audit, 2026-09-05)
+
+**The JSX scope is bigger than stated.** `JsxPage.tsx` builds a `Mantine` bag of ~27
+Mantine components plus the project `DataTable` wrapper and passes them into the
+compiled template — its own comment invites adding more. The scope lists elsewhere in
+this skill omit all of it. Your page template can use `Stack`, `Text`, `Code`,
+`DataTable` and the rest; see `plugins/Auditor/PageTemplates/AuditLog.template`.
+
+⚠️ **The JSX examples in this skill use dead CSS classes.** `panel panel-inverse`,
+`panel-heading`, `btn btn-primary`, `form-select`, `page-head` — ColorAdmin and
+Bootstrap were removed; none of these exist. Use Mantine primitives.
+
+**`AddFilterAsync<AuthorizeFilterContext>` receives no `args`.** For
+`HookPoints.AuthorizeAuthorize` the payload *is* `current`; `args` is empty. The
+`args[0]` pattern applies only to `PluginDataHookFor`. Both real subscribers ignore
+`args`.
+
+**Two scaffold steps this skill omits:**
+- Commit a `packages.lock.json` — `plugins/Directory.Build.props` sets `RestorePackagesWithLockFile=true` and CI restores with `--locked-mode`, so a new plugin without one fails CI. `make lockfiles` regenerates.
+- `dotnet sln add` your plugin, or `dotnet build AutoNate.sln` proves nothing about it.
+
+**Undocumented `IPluginContext` surfaces:** `PluginId`, `AgentSkills`, `Connectors`,
+`Transformers`, `Analyzers` — all real, all with the same tag-and-sweep lifecycle.
+`HelloPlugin` registers a chatbot tool via `context.AgentSkills.Register(...)`, so
+the "read this first" exemplar uses a surface this skill never explains. There is
+also a generic per-plugin settings API (`/api/admin/plugins/by-code/{code}/settings`
+over a `plugin_settings_kv` convention) that the Auditor is built on — do not
+reinvent it over `PluginDataHookFor`.
+
+**Invariant 2 — the ABI version pin.** `AutoNate.Plugin.Abstractions` is pinned at
+`AssemblyVersion 1.0.0.0` and must not follow the product version; moving it breaks
+every already-built third-party plugin, and the symptom is a misleading "type not
+found" that looks like your own bug. Test-enforced by `PluginAbiVersionTests`. The
+DataProtection purpose `AutoNate.Plugins.RolePassword.v1` is likewise do-not-rename.
+
+**`<Private>false</Private>` is a convention, not enforcement.** It stops the
+abstractions DLL being copied; nothing prevents a plugin csproj referencing
+`AutoNate.Web`, and no test guards it.
+
+**Which version wins:** the `plugin.json` manifest. `IAutoNatePlugin.Version` is
+log-only, and the Auditor's two disagree.
+
+**Plugin pages under `/admin/config/plugins/...` call endpoints gated by
+`(Plugin, Manage)`** — a plugin page intended for ordinary users will 403 on its own
+data.
+
+**Note:** `PluginDocumentation.tsx` ships much of this content in-app and carries the
+same two broken SQL examples. Fix both, or make one the source.
