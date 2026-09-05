@@ -1334,3 +1334,158 @@ correct; the Keycloak exclusion added alongside them does not affect them), and
 `WorkflowExecutionInstanceAuthorizer` was deliberately left unbatched there
 because it calls Flowable rather than the database — once #104 makes the cache
 the read model, batching it becomes possible.
+
+## Ad-hoc — 2026-09-05
+
+Scope interrogation of M3 ("full BPMN") at the user's request, after they judged
+18 stories too few for the claim. The stories are individually deep; the coverage
+is not. Every entry below is a user decision taken in that conversation.
+
+- **Change:** M3's scope is **full BPMN 2.0**, bounded by the 54 entries in
+  `COMING_SOON_BPMN_TYPES` (`WorkflowStudio.tsx`), not by the studio palette.
+  **Why:** #103 was written to enumerate the palette (`workflow.js`), so anything
+  BPMN 2.0 defines that is not a palette entry was invisible to the inventory *by
+  construction*. Multi-instance is the proof: it is an activity marker rather than
+  a palette item, has zero references anywhere in Auton8's own code, and the epic
+  could have closed "full BPMN support" with no for-each loop. Same blindness
+  covered event subprocesses, standard loops, link events and `flowable:async`.
+  **Affects:** #103 (inventory source must change), #107 (drift test must cover
+  three lists, not one), #40 (epic AC), and every M3 implementation story.
+
+- **Change:** Execution stays entirely in Flowable. Audited and confirmed clean —
+  no C# script engine (no Jint/ClearScript/Roslyn/NCalc), no gateway or condition
+  evaluation. `WorkflowBpmnXml.cs` authors BPMN and never interprets it.
+  **Why:** User requirement: "we need to rely on flowable for executions". A
+  custom `ActivityBehavior` registered into the engine still satisfies this —
+  it runs *inside* Flowable, the same seam `AutoNateBehaviorDelegate` uses.
+  **Affects:** constrains every M3 implementation story; the ComplexGateway
+  approach below depends on this reading.
+
+- **Change:** 52 of the 54 outstanding node types already have a Flowable
+  behaviour; the work is Auton8-side (palette, property editors, serialisation,
+  deny-list removal, proof). Only `ComplexGateway` and `IntermediateThrowMessage`
+  have no behaviour class in `flowable-engine-8.0.0.jar`.
+  **Why:** Enumerated directly from the jar in the running container, not from
+  documentation. Reshapes the milestone from engine work to studio work.
+  **Affects:** story sizing across M3.
+
+- **Change:** `ComplexGateway` gets a custom `ActivityBehavior` in
+  `flowable-extension/`, registered via a custom `ActivityBehaviorFactory`,
+  preceded by a spike.
+  **Why:** User requires all BPMN gateways; Flowable ships no behaviour for this
+  one. The spike is because gateway behaviours join tokens, which is more invasive
+  than the service-task seam already proven, and BPMN 2.0 leaves real latitude in
+  `activationCondition` semantics.
+  **Affects:** new spike + story in the BPMN milestone.
+
+- **Change:** Three independent sources of truth about BPMN support must be
+  reconciled to one: the `workflow.js` palette, `COMING_SOON_BPMN_TYPES`, and the
+  `UnsupportedRuntime*` lists in `WorkflowBpmnXml.cs`.
+  **Why:** Implementing a node type currently means editing three places and
+  nothing fails if one is missed. #107's drift test guards only palette-vs-inventory.
+  Compounding it: `BuildUnsupportedRuntimeWarnings` feeds `warnings`, not `errors`
+  (`WorkflowBpmnXml.cs:365`) — unsupported elements deploy today and silently do
+  nothing, which is #40's founding complaint, now mechanically confirmed.
+  **Affects:** #107; needs its own story ahead of the implementation work.
+
+- **Change:** BPMN Data Object / Data Store / Data Input / Data Output become
+  typed process-variable declarations; Data Store stays an annotation until M4.
+  **Why:** Gives Call Activity (#113) its in/out mapping UI for free without
+  coupling M3 to M4's data model. NB "Global Data Object" is an unrelated Auton8
+  term — a process variable present in all executions.
+  **Affects:** #113, #107.
+
+- **Change:** Timers ship with operator visibility, not just execution — scheduled
+  jobs on an execution, retry counts, dead-letter jobs, and a stated answer for
+  pending timers across a redeploy.
+  **Why:** `IFlowableClient` has 27 methods and none touch jobs. A timer that does
+  not fire is currently undiagnosable, and "the timer never fired" would be an
+  unanswerable support question.
+  **Affects:** new stories; `IFlowableClient` surface.
+
+- **Change:** Pools/lanes get **full collaboration** — a two-pool diagram deploys
+  two definitions and message flows wire to #112's correlation mechanism.
+  **Why:** User decision. Note this breaks a standing assumption that a diagram is
+  one process definition; deployment, versioning and the execution view all assume
+  it today.
+  **Affects:** #112, deployment and execution-view stories.
+
+- **Change:** M3 splits into three milestones — BPMN node coverage / script host
+  and sandbox / collaboration + DMN + operator visibility. Stories sliced **by
+  shared mechanism** (one story per mechanism that unlocks a family), continuing
+  the pattern #112 and #114 already use.
+  **Why:** `/n8-verify` runs at milestone granularity, so a single ~30-story M3
+  verifies nothing until everything lands — the exact failure mode the user
+  identified in earlier milestones. Renumbers M4–M7.
+  **Affects:** all downstream milestone numbering.
+
+### Script host and sandbox (new epic — security-driving)
+
+- **Change:** Script tasks move to a **gated host API** behind sandboxed GraalVM
+  Polyglot (JavaScript + Python at v1.0), replacing Nashorn.
+  **Why:** Confirmed on the running stack that a workflow author can execute
+  arbitrary JVM code. `BuildScriptTaskValidationErrors` checks only that
+  `scriptFormat == "javascript"` and the body is non-empty — no content
+  inspection — and *requires* `javascript`, which pins every script onto
+  `nashorn-core-15.4.jar`, whose Java interop is on by default. There is no
+  `flowable-secure-*` module in the image and no restricting config. A benign
+  probe (`Java.type('java.lang.System')`) returned `21.0.10`. The
+  `FlowableScriptTaskSupport*` classes are a read-only `ScriptEngineManager`
+  capability probe, not a sandbox — the name misled us.
+  The design puts the permission gate on a **host API**, not in the language
+  runtime, so a language is a front-end: one GraalVM `Context` with
+  `HostAccess` denied, and the bound Auton8 API as the only reachable surface.
+  Groovy is deliberately excluded — JVM-native, not a Truffle language, so it
+  would be the second separately-audited engine the user ruled out.
+  **Affects:** new milestone; `ForceAsyncScriptTasks`; the "Supported" list.
+
+- **Change:** Script execution identity — default is the assignee of the last user
+  task **on the token's own execution path**; permissions evaluated **live at
+  execution time**, not snapshotted at completion.
+  **Why:** Live evaluation means revoking access stops queued scripts, which is
+  what revocation is expected to do. Script tasks are forced async, so the gap is
+  real and can be long. Cost: a queued script can fail for reasons invisible at
+  completion time, so the failure must name the missing permission.
+  **Affects:** host API story; execution error surface.
+
+- **Change:** Per-**script-task** `runAs` setting with two explicit values —
+  `system` (requires the author to hold a specific "may set scripts run-as-system"
+  permission) or `workflowAuthor`. `system` bypasses individual permission checks
+  but **not** the sandbox: process variables, helper functions, APIs and tools
+  remain the only reachable surface.
+  **Why:** Per-task keeps the blast radius of a mistake to one step and makes
+  privileged steps visible on the diagram. Workflow-level would silently elevate
+  any script later added to an elevated workflow.
+  **Affects:** studio property editor; a new permission kind; the BPMN serialisation.
+
+- **Change:** **Publish-time validation** fails when a script task cannot resolve a
+  run-as identity — reachable with no preceding user task (timer/message start, or
+  first in flow), or downstream of a parallel join where "last user task" is
+  ambiguous. The author must then set `runAs` explicitly.
+  **Why:** Turns a class of runtime surprise into an authoring error. For a
+  timer-start process the runtime alternative surfaces long after deployment.
+  Requires reachability analysis — the same analysis the studio needs to warn in
+  the canvas.
+  **Assumption flagged for confirmation:** the user said "require run-as-system
+  after a join"; this is implemented as "require an *explicit* `runAs`", so
+  `workflowAuthor` also satisfies it, consistent with their answer on the
+  no-assignee case. Correct this if `system` was meant to be the only option there.
+  **Affects:** the studio's validation step; deployment.
+
+- **Change:** The LLM-instruction front-end ("if Type is sales, route to sales") is
+  **designed in** the script-host milestone and **built in M6**. Its host API
+  operations must be expressible as tool definitions, with a test asserting the
+  API surface is serialisable as tools.
+  **Why:** Binding a third front-end to the same gate is what proves the
+  abstraction; retrofitting it later is where these boundaries leak. Building it
+  now would put prompt-injection and cost questions inside an already-large
+  milestone.
+  **Affects:** M6; the host API's shape.
+
+- **Change:** Flowable gets its own least-privilege Postgres role, restricted to
+  the `flowable` database.
+  **Why:** Defence in depth, independent of the sandbox. Compose currently gives
+  all three databases one server and one role (`POSTGRES_USER: autonate`, the
+  bootstrap superuser), so Flowable's datasource credential reaches `AutoNate` and
+  `autonate_datastores` — users, permissions and the trusted data repository.
+  **Affects:** `infra/docker-compose.yml`, `infra/postgres/init/`, DEPLOYMENT.md.
