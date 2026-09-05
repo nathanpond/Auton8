@@ -38,7 +38,7 @@
              /src and /tests. 0.x: it runs and it is tested, but interfaces
              move and there is no upgrade-compatibility promise between 0.x
              releases. Keep in step with src/AutoNate.Spa/package.json. -->
-        <Version>0.1.1</Version>
+        <Version>0.2.0</Version>
     </PropertyGroup>
 
     <PropertyGroup>
