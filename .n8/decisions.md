@@ -1250,3 +1250,43 @@ Carry it into `/n8-verify` as a manual step.
   for something one component solved better, #17's suggestion actively made
   things worse. Audit findings are findings, not specifications. Read the
   measurement, re-derive the fix.
+
+## Release — v0.2.0 (2026-09-05)
+
+Tagged `v0.2.0` at `5043754` on `master`. Covers **M0** (infrastructure and
+packaging), **M1** (CI, quality gates, security scanning) and **M2** (identity:
+OIDC and SAML sign-in, claim-to-group mapping, sign-in method control; plus
+toasts and login branding). All three verified-closed by `/n8-verify`; CI green
+on the tagged commit before the tag was pushed.
+
+**Version:** minor, not patch. `Directory.Build.props` already read 0.1.1 without
+a release, so 0.1.1 would have validated — but three milestones including a new
+authentication subsystem is not a patch. 1.0 stays where the roadmap puts it: M7
+is "v1.0 audit and hardening" and M3–M6 are unstarted. The bump had to land
+before the tag because `release.yml` validates the tag against
+`Directory.Build.props` and hard-fails on mismatch.
+
+**Invariant 2 checked, not assumed.** `PluginAbiVersionTests` failed on the first
+run after the bump — the abstractions assembly was stale because only
+`AutoNate.Web` had been rebuilt. A full solution rebuild gives 16/16. The guard
+pins both halves: `AssemblyVersion` stays `1.0.0.0` while the informational
+version follows the product.
+
+**What the tag triggered:** `release.yml` published `autonate-web`, `hocuspocus`,
+`executor` and `flowable` to `ghcr.io` with provenance attestations, then created
+the release object itself — so `gh release create` was deliberately *not* run
+here, only the tag push and verification.
+
+**The first attempt failed and the tag was left alone.** `Publish autonate-web`
+died on `apt-get update` against a stale Debian mirror (`exit code: 100`),
+skipping the gated release job — a pushed tag with no release and three of four
+images already in the registry. Re-running the failed job with no changes
+succeeded. The tag was not deleted or moved: three images were already published
+under it, and moving it would have broken anyone who had pulled, while hiding
+that a publish failed. Robustness gap filed as **#143**, with the observation
+that removing the `curl` install (the healthcheck could use `/dev/tcp`, as the
+Keycloak service already does) beats retrying the network call.
+
+**Known issue shipped, knowingly:** #137 — `AllowedProviderHosts` cannot be
+extended from configuration. Fails closed, so a functionality defect rather than
+an exposure. Surfaced before the go/no-go and accepted.
