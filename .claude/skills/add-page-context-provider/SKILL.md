@@ -228,7 +228,15 @@ There is no automated SPA test for this — run it manually:
 - **Multiple registrations on the same page.** Only one provider per pageKey is active at a time (last-mounted wins). If two components both call `useRegisterPageContext({ pageKey: "x" })`, mounting order decides — that's brittle. Compose state into a single hook called from the page-level component.
 - **Topics that say what you want, not what the model needs.** `bpmn.xml` is fine because it's a noun the model already understands. `getCurrentSnapshot` is bad because it sounds like it should be the default action. Pick topics that read like data fields, not RPCs.
 - **Trusting the snapshot the model used to compose its preview.** By the time `confirmed=true` reaches your handler, the user may have clicked elsewhere or edited something. Validate preconditions (id still exists, type still matches, dirty state still allows the change) and fail with a precise error code so the model can re-narrate. Don't blindly mutate.
-- **Persisting in an action handler.** Mutations are in-memory only. Do not call save / publish / post APIs from inside `onPageAction`. The user must click Save themselves — that's the trust contract this whole system rests on.
+- **Persisting in an action handler.** Mutations are in-memory only. **This rule has been overtaken by the corpus — read it as a default, not a law.**
+`useDatasetsPagePageContext` ships `submit_create`, `submit_edit` and `delete_dataset`,
+and `useDataStoresPagePageContext`'s own action description says it "calls the same
+/api/datastores DELETE". Two of the eight shipped providers persist.
+
+The real contract is the **confirmation gate**: a mutating action must go through the
+two-call `confirmed` flow, so the model proposes and a human accepts. Prefer staging
+into page state and letting the user click Save where that is natural; where the page
+has no such affordance, a persisting action behind the gate is an accepted pattern.
 - **Forgetting `data-agent-exclude` on credential fields.** Password fields are excluded by default, but `type=text` API-key inputs, secret-question answers, OTP codes, etc. need the attribute explicitly. If a sensitive field uses a custom widget that renders something other than a `<password>` input, opt it out.
 
 ## What you do NOT need to touch

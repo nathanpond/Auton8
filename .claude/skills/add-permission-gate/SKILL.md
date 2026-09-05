@@ -37,8 +37,16 @@ denies everyone.** `Authorizer.cs:131-136`:
 
 ```csharp
 if (!_instanceAuthorizers.TryGetValue(target.Kind, out var handler))
-    return Deny($"no instance handler for kind '{target.Kind}'");
+    return (MaybeDryRun(AuthDecision.Deny($"no instance handler for kind '{target.Kind}'"), action, target), null);
 ```
+
+Note the blast radius is the **opposite** of the missing-route-id case in step 4. This
+one runs *inside* `Authorizer`, so it is reached only after the `Enabled=false` bypass
+and the super-admin short-circuit — meaning it denies everyone **except** super-admins,
+and does nothing at all when authorization is disabled. And `MaybeDryRun` means that
+under `Authorization:DryRun=true` — a real, documented rollout window — a missing
+instance authorizer **allows everyone** and merely logs. Do not rely on "it will
+obviously fail" to catch this.
 
 This has already shipped five times. `Program.cs:380-381` carries the scar:
 
@@ -53,7 +61,7 @@ This has already shipped five times. `Program.cs:380-381` carries the scar:
 
 ## Decision: new kind, new action, or both?
 
-- **New action only** → steps 2, 3, 4, 6, 7, 8.
+- **New action only** → steps 2, 3, 4, 6, 7, 8 — **plus 5c if the kind is a content kind**. `Actions.RefreshBindings` is exactly this case: a new action, no new kind, whose real work was the project-role bundle switch.
 - **New kind** → all steps. Steps 5a and 5b are the ones that decide allow/deny.
 
 ## Steps
@@ -88,10 +96,19 @@ cannot grant what they cannot see.
 ```
 
 ⚠️ **The third argument defaults to `"id"` — omitting it does NOT mean kind-level.**
-On a route with no `{id}` token the id resolves null and `RequirePermissionFilter.cs:37-44`
-returns a silent **403 to everyone except super-admins**, permanently, publishing an
-`auth.access.denied` event with reason `missing_target_id`. It does not throw. Use
-`RequireKindPermission` for kind-level.
+On a route with no `{id}` token the id resolves empty and `RequirePermissionFilter`
+returns 403 **immediately, before calling `AuthorizeAsync` at all**. So it is 403 for
+**everyone — super-admins included, and even with `Authorization:Enabled=false`**,
+because neither bypass lives in the filter; both are inside `Authorizer`, which is
+never reached. It publishes an `auth.access.denied` with reason `missing_target_id`
+and does not throw.
+
+That last part matters for diagnosis: an engineer who tests this as super-admin still
+gets 403, which is the opposite of the usual signal. Use `RequireKindPermission` for
+kind-level gating.
+
+There is also a third overload taking `Func<EndpointFilterInvocationContext, string?>`,
+which is the only way to gate on an id in the body or a nested route.
 
 Chain `.DisableAntiforgery()` on mutating endpoints, before the permission call.
 
@@ -114,7 +131,7 @@ warning in the `add-projection` skill first: `WildcardValue` must mean *match-an
 must agree with `InMemorySelectorEvaluator`. The shipped workflow compilers get this
 backwards (GHSA-vrw7-qxhw-m9q8) — do not copy them.
 
-**5c. Content kinds are different.** `RequirePermissionFilter.cs:47-59` diverts any
+**5c. Content kinds are different — and this applies to a new *action* too, not just a new kind.** `RequirePermissionFilter.cs:47-59` diverts any
 `ContentKinds.IsContentKind` to `IContentAuthorizer`, and a new action must be added
 to the project-role bundle switch at `ContentAuthorizer.cs:738-744` or the role
 baseline never grants it.
@@ -143,7 +160,20 @@ Exemplars: `WorkflowExecutions.tsx:88-104`, `ManageUsers.tsx:75-76`,
 
 ### 8. Tests
 
+- ⚠️ **The test factory defaults authorization OFF.** `AutoNateWebApplicationFactory` sets `Authorization:Enabled=false` and `Enforcement=off`, so an enforcement test needs the three-key override every real one in the repo carries:
+
+  ```csharp
+  ["Authorization:Enabled"] = "true",
+  ["Authorization:Enforcement"] = AuthorizationEnforcement.Full,
+  ["Authorization:AssignSuperAdminToAllExistingUsers"] = "false"
+  ```
+
+  Without it your *ungranted* user gets 200. Write only the positive half — very natural — and you ship a green test that proves nothing.
 - Enforcement test: the endpoint with a granted user (200/204) and an ungranted one (403).
+- ⚠️ **For a new kind, that test must hit an INSTANCE-level route** (`RequirePermission(..., "id")`) with a concrete id. A kind-level route returns from `AuthorizeKindLevelAsync` *before* the instance-handler lookup, so a `/<kind>/*` grant passes with zero instance authorizers registered — the exact failure 5a exists to prevent, invisible to the obvious test.
+- **`EntityRegistryTests` hard-asserts the kind count.** Adding to `CoreEntityTypes` fails it with "Expected N, Actual N+1" and no explanation; adding to `AnalyticsEntityTypes` does not. Bump it and add an `Assert.Contains`.
+- **`KindGateEnforcementTests` rows are GET-only** — all three theories call `GetAsync`. A row for a `POST /` create route returns 405, which the allow-theory reads as "not Forbidden" and passes. Only add GET routes there.
+- **Map the endpoint group in `Program.cs`.** `AuthorizationGatePresenceTests` walks the live `EndpointDataSource`, so an unmapped group passes the invariant by being invisible.
 - **`KindGateEnforcementTests` is a hard-coded `TheoryData`, not a sweep** — add a row for a new `RequireKindPermission` route or it is silently uncovered.
 - `AuthorizationGatePresenceTests` must pass (invariant 3).
 - New kind: a test that an admin can grant it via the grants API **and that the grant takes effect** — that is what catches a missing 5a.

@@ -40,7 +40,7 @@ its skeleton rather than building from scratch.
 
 | You need… | Copy from |
 |---|---|
-| External API + per-row upsert + own permission tags | `FlowableExecutionProjection` (+ `FlowableExecutionPollingFeed`, `WorkflowExecutionsQueryEntity`, `WorkflowExecutionCacheSelectorCompiler`) |
+| External API + per-row upsert + own permission tags | `FlowableExecutionProjection` (+ `FlowableExecutionPollingFeed`, `WorkflowExecutionsQueryEntity`, and `WorkflowExecutionCacheSelectorCompiler` — ⚠️ **do not copy its wildcard handling, see step 8**) |
 | Per-parent-instance snapshot, child rows | `FlowableVariableProjection` (+ `FlowableVariablePollingFeed`, `WorkflowVariablesQueryEntity`) — uses parent-auth inheritance |
 | Append-only event log with deterministic IDs | `FlowableHistoryProjection` (+ `FlowableHistoryPollingFeed`, `WorkflowHistoryQueryEntity`) — `ON CONFLICT DO NOTHING`, watermark-driven |
 | Internal aggregate from our own DB | `RecordActivityRollupProjection` (+ `RecordActivityRollupFeed`, `RecordActivityRollupQueryEntity`) — auth-gated via parent kind |
@@ -55,8 +55,16 @@ File: `src/AutoNate.Web/Persistence/DatabaseSchemaInitializer.cs`
 Add a `private const string XxxCacheSchemaSql = """ ... """;` block and a
 matching `ApplyStepAsync(dbContext, applied, nameof(XxxCacheSchemaSql),
 XxxCacheSchemaSql, cancellationToken)` call inside `EnsureAsync` — **not**
-`ExecuteSqlRawAsync`, which `EnsureAsync` no longer uses; every batch goes through the
-ledger now (see the `add-schema-change` skill, which owns this mechanism). The table must
+`ExecuteSqlRawAsync` directly. Route the batch through `ApplyStepAsync` so it lands in
+the `schema_versions` ledger — but note `ApplyStepAsync` still executes your SQL *via*
+`ExecuteSqlRawAsync` underneath, which is why the `{{}}` rule below applies. (See the
+`add-schema-change` skill, which owns this mechanism.)
+
+⚠️ **Use a new const; do not append to an existing one.** `ApplyStepAsync` keys the
+ledger on `nameof(...)` and early-returns when that name is already applied. Appending
+your table to, say, `WorkflowCacheSchemaSql` — the natural move, since it *is* the
+Flowable cache SQL — therefore never runs on any existing install, while passing every
+test, because every test database is fresh. The table must
 include:
 
 - A primary key matching what your `ChangeEvent.SourceId` will be.
@@ -338,3 +346,25 @@ runtime. Renames included — see `AutoNateDbContext.ProjectionCaches.cs`
 
 **"Retention" in the description is not covered here.** It is a separate hosted
 service (`WorkflowCacheRetentionService`).
+
+
+## Two things that will stop you before your tests run
+
+**`StubFlowableClient` implements `IFlowableClient`.** If your source type comes from
+Flowable, adding a method to that interface breaks the whole `AutoNate.Web.Tests`
+assembly at compile time — `AutoNateWebApplicationFactory` removes the real client and
+substitutes the stub. Extend the stub in the same change. This bites the decision
+table's *first* row, the headline case.
+
+**The test factory turns authorization off.** `AutoNateWebApplicationFactory` sets
+`Authorization:Enabled=false` and `Enforcement=off` alongside the
+`Projections:WorkerEnabled=false` this skill already quotes. So the standard recipe
+proves the read path and **nothing about authorization**. That matters most for
+Pattern B, whose failure mode is *silent zero rows* — indistinguishable from an empty
+cache in a test with auth disabled. Write at least one test that flips
+`Authorization:Enabled=true` and `Enforcement=full`, grants a selector, and asserts
+both that the visible rows come back **and** that another actor's rows do not.
+
+**There is already a guard for the backfill source.** `ProjectionFrameworkPhase4Tests`
+enumerates the live registry and rebuilds every projection, so a missing
+`IProjectionBackfillSource` fails automatically. Do not weaken it.

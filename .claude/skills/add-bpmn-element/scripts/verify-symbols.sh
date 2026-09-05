@@ -68,11 +68,24 @@ n=$(grep -rho "WorkflowBpmnXml.ValidateProcess" "$WEB" 2>/dev/null | wc -l | tr 
 [ "$n" -eq 1 ] && ok "ValidateProcess has 1 external call site (/prepare only)" \
   || bad "ValidateProcess call sites" "now $n — load-bearing fact 4 may be stale"
 
-# The lint ratchet number quoted in the skill.
+# The lint ratchet, matched in context rather than as a bare substring — a bare
+# grep for the number matches a line number or an issue number and passes on a stale skill.
 r=$(grep -o 'max-warnings=[0-9]*' "$SPA/../package.json" 2>/dev/null | head -1)
-grep -q "${r#*=}" .claude/skills/add-bpmn-element/SKILL.md \
-  && ok "lint ratchet ($r) matches SKILL.md" \
-  || bad "lint ratchet" "package.json says $r; SKILL.md quotes something else"
+if grep -qE "currently ${r#*=}|max-warnings=${r#*=}" .claude/skills/add-bpmn-element/SKILL.md; then
+  ok "lint ratchet ($r) matches SKILL.md"
+else
+  bad "lint ratchet" "package.json says $r; SKILL.md quotes something else"
+fi
+
+# MENU_GROUP_ORDER carries the same dead-code claim as BPMN_MENU_ENTRIES.
+n=$(grep -rho "MENU_GROUP_ORDER" "$SPA" 2>/dev/null | wc -l | tr -d ' ')
+[ "$n" -eq 1 ] && ok "MENU_GROUP_ORDER still dead (1 occurrence)" \
+  || bad "MENU_GROUP_ORDER" "now $n occurrences — step 2's premise has changed"
+
+# The 68-entry manifest count the skill quotes.
+sup=$(grep -c '^      "' "$SPA/pages/workflow/WorkflowStudio.tsx" 2>/dev/null || echo 0)
+[ "$sup" -gt 0 ] && ok "manifest entries present ($sup quoted strings; verify 68 by hand)" \
+  || bad "manifest" "could not find the type lists"
 
 echo
 [ "$fail" -eq 0 ] && echo "All claims resolve." || echo "Some claims have rotted — fix the skill."

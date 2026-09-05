@@ -12,7 +12,7 @@ recognisable half-wired failure:
 |---|---|
 | `describeBusinessObject` | Backend field is permanently null; property panel opens empty and "loses" settings on reselect |
 | Any of the 4 type mirrors | Field set in one layer, invisible in the next |
-| Key merged unconditionally | **Every other editor's routing breaks at once** while each field still reads correctly |
+| Key merged unconditionally | Elements sharing that `$type` misroute to the wrong modal, silently |
 | `update*Properties` | Editor shows values, Apply appears to work, edit is lost on reload |
 | `Apply*Snapshot` | Field reaches the backend, never reaches the XML |
 | A carve-out site | Element works but still warns "deploys but does nothing" |
@@ -58,12 +58,16 @@ only** — never an attribute namespace. Even Auton8-proprietary properties use
 because bpmn-js loads no Flowable moddle extension here, so raw prefixed attributes
 in `$attrs` are the only round-trip-safe shape.
 
-**3. Editor routing is key *presence*, not truthiness.** `onRequestConfigure` routes
-on `"timerDuration" in selection`, `"signalName" in selection`, and similar.
-That works only because `describeBusinessObject` **omits the keys entirely** for
-elements that don't have them. Writing `linkName: link?.linkName ?? null` on the base
-description object breaks every sibling editor at once, while each field still reads
-correctly in isolation. This is the highest-cost mistake available in this codebase.
+**3. Editor routing is `$type` *plus* key presence.** `onRequestConfigure` routes on
+`selection.type === "bpmn:StartEvent" && ("timerCycleCron" in selection || …)` — both
+guards, at every branch. So your describe helper must gate on `$type` **and** omit the
+keys for elements that don't have them; the two guards are independent and you need
+both.
+
+Merging a key unconditionally onto the base description object misroutes every element
+whose `$type` also matches that branch — e.g. an unconditional `timerDuration` sends
+message and signal intermediate catch events to the timer modal. Contained to one
+element type, not catastrophic, but silent and confusing.
 
 **4. `/publish` does not validate.** `WorkflowBpmnXml.ValidateProcess` has exactly one
 call site: `POST /api/workflows/prepare` (`WorkflowEndpoints.cs`). `POST
@@ -176,8 +180,8 @@ forbids.
 
 **The state clearing is N×N, not 1×N.** Clear every other editor in your branch —
 *and* add `set<YourEditor>(null)` to every existing branch, including `selectWorkflow`.
-There are ten such sites today. Grep for an existing `set*Editor(null)` and match its
-occurrences exactly.
+Grep for an existing `set*Editor(null)` and match its occurrence count exactly — it
+was 12 at the time of writing and it moves.
 
 Mantine v9 only. `Tooltip` from `@mantine/core`, never a native `title`. Toasts through
 `toast` from `@/components/notifications/toast` — importing `@mantine/notifications`

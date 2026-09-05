@@ -28,8 +28,11 @@ Append your action to `WorkflowExecution.actions` (or `WorkflowTask.actions`).
 
 ⚠️ **This does not enforce anything.** `Authorizer.cs` matches grants by raw string
 compare (`pg.Action == action || pg.Action == Actions.Wildcard`) and never consults
-the registry. `Actions.RefreshBindings` gates two shipped endpoints on
-`EntityKinds.Document` without being registered on it, and works. Registering makes
+the registry. `Actions.RefreshBindings` gates two shipped endpoints on `EntityKinds.Document`
+without being registered on it, and works. (Caveat worth knowing: `Document` is a
+*content* kind, so it routes through `IContentAuthorizer` rather than the grant
+compare — the conclusion holds for ordinary kinds too, but that example does not
+itself exercise the string-compare path.) Registering makes
 the action **discoverable** in the Grants help table, `SelectorBuilder` and `Explain`.
 The real hazard is the reverse: an action registered with no endpoint behind it gives
 admins a grant that does nothing (`AnalyticsEntityTypes.cs:68-71` records that
@@ -63,6 +66,12 @@ The third arg to `RequirePermission` is the route param name carrying the entity
 
 **Kind-level (bulk) variant.** If the action has no per-instance id (e.g. "delete-all", "cancel-all"), use `RequireKindPermission(kind, action)` instead — it routes through `RequireKindPermissionFilter`, which calls the authorizer with `EntityRef(kind, "*")`. The endpoint route then has no `{processInstanceId}` token. Match this on the SPA by checking the permission with `id: "*"`.
 
+### 5 (prerequisite).
+
+`src/AutoNate.Spa/src/api/executions.ts` — add the fetch function first. Every
+mutation in `useExecutions.ts` imports its function from `@/api/executions`; writing
+the hook against a symbol that does not exist there is the usual first failure.
+
 ### 5. Wire the SPA hook and UI
 Files:
 - `src/AutoNate.Spa/src/hooks/useExecutions.ts` — add a `useMyAction` mutation following `useCancelExecution` / `useDeleteExecution`. Invalidate `EXECUTIONS_QUERY_KEY` on success.
@@ -90,5 +99,23 @@ only if your action is dangerous enough to warrant an example.
 ## Common slip-ups
 
 - **Forgetting step 2 (CoreEntityTypes registration).** Grants editor lets admins try to grant the action, but the evaluator rejects it at runtime. Always check `WorkflowExecution.actions` after adding to `Actions.cs`.
-- **Using a different route param name than the third `RequirePermission` arg.** The filter does **not** throw. `RequirePermissionFilter.cs:37-44` publishes an `auth.access.denied` event with reason `missing_target_id` and returns a silent **403 to everyone except super-admins**, permanently. Looking for an exception will send you the wrong way. Note the arg defaults to `"id"`, so omitting it on a route with no `{id}` token produces the same silent 403 — kind-level gating is `RequireKindPermission`, not omission.
+- **Using a different route param name than the third `RequirePermission` arg.** The filter does **not** throw. It publishes an `auth.access.denied` with reason `missing_target_id` and returns a silent 403 — **to everyone, super-admins included, and even with `Authorization:Enabled=false`**, because the guard returns before `AuthorizeAsync` is ever called and both of those bypasses live inside `Authorizer`. Do not reason "it works for me as super-admin, so the route param is fine": that inference is exactly backwards here. Note the arg defaults to `"id"`, so omitting it on a route with no `{id}` token produces the same 403 — kind-level gating is `RequireKindPermission`, not omission.
+
+**When a route carries two tokens** (say `{processInstanceId}` and `{jobId}`), gate on the one naming the entity being authorized — the execution, not the job. The task sub-routes in `ExecutionEndpoints` set the precedent.
 - **Skipping `.DisableAntiforgery()` on mutations.** The SPA sends `application/json`; without this you get 400s from the antiforgery middleware on POST/PUT/DELETE.
+
+
+## Two things that break the build before your tests run
+
+**`StubFlowableClient` implements `IFlowableClient` directly.** Adding a member to that
+interface breaks the whole `AutoNate.Web.Tests` assembly at compile time, not just
+your new test. Extend the stub in the same change.
+
+**`AuthorizationGatePresenceTests` enumerates live endpoints** and fails if a mapped
+route carries no explicit authorization decision (project invariant 3). It will fail
+on its own if you map the endpoint before gating it — that is the intended behaviour,
+not a problem with your change.
+
+**A read endpoint is usually needed too.** You cannot render a gated row action
+without knowing which rows qualify. Every existing execution verb has a read side
+(`/diagram`, `/history`, `/log`, `/tasks`), all gated on `Actions.View`.

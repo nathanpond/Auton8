@@ -188,14 +188,20 @@ fallback, and it is then non-obvious whose notes survived. To add a summary, use
 **When the publish job fails, re-run it before changing anything.** The one failure
 that has actually happened was `apt-get update` exiting 100 against a stale Debian
 mirror (`src/AutoNate.Web/Dockerfile:71`, issue #143 — still open, no retry logic).
-It is transient and external; a plain re-run of the failed job succeeded. Two things
+It is transient and external; `gh run rerun <id> --failed` succeeded with no code change. Use `--failed`, not a bare rerun — the latter rebuilds all four images for another ~45 minutes. Two things
 to know while diagnosing: `Release assets` is gated on the publishes, so **no release
 object exists at all** — a `gh release download` will 404 and look like a different
 problem — and some images may already have been pushed under that tag.
 
-**Expect ~45 minutes, not the warm-cache figure.** Real runs: v0.2.0 43m52s,
-v0.1.1-rc1 47m11s. Only an immediate re-tag hits the warm path, because GHA cache
-scopes evict between releases. Reading a normal build as a hang is the mistake.
+**The `autonate-web` job takes ~45 minutes** (v0.1.1-rc1: 47m11s; v0.2.0's successful
+attempt: 43m33s). Only an immediate re-tag hits the warm path — GHA cache scopes evict
+between releases.
+
+But do not read that as the release duration. **v0.2.0's run took 8h32m wall-clock**,
+because attempt 1 failed on apt-get at ~01:58Z and then sat for 7h43m until a person
+pressed re-run at 09:41Z. **Nothing tells you.** A failed release does not retry itself
+and does not notify — the stall is silent and unbounded. Watch the run, or you will
+discover it the next morning.
 
 **The SPA version is on the honour system.** The workflow validates only
 `Directory.Build.props` against the tag; nothing checks

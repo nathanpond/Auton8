@@ -6,8 +6,8 @@ description: Add or change a database table, column, index or seed in Auton8. Us
 # Adding a schema change
 
 All of Auton8's schema lives in
-`src/AutoNate.Web/Persistence/DatabaseSchemaInitializer.cs` — around 4,500 lines
-executed as ~70 ordered batches on startup, plus
+`src/AutoNate.Web/Persistence/DatabaseSchemaInitializer.cs` — around 4,800 lines
+executed as ~78 ordered batches on startup, plus
 `src/AutoNate.Web/Persistence/Sql/BaseSchema.sql`, an embedded resource applied
 first.
 
@@ -126,7 +126,11 @@ list has exactly one entry. So a change to *that file* is exercised by every tes
 but a **batch** runs only in tests that boot the host through
 `DatabaseSchemaInitializer.EnsureAsync`. A test using `PostgresTestDatabase` directly
 sees the base schema and nothing else, and hits `relation "x" does not exist` for
-anything a batch created. Beyond that:
+anything a batch created. The fixture that *does* run batches is
+`AutoNateWebApplicationFactory`, which creates that same database and then boots
+`Program` → `PrimaryDatabaseInitializer` → `EnsureAsync`; `CreateOn(database)` gives
+you a second host over the same database, which is the "restart" primitive
+`RebrandMigrationTests` uses. Beyond that:
 
 - A new table or column that a feature reads gets its own endpoint or store test.
 - A one-shot migration gets a test that **rewinds and re-runs it** —
@@ -175,7 +179,16 @@ Called after `RecordsSchemaSql` (it references `records`):
 await ApplyStepAsync(dbContext, applied, nameof(RecordPinsSchemaSql), RecordPinsSchemaSql, cancellationToken);
 ```
 
-Then the EF entity — which is **three** edits, not one: the POCO in `src/AutoNate.Web/Persistence/Scaffolded/<Name>.cs`, a `public virtual DbSet<T>` in `AutoNateDbContext.cs`, and an explicit `modelBuilder.Entity<T>(…)` block in `OnModelCreating` with `.ToTable("snake_case")`, `.HasKey(…).HasName("x_pkey")` and a `HasColumnName` for **every** property. Skip the third and EF silently looks for PascalCase tables and columns. (There is no `AutoNateDbContext.Records.cs`; the partials are `AutoNateDbContext.cs`, `AutoNateDbContext.DataStores.cs` and `AutoNateDbContext.ProjectionCaches.cs`, and the latter two are for their own subsystems.) <!-- verify-ignore: AutoNateDbContext.Records.cs -->, and a store test.
+Then the EF entity — which is **three** edits, not one: the POCO in `src/AutoNate.Web/Persistence/Scaffolded/<Name>.cs`, a `public virtual DbSet<T>` in `AutoNateDbContext.cs`, and an explicit `modelBuilder.Entity<T>(…)` block in `OnModelCreating` with `.ToTable("snake_case")`, `.HasKey(…).HasName("x_pkey")` and a `HasColumnName` for **every** property. Skip the third and EF silently looks for PascalCase tables and columns. (There is no `AutoNateDbContext.Records.cs`; the partials are `AutoNateDbContext.cs`, `AutoNateDbContext.DataStores.cs` and `AutoNateDbContext.ProjectionCaches.cs`, and the latter two are for their own subsystems.) <!-- verify-ignore: AutoNateDbContext.Records.cs -->
+
+For a **column on an existing table** the DbSet is already there, so it is three
+different edits: the POCO property, the `HasColumnName` inside the existing
+`modelBuilder.Entity<T>` block, and — the one that is easy to miss —
+`PersistenceModelMapper`'s `ToModel` **and** `Apply`. Skip the mapper and the column
+persists and reads back from the database but never reaches an API response, with no
+compile error and no test failure unless you wrote the round-trip test.
+
+Then a store test.
 
 ## Trap 3: BaseSchema.sql re-runs on every boot
 
@@ -189,9 +202,19 @@ and re-runs on every single start, forever.** The file says so itself:
 > standalone CREATE INDEX naming `source` fails at parse time on an old database, on
 > every start, forever."*
 
-So when extending `BaseSchema.sql`: new columns go **inside** the
-`CREATE TABLE IF NOT EXISTS`, never as a trailing `ALTER`, and the index on a new
-column goes in a **batch**, never here.
+The real constraint is narrower than "put columns in the CREATE TABLE". A bare
+`ALTER TABLE … ADD COLUMN IF NOT EXISTS` names no pre-existing column, so it is
+trivially re-run safe — and the file already contains **13** of them, including
+`workflow_models.default_variables`, which exists *only* as a trailing ALTER.
+
+What cannot live here is a statement that **references** a column: an index, a
+`CHECK`, an `UPDATE`. Those fail at parse time on a database that predates the column,
+on every boot, forever. That is why the `group_members` provenance columns sit inside
+their `CREATE TABLE IF NOT EXISTS` — because of the `CHECK` beside them — and why the
+index on them lives in a batch.
+
+So: a plain new column may be a trailing ALTER here; anything referencing it goes in a
+batch.
 
 ## Trap 4: PostgreSQL parses a whole command before executing any of it
 
@@ -200,8 +223,23 @@ one command**. Postgres parses every statement first, so the index fails at pars
 time with `column "source" does not exist` — **on an existing database only**. A
 fresh database bootstraps from `BaseSchema.sql`, which already declares the column.
 
-**The test suite cannot catch this.** Every test database is fresh. This failed on
-the first real dev database it met.
+**Caveat, measured 2026-09-05: this does not reproduce on the current stack.** The
+combination above was run against PostgreSQL 16.15 through `ExecuteSqlRawAsync` (EF
+Core 9 / Npgsql 9.0.3) with the column absent beforehand, and succeeded — as does the
+same shape via `psql`. With no parameters the command goes over the simple query
+protocol, where each statement is analysed immediately before its own execution. Taken
+literally the rule would also condemn this skill's own worked example and
+`WorkflowVersioningSql`, both of which create a table and an index on it in one const
+and ship fine.
+
+Keep the two-constant split as convention — it costs nothing and the incident that
+motivated it was real. But do not expect the failure, and if you ever do see
+`column "x" does not exist` from a batch that plainly adds it, this is the first thing
+to suspect.
+
+**And it is testable**, contrary to what this skill said before: drop the column from
+a fixture database, run `EnsureAsync`, and assert both the column and its index exist.
+`BaseSchemaSingleSourceTests` already does the harder half.
 
 The fix is two constants applied back to back — see
 `GroupMemberProvenanceColumnsSql` and `GroupMemberProvenanceConstraintsSql`, whose

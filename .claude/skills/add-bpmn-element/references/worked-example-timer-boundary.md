@@ -41,24 +41,35 @@ a third carve-out there, or it works and still emits a "timer events" warning. A
 earlier draft of this example stopped at the first block and would have shipped #157
 half-fixed.
 
-## 2. Palette
+## 2. Authoring affordance — zero code
 
-`workflow.js` → `BPMN_MENU_ENTRIES`. Boundary events attach to an activity rather
-than being dropped on empty canvas, so check how bpmn-js's own context pad offers
-them before adding a palette entry — a palette entry that cannot be dropped anywhere
-useful is worse than none. If the context pad already offers it, the manifest change
-may be all step 2 needs, and the story should say so.
+The vendored bpmn-js bundle **already offers both forms** in the boundary-event
+replace menu: `timer-boundary` and `non-interrupting-timer-boundary`, with
+`cancelActivity: true/false` in the entry attributes. Right-click the boundary event,
+use the wrench.
 
-## 3. Read back
+So step 2 is nothing. Do **not** go to `BPMN_MENU_ENTRIES` — it is dead code (see
+load-bearing fact 1). Say "no palette change needed, bpmn-js already offers it" in the
+story and move on.
 
-`describeBusinessObject()` already calls `describeTimerStartEvent(businessObject)`.
-That helper reads `eventDefinitions` looking for `bpmn:TimerEventDefinition` — it is
-shape-compatible with a boundary event, because both carry the definition the same
-way.
+## 3. Read back — a NEW helper; neither existing one works
 
-Add `cancelActivity` (the interrupting flag, `true` by default per the BPMN
-specification) to the description, and reuse the existing timer fields rather than
-adding parallel ones.
+⚠️ **`describeTimerStartEvent` is not reusable here.** It returns `null` unless
+`$type === "bpmn:StartEvent"`, so it emits nothing at all for a boundary event. It
+also reads only `timeCycle` and `flowable:endDate` — no duration, no date.
+`describeTimerIntermediateCatchEvent` reads duration and date but not cycle, and is
+gated on `bpmn:IntermediateCatchEvent`. **Neither covers the duration|date|cycle set
+#157's first AC requires, and neither fires for a boundary event.**
+
+Write `describeTimerBoundaryEvent(businessObject)`, gated on `bpmn:BoundaryEvent`,
+reading all three timer kinds plus `cancelActivity` and `attachedToRef?.id`.
+
+Merge conditionally under **new key names** — `boundaryTimerDuration`,
+`boundaryTimerDate`, `boundaryTimerCycle`, `cancelActivity` — so they do not collide
+with the existing `timerDuration` / `timerCycleCron` keys that route the other two
+timer editors.
+
+Then mirror the fields in all four places (see SKILL.md step 3).
 
 ## 4. Write back
 
@@ -124,24 +135,27 @@ Boundary-specific errors:
 - a timer boundary event with no `attachedToRef`, or attached to something that no longer exists
 - a **cycle** timer on an **interrupting** boundary event — it can only fire once, so the repetition is silently meaningless
 
-## 8. Studio UI
+## 8. Studio UI — a new modal, not an extension
 
-`TimerStartEventModal` exists and is close. Either extend it to handle both shapes or
-add `TimerBoundaryEventModal` beside it — extending is preferable, since two modals
-editing the same timer definitions will drift.
+⚠️ **Do not extend `TimerStartEventModal`.** It is a cron/recurrence picker built
+around `parseCron` with a raw-cron override, and has no duration or date mode.
+`TimerIntermediateCatchEventModal` has duration and date but no cycle. Neither covers
+the required set; extending either means bolting on the half it lacks. Write
+`TimerBoundaryEventModal`.
 
 The branch goes in `onRequestConfigure` (a `useCallback`, **not** a selection effect —
-it is reached only through the right-click "Configure…" menu), matching
-`selection.type === "bpmn:BoundaryEvent"` plus `"timerDuration" in selection`. Routing
-is key *presence*, so `describeTimerStartEvent` must keep omitting the keys for
-non-timer elements.
+reached only through right-click "Configure…"), matching
+`selection.type === "bpmn:BoundaryEvent"` **and** one of your new
+`boundaryTimer*` keys. Routing is `$type` *plus* key presence; both guards matter.
 
-Clearing is **N×N**: clear every sibling in your branch, *and* add
-`setTimerBoundaryEditor(null)` to all ten existing branches including
-`selectWorkflow`.
+Clearing is N×N. **Grep for an existing `set*Editor(null)` and match its occurrence
+count exactly** — it was 12 when this was written, and it moves. Do not trust a number
+written down here.
 
-Add the interrupting toggle with a sentence explaining the consequence — an author
-who does not know the difference will pick the default and be surprised.
+Add the interrupting toggle with a sentence explaining the consequence. Note
+`cancelActivity` also drives bpmn-js's dashed non-interrupting ring at render time, so
+a direct moddle assignment that skips the command stack leaves the border stale as
+well as the dirty flag.
 
 ## 9. Tests
 
