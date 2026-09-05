@@ -106,3 +106,40 @@ Use `RecordingAuditEventPublisher` (in `tests/AutoNate.Web.Tests/RecordingAuditE
 - **Per-row events** for list endpoints. One event per request, with `resultCount` in `details`.
 - **Anonymous-protocol traffic** (health checks, OPTIONS preflights, anonymous branding reads). Skip those routes — there's no actor to audit.
 - **Auth-failed redirects**. The `auth.login.failed` event covers the credential-presentation step; don't also emit on the redirect that carries the user back to the login page.
+
+
+## Corrections (audit, 2026-09-05)
+
+**Two topic names in this skill do not exist.** There is no `workflow.events` (the
+real ones are `workflow-admin.events` and `workflow.execution.events`) and no
+`system.issues.events` (it is `system.issues`). Publishing to a topic no JetStream
+stream captures gives a Dapr 500 and an outbox row that retries to
+`MaxAttempts = 50` and is abandoned.
+
+The full set, from `grep 'TopicName = "'`: `agent.events`, `application.events`,
+`auth.events`, `content.events`, `dashboards.events`, `datastore.events`,
+`external-connections.events`, `iam.events`, `identity-providers.events`,
+`notification.events`, `query.events`, `record-schema.events`, `record.events`,
+`site.events`, `system.issues`, `workflow-admin.events`,
+`workflow.execution.events`. (`identity-providers.events` is published but has **no
+stream** — see #175.)
+
+**Two helpers already exist; do not hand-roll them.**
+- View-event filter hashing is `ViewEventFilterHash.Compute(filter)` → `(Hash, Preview)` in `Services/Events/ViewEventHelpers.cs`. It already does the 4 KB cap and truncation marker. There is no `ComputeStableHash`.
+- View-event coalescing is `ViewEventCoalescer` in the same file, DI-registered and already injected in `AuthEndpoints` and `NotificationEndpoints`. It keys on **`(actorId, eventType)`** — not topic. Do not build an `IMemoryCache` gate.
+
+**A new topic needs its `<Domain>EventTopic` / `<Domain>EventTypes` constant classes
+first.** `NatsStreamProvisioner` interpolates `$"{XEventTopic.TopicRoot}.>"`, so the
+step that says to append a literal cannot be followed without them. Every call site
+passes constants, never literals.
+
+**The publisher enqueues; it does not POST.** `DaprAuditEventPublisher.PublishAsync`
+writes to `IAuditEventOutbox` and returns; `AuditOutboxDispatcher` does the Dapr POST
+with `?metadata.rawPayload=true`. The conclusion is the same, but the durable outbox
+is why a wedged NATS produces a growing table rather than immediate loss.
+
+**Step 9 is redundant** — `AutoNateWebApplicationFactory` already swaps in the
+recorder by default and exposes `factory.RecordedAuditEvents`.
+
+**The naming convention is not universal** — `IdentityProviderEventTypes` uses
+snake_case nouns (`identity_provider.created`).

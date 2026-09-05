@@ -21,7 +21,7 @@ File: `src/AutoNate.Web/Services/Records/RecordEventPublisher.cs`
 Add a `const string` to `RecordEventTypes`. Use the dotted convention: `record.<noun>` or `record.<noun>.<verb>` (e.g. `record.status.changed`).
 
 ### 2. Update the envelope if the schema is changing
-Same file: extend `RecordEventEnvelope` with the new field. Keep ordering positional — every existing call site uses positional args. Field naming on the wire is camelCase via `JsonSerializerDefaults.Web`; pick a C# PascalCase name that maps cleanly.
+Same file: extend `RecordEventEnvelope` with the new field. Every existing call site uses **fully named** arguments (see `EfCoreRecordStore`), so inserting a parameter mid-record is safe. Do **not** try to preserve positional order by appending: the last parameter is optional (`AuditContext? AuditContext = null`) and appending after it will not compile. Field naming on the wire is camelCase via `JsonSerializerDefaults.Web`; pick a C# PascalCase name that maps cleanly.
 
 **Don't re-add audit-context fields**: every event already carries a nested `auditContext` (actorId, ipAddress, userAgent, requestId, correlationId, httpMethod, routePath, authOutcome, etc.) populated automatically by `DaprRecordEventPublisher` via `IRequestContext`. New top-level fields should be record-domain payload, not request-context.
 
@@ -57,3 +57,28 @@ Only if the new event genuinely doesn't fit `record.events`:
 ## Wire format reminder
 
 Subscribers must use `rawPayload=true`. Don't add CloudEvents framing — the publish URL already passes `metadata.rawPayload=true` and the entire Flowable telemetry topic relies on the same convention.
+
+
+## Corrections (audit, 2026-09-05)
+
+**There are six lifecycle events, not four** — Created, Updated, StatusChanged,
+**AssigneesChanged**, **Purged**, and Deleted/Restored, all in `EfCoreRecordStore`.
+
+**The catalog category is the 5th of 21, not the last** ("Data Stores" is last). And
+record events span **two** categories: lifecycle events under "Record", and the view
+events (`Viewed` / `ListViewed` / `Searched` / `HistoryViewed`) under a separate
+**"View events (information access)"** category. A new `record.*.viewed` type appended
+to "Record" lands under the wrong heading in the SPA.
+
+**Not every event is emitted from the store.** Four of the eleven `RecordEventTypes`
+are emitted from **endpoints** — the view events. If you are adding one of those,
+step 4 does not apply.
+
+**The test fake already exists** — `RecordingRecordEventPublisher`, wired by default
+in `AutoNateWebApplicationFactory` and exposed as `factory.RecordedRecordEvents`.
+
+**Free fan-out, and a volume hazard.** `RecordChannelResolver` is event-type-agnostic
+— it keys on `recordId` / `assigneeIds` — so a new record event automatically reaches
+every SPA subscriber on `record:{id}`, `records:visible` and
+`records:assigned-to:{userId}` with no registration. Convenient, but consider the
+volume before adding a high-frequency event.
