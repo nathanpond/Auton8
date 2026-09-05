@@ -1626,3 +1626,89 @@ created during the replan), five stories, one spike.
   boundary and is worse than having none. Enforced by an AC asserting a
   `Java.type` call is refused through the test-run path.
   **Issue:** #152
+
+## /n8-plan M4,M5 — 2026-09-05
+
+Nineteen issues created: 14 stories + 1 spike in M4, 5 stories in M5. Every one
+of the 54 outstanding BPMN node types now has an owning story; the coverage
+mapping is recorded in the M4 milestone description.
+
+- **Decision:** Signals carry a **declared scope** — `process` (default) or
+  `global`.
+  **Why:** A BPMN signal name is otherwise global, so two unrelated workflows
+  both using "approved" silently couple, and neither diagram shows it. Cost if
+  wrong: an author who wanted cross-workflow fan-out has to set `global`
+  explicitly, which is visible in the diagram — the safe direction to be wrong in.
+  **Issue:** #156
+
+- **Decision:** Authors write **raw condition expressions**, as they already do
+  on gateways, with new publish-time validation that rejects unparseable
+  expressions and *warns* on variables nothing in the process sets. A guided
+  condition builder was offered and declined.
+  **Why:** Consistency with what ships; a builder needs a raw escape hatch
+  anyway, and then both exist. The validation is where the value is — a mistyped
+  variable name currently makes a gateway silently take the wrong branch. #158
+  owns the validator; #159, #163 and #166 reuse it rather than reimplementing.
+  **Issue:** #158
+
+- **Decision:** Ad-hoc subprocesses are **driven by a person** picking from the
+  enabled activities, not by an API alone.
+  **Why:** A human-ordered process with no human interface is the wrong shape.
+  Cost: it is the largest UI component in M4 for the least-used BPMN construct,
+  so it is flagged in its own Notes as a descoping candidate.
+  **Issue:** #163
+
+- **Decision:** BPMN data objects become **typed process-variable declarations**;
+  data store references stay annotations until M6's repository exists.
+  **Why:** A declaration is what lets #158's validator know a variable exists,
+  and it gives #113's call activity mapping something concrete to map. As pure
+  annotations all four would be decoration.
+  **Issue:** #166
+
+- **Decision:** Collaboration is **one authored unit, many definitions**, deployed
+  atomically and versioned together — republishing advances every definition,
+  including unchanged pools.
+  **Why:** It is what guarantees a message flow always references a compatible
+  counterpart. Per-pool independent versioning was rejected: republishing one
+  pool could silently break the other's message flows while the diagram still
+  showed the relationship. Cost: one-definition-per-diagram is assumed today in
+  deployment, versioning and the executions view, so #169 is the largest
+  structural change in M5.
+  **Issue:** #169
+
+- **Decision:** A lane sets **default** task assignment, overridable per task.
+  **Why:** A diagram whose most obvious visual claim is untrue teaches authors
+  not to trust it. Constraining assignment was rejected — it would make lanes a
+  second place authorization is decided.
+  **Issue:** #171
+
+- **Decision:** Operators can see, **retry and reschedule** jobs — not delete
+  them. Retry and reschedule are separately grantable.
+  **Why:** Deleting a job silently changes what a process will do and is the
+  operation most likely to be regretted. Separate grants make read-only operator
+  access real. If deletion turns out to be needed it is a separate story.
+  **Issue:** #172
+
+- **Decision:** Multi-instance shows **collapsed with progress, expandable**, and
+  the view is split into M5 (#173) while authoring and execution stay in M4
+  (#159).
+  **Why:** A flat list of 50 rows interacts badly with #108's paging — one
+  process could fill several pages — and an aggregate cannot answer "which three
+  are stuck and who has them". The split follows the milestone boundary: the
+  executions view and its cache are M5's subject.
+  **Issue:** #159, #173
+
+- **Decision:** #168 (independent retry points, `flowable:async`) is included
+  although it is **not one of the 54** — it is an activity property, not a node
+  type.
+  **Why:** Without it, M5's job visibility shows a job list shaped entirely by
+  decisions authors cannot influence. Recorded in its own Notes as the first
+  story to drop if M4 runs long.
+  **Issue:** #168
+
+- **Decision:** M9's audit emphases extended with four items — the third
+  code-execution surface, the new authorization gates, BPMN serialisation data
+  loss, and signal scope as an isolation boundary.
+  **Why:** Emphasis 1 previously named two untrusted-code surfaces; M3 adds a
+  third, and the valuable audit question is whether all three agree rather than
+  whether each is individually sound.
