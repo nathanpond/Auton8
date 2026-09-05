@@ -1349,7 +1349,7 @@ is not. Every entry below is a user decision taken in that conversation.
   a palette item, has zero references anywhere in Auton8's own code, and the epic
   could have closed "full BPMN support" with no for-each loop. Same blindness
   covered event subprocesses, standard loops, link events and `flowable:async`.
-  **Affects:** #103 (inventory source must change), #107 (drift test must cover
+  **Affects:** #103 (inventory source must change), #107 (drift test must cover — reconciled by /n8-replan 2026-09-05
   three lists, not one), #40 (epic AC), and every M3 implementation story.
 
 - **Change:** Execution stays entirely in Flowable. Audited and confirmed clean —
@@ -1358,7 +1358,7 @@ is not. Every entry below is a user decision taken in that conversation.
   **Why:** User requirement: "we need to rely on flowable for executions". A
   custom `ActivityBehavior` registered into the engine still satisfies this —
   it runs *inside* Flowable, the same seam `AutoNateBehaviorDelegate` uses.
-  **Affects:** constrains every M3 implementation story; the ComplexGateway
+  **Affects:** constrains every M3 implementation story; the ComplexGateway — reconciled by /n8-replan 2026-09-05
   approach below depends on this reading.
 
 - **Change:** 52 of the 54 outstanding node types already have a Flowable
@@ -1367,7 +1367,7 @@ is not. Every entry below is a user decision taken in that conversation.
   have no behaviour class in `flowable-engine-8.0.0.jar`.
   **Why:** Enumerated directly from the jar in the running container, not from
   documentation. Reshapes the milestone from engine work to studio work.
-  **Affects:** story sizing across M3.
+  **Affects:** story sizing across M3. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** `ComplexGateway` gets a custom `ActivityBehavior` in
   `flowable-extension/`, registered via a custom `ActivityBehaviorFactory`,
@@ -1376,7 +1376,7 @@ is not. Every entry below is a user decision taken in that conversation.
   one. The spike is because gateway behaviours join tokens, which is more invasive
   than the service-task seam already proven, and BPMN 2.0 leaves real latitude in
   `activationCondition` semantics.
-  **Affects:** new spike + story in the BPMN milestone.
+  **Affects:** new spike + story in the BPMN milestone. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** Three independent sources of truth about BPMN support must be
   reconciled to one: the `workflow.js` palette, `COMING_SOON_BPMN_TYPES`, and the
@@ -1386,14 +1386,14 @@ is not. Every entry below is a user decision taken in that conversation.
   Compounding it: `BuildUnsupportedRuntimeWarnings` feeds `warnings`, not `errors`
   (`WorkflowBpmnXml.cs:365`) — unsupported elements deploy today and silently do
   nothing, which is #40's founding complaint, now mechanically confirmed.
-  **Affects:** #107; needs its own story ahead of the implementation work.
+  **Affects:** #107; needs its own story ahead of the implementation work. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** BPMN Data Object / Data Store / Data Input / Data Output become
   typed process-variable declarations; Data Store stays an annotation until M4.
   **Why:** Gives Call Activity (#113) its in/out mapping UI for free without
   coupling M3 to M4's data model. NB "Global Data Object" is an unrelated Auton8
   term — a process variable present in all executions.
-  **Affects:** #113, #107.
+  **Affects:** #113, #107. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** Timers ship with operator visibility, not just execution — scheduled
   jobs on an execution, retry counts, dead-letter jobs, and a stated answer for
@@ -1401,14 +1401,14 @@ is not. Every entry below is a user decision taken in that conversation.
   **Why:** `IFlowableClient` has 27 methods and none touch jobs. A timer that does
   not fire is currently undiagnosable, and "the timer never fired" would be an
   unanswerable support question.
-  **Affects:** new stories; `IFlowableClient` surface.
+  **Affects:** new stories; `IFlowableClient` surface. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** Pools/lanes get **full collaboration** — a two-pool diagram deploys
   two definitions and message flows wire to #112's correlation mechanism.
   **Why:** User decision. Note this breaks a standing assumption that a diagram is
   one process definition; deployment, versioning and the execution view all assume
   it today.
-  **Affects:** #112, deployment and execution-view stories.
+  **Affects:** #112, deployment and execution-view stories. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** M3 splits into three milestones — BPMN node coverage / script host
   and sandbox / collaboration + DMN + operator visibility. Stories sliced **by
@@ -1417,7 +1417,7 @@ is not. Every entry below is a user decision taken in that conversation.
   **Why:** `/n8-verify` runs at milestone granularity, so a single ~30-story M3
   verifies nothing until everything lands — the exact failure mode the user
   identified in earlier milestones. Renumbers M4–M7.
-  **Affects:** all downstream milestone numbering.
+  **Affects:** all downstream milestone numbering. — reconciled by /n8-replan 2026-09-05
 
 ### Script host and sandbox (new epic — security-driving)
 
@@ -1437,7 +1437,7 @@ is not. Every entry below is a user decision taken in that conversation.
   `HostAccess` denied, and the bound Auton8 API as the only reachable surface.
   Groovy is deliberately excluded — JVM-native, not a Truffle language, so it
   would be the second separately-audited engine the user ruled out.
-  **Affects:** new milestone; `ForceAsyncScriptTasks`; the "Supported" list.
+  **Affects:** new milestone; `ForceAsyncScriptTasks`; the "Supported" list. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** Script execution identity — default is the assignee of the last user
   task **on the token's own execution path**; permissions evaluated **live at
@@ -1446,7 +1446,7 @@ is not. Every entry below is a user decision taken in that conversation.
   what revocation is expected to do. Script tasks are forced async, so the gap is
   real and can be long. Cost: a queued script can fail for reasons invisible at
   completion time, so the failure must name the missing permission.
-  **Affects:** host API story; execution error surface.
+  **Affects:** host API story; execution error surface. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** Per-**script-task** `runAs` setting with two explicit values —
   `system` (requires the author to hold a specific "may set scripts run-as-system"
@@ -1456,7 +1456,7 @@ is not. Every entry below is a user decision taken in that conversation.
   **Why:** Per-task keeps the blast radius of a mistake to one step and makes
   privileged steps visible on the diagram. Workflow-level would silently elevate
   any script later added to an elevated workflow.
-  **Affects:** studio property editor; a new permission kind; the BPMN serialisation.
+  **Affects:** studio property editor; a new permission kind; the BPMN serialisation. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** **Publish-time validation** fails when a script task cannot resolve a
   run-as identity — reachable with no preceding user task (timer/message start, or
@@ -1470,7 +1470,7 @@ is not. Every entry below is a user decision taken in that conversation.
   after a join"; this is implemented as "require an *explicit* `runAs`", so
   `workflowAuthor` also satisfies it, consistent with their answer on the
   no-assignee case. Correct this if `system` was meant to be the only option there.
-  **Affects:** the studio's validation step; deployment.
+  **Affects:** the studio's validation step; deployment. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** The LLM-instruction front-end ("if Type is sales, route to sales") is
   **designed in** the script-host milestone and **built in M6**. Its host API
@@ -1480,7 +1480,7 @@ is not. Every entry below is a user decision taken in that conversation.
   abstraction; retrofitting it later is where these boundaries leak. Building it
   now would put prompt-injection and cost questions inside an already-large
   milestone.
-  **Affects:** M6; the host API's shape.
+  **Affects:** M6; the host API's shape. — reconciled by /n8-replan 2026-09-05
 
 - **Change:** Flowable gets its own least-privilege Postgres role, restricted to
   the `flowable` database.
@@ -1488,4 +1488,65 @@ is not. Every entry below is a user decision taken in that conversation.
   all three databases one server and one role (`POSTGRES_USER: autonate`, the
   bootstrap superuser), so Flowable's datasource credential reaches `AutoNate` and
   `autonate_datastores` — users, permissions and the trusted data repository.
-  **Affects:** `infra/docker-compose.yml`, `infra/postgres/init/`, DEPLOYMENT.md.
+  **Affects:** `infra/docker-compose.yml`, `infra/postgres/init/`, DEPLOYMENT.md. — reconciled by /n8-replan 2026-09-05
+
+## /n8-replan M3 — 2026-09-05
+
+Reconciling M3 against the scope interrogation logged as Ad-hoc — 2026-09-05
+(15 entries, all now marked reconciled).
+
+- **Decision:** New finding during evidence-gathering, correcting the ad-hoc
+  entry above: the script-task vulnerability is a **packaging bug, not a missing
+  design**. `org.graalvm.js:js-scriptengine` 25.3.4.1 is already declared at
+  compile scope in `flowable-extension/pom.xml`, and Dependabot has been bumping
+  it (`0148776`). But the pom has no shade or assembly plugin and
+  `infra/flowable/Dockerfile:26` copies only the extension jar, so GraalJS never
+  reaches `/app/WEB-INF/lib/` and `ScriptEngineManager` falls back to Nashorn
+  from the base image.
+  **Why it went unnoticed:** `FlowableScriptTaskSupportService.isJavaScriptEngine`
+  accepts `"javascript"` and `"js"` alongside `"graal.js"` and `"graaljs"`.
+  Nashorn reports the first two, so the probe written to verify GraalJS reported
+  success against the fallback it existed to detect. The remediation is therefore
+  much smaller than estimated — ship the dependency, pin engine selection, deny
+  host access, make the probe fail closed.
+  **Issue:** #147
+
+- **Decision:** M3 split three ways, with the script host **first**: M3 script
+  host and sandbox, M4 BPMN node coverage, M5 collaboration/decisions/operator
+  visibility. Trusted Data Repository → M6, Documents → M7, Assistant → M8,
+  Audit → M9.
+  **Why:** User chose security-first explicitly when asked, over the ordering
+  implied by the option they had selected earlier. GHSA-82rh-gjhw-rg9r is
+  exploitable today by any workflow author. Secondary benefit: #78's script-task
+  editor coverage lands after the sandbox reshapes that editor, so it is built
+  once. Cost: renumbering touched 7 issues' cross-references, corrected by
+  meaning rather than by pattern.
+  **Issue:** #40, #146
+
+- **Decision:** #103's enumeration source changed from the palette to the
+  68-entry list users are shown; its test AC changed with it.
+  **Why:** The old AC ("rows == palette entries") encoded the blind spot as a
+  passing check — a complete-looking inventory could omit multi-instance
+  entirely. Contract change, flagged to the user.
+  **Issue:** #103
+
+- **Decision:** #107 inverted from "remove what cannot run" to "one source of
+  truth, and unsupported means a deployment error".
+  **Why:** Under full BPMN 2.0 nothing gets removed, so the old remedy applies to
+  nothing. The replacement addresses a real defect found in the code:
+  `BuildUnsupportedRuntimeWarnings` feeds `warnings`, not `errors`
+  (`WorkflowBpmnXml.cs:365`), so unsupported elements deploy and silently do
+  nothing today — #40's founding complaint, confirmed mechanically.
+  **Issue:** #107
+
+- **Decision:** Created only the epic (#146) and the remediation story (#147) in
+  this run; deferred the remaining ~25 stories to `/n8-plan M3,M4,M5`.
+  **Why:** Filing fully-specified stories is `/n8-plan`'s job and these need its
+  interrogation step. #147 was exempted because it remediates a live advisory and
+  should not queue behind a planning pass.
+  **Issue:** #146, #147
+
+- **Decision:** Verified not stale, against current code: #19, #79, #104, #105,
+  #106, #108, #109, #113, #114, #115.
+  **Why:** Spot-checked their concrete claims. #108 was already replanned earlier
+  the same day for the wildcard inversion and needed no further change.
