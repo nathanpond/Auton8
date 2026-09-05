@@ -1741,3 +1741,58 @@ mapping is recorded in the M4 milestone description.
   an extensible registry; the surface must be tool-serialisable for M8; Groovy
   stays excluded; #150 (least-privilege Postgres role), #151, #152 and #153 are
   independent of where the code runs.
+
+## Ad-hoc — 2026-09-05 (skills audit and cold-test pass)
+
+- **Change:** All 13 project skills audited, then all 10 survivors cold-tested. Three
+  deleted, ten corrected. `scripts/verify-skill-claims.sh` added. Landed in #176.
+  **Why:** A skill written this session was cold-tested before landing and found to
+  contain five wrong claims despite every symbol having been verified. That prompted
+  auditing the rest, none of which had ever been exercised.
+  **Affects:** every future skill change; #174 rescoped.
+
+- **Decision:** Cold-testing is the gate for project skills; reading is not.
+  **Why:** The audit corrected ten skills by reading the code carefully. Cold-testing
+  those corrections found errors in **six of them** — including two skills where the
+  blast radius of a permission failure was stated exactly backwards, and one trap that
+  does not reproduce when actually measured against PostgreSQL 16.15. Cost if wrong:
+  a cold test is roughly one agent-run per skill, which is cheap against a wrong step
+  that costs a session.
+  **Issue:** #174
+
+- **Decision:** Corrections are merged into a skill's body, never appended as a
+  changelog section.
+  **Why:** Raised independently by three cold tests. An appended correction leaves the
+  skill asserting contradictory things about the same mechanism — `add-audit-event`
+  said "posts to Dapr" in its intro and "does not POST" in its appendix — and a
+  top-down reader anchors on the body. Worse than either statement alone.
+
+- **Decision:** The three Mantine skills were deleted rather than fixed.
+  **Why:** They were symlinks into `.agents/skills/`, which existed for nothing else.
+  Zero AutoNate references between them; one described itself as being for "the
+  mantine-9 repository". CLAUDE.md already prefers `docs/mantine/llms.txt` and the
+  live `mantine` MCP server, and a frozen copy can only diverge further from a live
+  source. `mantine-custom-components` additionally taught CSS Modules, of which this
+  repo has none.
+
+- **Change:** `add-schema-change`'s "multi-statement parse" trap was reframed after
+  measurement. `ALTER TABLE … ADD COLUMN` followed by `CREATE INDEX` on that column in
+  one command **succeeds** on PostgreSQL 16.15 via `ExecuteSqlRawAsync` and via psql —
+  with no parameters the command uses the simple query protocol, where each statement
+  is analysed just before execution. The two-constant split stays as convention with
+  the caveat recorded.
+  **Why:** The incident was real, but the rule as written would also condemn shipping
+  code, and an unqualified trap that cannot be reproduced trains readers to distrust
+  the rest of the document.
+  **Affects:** the `GroupMemberProvenance*Sql` comment carries the same unqualified
+  claim and should gain the same caveat.
+
+- **Change:** Five product defects filed from the audit, none of them skill problems.
+  **Why:** Auditing documentation against code surfaces defects in the code. Recorded
+  so the audit's value is not mistaken for documentation hygiene.
+  **Issue:** GHSA-fxx3-gpxv-32qq (plugin read-lockdown ledger-skipped after first
+  boot), #175 (identity-providers has no JetStream stream), #177 (execution diagram
+  renders a boundary-cancelled activity as completed), #178 (in-app plugin docs ship
+  SQL that is test-enforced to fail), #179 (AQL GROUP silently ignored), #180 (four
+  code comments asserting guarantees the code does not provide), #181 (released
+  QUICKSTART miscounts assets and hardcodes a 1.0 note).
