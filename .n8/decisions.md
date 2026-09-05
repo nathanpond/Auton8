@@ -1712,3 +1712,32 @@ mapping is recorded in the M4 milestone description.
   **Why:** Emphasis 1 previously named two untrusted-code surfaces; M3 adds a
   third, and the valuable audit question is whether all three agree rather than
   whether each is individually sound.
+
+## Ad-hoc — 2026-09-05 (during /n8-plan M4,M5)
+
+- **Change:** M3's sandbox approach reopened. #149 rewritten from "can script
+  tasks run under GraalVM isolates" to "execute script tasks in the executor
+  sidecar or in the JVM", and #147 now blocks on it.
+  **Why:** The whole-project analysis step surfaced `services/executor/` — a
+  production NATS sidecar already sandboxing JavaScript under isolated-vm
+  (`no require, no fetch, no fs`) and Python under Pyodide, with per-request
+  `memoryLimit` and `timeout`. That is most of what #147 was planned to build,
+  including the CPU and memory limits the original #149 was going to investigate
+  under GraalVM isolates.
+  **My error, recorded so the decision basis is legible:** when asking the user
+  how to sandbox script tasks, I described out-of-process execution as "the
+  largest build". It is largely built. The user chose GraalJS partly on that
+  framing. Told, and they chose to revisit with a spike rather than switch
+  outright or stay put.
+  **Cost of the delay, stated explicitly:** GHSA-82rh-gjhw-rg9r stays open while
+  the spike runs. #149 carries an interim mitigation — refusing script task
+  deployment via the `UnsupportedRuntime*` machinery #107 is already converting
+  to errors — flagged as an owner decision rather than a spike outcome.
+  **Affects:** #147 (approach), #149 (rewritten), #154 (may shrink to routing
+  Python through the same call). M3's milestone description gained the spike as
+  phase 0.
+  **Unaffected either way:** the permission gate lives on a host API rather than
+  in the language runtime; process variables are the only v1.0 operation behind
+  an extensible registry; the surface must be tool-serialisable for M8; Groovy
+  stays excluded; #150 (least-privilege Postgres role), #151, #152 and #153 are
+  independent of where the code runs.
