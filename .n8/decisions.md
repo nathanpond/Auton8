@@ -1550,3 +1550,79 @@ Reconciling M3 against the scope interrogation logged as Ad-hoc — 2026-09-05
   #106, #108, #109, #113, #114, #115.
   **Why:** Spot-checked their concrete claims. #108 was already replanned earlier
   the same day for the wildcard inversion and needed no further change.
+
+## /n8-plan M3 — 2026-09-05
+
+Planning the script host and sandbox milestone. Seven issues: one epic (#146,
+created during the replan), five stories, one spike.
+
+- **Decision:** Process variables are the **only** host API operation at v1.0.
+  Helper functions (`CreateRecord()` and similar) come later and the library is
+  built up over time, so the binding is a **registry** that additions plug into
+  rather than a fixed surface.
+  **Why:** User's call. Cost if wrong: a gate with nothing meaningful behind it
+  is under-exercised — we learn whether the permission model works only when a
+  real operation sits behind it. Mitigated by requiring the registry to be
+  extensibility-tested now (#147 AC).
+  **Issue:** #147
+
+- **Decision:** The script API is `variables.get/set`, **not** a compatible
+  `execution` shim. Old scripts break.
+  **Why:** `execution` names Flowable's `DelegateExecution` and invites authors
+  to reach for other methods on it that will not be bound; it is also a Java
+  idiom that would read wrongly in Python. A deprecated-shim option was offered
+  and declined. Nothing is seeded (invariant 1) and no stored script in the repo
+  uses Java interop, so the migration surface is user-authored workflows only.
+  **Issue:** #147, #151
+
+- **Decision:** #147 carries both the engine change and the `variables` binding
+  rather than splitting them.
+  **Why:** Denying host access without a replacement binding breaks every script
+  task, because Flowable binds `execution` — a host object — and today's scripts
+  call `execution.setVariable`. Shipping GraalJS with host access allowed leaves
+  the vulnerability. Either split produces an intermediate state that is broken
+  or still vulnerable, so the vertical slice is the pair.
+  **Issue:** #147
+
+- **Decision:** `runAs` authoring lands in M3; **live identity resolution is
+  deferred** to the milestone introducing the first permission-gated helper.
+  **Why:** With variables-only there is nothing to authorize, so resolution would
+  be untested-by-real-use authorization code. But `runAs` is authored data stored
+  in the BPMN — adding it later means migrating every existing diagram, whereas
+  resolution is pure runtime and costs nothing to add when first needed. User
+  chose this split over building the whole model or deferring all of it.
+  **Issue:** #153
+
+- **Decision:** Resource limits go to a time-boxed spike rather than into a story.
+  **Why:** Verified via context7 (2026-09-05) that sandbox limits need the
+  GraalVM **isolate** artifacts (`js-isolate-community`, Community from 25.1;
+  the pom's 25.3.4.1 clears the floor) rather than the `js-scriptengine`
+  currently declared, and that isolates carry documented limitations — a subset
+  of languages and options, no Node.js. Whether a bound host object can cross an
+  isolate boundary is unverified and would invalidate the design if not; whether
+  GraalPy works under isolates gates #154. Also confirmed Truffle falls back to
+  `DefaultTruffleRuntime` (interpreter, no JIT) on stock Temurin without
+  `-XX:+EnableJVMCI`. Too many unknowns to write a story against.
+  **Issue:** #149
+
+- **Decision:** Groovy excluded, JavaScript and Python at v1.0.
+  **Why:** Groovy is JVM-native rather than a Truffle language, so supporting it
+  means a second separately-audited engine with its own allowlist kept in step by
+  hand — the outcome the host-API design exists to avoid. `flowable-rest` bundles
+  `groovy-5.0.3` and `groovy-jsr223`; #147 must prevent them serving script
+  tasks rather than adopt them.
+  **Issue:** #147, #154
+
+- **Decision:** Triage pile cleared — #119, #120, #122, #123, #129, #132 to M9
+  (test-infrastructure and quality-gate work, which is that milestone's subject);
+  #83 to M7 with the editor work.
+  **Why:** None related to M3. User chose bulk placement over individual triage.
+  Noted at the time: the flaky-test issues (#122, #123, #132) undermine every
+  milestone's test gate in the meantime, so M9 may be later than they deserve.
+
+- **Decision:** #152 (script test environment) must reuse #147's engine
+  configuration rather than constructing its own.
+  **Why:** A test panel more permissive than production teaches authors the wrong
+  boundary and is worse than having none. Enforced by an AC asserting a
+  `Java.type` call is refused through the test-run path.
+  **Issue:** #152
