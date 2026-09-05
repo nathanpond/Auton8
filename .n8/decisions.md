@@ -576,6 +576,8 @@ combined with AND on every path.
 
 ## Ad-hoc — 2026-09-03 — Wildcard inversion found; advised, not fixed (#72, GHSA-vrw7-qxhw-m9q8)
 
+_— reconciled by /n8-replan 2026-09-05: #108 and #104 now carry the constraint; M3 description updated._
+
 The agreement property's first run reported 69 leaks and 539 lockouts, all on
 the wildcard. `ResolveTagValue` maps `WildcardValue` to `null`, and
 `CompileStringEquals` treats a null value as "match NULL" — the branch meant for
@@ -1290,3 +1292,45 @@ Keycloak service already does) beats retrying the network call.
 **Known issue shipped, knowingly:** #137 — `AllowedProviderHosts` cannot be
 extended from configuration. Fails closed, so a functionality defect rather than
 an exposure. Surfaced before the go/no-go and accepted.
+
+
+## Replan — M3 (2026-09-05)
+
+Ran `/n8-replan M3` after M2 closed and v0.2.0 shipped. Three evidence sources:
+the ad-hoc ledger, git history since M3 was planned, and spot-checks of every
+open M3 story's concrete claims against the code.
+
+**The finding that mattered — #108, stale *what*.** Its AC required authorization
+pushed into SQL through `WorkflowExecutionCacheSelectorCompiler` and stated "the
+two must agree". GHSA-vrw7-qxhw-m9q8, found during #72 *after* M3 was planned,
+records that they do not: `tag=*` compiles to `IS NULL` there while
+`InMemorySelectorEvaluator` reads it as `is not null` — exact complements, 69
+leaks and 539 lockouts measured.
+
+Today the in-memory path governs that endpoint. Executing #108 as written would
+have made the **inverted** SQL interpretation authoritative for wildcard grants —
+an authorization change delivered silently inside a performance story, with an AC
+an executor could satisfy using a test that never exercises a wildcard. Two AC
+added to #108 (resolve the inversion or exclude wildcards from the SQL path
+first; change `The_wildcard_divergence_still_holds` deliberately rather than
+deleting it), and #104 cross-referenced so the constraint cannot be picked up
+without it. Owner decision, because resolving it widens what existing `*` grants
+permit.
+
+**#6 closed as superseded by #108** (owner-approved). The milestone description
+already said #108 was "#6 re-scoped" while both stayed open. Its cost claim had
+also gone stale: it cited the DataTable count probe paying the full cost a second
+time per mount, and that probe was removed in #10. The O(E) fetch remains and was
+re-verified against `ExecutionEndpoints.cs`; only the doubling is gone, which is
+part of what `sev:high` rested on.
+
+**Checked and found NOT stale:** #19 (`IFlowableReadThrough` still registered and
+injected nowhere — verified), #78/#79 (`RequiresService=Flowable` traits still
+correct; the Keycloak exclusion added alongside them does not affect them), and
+#103, #107, #110–#115.
+
+**Noted for the executor, not required:** `AuthorizeManyAsync` and
+`FilterAuthorizedIdsAsync` landed in #5 after M3 was planned.
+`WorkflowExecutionInstanceAuthorizer` was deliberately left unbatched there
+because it calls Flowable rather than the database — once #104 makes the cache
+the read model, batching it becomes possible.
