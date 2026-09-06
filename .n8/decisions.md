@@ -1796,3 +1796,60 @@ mapping is recorded in the M4 milestone description.
   SQL that is test-enforced to fail), #179 (AQL GROUP silently ignored), #180 (four
   code comments asserting guarantees the code does not provide), #181 (released
   QUICKSTART miscounts assets and hardcodes a 1.0 note).
+
+## /n8-exec M3 — 2026-09-06
+
+Partially executed. The spike completed and decided; every implementation story is
+blocked as a result.
+
+- **Decision (#149, spike):** script tasks execute in the **executor sidecar**, not
+  in the Flowable JVM.
+  **Why:** three measurements. (a) The declared GraalJS dependency could never have
+  worked — `org.graalvm.js:js-scriptengine` depends on `polyglot` alone, no language
+  and no Truffle runtime, so the "declared but not shipped" premise in #147 is half
+  right: the intent was real, the dependency was wrong. The working set is
+  `js-community`, 14 jars / 67 MB. (b) The hop that argued against the executor costs
+  **1.9 ms warm median**, measured against the running stack over
+  `pipeline-code-run.>`; script tasks are forced async, so it lands on a job thread.
+  (c) The executor already enforces `timeoutMs`/`memoryMb` and already runs both JS
+  and Python, where the GraalVM branch needs isolates (different artifacts, unverified
+  host-object crossing) and GraalPy separately.
+  Also weighed: the executor removes the JVM rather than restricting it, and keeps the
+  count of untrusted-code sandboxes where it is rather than raising it — M9's audit
+  emphasis.
+  **Cost if wrong:** the contract needs a third `kind` and a variables-shaped payload.
+  Judged small because Auton8 already owns both ends and `jsRunner` already generates
+  the wrapper for its own kinds.
+  **Issue:** #149
+
+- **Verified, not assumed:** the GraalVM branch is viable — on Temurin 21.0.7+6-LTS,
+  the flowable-rest base JDK, `HostAccess.NONE` makes `Java.type` undefined rather
+  than merely refused, and an `@HostAccess.Export` binding works alongside it, exactly
+  as #147 designs. It loses on limits, languages and sandbox count, not on feasibility.
+  Recorded so a future reader does not re-litigate it. Note Truffle falls back to its
+  interpreter on that JDK — no JIT.
+  **My error, recorded:** the first run of that probe was on the local Java 26, not
+  the target. Caught from the runtime version in Truffle's own warning and redone on
+  21.
+
+- **Blocker (#150):** the story cannot be implemented as specified without breaking
+  every existing deployment. `docker-entrypoint-initdb.d` runs only on an empty data
+  directory, so pointing Flowable at a new role breaks any existing volume. And the
+  obvious migration is refused: `ALTER DATABASE … OWNER` does not move table
+  ownership, and `REASSIGN OWNED BY autonate` fails because the bootstrap superuser
+  owns system objects. Measured on a scratch database. Four options are on the issue;
+  all of them change the ownership model of a live engine schema, so it is a user
+  decision rather than a judgment call.
+  **Issue:** #150
+
+- **Discovered work, filed not fixed:** `CodeNodeRequest.isUnsafe` is gated by
+  `Actions.ExecuteUnsafe` on the .NET side and never read by the executor —
+  `grep -c` returns 1, the declaration. A permission guarding an effect that does not
+  exist, and a prerequisite if workflow scripts are routed through that sandbox.
+  **Issue:** #190
+
+- **Process note:** during the #150 probe I revoked `CONNECT ON DATABASE "AutoNate"
+  FROM PUBLIC` on the *running* dev cluster rather than on a scratch database, then
+  reverted it. Functionally restored; the ACL is now explicit rather than NULL. The
+  scratch database and role were dropped. Probes belong on scratch objects from the
+  first statement, not after the first result.
