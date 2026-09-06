@@ -1820,7 +1820,7 @@ blocked as a result.
   **Cost if wrong:** the contract needs a third `kind` and a variables-shaped payload.
   Judged small because Auton8 already owns both ends and `jsRunner` already generates
   the wrapper for its own kinds.
-  **Issue:** #149
+  **Issue:** #149 — reconciled by /n8-replan 2026-09-06
 
 - **Verified, not assumed:** the GraalVM branch is viable — on Temurin 21.0.7+6-LTS,
   the flowable-rest base JDK, `HostAccess.NONE` makes `Java.type` undefined rather
@@ -1840,16 +1840,63 @@ blocked as a result.
   owns system objects. Measured on a scratch database. Four options are on the issue;
   all of them change the ownership model of a live engine schema, so it is a user
   decision rather than a judgment call.
-  **Issue:** #150
+  **Issue:** #150 — reconciled by /n8-replan 2026-09-06
 
 - **Discovered work, filed not fixed:** `CodeNodeRequest.isUnsafe` is gated by
   `Actions.ExecuteUnsafe` on the .NET side and never read by the executor —
   `grep -c` returns 1, the declaration. A permission guarding an effect that does not
   exist, and a prerequisite if workflow scripts are routed through that sandbox.
-  **Issue:** #190
+  **Issue:** #190 — reconciled by /n8-replan 2026-09-06
 
 - **Process note:** during the #150 probe I revoked `CONNECT ON DATABASE "AutoNate"
   FROM PUBLIC` on the *running* dev cluster rather than on a scratch database, then
   reverted it. Functionally restored; the ACL is now explicit rather than NULL. The
   scratch database and role were dropped. Probes belong on scratch objects from the
   first statement, not after the first result.
+
+## /n8-replan M3 — 2026-09-06
+
+Reconciling M3 against #149's decision that script tasks execute in the executor
+sidecar rather than the Flowable JVM.
+
+- **Decision:** #147 keeps its three components in one story rather than splitting
+  into delegation and routing.
+  **Why:** neither half ships alone — delegation without routing stops scripts
+  running, routing without delegation is never called, and either without the
+  `variables` façade breaks every existing script. Same reasoning that kept the
+  engine change and the binding together in the original story. Cost: it is a large
+  story spanning `flowable-extension/`, `src/AutoNate.Web/` and `services/executor/`,
+  and that is stated on the issue rather than hidden in a split producing two broken
+  halves.
+  **Issue:** #147
+
+- **Decision:** Nashorn and Groovy exclusion **survives** the branch change.
+  **Why:** the base image still ships `nashorn-core`, `groovy` and
+  `flowable-groovy-script-static-engine`. Delegation should mean the engine's script
+  path is never reached; asserting they cannot serve script tasks is what proves it
+  rather than assuming it.
+  **Issue:** #147
+
+- **Decision:** #190 moved from unmilestoned discovered-work into M3, blocking #147.
+  **Why:** it was a curiosity while scripts ran in the JVM. Once they route through
+  the executor, a flag that is permission-gated as though it relaxes that sandbox —
+  and that the runner never reads — is a prerequisite.
+  **Issue:** #190, #147
+
+- **Decision (user):** #150 scoped to **fresh installs only**, with the gap
+  documented.
+  **Why:** the three alternatives all change the ownership model of a live engine
+  schema, and a mistake locks Flowable out of its own database. Measured: `ALTER
+  DATABASE` does not move table ownership, and `REASSIGN OWNED BY <bootstrap
+  superuser>` is refused because that role owns system objects.
+  **Cost, recorded plainly:** every existing deployment stays exactly as exposed as
+  it is today, and existing deployments were what this defence-in-depth story was
+  for. The AC's implied expectation that the role works on an already-provisioned
+  volume is not achievable by the chosen option and needs adjusting when the story
+  is picked up.
+  **Issue:** #150
+
+- **Verified not stale:** #151 and #153. Publish-time validation of removed script
+  shapes, and `runAs` authoring with its reachability analysis, do not depend on
+  where execution happens. #152 needed only a note — its "same sandbox as production"
+  criterion got easier, since there is now exactly one.
