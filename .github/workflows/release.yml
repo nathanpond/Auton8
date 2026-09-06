@@ -33,7 +33,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Fail before anything is pushed. A tag that disagrees with the product
       # version publishes images labelled with a version the code does not
@@ -89,7 +89,7 @@ jobs:
             context: .
             dockerfile: infra/flowable/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # OCI repository names must be lowercase and this repository is
       # `nathanpond/Auton8`. docker/metadata-action lowercases silently, so the
@@ -191,7 +191,7 @@ jobs:
           mkdir -p digests
           echo "${{ steps.build.outputs.digest }}" > "digests/${{ matrix.image }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.image }}
           path: digests/${{ matrix.image }}
@@ -204,9 +204,9 @@ jobs:
     permissions:
       contents: write   # attach assets to the release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: digest-*
           merge-multiple: false
