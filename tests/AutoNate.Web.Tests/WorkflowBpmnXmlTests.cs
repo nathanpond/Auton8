@@ -88,7 +88,7 @@ public sealed class WorkflowBpmnXmlTests
                              <bpmn:process id="script_flow" name="Script Flow" isExecutable="true">
                                <bpmn:startEvent id="StartEvent_1" />
                                <bpmn:scriptTask id="ScriptTask_1" name="Compute" scriptFormat="javascript">
-                                 <bpmn:script>execution.setVariable("value", 1);</bpmn:script>
+                                 <bpmn:script>variables.set("value", 1);</bpmn:script>
                                </bpmn:scriptTask>
                              </bpmn:process>
                            </bpmn:definitions>
@@ -96,6 +96,11 @@ public sealed class WorkflowBpmnXmlTests
 
         var result = WorkflowBpmnXml.ValidateProcess(xml);
 
+        // The body here changed with #151. It used to be
+        // `execution.setVariable("value", 1)`, which is no longer a valid
+        // script: #147 moved execution into the sandbox, where `execution` is
+        // not bound. Keeping the old body would have made this test assert
+        // that an unpublishable script publishes.
         Assert.Empty(result.Errors);
         Assert.DoesNotContain(result.Warnings, warning => warning.Contains("script tasks", StringComparison.OrdinalIgnoreCase));
     }

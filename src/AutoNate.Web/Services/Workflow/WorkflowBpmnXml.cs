@@ -1481,6 +1481,16 @@ public static partial class WorkflowBpmnXml
             {
                 errors.Add($"Script task '{taskLabel}' must include a non-empty inline script body.");
             }
+
+            // #151: scripts run in the executor sandbox since #147, so the old
+            // `execution` binding and any reach for the JVM now fail at
+            // runtime — on whoever happens to run the process, with an error
+            // that does not say how to fix it. Catch them here instead, while
+            // the author still has the editor open, and name the replacement.
+            foreach (var rejection in ScriptSurfaceRules.FindRejected(scriptBody))
+            {
+                errors.Add($"Script task '{taskLabel}': {rejection}");
+            }
         }
 
         return errors;

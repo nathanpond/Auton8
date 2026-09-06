@@ -2012,3 +2012,27 @@ HTTP 503 `executor_unavailable`, distinct from the script error above.
 The two probe deployments were removed from the dev engine afterwards.
 Recreating the containers to test this also required restarting
 `autonate-web-dapr`, whose network namespace follows `autonate-web`.
+
+## #151 — publish-time rejection of removed script shapes
+
+Rejected shapes and their replacements live in `ScriptSurfaceRules`, consulted
+by `WorkflowBpmnXml` and rendered into `docs/DEPLOYMENT.md` from the same list,
+so the check and the documentation cannot drift.
+
+**Detection technique (Claude's Discretion).** A static scan that blanks
+comments and string literals, then matches identifiers. Not a parser: the story
+allowed a simpler technique and stated a preference for false negatives.
+
+**One limitation taken deliberately.** The stripper cannot tell a regex literal
+from division, so `/execution/.test(x)` is read as code and would be flagged —
+a false positive, against the story's stated preference. The alternative is
+worse: guessing that a `/` begins a literal would blank out real code and
+produce silent false negatives, which is the failure the preference exists to
+avoid being *hidden* by. A visible, explainable rejection beats an invisible
+miss. Distinguishing the two properly needs the preceding-token context a real
+lexer carries, which is more machinery than this check warrants today.
+
+**One existing test corrected.** `ValidateProcess_AcceptsJavaScriptScriptTask`
+used `execution.setVariable` as its "valid script" fixture. After #147 that
+script is unpublishable, so the test would have been asserting that an invalid
+script publishes.

@@ -98,6 +98,27 @@ distinctly, so a failing workflow's error surface says which one happened.
 JavaScript is the only supported `scriptFormat`. A script task declaring
 `groovy` is refused at execution with a message saying so.
 
+**Shapes rejected at publish time.** These fail in the sandbox anyway, but
+publish-time rejection turns a runtime failure on whoever happened to run the
+process into a message the author can act on. The list is generated from
+`ScriptSurfaceRules` in `src/AutoNate.Web/Services/Workflow/`, which is the
+single source both the check and this table come from:
+
+| Rejected | Write instead |
+|---|---|
+| `execution.setVariable(name, value)` | `variables.set(name, value)` |
+| `execution.getVariable(name)` | `variables.get(name)` |
+| `execution.removeVariable(name)` | `variables.set(name, null)` |
+| `execution` (any other use) | `variables.get` / `variables.set` |
+| `Java.type(...)`, `JavaImporter`, `Packages.*`, `java.lang.*` | nothing — the JVM is not reachable from a script, by design |
+
+The check inspects the script statically; it never runs it, because running
+author-supplied code at publish is exactly what must not happen. It ignores
+comments and string literals, so a script that merely *mentions* one of these
+still publishes. Where a shape cannot be told apart reliably it is allowed
+through: a missed script fails at runtime with a clear sandbox error, whereas a
+wrongly blocked one leaves an author with no recourse.
+
 ### The Flowable database role (fresh installs only)
 
 By default the Flowable engine connects to Postgres as the same bootstrap
