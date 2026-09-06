@@ -70,6 +70,7 @@ public static partial class WorkflowBpmnXml
                                    xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                                    xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                                    xmlns:flowable="http://flowable.org/bpmn"
+                                   xmlns:autonate="http://autonate.dev/workflows"
                                    id="Definitions_{{normalizedProcessKey}}"
                                    targetNamespace="http://autonate.dev/workflows">
                  <bpmn:process id="{{normalizedProcessKey}}" name="{{SecurityElement.Escape(normalizedWorkflowName)}}" isExecutable="true">
@@ -355,6 +356,9 @@ public static partial class WorkflowBpmnXml
 
             var errors = new List<string>();
             errors.AddRange(BuildScriptTaskValidationErrors(document));
+            // #153: a script task whose identity cannot be determined must say
+            // which one it means before it can be published.
+            errors.AddRange(ScriptTaskIdentity.BuildIdentityValidationErrors(document));
             errors.AddRange(BuildSignalStartEventValidationErrors(document));
             errors.AddRange(BuildTimerStartEventValidationErrors(document));
             errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));
@@ -1471,15 +1475,31 @@ public static partial class WorkflowBpmnXml
                 ?? scriptTask.Attribute("id")?.Value
                 ?? "Unnamed script task";
             var scriptFormat = scriptTask.Attribute("scriptFormat")?.Value;
-            if (!string.Equals(scriptFormat, "javascript", StringComparison.OrdinalIgnoreCase))
+            if (!ScriptSurfaceRules.IsSupportedScriptFormat(scriptFormat))
             {
-                errors.Add($"Script task '{taskLabel}' must use scriptFormat=\"javascript\".");
+                // A list since #154. Both languages run in the same sandbox
+                // against the same host surface, so this is a front-end choice
+                // rather than a second execution path.
+                var supported = string.Join(
+                    " or ",
+                    ScriptSurfaceRules.SupportedScriptFormats.Select(f => $"\"{f}\""));
+                errors.Add($"Script task '{taskLabel}' must use scriptFormat={supported}.");
             }
 
             var scriptBody = scriptTask.Element(BpmnNamespace + "script")?.Value;
             if (string.IsNullOrWhiteSpace(scriptBody))
             {
                 errors.Add($"Script task '{taskLabel}' must include a non-empty inline script body.");
+            }
+
+            // #151: scripts run in the executor sandbox since #147, so the old
+            // `execution` binding and any reach for the JVM now fail at
+            // runtime — on whoever happens to run the process, with an error
+            // that does not say how to fix it. Catch them here instead, while
+            // the author still has the editor open, and name the replacement.
+            foreach (var rejection in ScriptSurfaceRules.FindRejected(scriptBody))
+            {
+                errors.Add($"Script task '{taskLabel}': {rejection}");
             }
         }
 

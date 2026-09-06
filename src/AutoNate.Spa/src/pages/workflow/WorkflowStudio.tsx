@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
 import {
   ActionIcon,
   Alert,
@@ -9,6 +10,7 @@ import {
   Button,
   Checkbox,
   Code,
+  Divider,
   Group,
   List,
   Modal,
@@ -25,6 +27,8 @@ import {
   Title
 } from "@mantine/core";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
+import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
+import { ScriptTestRunPanel } from "./ScriptTestRunPanel";
 import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
 import {
   usePauseWorkflow,
@@ -79,6 +83,9 @@ type ScriptTaskEditor = {
   type: string;
   name: string;
   scriptFormat: string;
+  // #153: "" (default — the preceding user task's assignee), "system", or
+  // "workflowAuthor".
+  runAs: string;
   script: string;
   resultVariable: string;
 };
@@ -210,6 +217,7 @@ type ElementSelection = {
   type: string;
   name?: string | null;
   scriptFormat?: string | null;
+  runAs?: string | null;
   script?: string | null;
   resultVariable?: string | null;
   conditionExpression?: string | null;
@@ -520,7 +528,11 @@ export default function WorkflowStudio() {
         id: selection.id,
         type: selection.type,
         name: selection.name ?? "",
-        scriptFormat: "javascript",
+        // Read from the diagram rather than assumed (#154). A task saved as
+        // Python must not silently reopen as JavaScript and then be saved back
+        // that way.
+        scriptFormat: selection.scriptFormat === "python" ? "python" : "javascript",
+        runAs: selection.runAs ?? "",
         script: selection.script ?? "",
         resultVariable: selection.resultVariable ?? ""
       });
@@ -813,6 +825,27 @@ export default function WorkflowStudio() {
           : `${prefix}.`
       );
     });
+
+  // #153: may this author declare a script task to run as the system?
+  //
+  // Drives whether the option is offered. It is not the gate — the server
+  // re-checks on publish, because a control that is merely hidden is not a
+  // permission. Defaults to false while the check is in flight, so the option
+  // does not flicker into existence for someone who cannot use it.
+  const elevateChecks = useMemo(
+    () =>
+      currentModel
+        ? [{ kind: "workflowmodel", action: "elevatescript", id: currentModel.id }]
+        : [],
+    [currentModel]
+  );
+  const { data: elevatePermissions } = usePermissionChecks(elevateChecks);
+  const canElevateScript =
+    currentModel !== null &&
+    (elevatePermissions?.get(
+      permissionKey({ kind: "workflowmodel", action: "elevatescript", id: currentModel.id })
+    ) ??
+      false);
 
   const applyScriptTask = () =>
     runBusy("applying script task changes", async () => {
@@ -1263,6 +1296,7 @@ export default function WorkflowStudio() {
           }}
           onApply={applyScriptTask}
           disabled={!!busy || !handle}
+          canElevate={canElevateScript}
         />
       )}
 
@@ -2063,13 +2097,15 @@ function ScriptTaskModal({
   onChange,
   onClose,
   onApply,
-  disabled
+  disabled,
+  canElevate
 }: {
   editor: ScriptTaskEditor;
   onChange: (next: ScriptTaskEditor) => void;
   onClose: () => void;
   onApply: () => void;
   disabled: boolean;
+  canElevate: boolean;
 }) {
   return (
     <Modal opened onClose={onClose} title="Script Task" size="xl">
@@ -2090,13 +2126,59 @@ function ScriptTaskModal({
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
           />
-          <TextInput label="Script Format" value="javascript" readOnly />
+          <Select
+            label="Language"
+            data={[
+              { value: "javascript", label: "JavaScript" },
+              { value: "python", label: "Python" }
+            ]}
+            value={editor.scriptFormat === "python" ? "python" : "javascript"}
+            onChange={(value) =>
+              onChange({ ...editor, scriptFormat: value === "python" ? "python" : "javascript" })
+            }
+            allowDeselect={false}
+          />
           <TextInput
             label="Result Variable"
             value={editor.resultVariable}
             onChange={(e) => onChange({ ...editor, resultVariable: e.currentTarget.value })}
           />
         </Group>
+
+        {/* #153. Unset is the default and the common case; the two explicit
+            options exist for the diagrams where "the last user task" has no
+            single answer. `system` is hidden from an author who lacks the
+            permission — and the server checks it again on publish, because a
+            hidden control is not a gate. */}
+        <Select
+          label="Run as"
+          description="Whose permissions this script runs with."
+          data={[
+            { value: "", label: "The last user task's assignee (default)" },
+            { value: "workflowAuthor", label: "The workflow author" },
+            ...(canElevate
+              ? [{ value: "system", label: "System — bypasses individual permission checks" }]
+              : [])
+          ]}
+          value={editor.runAs}
+          onChange={(value) => onChange({ ...editor, runAs: value ?? "" })}
+          allowDeselect={false}
+        />
+
+        {editor.runAs === "system" && (
+          <Alert color="yellow" title="This step runs as the system">
+            It bypasses individual permission checks. It does not leave the sandbox — process
+            variables and the host API remain the only things a script can reach.
+          </Alert>
+        )}
+
+        {!canElevate && editor.runAs === "system" && (
+          <Alert color="orange" title="You cannot publish this setting">
+            This script task is set to run as the system, but you do not have permission to
+            author that. Publishing will be refused until it is changed or the permission is
+            granted.
+          </Alert>
+        )}
 
         <Stack gap={4}>
           <Text size="sm" fw={500}>
@@ -2115,7 +2197,7 @@ function ScriptTaskModal({
               value={editor.script}
               onChange={(value) => onChange({ ...editor, script: value })}
               height="280px"
-              extensions={[javascript()]}
+              extensions={[editor.scriptFormat === "python" ? python() : javascript()]}
               basicSetup={{
                 lineNumbers: true,
                 highlightActiveLineGutter: true,
@@ -2145,6 +2227,17 @@ function ScriptTaskModal({
             />
           </Box>
         </Stack>
+
+        <Divider />
+
+        {/* #152. Keyed on the script so editing it clears a stale result —
+            otherwise the panel would show output from code that is no longer
+            in the editor, which is worse than showing none. */}
+        <ScriptTestRunPanel
+          key={`${editor.scriptFormat}:${editor.script}`}
+          script={editor.script}
+          scriptFormat={editor.scriptFormat}
+        />
 
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>
@@ -3913,6 +4006,7 @@ const STARTER_DIAGRAM_PLACEHOLDER = `<?xml version="1.0" encoding="UTF-8"?>
                   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   id="Definitions_1"
+                  xmlns:autonate="http://autonate.dev/workflows"
                   targetNamespace="http://autonate.dev/workflows">
   <bpmn:process id="workflow" name="Workflow" isExecutable="true">
     <bpmn:startEvent id="StartEvent_1" />

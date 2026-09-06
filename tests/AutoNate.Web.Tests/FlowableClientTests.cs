@@ -1142,7 +1142,15 @@ public sealed class FlowableClientTests
             {
                 Id = Guid.NewGuid(), ProcessKey = "k", Name = "n", BpmnXml = BpmnWithScriptTask
             }));
-        Assert.Contains("missing JavaScript script task support", ex.Message);
+        // The message changed with #147 and the change is the point. Script
+        // tasks now run in the executor sandbox, so "install a JSR-223
+        // JavaScript engine" would send an operator to fix the wrong thing —
+        // and installing one is a step backwards. What is actually missing is
+        // the sandbox callback configuration, so that is what it must name.
+        Assert.Contains("executor sandbox callback is not configured", ex.Message);
+        Assert.Contains("callback-base-url", ex.Message);
+        Assert.DoesNotContain("Install a JavaScript JSR-223 engine", ex.Message);
+        // The reported engines still travel with it, for diagnosing an image.
         Assert.Contains("Groovy", ex.Message);
     }
 

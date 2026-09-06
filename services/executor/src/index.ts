@@ -1,6 +1,7 @@
 import { connect, NatsConnection, StringCodec } from "nats";
 import { runJs } from "./jsRunner.js";
-import { prewarmPython, runPython, shutdownPython } from "./pythonRunner.js";
+import { runScriptTask } from "./scriptTaskRunner.js";
+import { prewarmPython, runPython, runPythonScriptTask, shutdownPython } from "./pythonRunner.js";
 import { CodeNodeReply, CodeNodeRequest } from "./wire.js";
 
 // Entry point for the AutoNate executor sidecar. Connects to NATS,
@@ -93,6 +94,20 @@ async function handleMessage(message: {
     const request = JSON.parse(raw) as CodeNodeRequest;
     if (request.version !== 1) {
       response = fail(`Unsupported wire version ${request.version}; this sidecar speaks v1.`);
+    } else if (request.kind === "scripttask") {
+      // BPMN script tasks (#147) return variable mutations rather than a frame.
+      // Routed before the language branches because the reply shape differs,
+      // not the language.
+      // Both languages are front-ends onto the same host surface (#154).
+      if (request.language === "js") {
+        const scriptTask = await runScriptTask(request);
+        response = { success: true, errorMessage: null, output: null, scriptTask };
+      } else if (request.language === "python") {
+        const scriptTask = await runPythonScriptTask(request);
+        response = { success: true, errorMessage: null, output: null, scriptTask };
+      } else {
+        response = fail(`Script tasks support 'js' and 'python'; got '${request.language}'.`);
+      }
     } else if (request.language === "js") {
       const output = await runJs(request);
       response = { success: true, errorMessage: null, output };

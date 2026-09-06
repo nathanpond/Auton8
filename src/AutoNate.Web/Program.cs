@@ -690,6 +690,10 @@ builder.Services.AddHostedService<AutoNate.Web.Services.Pipelines.Orchestration.
 builder.Services.AddScoped<AutoNate.Web.Services.Transformers.Code.ICodeTransformerStore,
     AutoNate.Web.Services.Transformers.Code.EfCoreCodeTransformerStore>();
 builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.JetStreamCodeNodeRunner>();
+// Script tasks resolve the same runner through its interface (#147); the
+// pipeline callers keep using the concrete type.
+builder.Services.AddScoped<AutoNate.Web.Services.Pipelines.Execution.IScriptTaskRunner>(
+    sp => sp.GetRequiredService<AutoNate.Web.Services.Pipelines.Execution.JetStreamCodeNodeRunner>());
 
 // Agent provider abstraction. Per-provider HttpClients have generous timeouts
 // because token streaming for a tool-using turn can run minutes.
@@ -1632,6 +1636,7 @@ app.MapUserEndpoints();
 app.MapEventCatalogEndpoints();
 app.MapWorkflowEndpoints();
 app.MapWorkflowBehaviorEndpoints();
+app.MapWorkflowScriptTaskEndpoints();
 app.MapExecutionEndpoints();
 app.MapRecordTypeEndpoints();
 app.MapRecordEndpoints();

@@ -512,6 +512,7 @@ export async function createModeler(container, xml, dotNetRef) {
   try {
     const importResult = await modeler.importXML(xml);
     fitAndCenter(modeler);
+    refreshScriptIdentityMarkers({ modeler });
     lastImportDebug = buildImportDebug(modeler, container, importResult?.warnings ?? []);
   } finally {
     suppressDirtyEvents = false;
@@ -976,7 +977,7 @@ function saveManualRegistryXml(modelerHandle) {
 
     return [
       '<?xml version="1.0" encoding="UTF-8"?>',
-      `<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="${escapeXml(definitionId)}" targetNamespace="http://autonate.dev/workflows">`,
+      `<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:autonate="http://autonate.dev/workflows" id="${escapeXml(definitionId)}" targetNamespace="http://autonate.dev/workflows">`,
       `  <bpmn:process id="${escapeXml(processId)}" name="${escapeXml(processName || processId)}" isExecutable="true">`,
       ...shapeXml,
       ...flowXml,
@@ -1049,6 +1050,11 @@ function describeBusinessObject(businessObject) {
     type: businessObject.$type,
     name: typeof businessObject.name === "string" ? businessObject.name : null,
     scriptFormat: typeof businessObject.scriptFormat === "string" ? businessObject.scriptFormat : null,
+    // #153. Stored in the autonate namespace, which is on the do-not-rename
+    // list. Read from $attrs the same way every other namespaced property in
+    // this file is: bpmn-js has no moddle extension loaded for it, so
+    // modeling.updateProperties would serialise it without the prefix.
+    runAs: readAutoNateAttribute(businessObject, "runAs"),
     script: typeof businessObject.script === "string" ? businessObject.script : null,
     resultVariable: typeof businessObject.resultVariable === "string" ? businessObject.resultVariable : null,
     conditionExpression: typeof conditionExpression?.body === "string" ? conditionExpression.body : null,
@@ -1155,6 +1161,52 @@ function describeServiceTask(businessObject) {
     serviceTaskKind: kind,
     behaviorKey: behaviorKey
   };
+}
+
+// The autonate-namespace equivalents of the flowable: helpers above. The
+// namespace URI is on the do-not-rename list: changing it orphans the property
+// on every diagram that already carries it.
+const AUTONATE_ATTR_PREFIX = "autonate:";
+
+// #153: mark script tasks that declare an identity, so a reviewer can see the
+// privileged steps by looking at the diagram rather than opening each one.
+//
+// A marker class rather than a rendered overlay: bpmn-js reapplies markers
+// across re-renders, and the styling then lives in CSS with the rest of the
+// studio's appearance.
+export function refreshScriptIdentityMarkers(modelerHandle) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const canvas = modeler?.get?.("canvas", false);
+  if (!elementRegistry || !canvas?.addMarker) return;
+
+  for (const element of elementRegistry.getAll?.() ?? []) {
+    if (element?.businessObject?.$type !== "bpmn:ScriptTask") continue;
+    const runAs = readAutoNateAttribute(element.businessObject, "runAs");
+    canvas.removeMarker(element.id, "an8-script-system");
+    canvas.removeMarker(element.id, "an8-script-author");
+    if (runAs === "system") {
+      canvas.addMarker(element.id, "an8-script-system");
+    } else if (runAs === "workflowAuthor") {
+      canvas.addMarker(element.id, "an8-script-author");
+    }
+  }
+}
+
+function readAutoNateAttribute(businessObject, name) {
+  const value = businessObject?.$attrs?.[`${AUTONATE_ATTR_PREFIX}${name}`];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function writeAutoNateAttribute(businessObject, name, value) {
+  if (!businessObject) return;
+  businessObject.$attrs = businessObject.$attrs ?? {};
+  const key = `${AUTONATE_ATTR_PREFIX}${name}`;
+  if (value === null || value === undefined || value === "") {
+    delete businessObject.$attrs[key];
+    return;
+  }
+  businessObject.$attrs[key] = value;
 }
 
 function readFlowableServiceTaskAttr(businessObject, name) {
@@ -1381,10 +1433,24 @@ export function updateScriptTaskProperties(modelerHandle, task) {
 
   modeling.updateProperties(element, {
     name: normalizeOptionalString(task.name),
-    scriptFormat: "javascript",
+    // The author's language choice, stored in the standard BPMN attribute
+    // rather than an Auton8-specific one (#154). Defaulted rather than trusted:
+    // a task authored before Python support carries no value.
+    scriptFormat: task.scriptFormat === "python" ? "python" : "javascript",
     script: typeof task.script === "string" ? task.script : "",
     resultVariable: normalizeOptionalString(task.resultVariable)
   });
+
+  // #153: the identity declaration. Written after updateProperties so it is
+  // not cleared by it, and only when set — an unset value is the default
+  // (the preceding user task's assignee) and writing an empty attribute would
+  // make "unset" and "explicitly nothing" indistinguishable in the XML.
+  writeAutoNateAttribute(
+    element.businessObject,
+    "runAs",
+    task.runAs === "system" || task.runAs === "workflowAuthor" ? task.runAs : null
+  );
+  refreshScriptIdentityMarkers(modelerHandle);
 }
 
 export function updateUserTaskProperties(modelerHandle, task) {

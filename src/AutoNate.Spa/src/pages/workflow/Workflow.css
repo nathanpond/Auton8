@@ -1013,3 +1013,21 @@
         width: 100%;
     }
 }
+
+/* #153: script tasks that declare an identity are marked on the diagram, so a
+   reviewer can see the privileged steps without opening each one.
+
+   Colour is not the only signal — the dashed outline distinguishes them for a
+   reader who cannot tell the two hues apart, and the title attribute bpmn-js
+   renders from the element name carries the rest. */
+.djs-element.an8-script-system .djs-visual > :nth-child(1) {
+  stroke: var(--mantine-color-yellow-7, #b8860b) !important;
+  stroke-width: 3px !important;
+  stroke-dasharray: 6 3 !important;
+}
+
+.djs-element.an8-script-author .djs-visual > :nth-child(1) {
+  stroke: var(--mantine-color-blue-6, #1971c2) !important;
+  stroke-width: 2.5px !important;
+  stroke-dasharray: 2 2 !important;
+}

@@ -47,8 +47,10 @@ Any hand-rolled orchestration needs to solve the same ordering problem.
 
 The application owns its schema end to end. It creates the base tables and
 every migration after them on startup, so a deployment only has to provide an
-**empty database** — there is no init script to mount and no ordering to get
-right.
+**empty database** — no schema to mount and no ordering to get right. (The
+local compose stack does mount two init scripts, but neither builds schema:
+they create the database and the Flowable role, both cluster-level things the
+application cannot do from a connection to its own database. See below.)
 
 Initialisation is serialised by a Postgres advisory lock, so two hosts starting
 against one database is defined behaviour rather than a race. Applied steps are
@@ -56,6 +58,175 @@ recorded in `schema_versions`, and the application **refuses to start against a
 database written by a newer build**, naming both versions. `GET /api/health/system`
 reports the current schema version and applied-step count, so the question
 "which version is this database at" is answerable from the admin UI.
+
+### Where workflow scripts execute
+
+A BPMN **script task** does not run inside the Flowable JVM. The engine's own
+script behaviour is replaced at parse time by an `ActivityBehaviorFactory` in
+the AutoNate Flowable extension, so there is no path by which author code
+reaches a JVM script engine. The script and the execution's variables are
+POSTed to `AutoNate.Web`, which runs them in the same V8 isolate the pipeline
+code nodes use, and returns the variables the script wrote.
+
+This matters because it is what closes GHSA-82rh-gjhw-rg9r. The base image
+still ships `nashorn-core`, `groovy` and `flowable-groovy-script-static-engine`;
+Nashorn's Java interop is on by default, so before this change a script task
+could reach `java.lang.System` and, through it, the JVM and every database the
+process could see.
+
+**What a script may reach:** its process variables, through `variables.get(name)`
+and `variables.set(name, value)`. Nothing else. There is no `require`, no
+`fetch`, no filesystem, no network, no database, and no Java. Only JSON crosses
+the sandbox boundary.
+
+**Configuration.** The Flowable runtime needs both of these, or it refuses to
+publish a workflow containing a script task:
+
+```
+autonate.flowable-events.callback-base-url
+autonate.flowable-events.callback-shared-secret
+```
+
+**Fail-closed.** If the sandbox cannot be reached, the script task fails and
+the job retries. It is never run anywhere else. A fallback to in-JVM execution
+would reinstate the vulnerability at exactly the moment the system is degraded,
+so there deliberately is not one — and a test asserts its absence.
+
+Script errors (an author's mistake) and an unreachable sandbox are reported
+distinctly, so a failing workflow's error surface says which one happened.
+
+**Supported languages.** `scriptFormat` may be `javascript` or `python`; both
+run in the same sandbox against the same host surface, reached by the same
+names (`variables.get`, `variables.set`). The language is a front-end choice,
+not a second execution path, and a test in the executor asserts that the two
+reach exactly the same things — if they ever diverge, the build fails rather
+than the difference being discovered by an author.
+
+Python needs one extra measure to make that true. The JavaScript isolate has no
+filesystem, no process and no network to withhold — they simply are not there.
+Pyodide ships a real CPython, where `import os` and `import socket` succeed and
+`open()` reads an in-memory filesystem. Their reach is already heavily
+curtailed, but "curtailed" is a weaker claim than "unreachable", so for script
+tasks those modules are refused outright and `open()` is removed. A script task
+declaring `groovy` is refused with a message saying so.
+
+**Python costs materially more to start, and it is worth knowing before you
+choose it.** Measured on an idle developer machine
+(`services/executor/bench/measure.mjs`), a trivial script task that reads one
+variable and writes another:
+
+| | JavaScript | Python |
+|---|---|---|
+| cold (no interpreter waiting) | 1.8 ms | **1078 ms** |
+| warm (an interpreter waiting) | 1.8 ms | 5 ms |
+
+The cold figure is not a rare case. A Pyodide interpreter is single-use — it is
+destroyed after each run so nothing an author does survives into the next — and
+the executor keeps only **one** warm spare by default
+(`EXECUTOR_PY_WARM_WORKERS`). Back-to-back Python script tasks therefore
+alternate: the measured warm series was 4.7, 1066.6, 4.9, 1065.6, 4.1 ms,
+because each run consumes the spare and the replacement takes about a second to
+become ready.
+
+For a workflow that runs a Python script task occasionally this is invisible.
+For one that runs them in a burst, roughly every other execution pays about a
+second. Raise `EXECUTOR_PY_WARM_WORKERS` to trade memory for that latency —
+each warm interpreter holds a loaded CPython — or write the script in
+JavaScript, which has no equivalent cost.
+
+**Which identity a script runs as.** Each script task carries a `runAs`
+declaration, stored as `autonate:runAs` in the
+`http://autonate.dev/workflows` namespace (on the do-not-rename list):
+
+| Value | Meaning |
+|---|---|
+| *unset* (default) | the assignee of the last user task on the token's own path |
+| `workflowAuthor` | the author of the workflow definition |
+| `system` | bypasses individual permission checks; requires the `elevatescript` permission on the workflow to author, and the server refuses the publish without it |
+
+`system` never bypasses the sandbox. Process variables and the host API remain
+the only things a script can reach, whichever identity it runs as.
+
+Publishing is refused, naming the script task, when the default cannot be
+resolved: the task is reachable with no preceding user task (a timer- or
+message-started process, or a script placed before any user task), or it sits
+after a parallel join where "the last user task" has more than one answer. The
+author then has to say which identity they mean. Script tasks with a declared
+identity are marked on the diagram.
+
+> **The property is stored and validated, but not yet enforced at runtime.**
+> At v1.0 the host API exposes only process variables, so there is nothing to
+> authorize and no identity is resolved when a script runs. The declaration
+> landed now (#153) because it is authored data living in the BPMN: adding it
+> later would mean migrating every diagram that already exists. Resolution
+> arrives with the first permission-gated helper. An unenforced property here
+> is deliberate, not a bug.
+
+**Shapes rejected at publish time.** These fail in the sandbox anyway, but
+publish-time rejection turns a runtime failure on whoever happened to run the
+process into a message the author can act on. The list is generated from
+`ScriptSurfaceRules` in `src/AutoNate.Web/Services/Workflow/`, which is the
+single source both the check and this table come from:
+
+| Rejected | Write instead |
+|---|---|
+| `execution.setVariable(name, value)` | `variables.set(name, value)` |
+| `execution.getVariable(name)` | `variables.get(name)` |
+| `execution.removeVariable(name)` | `variables.set(name, null)` |
+| `execution` (any other use) | `variables.get` / `variables.set` |
+| `Java.type(...)`, `JavaImporter`, `Packages.*`, `java.lang.*` | nothing — the JVM is not reachable from a script, by design |
+
+The check inspects the script statically; it never runs it, because running
+author-supplied code at publish is exactly what must not happen. It ignores
+comments and string literals, so a script that merely *mentions* one of these
+still publishes. Where a shape cannot be told apart reliably it is allowed
+through: a missed script fails at runtime with a clear sandbox error, whereas a
+wrongly blocked one leaves an author with no recourse.
+
+### The Flowable database role (fresh installs only)
+
+By default the Flowable engine connects to Postgres as the same bootstrap
+superuser the application uses — the role that **owns** `AutoNate` and
+`autonate_datastores`. That is more than the engine needs: anything reaching
+that datasource reaches application data as its owner.
+
+`infra/postgres/init/02-flowable-role.sql` provisions a restricted
+`flowable_app` role that owns the `flowable` database and has `CONNECT`
+revoked on the application databases. To use it, set both:
+
+```
+AUTONATE_FLOWABLE_DB_USER=flowable_app
+AUTONATE_FLOWABLE_DB_PASSWORD=<a real password, not the init script default>
+```
+
+The init script ships a placeholder password (`flowable_dev_only_change_me`)
+because a role has to be created with one. Change it on any deployment that is
+not a laptop:
+
+```sql
+ALTER ROLE flowable_app PASSWORD '<real password>';
+```
+
+**This protects new deployments only, and the default is deliberately off.**
+Two facts make that the honest position rather than a shortcut:
+
+1. `docker-entrypoint-initdb.d` scripts run only against an **empty data
+   directory**. An existing cluster never executes this file.
+2. Creating the role by hand on an existing cluster is *still* not enough.
+   `ALTER DATABASE ... OWNER` does not move ownership of the tables Flowable
+   has already created, and `REASSIGN OWNED` is refused for the bootstrap
+   role. The engine would own the database but not its own schema, and would
+   fail on its next schema upgrade.
+
+So there is no supported switch-over for an existing deployment, and compose
+keeps defaulting to the superuser so that pulling this change cannot break one.
+**An existing deployment must not set these variables** until a migration that
+transfers table ownership exists.
+
+The practical consequence, stated plainly: every deployment created before this
+change — and every new deployment whose operator does not set these two
+variables — runs the Flowable engine with the same database reach it always
+had. The isolation is available, not automatic.
 
 ## Configuration
 

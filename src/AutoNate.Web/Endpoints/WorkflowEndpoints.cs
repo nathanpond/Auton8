@@ -1,5 +1,8 @@
+using System.Security.Claims;
 using System.Text.Json;
+using System.Xml.Linq;
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
 using AutoNate.Web.Persistence;
@@ -197,11 +200,39 @@ public static class WorkflowEndpoints
             IWorkflowModelStore store,
             IFlowableClient flowable,
             IAuditEventPublisher auditPublisher,
+            IAuthorizer authorizer,
+            ClaimsPrincipal actor,
             CancellationToken cancellationToken) =>
         {
             if (model.Id != id)
             {
                 return Results.BadRequest(new { message = "URL id does not match body Id." });
+            }
+
+            // #153: a script task declaring `runAs="system"` needs a permission
+            // beyond Publish. Checked here rather than by an endpoint filter
+            // because the answer is in the payload, not the route — and checked
+            // at all because the studio only *hides* the option, which is not a
+            // gate.
+            var identities = ReadScriptIdentities(model.BpmnXml);
+            if (identities.DeclaresSystem)
+            {
+                var decision = await authorizer.AuthorizeAsync(
+                    actor,
+                    Actions.ElevateScript,
+                    new EntityRef(EntityKinds.WorkflowModel, id.ToString()),
+                    cancellationToken);
+                if (decision.Effect != AuthEffect.Allow)
+                {
+                    return Results.Json(
+                        new
+                        {
+                            message =
+                                "This workflow contains a script task set to run as the system, " +
+                                "which requires the 'elevatescript' permission on the workflow.",
+                        },
+                        statusCode: StatusCodes.Status403Forbidden);
+                }
             }
 
             var deployment = await flowable.DeployProcessAsync(model, cancellationToken);
@@ -214,7 +245,15 @@ public static class WorkflowEndpoints
                 WorkflowAdminEventTypes.ModelPublished,
                 WorkflowResourceKinds.WorkflowModel,
                 resource: new { id = published.Id, name = published.Name, processKey = published.ProcessKey },
-                details: new { deploymentId = deployment.DeploymentId, processDefinitionId = deployment.ProcessDefinitionId },
+                details: new
+                {
+                    deploymentId = deployment.DeploymentId,
+                    processDefinitionId = deployment.ProcessDefinitionId,
+                    // #153: which steps were declared to run as something other
+                    // than their preceding assignee. A privilege declaration is
+                    // worth a record of who published it and when.
+                    scriptIdentities = identities.ByElementId,
+                },
                 cancellationToken);
             return Results.Ok(new PublishResponse(augmented, deployment));
         }).DisableAntiforgery()
@@ -494,4 +533,30 @@ public static class WorkflowEndpoints
             }
         };
     }
+
+    // Reads the script identity declarations out of a model's BPMN.
+    //
+    // Tolerant of unparseable XML on purpose: publish already fails downstream
+    // with a better message than this would produce, and throwing here would
+    // turn a diagnosable validation error into a 500.
+    private static (bool DeclaresSystem, IReadOnlyDictionary<string, string> ByElementId)
+        ReadScriptIdentities(string? bpmnXml)
+    {
+        if (string.IsNullOrWhiteSpace(bpmnXml))
+        {
+            return (false, new Dictionary<string, string>(StringComparer.Ordinal));
+        }
+        try
+        {
+            var document = XDocument.Parse(bpmnXml);
+            return (
+                ScriptTaskIdentity.DeclaresSystemIdentity(document),
+                ScriptTaskIdentity.DeclaredIdentities(document));
+        }
+        catch (System.Xml.XmlException)
+        {
+            return (false, new Dictionary<string, string>(StringComparer.Ordinal));
+        }
+    }
+
 }

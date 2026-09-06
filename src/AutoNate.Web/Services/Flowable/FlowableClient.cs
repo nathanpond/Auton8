@@ -1435,12 +1435,18 @@ public sealed class FlowableClient(
         }
 
         var engineList = probeResult.EngineNames.Count == 0
-            ? "no installed script engines"
+            ? "no engines reported"
             : string.Join(", ", probeResult.EngineNames);
 
+        // What this gate checks changed with #147: script tasks run in the
+        // executor sandbox, so the question is whether the Flowable runtime is
+        // configured to reach it — not whether a JSR-223 JavaScript engine is
+        // installed. Telling an operator to install one would send them to fix
+        // the wrong thing, and installing one is a step backwards.
         throw new InvalidOperationException(
-            $"Flowable is missing JavaScript script task support. Available script engines: {engineList}. " +
-            "Install a JavaScript JSR-223 engine in the Flowable runtime before publishing BPMN script tasks.");
+            "Flowable cannot run script tasks: the AutoNate executor sandbox callback is not configured " +
+            "(autonate.flowable-events.callback-base-url and callback-shared-secret). " +
+            $"Reported: {engineList}. Scripts execute in the sandbox, not in a JVM script engine.");
     }
 
     private async Task<FlowableScriptTaskSupportResponse?> TryReadJavaScriptScriptTaskSupportAsync(CancellationToken cancellationToken)

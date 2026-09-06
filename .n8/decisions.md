@@ -1796,3 +1796,358 @@ mapping is recorded in the M4 milestone description.
   SQL that is test-enforced to fail), #179 (AQL GROUP silently ignored), #180 (four
   code comments asserting guarantees the code does not provide), #181 (released
   QUICKSTART miscounts assets and hardcodes a 1.0 note).
+
+## /n8-exec M3 — 2026-09-06
+
+Partially executed. The spike completed and decided; every implementation story is
+blocked as a result.
+
+- **Decision (#149, spike):** script tasks execute in the **executor sidecar**, not
+  in the Flowable JVM.
+  **Why:** three measurements. (a) The declared GraalJS dependency could never have
+  worked — `org.graalvm.js:js-scriptengine` depends on `polyglot` alone, no language
+  and no Truffle runtime, so the "declared but not shipped" premise in #147 is half
+  right: the intent was real, the dependency was wrong. The working set is
+  `js-community`, 14 jars / 67 MB. (b) The hop that argued against the executor costs
+  **1.9 ms warm median**, measured against the running stack over
+  `pipeline-code-run.>`; script tasks are forced async, so it lands on a job thread.
+  (c) The executor already enforces `timeoutMs`/`memoryMb` and already runs both JS
+  and Python, where the GraalVM branch needs isolates (different artifacts, unverified
+  host-object crossing) and GraalPy separately.
+  Also weighed: the executor removes the JVM rather than restricting it, and keeps the
+  count of untrusted-code sandboxes where it is rather than raising it — M9's audit
+  emphasis.
+  **Cost if wrong:** the contract needs a third `kind` and a variables-shaped payload.
+  Judged small because Auton8 already owns both ends and `jsRunner` already generates
+  the wrapper for its own kinds.
+  **Issue:** #149 — reconciled by /n8-replan 2026-09-06
+
+- **Verified, not assumed:** the GraalVM branch is viable — on Temurin 21.0.7+6-LTS,
+  the flowable-rest base JDK, `HostAccess.NONE` makes `Java.type` undefined rather
+  than merely refused, and an `@HostAccess.Export` binding works alongside it, exactly
+  as #147 designs. It loses on limits, languages and sandbox count, not on feasibility.
+  Recorded so a future reader does not re-litigate it. Note Truffle falls back to its
+  interpreter on that JDK — no JIT.
+  **My error, recorded:** the first run of that probe was on the local Java 26, not
+  the target. Caught from the runtime version in Truffle's own warning and redone on
+  21.
+
+- **Blocker (#150):** the story cannot be implemented as specified without breaking
+  every existing deployment. `docker-entrypoint-initdb.d` runs only on an empty data
+  directory, so pointing Flowable at a new role breaks any existing volume. And the
+  obvious migration is refused: `ALTER DATABASE … OWNER` does not move table
+  ownership, and `REASSIGN OWNED BY autonate` fails because the bootstrap superuser
+  owns system objects. Measured on a scratch database. Four options are on the issue;
+  all of them change the ownership model of a live engine schema, so it is a user
+  decision rather than a judgment call.
+  **Issue:** #150 — reconciled by /n8-replan 2026-09-06
+
+- **Discovered work, filed not fixed:** `CodeNodeRequest.isUnsafe` is gated by
+  `Actions.ExecuteUnsafe` on the .NET side and never read by the executor —
+  `grep -c` returns 1, the declaration. A permission guarding an effect that does not
+  exist, and a prerequisite if workflow scripts are routed through that sandbox.
+  **Issue:** #190 — reconciled by /n8-replan 2026-09-06
+
+- **Process note:** during the #150 probe I revoked `CONNECT ON DATABASE "AutoNate"
+  FROM PUBLIC` on the *running* dev cluster rather than on a scratch database, then
+  reverted it. Functionally restored; the ACL is now explicit rather than NULL. The
+  scratch database and role were dropped. Probes belong on scratch objects from the
+  first statement, not after the first result.
+
+## /n8-replan M3 — 2026-09-06
+
+Reconciling M3 against #149's decision that script tasks execute in the executor
+sidecar rather than the Flowable JVM.
+
+- **Decision:** #147 keeps its three components in one story rather than splitting
+  into delegation and routing.
+  **Why:** neither half ships alone — delegation without routing stops scripts
+  running, routing without delegation is never called, and either without the
+  `variables` façade breaks every existing script. Same reasoning that kept the
+  engine change and the binding together in the original story. Cost: it is a large
+  story spanning `flowable-extension/`, `src/AutoNate.Web/` and `services/executor/`,
+  and that is stated on the issue rather than hidden in a split producing two broken
+  halves.
+  **Issue:** #147
+
+- **Decision:** Nashorn and Groovy exclusion **survives** the branch change.
+  **Why:** the base image still ships `nashorn-core`, `groovy` and
+  `flowable-groovy-script-static-engine`. Delegation should mean the engine's script
+  path is never reached; asserting they cannot serve script tasks is what proves it
+  rather than assuming it.
+  **Issue:** #147
+
+- **Decision:** #190 moved from unmilestoned discovered-work into M3, blocking #147.
+  **Why:** it was a curiosity while scripts ran in the JVM. Once they route through
+  the executor, a flag that is permission-gated as though it relaxes that sandbox —
+  and that the runner never reads — is a prerequisite.
+  **Issue:** #190, #147
+
+- **Decision (user):** #150 scoped to **fresh installs only**, with the gap
+  documented.
+  **Why:** the three alternatives all change the ownership model of a live engine
+  schema, and a mistake locks Flowable out of its own database. Measured: `ALTER
+  DATABASE` does not move table ownership, and `REASSIGN OWNED BY <bootstrap
+  superuser>` is refused because that role owns system objects.
+  **Cost, recorded plainly:** every existing deployment stays exactly as exposed as
+  it is today, and existing deployments were what this defence-in-depth story was
+  for. The AC's implied expectation that the role works on an already-provisioned
+  volume is not achievable by the chosen option and needs adjusting when the story
+  is picked up.
+  **Issue:** #150
+
+- **Verified not stale:** #151 and #153. Publish-time validation of removed script
+  shapes, and `runAs` authoring with its reachability analysis, do not depend on
+  where execution happens. #152 needed only a note — its "same sandbox as production"
+  criterion got easier, since there is now exactly one.
+
+## #150 — Flowable database role defaults to OFF
+
+The restricted `flowable_app` role is provisioned by an init script and wired
+into compose behind `AUTONATE_FLOWABLE_DB_USER`, but the **default remains the
+bootstrap superuser**.
+
+Why: `docker-entrypoint-initdb.d` runs only on an empty data directory, and
+creating the role by hand on an existing cluster is not sufficient either —
+`ALTER DATABASE ... OWNER` does not move ownership of the tables Flowable has
+already created, and `REASSIGN OWNED` is refused for the bootstrap role. A
+default of `flowable_app` would therefore leave every upgraded deployment with
+an engine that owns its database but not its schema, failing on the next
+Flowable schema upgrade. The opt-in default is the only choice that cannot
+break an existing deployment on a `git pull`.
+
+Consequence, recorded rather than glossed: the isolation is available, not
+automatic. Deployments that do not set the variable keep exactly the database
+reach they have today. That follows from the user's decision to scope #150 to
+fresh installs; it is not an additional descope.
+
+Also corrected here: the init script's header claimed "the release compose
+applies the same SQL from its db-init service". No release compose and no
+db-init service exist in this repository. The claim was false and is removed.
+
+## #147 — unblocked from #190
+
+I had marked #147 blocked by #190 during the replan. Removing that block.
+
+The two touch the same record (`CodeNodeRequest`) but neither constrains the
+other: #147 adds a `kind` and a wrapper, #190 decides whether an unused field
+is deleted. #147 builds correctly against today's wire format regardless of how
+#190 resolves, and if the field is removed later that is a mechanical edit.
+
+The block's cost was out of proportion to any real coupling — #190 waits on a
+schema decision that is the owner's to make, and it was holding M3's core
+security story (GHSA-82rh-gjhw-rg9r) plus #151-#154 behind a cleanup of a field
+nothing reads. Whole milestone stalled on an inert flag.
+
+Risk accepted: a small merge conflict in the wire record if both land close
+together. That is cheap and visible, unlike a stalled milestone.
+
+## #147 — script tasks execute in the executor sandbox
+
+Implemented across three seams: an `ActivityBehaviorFactory` in the Flowable
+extension that replaces the engine's `ScriptTaskActivityBehavior`, a
+secret-gated callback in AutoNate.Web, and a `scripttask` kind in the executor.
+
+**Design decisions taken during execution:**
+
+- *The host API is a registry whose operations carry their own in-isolate
+  source.* One declaration produces both the `variables` façade the author sees
+  and the tool definitions M8 binds to, so the two cannot drift. The
+  implementations are evaluated inside the isolate rather than injected as host
+  callbacks, because injecting host functions would put host objects within
+  reach of author code — only JSON crosses the boundary.
+- *Mutations ride on a new `scriptTask` field of `CodeNodeReply`, not on
+  `output`.* A `CodeNodeFrame` is tabular and cannot represent a non-scalar
+  variable without misrepresenting its shape.
+- *A script error and an unreachable sandbox are different exceptions and
+  different status codes* (422 vs 503). They were one `InvalidOperationException`
+  before; collapsed, a workflow's error surface cannot tell an author's mistake
+  from an infrastructure blip.
+- *`IScriptTaskRunner` was extracted* so that failure-to-status mapping is
+  testable without standing up NATS and the sidecar and contriving each failure.
+
+**Rule 2 fixes made in passing (in-scope correctness):**
+
+- `FlowableScriptTaskSupportService` reported whether a JSR-223 JavaScript
+  engine was installed, and AutoNate.Web *refused to publish* when the answer
+  was no. After this change that question is inverted: script tasks work
+  because they do not use a JVM script engine. Left alone, the gate would have
+  blocked publishing on a hardened image with Nashorn removed, while reporting
+  "supported" on a deployment whose sandbox is not configured at all. It now
+  reports on the sandbox callback, and the .NET error message no longer tells
+  operators to install a JSR-223 engine.
+- The behaviour refuses a non-JavaScript `scriptFormat` rather than forwarding
+  it. The base image still ships Groovy; sending a Groovy body to a JS isolate
+  would fail with a syntax error explaining nothing.
+
+**Vulnerability confirmed and closed on the running stack**, not only in tests.
+Against the pre-change engine a deployed script task ran
+`Java.type('java.lang.System')` and returned `jvmUser=root`,
+`jvmVersion=21.0.10`. After rebuilding, the same definition no longer reaches
+the JVM at all.
+
+### #147 — end-to-end evidence on the running stack
+
+Both halves measured on the local compose stack rather than inferred from unit
+tests, because the claim being made is a security one.
+
+**Before** (engine built from pre-change code), the advisory's payload as a
+deployed BPMN script task:
+
+    jvmUser    = root
+    jvmVersion = 21.0.10
+
+**After** (same process definition, rebuilt engine):
+
+    Script task 'probe' failed: Java is not defined
+
+**Round trip**, same stack: `variables.get('orderTotal')` read 250,
+`variables.set` applied `approved=true` and a nested
+`audit={checkedBy:'script',total:250}` to the execution, and
+`resultVariable="verdict"` came back `APPROVED`.
+
+**Fail-closed**, executor stopped: the JVM-escape script still did not run —
+HTTP 503 `executor_unavailable`, distinct from the script error above.
+
+The two probe deployments were removed from the dev engine afterwards.
+Recreating the containers to test this also required restarting
+`autonate-web-dapr`, whose network namespace follows `autonate-web`.
+
+## #151 — publish-time rejection of removed script shapes
+
+Rejected shapes and their replacements live in `ScriptSurfaceRules`, consulted
+by `WorkflowBpmnXml` and rendered into `docs/DEPLOYMENT.md` from the same list,
+so the check and the documentation cannot drift.
+
+**Detection technique (Claude's Discretion).** A static scan that blanks
+comments and string literals, then matches identifiers. Not a parser: the story
+allowed a simpler technique and stated a preference for false negatives.
+
+**One limitation taken deliberately.** The stripper cannot tell a regex literal
+from division, so `/execution/.test(x)` is read as code and would be flagged —
+a false positive, against the story's stated preference. The alternative is
+worse: guessing that a `/` begins a literal would blank out real code and
+produce silent false negatives, which is the failure the preference exists to
+avoid being *hidden* by. A visible, explainable rejection beats an invisible
+miss. Distinguishing the two properly needs the preceding-token context a real
+lexer carries, which is more machinery than this check warrants today.
+
+**One existing test corrected.** `ValidateProcess_AcceptsJavaScriptScriptTask`
+used `execution.setVariable` as its "valid script" fixture. After #147 that
+script is unpublishable, so the test would have been asserting that an invalid
+script publishes.
+
+## #152 — script test-run panel
+
+The endpoint calls the same `IScriptTaskRunner` the Flowable callback calls
+rather than constructing an evaluator. That is the whole point of the story's
+"same sandbox as production" criterion: a second configuration is how the test
+environment and the real one drift, and a test environment that is more
+permissive teaches authors the wrong thing.
+
+**Refusal classification reuses #151's list.** The sandbox does not announce
+refusals — it withholds the binding, so reaching for `Java.type` yields a bare
+`ReferenceError: Java is not defined`, which is the same shape a typo produces.
+`ScriptSurfaceRules.TryExplainRefusal` keys off the identifiers that already
+drive publish-time rejection, so the panel can present a refusal as the
+boundary working rather than as a bug, and the two cannot disagree about what
+is out of bounds.
+
+Guarded against the obvious false positive: a message must both name the
+identifier and carry the engine's "is not defined" phrasing, so an author's own
+`throw new Error("Java")` is not reported as the sandbox blocking them.
+
+**Input entry is JSON.** It carries every type the sandbox round-trips, and a
+malformed value is reported as the author types rather than surfacing later as
+a confusing script failure — which is the story's "reported at entry" criterion.
+
+The panel is keyed on the script text so editing the code clears a stale
+result. Showing output from code no longer in the editor is worse than showing
+none.
+
+## #154 — Python script tasks
+
+**Parity had to be built, not asserted.** The story's central claim is that a
+language is a front-end onto one host surface, and the suite compares verdicts
+across both languages rather than asserting each separately, so a divergence
+fails the build.
+
+Making that claim true required real work on the Python side. The JavaScript
+isolate has no filesystem, process or network to withhold — they are simply not
+present. Pyodide ships a real CPython where `import os` and `import socket`
+succeed and `open()` reads an in-memory filesystem. Their reach was already
+heavily curtailed by earlier hardening, but "curtailed" is a weaker claim than
+"unreachable", and writing a parity test against the pre-existing state would
+have asserted something false. Script tasks now refuse a denylist of modules
+through an import hook and remove `open()`.
+
+**Startup cost measured rather than estimated**, and it is materially worse:
+1078 ms cold against JavaScript's 1.8 ms. The finding that matters is not the
+cold number but its frequency — Pyodide interpreters are single-use and the
+executor keeps one warm spare, so a burst alternates (4.7, 1066.6, 4.9, 1065.6,
+4.1 ms). Documented in DEPLOYMENT.md with the knob
+(`EXECUTOR_PY_WARM_WORKERS`). The default is left alone: raising it trades
+memory for latency and each warm interpreter holds a loaded CPython, which is a
+deployment-sizing decision rather than one to take unilaterally.
+
+**A Python gotcha worth recording**, since it cost real debugging time: names
+with a leading double underscore referenced inside a class body are mangled to
+`_ClassName__name`, so `__mutations` read from within the `variables` façade
+failed with a NameError pointing nowhere near the cause. The generated
+preamble uses `_an8_`-prefixed names for that reason.
+
+## #153 — script task identity
+
+**The analysis, not the property, is the story.** Its failure mode is
+asymmetric: a wrongly permissive answer publishes a script running as an
+identity nobody chose, while a wrongly restrictive one asks the author a
+question. Everything ambiguous therefore resolves to "be explicit":
+
+- a call activity does not count as a preceding user task, because the called
+  process is not in the document and a guess would be permissive;
+- a boundary event carries the state from *before* the task it is attached to,
+  since that task did not complete and its assignee finished nothing;
+- an event subprocess or any node with no incoming flow is treated as a start.
+
+Implemented as two dataflow analyses to a fixpoint over each flow scope — a
+"must" property (all paths carry a user task, combined with AND) and a "may"
+property (some path crosses a parallel join, combined with OR) — so loops
+terminate rather than needing a path enumeration that would not.
+
+**The permission is enforced in the publish handler**, not by an endpoint
+filter, because the answer is in the payload rather than the route. Registering
+the action buys discoverability only; the add-permission-gate skill is explicit
+that the registry gates nothing.
+
+**A new `autonate:` prefix was declared** in the three BPMN templates. The
+namespace URI already existed as `targetNamespace` but had no prefix, so
+nothing could be serialised into it. The URI is unchanged — it is on the
+do-not-rename list. Verified against the running Flowable: it accepts the
+attribute on a `scriptTask` and the deployed resource still carries
+`autonate:runAs="system"` afterwards.
+
+**Three attempts were needed to make the publish-gate test assert anything**,
+and the shape of the mistake is worth recording. Publishing a random workflow
+id returns 403 from the route's own instance check — empty body, before this
+gate is reached — so both the refusal test and its positive control passed
+while proving nothing. The test now creates the workflow first, grants the
+author Publish explicitly, and the control asserts the absence of *any* 403
+rather than of a particular message.
+
+### #153 — a false positive the full suite caught
+
+The first version of the analysis treated any node with no incoming flow as a
+start event, on the reasoning that an event subprocess can begin a path without
+one. That also captured *disconnected* nodes, so a script task no token can
+reach read as "reachable with no preceding user task" — and 13 tests, mine and
+pre-existing, failed on fixtures that are legitimate fragments.
+
+The rule is now: only a real `startEvent` begins a path, and a script task is
+analysed only if it is reachable from one. An unreachable script task can never
+execute, so it needs no identity, and demanding one would leave an author
+unable to publish with no way to comply. Event subprocesses keep working
+because their start events are start events, in their own scope.
+
+Worth noting how it was found: the full suite, not the story's own tests, which
+all passed. Running the milestone suite rather than the story's slice is what
+turned a false positive into a two-line fix instead of an author's problem.

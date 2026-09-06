@@ -11,11 +11,17 @@ public sealed record class CodeNodeRequest(
     string Language,         // "js" | "python"
     string Kind,             // "transformer" | "analyzer"
     string Code,
+    // Received by the sidecar and ignored — the full-CPython runner this was
+    // meant to select was never built. Kept on the wire only because the
+    // column and the permission still exist; see #190.
     bool IsUnsafe,
     IReadOnlyDictionary<string, string> Config,
     IReadOnlyList<CodeNodeFrame> Inputs,
     int TimeoutMs,
-    int MemoryMb);
+    int MemoryMb,
+    // Process variables for a BPMN script task (#147). Null for the pipeline
+    // kinds, whose data travels as `Inputs` frames instead.
+    IReadOnlyDictionary<string, object?>? Variables = null);
 
 public sealed record class CodeNodeFrame(
     IReadOnlyList<CodeNodeColumn> Columns,
@@ -32,11 +38,46 @@ public sealed record class CodeNodeColumn(string Name, int Type)
 public sealed record class CodeNodeReply(
     bool Success,
     string? ErrorMessage,
-    CodeNodeFrame? Output);
+    CodeNodeFrame? Output,
+    // Script-task kinds only. Separate from Output because variable mutations
+    // are not tabular; a CodeNodeFrame cannot carry a non-scalar variable
+    // without misrepresenting its shape.
+    ScriptTaskResult? ScriptTask = null);
+
+// What a script task returns: the value backing `resultVariable`, and the
+// variables the script wrote, to be applied to the execution by the caller.
+public sealed record class ScriptTaskResult(
+    object? Result,
+    IReadOnlyDictionary<string, object?> Mutations);
 
 internal static class CodeNodeWireFormat
 {
     public const int CurrentVersion = 1;
+
+    // BPMN script tasks. `kind` is "scripttask" and the executor replies with
+    // mutations rather than a frame; see services/executor/src/scriptTaskRunner.ts.
+    //
+    // `language` is the executor's name for the runner ("js" | "python"), not
+    // the BPMN `scriptFormat` the author wrote. ScriptSurfaceRules owns that
+    // translation so the two vocabularies meet in exactly one place.
+    public static CodeNodeRequest ForScriptTask(
+        string nodeId,
+        string code,
+        string language,
+        IReadOnlyDictionary<string, object?> variables,
+        int timeoutMs,
+        int memoryMb) =>
+        new(CurrentVersion,
+            nodeId,
+            language,
+            Kind: "scripttask",
+            code,
+            IsUnsafe: false,
+            Config: new Dictionary<string, string>(StringComparer.Ordinal),
+            Inputs: [],
+            timeoutMs,
+            memoryMb,
+            variables);
 
     public static CodeNodeRequest From(
         string nodeId,

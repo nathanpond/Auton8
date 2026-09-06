@@ -20,19 +20,38 @@ export interface CodeNodeRequest {
   version: number;
   nodeId: string;
   language: "js" | "python";
-  kind: "transformer" | "analyzer";
+  kind: "transformer" | "analyzer" | "scripttask";
   code: string;
+  // Received and ignored. This was meant to select a full-CPython runner
+  // instead of the Pyodide sandbox; that runner was never built. The host
+  // still gates SETTING it behind an `executeunsafe` permission, so the gate
+  // currently protects nothing. Do not start honouring this flag without
+  // reading #190 — the sandbox has been hardened twice since it was designed.
   isUnsafe: boolean;
   config: Record<string, string>;
   inputs: CodeNodeFrame[];
+  // Process variables for a `scripttask` run. Absent for the pipeline kinds,
+  // whose data arrives as `inputs` frames instead.
+  variables?: Record<string, unknown>;
   timeoutMs: number;
   memoryMb: number;
+}
+
+// What a script task returns. Mutations are applied to the execution by the
+// host after the reply lands; `result` backs the script task's `resultVariable`.
+export interface ScriptTaskResult {
+  result: unknown;
+  mutations: Record<string, unknown>;
 }
 
 export interface CodeNodeReply {
   success: boolean;
   errorMessage: string | null;
   output: CodeNodeFrame | null;
+  // Script-task kinds only. Kept separate from `output` because mutations are
+  // not tabular and a CodeNodeFrame cannot represent a non-scalar variable
+  // without lying about its shape.
+  scriptTask?: ScriptTaskResult | null;
 }
 
 export function emptyFrame(): CodeNodeFrame {
