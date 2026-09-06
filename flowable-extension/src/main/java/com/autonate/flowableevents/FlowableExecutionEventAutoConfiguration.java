@@ -4,6 +4,10 @@ import java.util.ArrayList;
 import org.flowable.common.engine.api.delegate.event.FlowableEventListener;
 import org.flowable.engine.HistoryService;
 import org.flowable.spring.SpringProcessEngineConfiguration;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import java.net.http.HttpClient;
+import java.time.Duration;
 import org.flowable.spring.boot.EngineConfigurationConfigurer;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -37,8 +41,10 @@ public class FlowableExecutionEventAutoConfiguration {
     }
 
     @Bean
-    FlowableScriptTaskSupportService flowableScriptTaskSupportService() {
-        return new FlowableScriptTaskSupportService();
+    FlowableScriptTaskSupportService flowableScriptTaskSupportService(
+        FlowableExecutionEventProperties properties
+    ) {
+        return new FlowableScriptTaskSupportService(properties);
     }
 
     @Bean(name = "dueDateHelper")
@@ -91,6 +97,35 @@ public class FlowableExecutionEventAutoConfiguration {
         ObjectProvider<org.flowable.engine.RepositoryService> repositoryServiceProvider
     ) {
         return new WorkflowFailureEventListener(eventMapper, publisher, repositoryServiceProvider);
+    }
+
+    // The seam that decides where BPMN script-task code runs (#147).
+    //
+    // Installing the factory on the engine configuration is what makes the
+    // sandbox mandatory rather than opt-in: the parser asks this factory for
+    // every script task's behaviour, so there is no route by which a script
+    // reaches the JVM's own script engine.
+    @Bean
+    AutoNateActivityBehaviorFactory autoNateActivityBehaviorFactory(
+        FlowableExecutionEventProperties properties
+    ) {
+        return new AutoNateActivityBehaviorFactory(
+            HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(Math.max(1, properties.getBehaviorTimeoutSeconds())))
+                .build(),
+            new ObjectMapper().registerModule(new JavaTimeModule()),
+            properties);
+    }
+
+    @Bean
+    EngineConfigurationConfigurer<SpringProcessEngineConfiguration> autoNateScriptTaskConfigurer(
+        AutoNateActivityBehaviorFactory activityBehaviorFactory
+    ) {
+        return engineConfiguration -> {
+            engineConfiguration.setActivityBehaviorFactory(activityBehaviorFactory);
+            logger.info(
+                "BPMN script tasks routed to the AutoNate executor sandbox; the JVM script engine is not used.");
+        };
     }
 
     @Bean

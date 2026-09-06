@@ -1,5 +1,6 @@
 import { connect, NatsConnection, StringCodec } from "nats";
 import { runJs } from "./jsRunner.js";
+import { runScriptTask } from "./scriptTaskRunner.js";
 import { prewarmPython, runPython, shutdownPython } from "./pythonRunner.js";
 import { CodeNodeReply, CodeNodeRequest } from "./wire.js";
 
@@ -93,6 +94,16 @@ async function handleMessage(message: {
     const request = JSON.parse(raw) as CodeNodeRequest;
     if (request.version !== 1) {
       response = fail(`Unsupported wire version ${request.version}; this sidecar speaks v1.`);
+    } else if (request.kind === "scripttask") {
+      // BPMN script tasks (#147) return variable mutations rather than a frame.
+      // Routed before the language branches because the reply shape differs,
+      // not the language.
+      if (request.language !== "js") {
+        response = fail(`Script tasks support 'js' only; got '${request.language}'.`);
+      } else {
+        const scriptTask = await runScriptTask(request);
+        response = { success: true, errorMessage: null, output: null, scriptTask };
+      }
     } else if (request.language === "js") {
       const output = await runJs(request);
       response = { success: true, errorMessage: null, output };

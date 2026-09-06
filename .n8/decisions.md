@@ -1941,3 +1941,74 @@ nothing reads. Whole milestone stalled on an inert flag.
 
 Risk accepted: a small merge conflict in the wire record if both land close
 together. That is cheap and visible, unlike a stalled milestone.
+
+## #147 — script tasks execute in the executor sandbox
+
+Implemented across three seams: an `ActivityBehaviorFactory` in the Flowable
+extension that replaces the engine's `ScriptTaskActivityBehavior`, a
+secret-gated callback in AutoNate.Web, and a `scripttask` kind in the executor.
+
+**Design decisions taken during execution:**
+
+- *The host API is a registry whose operations carry their own in-isolate
+  source.* One declaration produces both the `variables` façade the author sees
+  and the tool definitions M8 binds to, so the two cannot drift. The
+  implementations are evaluated inside the isolate rather than injected as host
+  callbacks, because injecting host functions would put host objects within
+  reach of author code — only JSON crosses the boundary.
+- *Mutations ride on a new `scriptTask` field of `CodeNodeReply`, not on
+  `output`.* A `CodeNodeFrame` is tabular and cannot represent a non-scalar
+  variable without misrepresenting its shape.
+- *A script error and an unreachable sandbox are different exceptions and
+  different status codes* (422 vs 503). They were one `InvalidOperationException`
+  before; collapsed, a workflow's error surface cannot tell an author's mistake
+  from an infrastructure blip.
+- *`IScriptTaskRunner` was extracted* so that failure-to-status mapping is
+  testable without standing up NATS and the sidecar and contriving each failure.
+
+**Rule 2 fixes made in passing (in-scope correctness):**
+
+- `FlowableScriptTaskSupportService` reported whether a JSR-223 JavaScript
+  engine was installed, and AutoNate.Web *refused to publish* when the answer
+  was no. After this change that question is inverted: script tasks work
+  because they do not use a JVM script engine. Left alone, the gate would have
+  blocked publishing on a hardened image with Nashorn removed, while reporting
+  "supported" on a deployment whose sandbox is not configured at all. It now
+  reports on the sandbox callback, and the .NET error message no longer tells
+  operators to install a JSR-223 engine.
+- The behaviour refuses a non-JavaScript `scriptFormat` rather than forwarding
+  it. The base image still ships Groovy; sending a Groovy body to a JS isolate
+  would fail with a syntax error explaining nothing.
+
+**Vulnerability confirmed and closed on the running stack**, not only in tests.
+Against the pre-change engine a deployed script task ran
+`Java.type('java.lang.System')` and returned `jvmUser=root`,
+`jvmVersion=21.0.10`. After rebuilding, the same definition no longer reaches
+the JVM at all.
+
+### #147 — end-to-end evidence on the running stack
+
+Both halves measured on the local compose stack rather than inferred from unit
+tests, because the claim being made is a security one.
+
+**Before** (engine built from pre-change code), the advisory's payload as a
+deployed BPMN script task:
+
+    jvmUser    = root
+    jvmVersion = 21.0.10
+
+**After** (same process definition, rebuilt engine):
+
+    Script task 'probe' failed: Java is not defined
+
+**Round trip**, same stack: `variables.get('orderTotal')` read 250,
+`variables.set` applied `approved=true` and a nested
+`audit={checkedBy:'script',total:250}` to the execution, and
+`resultVariable="verdict"` came back `APPROVED`.
+
+**Fail-closed**, executor stopped: the JVM-escape script still did not run —
+HTTP 503 `executor_unavailable`, distinct from the script error above.
+
+The two probe deployments were removed from the dev engine afterwards.
+Recreating the containers to test this also required restarting
+`autonate-web-dapr`, whose network namespace follows `autonate-web`.

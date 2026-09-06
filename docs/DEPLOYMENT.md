@@ -59,6 +59,45 @@ database written by a newer build**, naming both versions. `GET /api/health/syst
 reports the current schema version and applied-step count, so the question
 "which version is this database at" is answerable from the admin UI.
 
+### Where workflow scripts execute
+
+A BPMN **script task** does not run inside the Flowable JVM. The engine's own
+script behaviour is replaced at parse time by an `ActivityBehaviorFactory` in
+the AutoNate Flowable extension, so there is no path by which author code
+reaches a JVM script engine. The script and the execution's variables are
+POSTed to `AutoNate.Web`, which runs them in the same V8 isolate the pipeline
+code nodes use, and returns the variables the script wrote.
+
+This matters because it is what closes GHSA-82rh-gjhw-rg9r. The base image
+still ships `nashorn-core`, `groovy` and `flowable-groovy-script-static-engine`;
+Nashorn's Java interop is on by default, so before this change a script task
+could reach `java.lang.System` and, through it, the JVM and every database the
+process could see.
+
+**What a script may reach:** its process variables, through `variables.get(name)`
+and `variables.set(name, value)`. Nothing else. There is no `require`, no
+`fetch`, no filesystem, no network, no database, and no Java. Only JSON crosses
+the sandbox boundary.
+
+**Configuration.** The Flowable runtime needs both of these, or it refuses to
+publish a workflow containing a script task:
+
+```
+autonate.flowable-events.callback-base-url
+autonate.flowable-events.callback-shared-secret
+```
+
+**Fail-closed.** If the sandbox cannot be reached, the script task fails and
+the job retries. It is never run anywhere else. A fallback to in-JVM execution
+would reinstate the vulnerability at exactly the moment the system is degraded,
+so there deliberately is not one — and a test asserts its absence.
+
+Script errors (an author's mistake) and an unreachable sandbox are reported
+distinctly, so a failing workflow's error surface says which one happened.
+
+JavaScript is the only supported `scriptFormat`. A script task declaring
+`groovy` is refused at execution with a message saying so.
+
 ### The Flowable database role (fresh installs only)
 
 By default the Flowable engine connects to Postgres as the same bootstrap

@@ -28,7 +28,7 @@ namespace AutoNate.Web.Services.Pipelines.Execution;
 public sealed class JetStreamCodeNodeRunner(
     INatsConnectionProvider natsProvider,
     ICodeTransformerStore codeStore,
-    ILogger<JetStreamCodeNodeRunner> log)
+    ILogger<JetStreamCodeNodeRunner> log) : IScriptTaskRunner
 {
     // Hard-coded today; lift to IOptions when the operator wants to tune.
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
@@ -54,14 +54,69 @@ public sealed class JetStreamCodeNodeRunner(
             memoryMb: DefaultMemoryMb);
 
         var subject = $"pipeline-code-run.{pipelineRunId:N}.{pipelineNode.Id}";
+        log.LogDebug("Dispatching code-node {NodeId} for run {RunId} to executor sidecar.",
+            pipelineNode.Id, pipelineRunId);
+        var parsed = await RequestAsync(subject, request, pipelineNode.Id, cancellationToken);
+        return parsed.Output is null ? DataFrame.Empty : CodeNodeWireFormat.ToDataFrame(parsed.Output);
+    }
+
+    // Runs a BPMN script task in the executor sandbox (#147).
+    //
+    // Fail-closed by construction: every failure path here throws, and the only
+    // caller turns that into a retryable Flowable job. There is deliberately no
+    // fallback — running the script anywhere else on a transport failure would
+    // reintroduce GHSA-82rh-gjhw-rg9r exactly when the system is degraded.
+    public async Task<ScriptTaskResult> RunScriptTaskAsync(
+        string processInstanceId,
+        string nodeId,
+        string code,
+        IReadOnlyDictionary<string, object?> variables,
+        CancellationToken cancellationToken)
+    {
+        var request = CodeNodeWireFormat.ForScriptTask(
+            nodeId: nodeId,
+            code: code,
+            variables: variables,
+            timeoutMs: (int)DefaultTimeout.TotalMilliseconds,
+            memoryMb: DefaultMemoryMb);
+
+        // Same `pipeline-code-run.>` subject space the sidecar already
+        // subscribes to, so script tasks need no new stream or queue group.
+        var subject = $"pipeline-code-run.scripttask.{Sanitize(processInstanceId)}.{Sanitize(nodeId)}";
+        log.LogDebug("Dispatching script task {NodeId} for process {ProcessInstanceId} to executor sidecar.",
+            nodeId, processInstanceId);
+        var parsed = await RequestAsync(subject, request, nodeId, cancellationToken);
+        return parsed.ScriptTask
+            ?? throw new InvalidOperationException(
+                "Executor sidecar replied to a script task without a script-task result.");
+    }
+
+    // NATS subject tokens cannot contain '.', ' ', '*' or '>'. Flowable ids are
+    // normally safe, but a node id comes from author-controlled BPMN, so it is
+    // not trusted to be: an id containing '.' would silently widen the subject.
+    private static string Sanitize(string token)
+    {
+        Span<char> buffer = stackalloc char[token.Length];
+        for (var i = 0; i < token.Length; i++)
+        {
+            var c = token[i];
+            buffer[i] = c is '.' or ' ' or '*' or '>' ? '_' : c;
+        }
+        return buffer.Length == 0 ? "_" : new string(buffer);
+    }
+
+    private async Task<CodeNodeReply> RequestAsync(
+        string subject,
+        CodeNodeRequest request,
+        string nodeId,
+        CancellationToken cancellationToken)
+    {
         var payload = JsonSerializer.SerializeToUtf8Bytes(request, SerializerOptions);
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(DefaultTimeout);
 
         try
         {
-            log.LogDebug("Dispatching code-node {NodeId} for run {RunId} to executor sidecar.",
-                pipelineNode.Id, pipelineRunId);
             var nats = await natsProvider.GetAsync(timeoutCts.Token);
             var inbox = nats.NewInbox();
             await using var replies = await nats.SubscribeCoreAsync<byte[]>(
@@ -78,17 +133,21 @@ public sealed class JetStreamCodeNodeRunner(
                 {
                     log.LogDebug(
                         "Ignoring non-CodeNodeReply message on inbox for node {NodeId} (JetStream ack?): {Payload}",
-                        pipelineNode.Id, Encoding.UTF8.GetString(msg.Data));
+                        nodeId, Encoding.UTF8.GetString(msg.Data));
                     continue;
                 }
                 var parsed = JsonSerializer.Deserialize<CodeNodeReply>(msg.Data, SerializerOptions)
                     ?? throw new InvalidOperationException("Executor sidecar reply could not be parsed.");
                 if (!parsed.Success)
                 {
-                    throw new InvalidOperationException(
+                    // The sidecar answered — the author's code is what failed.
+                    // Distinct from the transport failures the catch blocks
+                    // below produce, so a caller can tell a script error from
+                    // an executor that was not there.
+                    throw new ScriptExecutionException(
                         parsed.ErrorMessage ?? "Executor sidecar reported an unknown failure.");
                 }
-                return parsed.Output is null ? DataFrame.Empty : CodeNodeWireFormat.ToDataFrame(parsed.Output);
+                return parsed;
             }
             // The subscription only ends on cancellation, which the catch
             // blocks below translate; reaching here means the server closed it.

@@ -45,6 +45,13 @@ public sealed class AnonymousMutationInventoryTests(ITestOutputHelper output)
             + "use all check out — see SamlSignInServiceTests.",
         ["/api/workflow-behaviors/{key}/execute"] =
             "Server-to-server callback from Flowable, gated by SharedSecretEndpointFilter.",
+        ["/api/workflow-script-tasks/execute"] =
+            "Server-to-server callback from Flowable when a BPMN script task runs (#147), gated by "
+            + "SharedSecretEndpointFilter. Same posture and same secret as the workflow-behavior "
+            + "callback above: the caller is the JVM, which has no browser session to carry a "
+            + "token. Forging it runs author-supplied JavaScript in the executor sandbox against "
+            + "one process instance's variables — which is what the sandbox exists to contain — "
+            + "and the secret is what stops an unauthenticated caller reaching it at all.",
         ["/internal/yjs-auth"] =
             "Server-to-server callback from the Hocuspocus sidecar, gated by "
             + "YjsInternalSecretEndpointFilter.",

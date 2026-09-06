@@ -140,6 +140,12 @@ async function runOn(handle: PythonWorker, request: CodeNodeRequest): Promise<Co
   await handle.ready;
 
   const timeoutMs = Math.max(1000, request.timeoutMs);
+  // Python has no script-task kind yet — that is #154. Refuse explicitly
+  // rather than letting the worker receive a kind it does not handle, where
+  // the failure would surface as an unhelpful protocol error.
+  if (request.kind === "scripttask") {
+    throw new Error("Python script tasks are not supported yet; use JavaScript.");
+  }
   const job: PythonJob = {
     kind: request.kind,
     code: request.code,
