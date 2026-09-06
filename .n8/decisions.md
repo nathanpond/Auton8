@@ -1924,3 +1924,20 @@ fresh installs; it is not an additional descope.
 Also corrected here: the init script's header claimed "the release compose
 applies the same SQL from its db-init service". No release compose and no
 db-init service exist in this repository. The claim was false and is removed.
+
+## #147 — unblocked from #190
+
+I had marked #147 blocked by #190 during the replan. Removing that block.
+
+The two touch the same record (`CodeNodeRequest`) but neither constrains the
+other: #147 adds a `kind` and a wrapper, #190 decides whether an unused field
+is deleted. #147 builds correctly against today's wire format regardless of how
+#190 resolves, and if the field is removed later that is a mechanical edit.
+
+The block's cost was out of proportion to any real coupling — #190 waits on a
+schema decision that is the owner's to make, and it was holding M3's core
+security story (GHSA-82rh-gjhw-rg9r) plus #151-#154 behind a cleanup of a field
+nothing reads. Whole milestone stalled on an inert flag.
+
+Risk accepted: a small merge conflict in the wire record if both land close
+together. That is cheap and visible, unlike a stalled milestone.
