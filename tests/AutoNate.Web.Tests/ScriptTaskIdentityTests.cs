@@ -238,6 +238,33 @@ public sealed class ScriptTaskIdentityTests
         Assert.Empty(Errors(xml));
     }
 
+    [Fact]
+    public void AScriptTaskNoTokenCanReachIsNotFlagged()
+    {
+        // Regression: the first version treated any node with no incoming flow
+        // as a start, so a disconnected script task read as "reachable with no
+        // preceding user task". It is not reachable at all — it can never run,
+        // so it needs no identity, and demanding one would leave an author
+        // unable to publish with no way to comply.
+        var xml = Process($"""
+            <bpmn:startEvent id="s" />
+            <bpmn:userTask id="u" name="Approve" />
+            {Script("orphan")}
+            {Flow("f1", "s", "u")}
+            """);
+
+        Assert.Empty(Errors(xml));
+    }
+
+    [Fact]
+    public void AProcessWithNoStartEventReportsNothing()
+    {
+        // A fragment: nothing can begin, so nothing can reach the script task.
+        var xml = Process(Script("t"));
+
+        Assert.Empty(Errors(xml));
+    }
+
     // --- reading the declaration -----------------------------------------
 
     [Fact]

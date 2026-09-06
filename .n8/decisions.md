@@ -2133,3 +2133,21 @@ gate is reached — so both the refusal test and its positive control passed
 while proving nothing. The test now creates the workflow first, grants the
 author Publish explicitly, and the control asserts the absence of *any* 403
 rather than of a particular message.
+
+### #153 — a false positive the full suite caught
+
+The first version of the analysis treated any node with no incoming flow as a
+start event, on the reasoning that an event subprocess can begin a path without
+one. That also captured *disconnected* nodes, so a script task no token can
+reach read as "reachable with no preceding user task" — and 13 tests, mine and
+pre-existing, failed on fixtures that are legitimate fragments.
+
+The rule is now: only a real `startEvent` begins a path, and a script task is
+analysed only if it is reachable from one. An unreachable script task can never
+execute, so it needs no identity, and demanding one would leave an author
+unable to publish with no way to comply. Event subprocesses keep working
+because their start events are start events, in their own scope.
+
+Worth noting how it was found: the full suite, not the story's own tests, which
+all passed. Running the milestone suite rather than the story's slice is what
+turned a false positive into a two-line fix instead of an author's problem.

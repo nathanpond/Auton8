@@ -94,12 +94,15 @@ public static class ScriptTaskIdentity
         {
             var nodes = BuildGraph(scope);
             if (nodes.Count == 0) continue;
+            var reachable = Reachable(nodes);
             var facts = Solve(nodes);
 
             foreach (var scriptTask in scope.Elements(Bpmn + "scriptTask"))
             {
                 var id = scriptTask.Attribute("id")?.Value;
                 if (id is null || ReadRunAs(scriptTask) is not null) continue;
+                // Unreachable from any start event, so it can never run.
+                if (!reachable.Contains(id)) continue;
                 if (!facts.TryGetValue(id, out var f)) continue;
 
                 var label = scriptTask.Attribute("name")?.Value ?? id;
@@ -168,15 +171,37 @@ public static class ScriptTaskIdentity
             nodes[id].IncomingCount++;
         }
 
+        // Only a real start event begins a path. A node with no incoming flow
+        // is not a start — it is unreachable, and a script task that can never
+        // execute needs no identity. Treating those as starts flagged every
+        // disconnected fragment, which is a false positive of exactly the kind
+        // that leaves an author unable to publish with no way to comply.
         foreach (var node in nodes.Values)
         {
-            // A start event, or anything triggered independently of the flow —
-            // an event subprocess starts on its own trigger, so a token can
-            // arrive there having passed through no user task at all.
-            node.IsStart = node.LocalName is "startEvent" || node.IncomingCount == 0;
+            node.IsStart = node.LocalName is "startEvent";
         }
 
         return nodes;
+    }
+
+    // Everything a token can actually get to from a start event, following
+    // sequence flows and boundary-event edges.
+    private static HashSet<string> Reachable(Dictionary<string, Node> nodes)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>(nodes.Values.Where(n => n.IsStart).Select(n => n.Id));
+        foreach (var id in queue) seen.Add(id);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!nodes.TryGetValue(current, out var node)) continue;
+            foreach (var next in node.Next.Concat(node.InterruptedNext))
+            {
+                if (seen.Add(next)) queue.Enqueue(next);
+            }
+        }
+        return seen;
     }
 
     // Two dataflow analyses over the same graph, run to a fixpoint so loops
