@@ -1900,3 +1900,27 @@ sidecar rather than the Flowable JVM.
   shapes, and `runAs` authoring with its reachability analysis, do not depend on
   where execution happens. #152 needed only a note — its "same sandbox as production"
   criterion got easier, since there is now exactly one.
+
+## #150 — Flowable database role defaults to OFF
+
+The restricted `flowable_app` role is provisioned by an init script and wired
+into compose behind `AUTONATE_FLOWABLE_DB_USER`, but the **default remains the
+bootstrap superuser**.
+
+Why: `docker-entrypoint-initdb.d` runs only on an empty data directory, and
+creating the role by hand on an existing cluster is not sufficient either —
+`ALTER DATABASE ... OWNER` does not move ownership of the tables Flowable has
+already created, and `REASSIGN OWNED` is refused for the bootstrap role. A
+default of `flowable_app` would therefore leave every upgraded deployment with
+an engine that owns its database but not its schema, failing on the next
+Flowable schema upgrade. The opt-in default is the only choice that cannot
+break an existing deployment on a `git pull`.
+
+Consequence, recorded rather than glossed: the isolation is available, not
+automatic. Deployments that do not set the variable keep exactly the database
+reach they have today. That follows from the user's decision to scope #150 to
+fresh installs; it is not an additional descope.
+
+Also corrected here: the init script's header claimed "the release compose
+applies the same SQL from its db-init service". No release compose and no
+db-init service exist in this repository. The claim was false and is removed.

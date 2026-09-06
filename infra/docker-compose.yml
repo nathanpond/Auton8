@@ -27,12 +27,16 @@ services:
     command: ["postgres", "-c", "max_connections=300"]
     volumes:
       - ./mounts/postgres/data:/var/lib/postgresql/data
-      # Only 01-create-autonate-db.sql lives here now, and the asymmetry is
-      # deliberate: creating the database is the one thing the application
-      # cannot do from a connection to that database. Everything else — the
-      # base schema and every migration after it — is applied by
-      # DatabaseSchemaInitializer.EnsureAsync from inside the app, so an empty
-      # database is all this mount has to produce.
+      # Two scripts live here, and the asymmetry with the rest of the schema is
+      # deliberate: both do things the application cannot do from a connection
+      # to its own database. 01 creates the database; 02 provisions the
+      # restricted `flowable_app` role, because roles are cluster-wide objects.
+      # Everything else — the base schema and every migration after it — is
+      # applied by DatabaseSchemaInitializer.EnsureAsync from inside the app.
+      #
+      # These run ONLY on an empty data directory, which is why 02 is a
+      # fresh-install measure and the datasource above still defaults to the
+      # superuser.
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
@@ -67,8 +71,20 @@ services:
       SERVER_PORT: 8080
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flowable
-      SPRING_DATASOURCE_USERNAME: ${AUTONATE_POSTGRES_USER:-autonate}
-      SPRING_DATASOURCE_PASSWORD: ${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}
+      # Defaults to the bootstrap superuser, which also owns `AutoNate` and
+      # `autonate_datastores` — so anything reaching this datasource reaches the
+      # application's data as its owner. `infra/postgres/init/02-flowable-role.sql`
+      # provisions a restricted `flowable_app` role that can see only the
+      # `flowable` database; set these two to opt in.
+      #
+      # The default is deliberately NOT the restricted role. init scripts run only
+      # on an empty data directory, and on an existing cluster Flowable's tables are
+      # owned by the superuser — `ALTER DATABASE` does not move table ownership and
+      # `REASSIGN OWNED` is refused for the bootstrap role. Switching the default
+      # would leave every upgraded deployment unable to touch its own schema.
+      # Set these on a NEW deployment only. See docs/DEPLOYMENT.md and #150.
+      SPRING_DATASOURCE_USERNAME: ${AUTONATE_FLOWABLE_DB_USER:-${AUTONATE_POSTGRES_USER:-autonate}}
+      SPRING_DATASOURCE_PASSWORD: ${AUTONATE_FLOWABLE_DB_PASSWORD:-${AUTONATE_POSTGRES_PASSWORD:-Your_password123!}}
       TZ: ${AUTONATE_FLOWABLE_TZ:-America/New_York}
     ports:
       - "127.0.0.1:${AUTONATE_FLOWABLE_PORT:-8080}:8080"

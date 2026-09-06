@@ -47,8 +47,10 @@ Any hand-rolled orchestration needs to solve the same ordering problem.
 
 The application owns its schema end to end. It creates the base tables and
 every migration after them on startup, so a deployment only has to provide an
-**empty database** — there is no init script to mount and no ordering to get
-right.
+**empty database** — no schema to mount and no ordering to get right. (The
+local compose stack does mount two init scripts, but neither builds schema:
+they create the database and the Flowable role, both cluster-level things the
+application cannot do from a connection to its own database. See below.)
 
 Initialisation is serialised by a Postgres advisory lock, so two hosts starting
 against one database is defined behaviour rather than a race. Applied steps are
@@ -56,6 +58,51 @@ recorded in `schema_versions`, and the application **refuses to start against a
 database written by a newer build**, naming both versions. `GET /api/health/system`
 reports the current schema version and applied-step count, so the question
 "which version is this database at" is answerable from the admin UI.
+
+### The Flowable database role (fresh installs only)
+
+By default the Flowable engine connects to Postgres as the same bootstrap
+superuser the application uses — the role that **owns** `AutoNate` and
+`autonate_datastores`. That is more than the engine needs: anything reaching
+that datasource reaches application data as its owner.
+
+`infra/postgres/init/02-flowable-role.sql` provisions a restricted
+`flowable_app` role that owns the `flowable` database and has `CONNECT`
+revoked on the application databases. To use it, set both:
+
+```
+AUTONATE_FLOWABLE_DB_USER=flowable_app
+AUTONATE_FLOWABLE_DB_PASSWORD=<a real password, not the init script default>
+```
+
+The init script ships a placeholder password (`flowable_dev_only_change_me`)
+because a role has to be created with one. Change it on any deployment that is
+not a laptop:
+
+```sql
+ALTER ROLE flowable_app PASSWORD '<real password>';
+```
+
+**This protects new deployments only, and the default is deliberately off.**
+Two facts make that the honest position rather than a shortcut:
+
+1. `docker-entrypoint-initdb.d` scripts run only against an **empty data
+   directory**. An existing cluster never executes this file.
+2. Creating the role by hand on an existing cluster is *still* not enough.
+   `ALTER DATABASE ... OWNER` does not move ownership of the tables Flowable
+   has already created, and `REASSIGN OWNED` is refused for the bootstrap
+   role. The engine would own the database but not its own schema, and would
+   fail on its next schema upgrade.
+
+So there is no supported switch-over for an existing deployment, and compose
+keeps defaulting to the superuser so that pulling this change cannot break one.
+**An existing deployment must not set these variables** until a migration that
+transfers table ownership exists.
+
+The practical consequence, stated plainly: every deployment created before this
+change — and every new deployment whose operator does not set these two
+variables — runs the Flowable engine with the same database reach it always
+had. The isolation is available, not automatic.
 
 ## Configuration
 
