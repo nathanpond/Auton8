@@ -58,8 +58,18 @@ public static class Actions
     // Refresh: trigger a cached dataset / connector pull on demand.
     // Run: execute a pipeline (manual kick-off, in addition to scheduled runs).
     // Schedule: edit refresh frequency / pipeline cron.
-    // ExecuteUnsafe: opt out of the Pyodide/V8-isolate sandbox on user-authored
-    //   transformer/analyzer code — gates the full-CPython runner path.
+    // ExecuteUnsafe: gates SETTING the `is_unsafe` flag on user-authored
+    //   transformer/analyzer code. It was planned to opt out of the
+    //   Pyodide/V8-isolate sandbox and select a full-CPython runner
+    //   (see the Phase 0 scaffold of the Data Stores plan).
+    //   *** THAT RUNNER WAS NEVER IMPLEMENTED. *** The executor receives
+    //   `isUnsafe` and ignores it — grep services/executor/src for it and the
+    //   only hit is the field declaration. So this action currently gates a
+    //   flag with no effect: an admin granted it gains nothing.
+    //   Direction of travel is the opposite one — the Python sandbox was
+    //   hardened further (per-request worker, interrupt-buffer deadline,
+    //   WASM memory cap). Do not implement the unsafe path without deciding
+    //   it deliberately; #190 tracks removing the flag and this action.
     // Share: issue a share token for a saved query (analog of the document
     //   share surface).
     // Connect: invoke a data connector's "test connection" probe.

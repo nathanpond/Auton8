@@ -11,6 +11,9 @@ public sealed record class CodeNodeRequest(
     string Language,         // "js" | "python"
     string Kind,             // "transformer" | "analyzer"
     string Code,
+    // Received by the sidecar and ignored — the full-CPython runner this was
+    // meant to select was never built. Kept on the wire only because the
+    // column and the permission still exist; see #190.
     bool IsUnsafe,
     IReadOnlyDictionary<string, string> Config,
     IReadOnlyList<CodeNodeFrame> Inputs,

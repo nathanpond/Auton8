@@ -2,9 +2,11 @@ namespace AutoNate.Web.Persistence.Scaffolded;
 
 // User-authored transformer or analyzer (Phase 6 of the Data Stores plan).
 // The actual code runs in `services/executor/` (Node.js sidecar) under a
-// V8 isolate for JS or Pyodide WASM for Python by default. `IsUnsafe`
-// flips the runtime to host-side CPython (pandas/numpy) and gates the
-// row behind the `transformer:executeunsafe` permission.
+// V8 isolate for JS or Pyodide WASM for Python. `IsUnsafe` was intended to
+// flip the runtime to host-side CPython (pandas/numpy) and still gates the
+// row behind the `transformer:executeunsafe` permission — but the CPython
+// runner was never implemented and the executor ignores the flag, so setting
+// it changes nothing about how the code runs. See #190.
 public partial class CodeTransformer
 {
     public Guid Id { get; set; }

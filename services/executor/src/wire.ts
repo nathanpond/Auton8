@@ -22,6 +22,11 @@ export interface CodeNodeRequest {
   language: "js" | "python";
   kind: "transformer" | "analyzer";
   code: string;
+  // Received and ignored. This was meant to select a full-CPython runner
+  // instead of the Pyodide sandbox; that runner was never built. The host
+  // still gates SETTING it behind an `executeunsafe` permission, so the gate
+  // currently protects nothing. Do not start honouring this flag without
+  // reading #190 — the sandbox has been hardened twice since it was designed.
   isUnsafe: boolean;
   config: Record<string, string>;
   inputs: CodeNodeFrame[];
