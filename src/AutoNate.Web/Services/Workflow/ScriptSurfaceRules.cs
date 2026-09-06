@@ -23,7 +23,14 @@ namespace AutoNate.Web.Services.Workflow;
 // and these are its complement.
 public static class ScriptSurfaceRules
 {
-    public sealed record RejectedShape(Regex Pattern, string Explanation);
+    /// <param name="Identifier">
+    /// The bare name a sandbox refusal reports. When the sandbox rejects a
+    /// script it does so as an ordinary <c>ReferenceError</c> — "Java is not
+    /// defined" — which is indistinguishable from a typo unless something
+    /// knows the name was withheld deliberately. This is what knows.
+    /// Null where the shape has no single identifier to key on.
+    /// </param>
+    public sealed record RejectedShape(Regex Pattern, string Explanation, string? Identifier = null);
 
     // Ordered: the first match wins for a given script, so the specific
     // `execution.setVariable` message is reached before the general
@@ -37,18 +44,22 @@ public static class ScriptSurfaceRules
         new(new Regex(@"\bexecution\s*\.\s*removeVariable\b", RegexOptions.Compiled),
             "`execution.removeVariable(name)` is no longer available; set the variable to null with `variables.set(name, null)`."),
         new(new Regex(@"\bexecution\b", RegexOptions.Compiled),
-            "`execution` is not bound in the script sandbox; process variables are available through `variables.get(name)` and `variables.set(name, value)`."),
+            "`execution` is not bound in the script sandbox; process variables are available through `variables.get(name)` and `variables.set(name, value)`.",
+            Identifier: "execution"),
 
         // Java interop. These would fail in the sandbox as an unresolved
         // identifier, which is correct but late — and the reason matters more
         // than the symptom, because an author reading "Java is not defined"
         // may reasonably think it is a missing dependency.
         new(new Regex(@"\bJava\s*\.\s*type\b", RegexOptions.Compiled),
-            "`Java.type(...)` is not available: scripts run in a sandbox with no access to the host JVM."),
+            "`Java.type(...)` is not available: scripts run in a sandbox with no access to the host JVM.",
+            Identifier: "Java"),
         new(new Regex(@"\bJavaImporter\b", RegexOptions.Compiled),
-            "`JavaImporter` is not available: scripts run in a sandbox with no access to the host JVM."),
+            "`JavaImporter` is not available: scripts run in a sandbox with no access to the host JVM.",
+            Identifier: "JavaImporter"),
         new(new Regex(@"\bPackages\s*\.", RegexOptions.Compiled),
-            "`Packages.*` is not available: scripts run in a sandbox with no access to the host JVM."),
+            "`Packages.*` is not available: scripts run in a sandbox with no access to the host JVM.",
+            Identifier: "Packages"),
         new(new Regex(@"\bjava\s*\.\s*lang\b", RegexOptions.Compiled),
             "`java.lang.*` is not available: scripts run in a sandbox with no access to the host JVM."),
     ];
@@ -145,5 +156,40 @@ public static class ScriptSurfaceRules
             i++;
         }
         return output.ToString();
+    }
+
+    /// <summary>
+    /// Decides whether a sandbox error is the boundary refusing something, as
+    /// opposed to an ordinary mistake in the author's script.
+    /// </summary>
+    /// <remarks>
+    /// The sandbox does not announce refusals. It withholds the binding, so
+    /// reaching for one produces a plain <c>ReferenceError: Java is not
+    /// defined</c> — the same shape a misspelled variable produces. To an
+    /// author that reads like a missing dependency rather than a deliberate
+    /// boundary, and the test-run panel is exactly where they should learn the
+    /// difference (#152).
+    ///
+    /// Keyed off the same list that drives publish-time rejection, so the two
+    /// cannot disagree about what is out of bounds.
+    /// </remarks>
+    public static string? TryExplainRefusal(string? errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage)) return null;
+
+        foreach (var shape in Rejected)
+        {
+            if (shape.Identifier is null) continue;
+            // The engine's wording is "<name> is not defined". Requiring both
+            // the name and that phrasing keeps a script that merely mentions
+            // the name in its own thrown message from being misreported as a
+            // refusal.
+            if (errorMessage.Contains(shape.Identifier, StringComparison.Ordinal)
+                && errorMessage.Contains("is not defined", StringComparison.OrdinalIgnoreCase))
+            {
+                return shape.Explanation;
+            }
+        }
+        return null;
     }
 }

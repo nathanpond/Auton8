@@ -2036,3 +2036,31 @@ lexer carries, which is more machinery than this check warrants today.
 used `execution.setVariable` as its "valid script" fixture. After #147 that
 script is unpublishable, so the test would have been asserting that an invalid
 script publishes.
+
+## #152 — script test-run panel
+
+The endpoint calls the same `IScriptTaskRunner` the Flowable callback calls
+rather than constructing an evaluator. That is the whole point of the story's
+"same sandbox as production" criterion: a second configuration is how the test
+environment and the real one drift, and a test environment that is more
+permissive teaches authors the wrong thing.
+
+**Refusal classification reuses #151's list.** The sandbox does not announce
+refusals — it withholds the binding, so reaching for `Java.type` yields a bare
+`ReferenceError: Java is not defined`, which is the same shape a typo produces.
+`ScriptSurfaceRules.TryExplainRefusal` keys off the identifiers that already
+drive publish-time rejection, so the panel can present a refusal as the
+boundary working rather than as a bug, and the two cannot disagree about what
+is out of bounds.
+
+Guarded against the obvious false positive: a message must both name the
+identifier and carry the engine's "is not defined" phrasing, so an author's own
+`throw new Error("Java")` is not reported as the sandbox blocking them.
+
+**Input entry is JSON.** It carries every type the sandbox round-trips, and a
+malformed value is reported as the author types rather than surfacing later as
+a confusing script failure — which is the story's "reported at entry" criterion.
+
+The panel is keyed on the script text so editing the code clears a stale
+result. Showing output from code no longer in the editor is worse than showing
+none.

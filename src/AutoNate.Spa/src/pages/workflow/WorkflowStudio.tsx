@@ -9,6 +9,7 @@ import {
   Button,
   Checkbox,
   Code,
+  Divider,
   Group,
   List,
   Modal,
@@ -25,6 +26,7 @@ import {
   Title
 } from "@mantine/core";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
+import { ScriptTestRunPanel } from "./ScriptTestRunPanel";
 import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
 import {
   usePauseWorkflow,
@@ -2145,6 +2147,13 @@ function ScriptTaskModal({
             />
           </Box>
         </Stack>
+
+        <Divider />
+
+        {/* #152. Keyed on the script so editing it clears a stale result —
+            otherwise the panel would show output from code that is no longer
+            in the editor, which is worse than showing none. */}
+        <ScriptTestRunPanel key={editor.script} script={editor.script} />
 
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>

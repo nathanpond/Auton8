@@ -155,6 +155,37 @@ public sealed class ScriptSurfaceRulesTests
         Assert.DoesNotContain("execution", stripped);
     }
 
+    // --- classifying a sandbox refusal (#152) ----------------------------
+
+    [Theory]
+    [InlineData("ReferenceError: Java is not defined")]
+    [InlineData("ReferenceError: Packages is not defined")]
+    [InlineData("ReferenceError: execution is not defined")]
+    public void ASandboxRefusalIsRecognisedFromTheErrorTheSandboxActuallyProduces(string message)
+    {
+        // The sandbox withholds the binding rather than announcing a refusal,
+        // so this is the exact text an author sees. Keyed off the same list
+        // that drives publish-time rejection, so the two cannot disagree about
+        // what is out of bounds.
+        Assert.NotNull(ScriptSurfaceRules.TryExplainRefusal(message));
+    }
+
+    [Fact]
+    public void AnOrdinaryTypoIsNotClassifiedAsARefusal()
+    {
+        // If everything became a "refusal" the distinction would be worthless
+        // and an author would stop reading it.
+        Assert.Null(ScriptSurfaceRules.TryExplainRefusal("ReferenceError: totl is not defined"));
+    }
+
+    [Fact]
+    public void AScriptThatMerelyMentionsABlockedNameInItsOwnErrorIsNotARefusal()
+    {
+        // `throw new Error("Java")` must not be reported as the sandbox
+        // blocking something — the author threw that themselves.
+        Assert.Null(ScriptSurfaceRules.TryExplainRefusal("Error: Java"));
+    }
+
     // --- the existing rules are not regressed ---------------------------
 
     [Fact]
