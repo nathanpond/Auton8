@@ -134,6 +134,34 @@ second. Raise `EXECUTOR_PY_WARM_WORKERS` to trade memory for that latency —
 each warm interpreter holds a loaded CPython — or write the script in
 JavaScript, which has no equivalent cost.
 
+**Which identity a script runs as.** Each script task carries a `runAs`
+declaration, stored as `autonate:runAs` in the
+`http://autonate.dev/workflows` namespace (on the do-not-rename list):
+
+| Value | Meaning |
+|---|---|
+| *unset* (default) | the assignee of the last user task on the token's own path |
+| `workflowAuthor` | the author of the workflow definition |
+| `system` | bypasses individual permission checks; requires the `elevatescript` permission on the workflow to author, and the server refuses the publish without it |
+
+`system` never bypasses the sandbox. Process variables and the host API remain
+the only things a script can reach, whichever identity it runs as.
+
+Publishing is refused, naming the script task, when the default cannot be
+resolved: the task is reachable with no preceding user task (a timer- or
+message-started process, or a script placed before any user task), or it sits
+after a parallel join where "the last user task" has more than one answer. The
+author then has to say which identity they mean. Script tasks with a declared
+identity are marked on the diagram.
+
+> **The property is stored and validated, but not yet enforced at runtime.**
+> At v1.0 the host API exposes only process variables, so there is nothing to
+> authorize and no identity is resolved when a script runs. The declaration
+> landed now (#153) because it is authored data living in the BPMN: adding it
+> later would mean migrating every diagram that already exists. Resolution
+> arrives with the first permission-gated helper. An unenforced property here
+> is deliberate, not a bug.
+
 **Shapes rejected at publish time.** These fail in the sandbox anyway, but
 publish-time rejection turns a runtime failure on whoever happened to run the
 process into a message the author can act on. The list is generated from

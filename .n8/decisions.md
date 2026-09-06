@@ -2095,3 +2095,41 @@ with a leading double underscore referenced inside a class body are mangled to
 `_ClassName__name`, so `__mutations` read from within the `variables` façade
 failed with a NameError pointing nowhere near the cause. The generated
 preamble uses `_an8_`-prefixed names for that reason.
+
+## #153 — script task identity
+
+**The analysis, not the property, is the story.** Its failure mode is
+asymmetric: a wrongly permissive answer publishes a script running as an
+identity nobody chose, while a wrongly restrictive one asks the author a
+question. Everything ambiguous therefore resolves to "be explicit":
+
+- a call activity does not count as a preceding user task, because the called
+  process is not in the document and a guess would be permissive;
+- a boundary event carries the state from *before* the task it is attached to,
+  since that task did not complete and its assignee finished nothing;
+- an event subprocess or any node with no incoming flow is treated as a start.
+
+Implemented as two dataflow analyses to a fixpoint over each flow scope — a
+"must" property (all paths carry a user task, combined with AND) and a "may"
+property (some path crosses a parallel join, combined with OR) — so loops
+terminate rather than needing a path enumeration that would not.
+
+**The permission is enforced in the publish handler**, not by an endpoint
+filter, because the answer is in the payload rather than the route. Registering
+the action buys discoverability only; the add-permission-gate skill is explicit
+that the registry gates nothing.
+
+**A new `autonate:` prefix was declared** in the three BPMN templates. The
+namespace URI already existed as `targetNamespace` but had no prefix, so
+nothing could be serialised into it. The URI is unchanged — it is on the
+do-not-rename list. Verified against the running Flowable: it accepts the
+attribute on a `scriptTask` and the deployed resource still carries
+`autonate:runAs="system"` afterwards.
+
+**Three attempts were needed to make the publish-gate test assert anything**,
+and the shape of the mistake is worth recording. Publishing a random workflow
+id returns 403 from the route's own instance check — empty body, before this
+gate is reached — so both the refusal test and its positive control passed
+while proving nothing. The test now creates the workflow first, grants the
+author Publish explicitly, and the control asserts the absence of *any* 403
+rather than of a particular message.

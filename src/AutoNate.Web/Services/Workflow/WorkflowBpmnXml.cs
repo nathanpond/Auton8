@@ -70,6 +70,7 @@ public static partial class WorkflowBpmnXml
                                    xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                                    xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                                    xmlns:flowable="http://flowable.org/bpmn"
+                                   xmlns:autonate="http://autonate.dev/workflows"
                                    id="Definitions_{{normalizedProcessKey}}"
                                    targetNamespace="http://autonate.dev/workflows">
                  <bpmn:process id="{{normalizedProcessKey}}" name="{{SecurityElement.Escape(normalizedWorkflowName)}}" isExecutable="true">
@@ -355,6 +356,9 @@ public static partial class WorkflowBpmnXml
 
             var errors = new List<string>();
             errors.AddRange(BuildScriptTaskValidationErrors(document));
+            // #153: a script task whose identity cannot be determined must say
+            // which one it means before it can be published.
+            errors.AddRange(ScriptTaskIdentity.BuildIdentityValidationErrors(document));
             errors.AddRange(BuildSignalStartEventValidationErrors(document));
             errors.AddRange(BuildTimerStartEventValidationErrors(document));
             errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));

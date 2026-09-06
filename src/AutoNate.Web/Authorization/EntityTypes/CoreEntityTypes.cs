@@ -100,7 +100,11 @@ public static class CoreEntityTypes
         actions: new[]
         {
             Actions.View, Actions.Edit, Actions.Delete,
-            Actions.Publish, Actions.Start, Actions.Pause
+            Actions.Publish, Actions.Start, Actions.Pause,
+            // #153. Registered for discoverability — an admin cannot grant what
+            // they cannot see — while the enforcement lives in the publish
+            // handler, which is the only place that can read the declaration.
+            Actions.ElevateScript
         },
         tags: new[] { "processkey", "draft", "published" });
 

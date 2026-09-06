@@ -24,6 +24,21 @@ public static class Actions
     public const string Unlock = "unlock";
 
     public const string Publish = "publish";
+
+    // Workflow script identity (#153). Gates authoring a script task that
+    // declares `runAs="system"`, which bypasses individual permission checks
+    // when identity resolution lands.
+    //
+    // Its own action rather than a reuse of Publish or Edit, because it must be
+    // grantable on its own: most authors should be able to build and publish
+    // workflows without ever being able to write a step that runs as the
+    // system. It never bypasses the sandbox — process variables and the host
+    // API remain the only reachable surface either way.
+    //
+    // NOT enforced by the registry (see the add-permission-gate skill): the
+    // enforcement is the check in the publish handler, which reads the XML.
+    // A hidden control in the studio is not a gate.
+    public const string ElevateScript = "elevatescript";
     public const string Start = "start";
     public const string Pause = "pause";
 

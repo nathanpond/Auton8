@@ -27,6 +27,7 @@ import {
   Title
 } from "@mantine/core";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
+import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
 import { ScriptTestRunPanel } from "./ScriptTestRunPanel";
 import { EXECUTIONS_QUERY_KEY, useExecutions } from "@/hooks/useExecutions";
 import {
@@ -82,6 +83,9 @@ type ScriptTaskEditor = {
   type: string;
   name: string;
   scriptFormat: string;
+  // #153: "" (default — the preceding user task's assignee), "system", or
+  // "workflowAuthor".
+  runAs: string;
   script: string;
   resultVariable: string;
 };
@@ -213,6 +217,7 @@ type ElementSelection = {
   type: string;
   name?: string | null;
   scriptFormat?: string | null;
+  runAs?: string | null;
   script?: string | null;
   resultVariable?: string | null;
   conditionExpression?: string | null;
@@ -527,6 +532,7 @@ export default function WorkflowStudio() {
         // Python must not silently reopen as JavaScript and then be saved back
         // that way.
         scriptFormat: selection.scriptFormat === "python" ? "python" : "javascript",
+        runAs: selection.runAs ?? "",
         script: selection.script ?? "",
         resultVariable: selection.resultVariable ?? ""
       });
@@ -819,6 +825,27 @@ export default function WorkflowStudio() {
           : `${prefix}.`
       );
     });
+
+  // #153: may this author declare a script task to run as the system?
+  //
+  // Drives whether the option is offered. It is not the gate — the server
+  // re-checks on publish, because a control that is merely hidden is not a
+  // permission. Defaults to false while the check is in flight, so the option
+  // does not flicker into existence for someone who cannot use it.
+  const elevateChecks = useMemo(
+    () =>
+      currentModel
+        ? [{ kind: "workflowmodel", action: "elevatescript", id: currentModel.id }]
+        : [],
+    [currentModel]
+  );
+  const { data: elevatePermissions } = usePermissionChecks(elevateChecks);
+  const canElevateScript =
+    currentModel !== null &&
+    (elevatePermissions?.get(
+      permissionKey({ kind: "workflowmodel", action: "elevatescript", id: currentModel.id })
+    ) ??
+      false);
 
   const applyScriptTask = () =>
     runBusy("applying script task changes", async () => {
@@ -1269,6 +1296,7 @@ export default function WorkflowStudio() {
           }}
           onApply={applyScriptTask}
           disabled={!!busy || !handle}
+          canElevate={canElevateScript}
         />
       )}
 
@@ -2069,13 +2097,15 @@ function ScriptTaskModal({
   onChange,
   onClose,
   onApply,
-  disabled
+  disabled,
+  canElevate
 }: {
   editor: ScriptTaskEditor;
   onChange: (next: ScriptTaskEditor) => void;
   onClose: () => void;
   onApply: () => void;
   disabled: boolean;
+  canElevate: boolean;
 }) {
   return (
     <Modal opened onClose={onClose} title="Script Task" size="xl">
@@ -2114,6 +2144,41 @@ function ScriptTaskModal({
             onChange={(e) => onChange({ ...editor, resultVariable: e.currentTarget.value })}
           />
         </Group>
+
+        {/* #153. Unset is the default and the common case; the two explicit
+            options exist for the diagrams where "the last user task" has no
+            single answer. `system` is hidden from an author who lacks the
+            permission — and the server checks it again on publish, because a
+            hidden control is not a gate. */}
+        <Select
+          label="Run as"
+          description="Whose permissions this script runs with."
+          data={[
+            { value: "", label: "The last user task's assignee (default)" },
+            { value: "workflowAuthor", label: "The workflow author" },
+            ...(canElevate
+              ? [{ value: "system", label: "System — bypasses individual permission checks" }]
+              : [])
+          ]}
+          value={editor.runAs}
+          onChange={(value) => onChange({ ...editor, runAs: value ?? "" })}
+          allowDeselect={false}
+        />
+
+        {editor.runAs === "system" && (
+          <Alert color="yellow" title="This step runs as the system">
+            It bypasses individual permission checks. It does not leave the sandbox — process
+            variables and the host API remain the only things a script can reach.
+          </Alert>
+        )}
+
+        {!canElevate && editor.runAs === "system" && (
+          <Alert color="orange" title="You cannot publish this setting">
+            This script task is set to run as the system, but you do not have permission to
+            author that. Publishing will be refused until it is changed or the permission is
+            granted.
+          </Alert>
+        )}
 
         <Stack gap={4}>
           <Text size="sm" fw={500}>
@@ -3941,6 +4006,7 @@ const STARTER_DIAGRAM_PLACEHOLDER = `<?xml version="1.0" encoding="UTF-8"?>
                   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   id="Definitions_1"
+                  xmlns:autonate="http://autonate.dev/workflows"
                   targetNamespace="http://autonate.dev/workflows">
   <bpmn:process id="workflow" name="Workflow" isExecutable="true">
     <bpmn:startEvent id="StartEvent_1" />
