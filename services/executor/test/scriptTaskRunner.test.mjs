@@ -88,6 +88,40 @@ test("author code cannot reach fetch or any network primitive", async () => {
   assert.equal(out.result, "undefined,undefined,undefined");
 });
 
+test("author code cannot reach the filesystem", async () => {
+  // Asserted separately from `require` on purpose: a runtime can withhold the
+  // loader while still exposing a filesystem global, and the AC is that each
+  // route is closed, not that one of them is.
+  const out = await runScriptTask(
+    request(`return [typeof fs, typeof readFile, typeof Deno, typeof File].join(",");`)
+  );
+  assert.equal(out.result, "undefined,undefined,undefined,undefined");
+});
+
+test("author code cannot spawn a process", async () => {
+  const out = await runScriptTask(
+    request(`return [typeof child_process, typeof spawn, typeof exec, typeof Runtime].join(",");`)
+  );
+  assert.equal(out.result, "undefined,undefined,undefined,undefined");
+});
+
+test("author code cannot reach Java, in any of the forms an escape would use", async () => {
+  // The advisory's payload was `Java.type('java.lang.System')`. Nashorn also
+  // exposes `Packages`, `java` and `JavaImporter`, so a fix that only hid
+  // `Java` would leave the hole open under a different name.
+  const out = await runScriptTask(
+    request(`return [typeof Java, typeof Packages, typeof java, typeof JavaImporter].join(",");`)
+  );
+  assert.equal(out.result, "undefined,undefined,undefined,undefined");
+});
+
+test("author code cannot reach a timer it could use to outlive the run", async () => {
+  const out = await runScriptTask(
+    request(`return [typeof setTimeout, typeof setInterval, typeof queueMicrotask].join(",");`)
+  );
+  assert.equal(out.result, "undefined,undefined,undefined");
+});
+
 test("author code cannot reach a module loader", async () => {
   // `import.meta` is a syntax error outside a module and dynamic `import` has
   // no resolver in the isolate. Either way the script fails rather than
