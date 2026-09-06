@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
 import {
   ActionIcon,
   Alert,
@@ -522,7 +523,10 @@ export default function WorkflowStudio() {
         id: selection.id,
         type: selection.type,
         name: selection.name ?? "",
-        scriptFormat: "javascript",
+        // Read from the diagram rather than assumed (#154). A task saved as
+        // Python must not silently reopen as JavaScript and then be saved back
+        // that way.
+        scriptFormat: selection.scriptFormat === "python" ? "python" : "javascript",
         script: selection.script ?? "",
         resultVariable: selection.resultVariable ?? ""
       });
@@ -2092,7 +2096,18 @@ function ScriptTaskModal({
             value={editor.name}
             onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
           />
-          <TextInput label="Script Format" value="javascript" readOnly />
+          <Select
+            label="Language"
+            data={[
+              { value: "javascript", label: "JavaScript" },
+              { value: "python", label: "Python" }
+            ]}
+            value={editor.scriptFormat === "python" ? "python" : "javascript"}
+            onChange={(value) =>
+              onChange({ ...editor, scriptFormat: value === "python" ? "python" : "javascript" })
+            }
+            allowDeselect={false}
+          />
           <TextInput
             label="Result Variable"
             value={editor.resultVariable}
@@ -2117,7 +2132,7 @@ function ScriptTaskModal({
               value={editor.script}
               onChange={(value) => onChange({ ...editor, script: value })}
               height="280px"
-              extensions={[javascript()]}
+              extensions={[editor.scriptFormat === "python" ? python() : javascript()]}
               basicSetup={{
                 lineNumbers: true,
                 highlightActiveLineGutter: true,
@@ -2153,7 +2168,11 @@ function ScriptTaskModal({
         {/* #152. Keyed on the script so editing it clears a stale result —
             otherwise the panel would show output from code that is no longer
             in the editor, which is worse than showing none. */}
-        <ScriptTestRunPanel key={editor.script} script={editor.script} />
+        <ScriptTestRunPanel
+          key={`${editor.scriptFormat}:${editor.script}`}
+          script={editor.script}
+          scriptFormat={editor.scriptFormat}
+        />
 
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>

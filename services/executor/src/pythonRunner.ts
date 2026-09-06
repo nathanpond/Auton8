@@ -1,6 +1,6 @@
 import { Worker } from "node:worker_threads";
 import type { PythonJob, PythonWorkerMessage } from "./pythonProtocol.js";
-import { CodeNodeFrame, CodeNodeRequest, normaliseOutput } from "./wire.js";
+import { CodeNodeFrame, CodeNodeRequest, ScriptTaskResult, normaliseOutput } from "./wire.js";
 
 // Pyodide (WASM Python) sandbox, one interpreter per request (archived-58).
 //
@@ -122,6 +122,26 @@ function releaseSlot(): void {
 }
 
 export async function runPython(request: CodeNodeRequest): Promise<CodeNodeFrame> {
+  return normaliseOutput(await runIsolated(request));
+}
+
+// BPMN script tasks in Python (#154). Same worker, same sandbox, same
+// single-use interpreter as the pipeline kinds — the language is a front-end,
+// not a second execution path, which is the property the parity suite exists
+// to hold us to.
+export async function runPythonScriptTask(request: CodeNodeRequest): Promise<ScriptTaskResult> {
+  const parsed = await runIsolated(request);
+  if (parsed === null || typeof parsed !== "object") {
+    return { result: null, mutations: {} };
+  }
+  const shaped = parsed as Partial<ScriptTaskResult>;
+  return {
+    result: shaped.result ?? null,
+    mutations: (shaped.mutations ?? {}) as Record<string, unknown>,
+  };
+}
+
+async function runIsolated(request: CodeNodeRequest): Promise<unknown> {
   await acquireSlot();
   const handle = warm.shift() ?? spawn();
   replenish();
@@ -134,27 +154,24 @@ export async function runPython(request: CodeNodeRequest): Promise<CodeNodeFrame
   }
 }
 
-async function runOn(handle: PythonWorker, request: CodeNodeRequest): Promise<CodeNodeFrame> {
+// Returns the parsed JSON the script produced. The callers below give it a
+// shape: a frame for the pipeline kinds, mutations for a script task.
+async function runOn(handle: PythonWorker, request: CodeNodeRequest): Promise<unknown> {
   const { worker, interrupt } = handle;
   worker.ref();
   await handle.ready;
 
   const timeoutMs = Math.max(1000, request.timeoutMs);
-  // Python has no script-task kind yet — that is #154. Refuse explicitly
-  // rather than letting the worker receive a kind it does not handle, where
-  // the failure would surface as an unhelpful protocol error.
-  if (request.kind === "scripttask") {
-    throw new Error("Python script tasks are not supported yet; use JavaScript.");
-  }
   const job: PythonJob = {
     kind: request.kind,
     code: request.code,
     inputsJson: JSON.stringify(request.inputs.map((f) => f.rows)),
     configJson: JSON.stringify(request.config),
+    variablesJson: JSON.stringify(request.variables ?? {}),
     memoryMb: Math.max(1, request.memoryMb),
   };
 
-  return new Promise<CodeNodeFrame>((resolve, reject) => {
+  return new Promise<unknown>((resolve, reject) => {
     let settled = false;
     let graceTimer: NodeJS.Timeout | undefined;
 
@@ -193,7 +210,7 @@ async function runOn(handle: PythonWorker, request: CodeNodeRequest): Promise<Co
           } catch {
             parsed = null;
           }
-          finish(() => resolve(normaliseOutput(parsed)));
+          finish(() => resolve(parsed));
         } else {
           finish(() => reject(new Error(message.error)));
         }

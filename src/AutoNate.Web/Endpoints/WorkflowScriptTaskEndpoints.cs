@@ -13,7 +13,11 @@ public sealed record WorkflowScriptTaskRequest(
     string NodeId,
     string Code,
     IReadOnlyDictionary<string, object?>? Variables,
-    string? CorrelationId);
+    string? CorrelationId,
+    // The BPMN `scriptFormat` the author declared (#154). Absent from older
+    // Flowable extensions, which only ever sent JavaScript, so it defaults
+    // there rather than failing a request that is still valid.
+    string? ScriptFormat = null);
 
 // The mutations the engine applies to the execution, and the value backing
 // `resultVariable`.
@@ -55,6 +59,7 @@ public static class WorkflowScriptTaskEndpoints
                     request.ProcessInstanceId,
                     request.NodeId,
                     request.Code,
+                    ScriptSurfaceRules.ToExecutorLanguage(request.ScriptFormat),
                     request.Variables ?? new Dictionary<string, object?>(StringComparer.Ordinal),
                     cancellationToken);
 
@@ -123,6 +128,7 @@ public static class WorkflowScriptTaskEndpoints
                     processInstanceId: "test-run",
                     nodeId: "test-run",
                     code: request.Code,
+                    language: ScriptSurfaceRules.ToExecutorLanguage(request.ScriptFormat),
                     variables: inputs,
                     cancellationToken);
 
@@ -186,7 +192,8 @@ public static class WorkflowScriptTaskEndpoints
 // #152 test-run contract.
 public sealed record WorkflowScriptTestRunRequest(
     string Code,
-    IReadOnlyDictionary<string, object?>? Variables);
+    IReadOnlyDictionary<string, object?>? Variables,
+    string? ScriptFormat = null);
 
 public sealed record WorkflowScriptTestRunResponse(
     bool Ok,

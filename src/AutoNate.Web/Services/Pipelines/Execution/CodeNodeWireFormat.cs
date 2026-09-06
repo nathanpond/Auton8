@@ -56,15 +56,20 @@ internal static class CodeNodeWireFormat
 
     // BPMN script tasks. `kind` is "scripttask" and the executor replies with
     // mutations rather than a frame; see services/executor/src/scriptTaskRunner.ts.
+    //
+    // `language` is the executor's name for the runner ("js" | "python"), not
+    // the BPMN `scriptFormat` the author wrote. ScriptSurfaceRules owns that
+    // translation so the two vocabularies meet in exactly one place.
     public static CodeNodeRequest ForScriptTask(
         string nodeId,
         string code,
+        string language,
         IReadOnlyDictionary<string, object?> variables,
         int timeoutMs,
         int memoryMb) =>
         new(CurrentVersion,
             nodeId,
-            Language: "js",
+            language,
             Kind: "scripttask",
             code,
             IsUnsafe: false,

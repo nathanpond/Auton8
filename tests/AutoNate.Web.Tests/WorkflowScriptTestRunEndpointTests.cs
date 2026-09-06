@@ -24,12 +24,14 @@ public sealed class WorkflowScriptTestRunEndpointTests
     private sealed class FakeRunner(Func<ScriptTaskResult> behaviour) : IScriptTaskRunner
     {
         public string? LastProcessInstanceId { get; private set; }
+        public string? LastLanguage { get; private set; }
 
         public Task<ScriptTaskResult> RunScriptTaskAsync(
-            string processInstanceId, string nodeId, string code,
+            string processInstanceId, string nodeId, string code, string language,
             IReadOnlyDictionary<string, object?> variables, CancellationToken cancellationToken)
         {
             LastProcessInstanceId = processInstanceId;
+            LastLanguage = language;
             return Task.FromResult(behaviour());
         }
     }
@@ -143,6 +145,33 @@ public sealed class WorkflowScriptTestRunEndpointTests
 
         // A synthetic scope, not a started execution — nothing to write back to.
         Assert.Equal("test-run", runner.LastProcessInstanceId);
+    }
+
+    [Theory]
+    [InlineData(null, "js")]
+    [InlineData("javascript", "js")]
+    [InlineData("python", "python")]
+    public async Task TheDeclaredScriptFormatSelectsTheRunner(string? scriptFormat, string expected)
+    {
+        // #154. BPMN says "javascript"; the executor's wire format says "js".
+        // Asserted rather than assumed, because getting it wrong would silently
+        // run every Python script task through the JavaScript runner — where it
+        // would fail as a syntax error that says nothing about the cause.
+        //
+        // A null format is the older Flowable extension, which only ever sent
+        // JavaScript; it must keep working rather than failing a valid request.
+        var (factory, client, runner) = await HostAsync(
+            () => new ScriptTaskResult(null, new Dictionary<string, object?>()));
+        await using var _f = factory;
+
+        await client.PostAsJsonAsync("/api/workflow-script-tasks/test-run", new
+        {
+            code = "variables.set('x', 1)",
+            variables = new Dictionary<string, object?>(),
+            scriptFormat,
+        });
+
+        Assert.Equal(expected, runner.LastLanguage);
     }
 
     [Fact]

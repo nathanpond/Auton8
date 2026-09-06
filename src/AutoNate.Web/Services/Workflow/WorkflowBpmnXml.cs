@@ -1471,9 +1471,15 @@ public static partial class WorkflowBpmnXml
                 ?? scriptTask.Attribute("id")?.Value
                 ?? "Unnamed script task";
             var scriptFormat = scriptTask.Attribute("scriptFormat")?.Value;
-            if (!string.Equals(scriptFormat, "javascript", StringComparison.OrdinalIgnoreCase))
+            if (!ScriptSurfaceRules.IsSupportedScriptFormat(scriptFormat))
             {
-                errors.Add($"Script task '{taskLabel}' must use scriptFormat=\"javascript\".");
+                // A list since #154. Both languages run in the same sandbox
+                // against the same host surface, so this is a front-end choice
+                // rather than a second execution path.
+                var supported = string.Join(
+                    " or ",
+                    ScriptSurfaceRules.SupportedScriptFormats.Select(f => $"\"{f}\""));
+                errors.Add($"Script task '{taskLabel}' must use scriptFormat={supported}.");
             }
 
             var scriptBody = scriptTask.Element(BpmnNamespace + "script")?.Value;

@@ -2064,3 +2064,34 @@ a confusing script failure — which is the story's "reported at entry" criterio
 The panel is keyed on the script text so editing the code clears a stale
 result. Showing output from code no longer in the editor is worse than showing
 none.
+
+## #154 — Python script tasks
+
+**Parity had to be built, not asserted.** The story's central claim is that a
+language is a front-end onto one host surface, and the suite compares verdicts
+across both languages rather than asserting each separately, so a divergence
+fails the build.
+
+Making that claim true required real work on the Python side. The JavaScript
+isolate has no filesystem, process or network to withhold — they are simply not
+present. Pyodide ships a real CPython where `import os` and `import socket`
+succeed and `open()` reads an in-memory filesystem. Their reach was already
+heavily curtailed by earlier hardening, but "curtailed" is a weaker claim than
+"unreachable", and writing a parity test against the pre-existing state would
+have asserted something false. Script tasks now refuse a denylist of modules
+through an import hook and remove `open()`.
+
+**Startup cost measured rather than estimated**, and it is materially worse:
+1078 ms cold against JavaScript's 1.8 ms. The finding that matters is not the
+cold number but its frequency — Pyodide interpreters are single-use and the
+executor keeps one warm spare, so a burst alternates (4.7, 1066.6, 4.9, 1065.6,
+4.1 ms). Documented in DEPLOYMENT.md with the knob
+(`EXECUTOR_PY_WARM_WORKERS`). The default is left alone: raising it trades
+memory for latency and each warm interpreter holds a loaded CPython, which is a
+deployment-sizing decision rather than one to take unilaterally.
+
+**A Python gotcha worth recording**, since it cost real debugging time: names
+with a leading double underscore referenced inside a class body are mangled to
+`_ClassName__name`, so `__mutations` read from within the `variables` façade
+failed with a NameError pointing nowhere near the cause. The generated
+preamble uses `_an8_`-prefixed names for that reason.

@@ -21,11 +21,12 @@ export type ScriptTestRunResponse = {
 export async function runScriptTest(
   code: string,
   variables: Record<string, unknown>,
+  scriptFormat: string,
   signal?: AbortSignal
 ): Promise<ScriptTestRunResponse> {
   const { data } = await api.post<ScriptTestRunResponse>(
     "/api/workflow-script-tasks/test-run",
-    { code, variables },
+    { code, variables, scriptFormat },
     { signal }
   );
   return data;

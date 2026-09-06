@@ -92,21 +92,20 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
                 "Script task '" + activityId + "' has no script body.");
         }
 
-        // The sandbox runs JavaScript only at v1.0 (Python is #154). Refuse
-        // anything else here rather than forwarding it: the base image still
-        // ships groovy and flowable-groovy-script-static-engine, and sending a
-        // Groovy body to a JS isolate would fail with a syntax error that says
-        // nothing about the real reason. This is also the criterion that
-        // Nashorn and Groovy cannot serve script tasks — they cannot, because
-        // this behaviour replaced the engine's script path entirely, and a
-        // non-JavaScript format now stops here.
-        if (language != null && !language.isBlank()
-            && !"javascript".equalsIgnoreCase(language)
-            && !"js".equalsIgnoreCase(language)) {
+        // The sandbox runs JavaScript and Python (#154); anything else is
+        // refused here rather than forwarded. The base image still ships groovy
+        // and flowable-groovy-script-static-engine, and sending a Groovy body
+        // to a JavaScript isolate would fail with a syntax error that says
+        // nothing about the real reason.
+        //
+        // This is also the criterion that Nashorn and Groovy cannot serve
+        // script tasks — they cannot, because this behaviour replaced the
+        // engine's script path entirely and an unsupported format stops here.
+        if (language != null && !language.isBlank() && !isSupportedFormat(language)) {
             throw new FlowableException(
                 "Script task '" + activityId + "' uses scriptFormat '" + language +
-                "'. Only 'javascript' is supported; scripts run in the AutoNate sandbox, " +
-                "not in a JVM script engine.");
+                "'. Supported formats are 'javascript' and 'python'; scripts run in the " +
+                "AutoNate sandbox, not in a JVM script engine.");
         }
 
         var callbackBase = properties.getCallbackBaseUrl();
@@ -134,6 +133,10 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
         body.put("executionId", execution.getId());
         body.put("nodeId", execution.getCurrentActivityId());
         body.put("code", script);
+        // The author's declared format travels with the script; the host maps
+        // it to the executor's runner name. Sending it rather than assuming
+        // JavaScript is what lets a Python script task work at all.
+        body.put("scriptFormat", language == null || language.isBlank() ? "javascript" : language);
         body.put("correlationId", correlationId);
         body.set("variables", snapshotVariables(execution));
         return body;
@@ -262,6 +265,12 @@ public class ExecutorScriptTaskActivityBehavior extends ScriptTaskActivityBehavi
         }
         if (node.isFloatingPointNumber()) return node.asDouble();
         return node;
+    }
+
+    private static boolean isSupportedFormat(String format) {
+        return "javascript".equalsIgnoreCase(format)
+            || "js".equalsIgnoreCase(format)
+            || "python".equalsIgnoreCase(format);
     }
 
     private static String normaliseBasePath(URI base) {

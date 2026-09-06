@@ -95,8 +95,44 @@ so there deliberately is not one — and a test asserts its absence.
 Script errors (an author's mistake) and an unreachable sandbox are reported
 distinctly, so a failing workflow's error surface says which one happened.
 
-JavaScript is the only supported `scriptFormat`. A script task declaring
-`groovy` is refused at execution with a message saying so.
+**Supported languages.** `scriptFormat` may be `javascript` or `python`; both
+run in the same sandbox against the same host surface, reached by the same
+names (`variables.get`, `variables.set`). The language is a front-end choice,
+not a second execution path, and a test in the executor asserts that the two
+reach exactly the same things — if they ever diverge, the build fails rather
+than the difference being discovered by an author.
+
+Python needs one extra measure to make that true. The JavaScript isolate has no
+filesystem, no process and no network to withhold — they simply are not there.
+Pyodide ships a real CPython, where `import os` and `import socket` succeed and
+`open()` reads an in-memory filesystem. Their reach is already heavily
+curtailed, but "curtailed" is a weaker claim than "unreachable", so for script
+tasks those modules are refused outright and `open()` is removed. A script task
+declaring `groovy` is refused with a message saying so.
+
+**Python costs materially more to start, and it is worth knowing before you
+choose it.** Measured on an idle developer machine
+(`services/executor/bench/measure.mjs`), a trivial script task that reads one
+variable and writes another:
+
+| | JavaScript | Python |
+|---|---|---|
+| cold (no interpreter waiting) | 1.8 ms | **1078 ms** |
+| warm (an interpreter waiting) | 1.8 ms | 5 ms |
+
+The cold figure is not a rare case. A Pyodide interpreter is single-use — it is
+destroyed after each run so nothing an author does survives into the next — and
+the executor keeps only **one** warm spare by default
+(`EXECUTOR_PY_WARM_WORKERS`). Back-to-back Python script tasks therefore
+alternate: the measured warm series was 4.7, 1066.6, 4.9, 1065.6, 4.1 ms,
+because each run consumes the spare and the replacement takes about a second to
+become ready.
+
+For a workflow that runs a Python script task occasionally this is invisible.
+For one that runs them in a burst, roughly every other execution pays about a
+second. Raise `EXECUTOR_PY_WARM_WORKERS` to trade memory for that latency —
+each warm interpreter holds a loaded CPython — or write the script in
+JavaScript, which has no equivalent cost.
 
 **Shapes rejected at publish time.** These fail in the sandbox anyway, but
 publish-time rejection turns a runtime failure on whoever happened to run the

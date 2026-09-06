@@ -23,7 +23,13 @@ import { runScriptTest, type ScriptTestRunResponse } from "@/api/workflowScriptT
 /** Inputs are entered as JSON, which carries every type the sandbox round-trips. */
 const InitialInputs = "{\n  \n}";
 
-export function ScriptTestRunPanel({ script }: { script: string }) {
+export function ScriptTestRunPanel({
+  script,
+  scriptFormat
+}: {
+  script: string;
+  scriptFormat: string;
+}) {
   const [inputsText, setInputsText] = useState(InitialInputs);
   const [inputsError, setInputsError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -67,13 +73,13 @@ export function ScriptTestRunPanel({ script }: { script: string }) {
     setTransportError(null);
     setResponse(null);
     try {
-      setResponse(await runScriptTest(script, variables));
+      setResponse(await runScriptTest(script, variables, scriptFormat));
     } catch (e) {
       setTransportError(e instanceof Error ? e.message : "The test run could not be sent.");
     } finally {
       setRunning(false);
     }
-  }, [inputsText, script]);
+  }, [inputsText, script, scriptFormat]);
 
   const changed = response?.changed ?? [];
   const mutations = response?.mutations ?? {};

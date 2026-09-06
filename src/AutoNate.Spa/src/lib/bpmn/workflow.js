@@ -1381,7 +1381,10 @@ export function updateScriptTaskProperties(modelerHandle, task) {
 
   modeling.updateProperties(element, {
     name: normalizeOptionalString(task.name),
-    scriptFormat: "javascript",
+    // The author's language choice, stored in the standard BPMN attribute
+    // rather than an Auton8-specific one (#154). Defaulted rather than trusted:
+    // a task authored before Python support carries no value.
+    scriptFormat: task.scriptFormat === "python" ? "python" : "javascript",
     script: typeof task.script === "string" ? task.script : "",
     resultVariable: normalizeOptionalString(task.resultVariable)
   });

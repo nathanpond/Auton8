@@ -51,6 +51,88 @@ function formatError(err: unknown): string {
   return text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
 }
 
+// Modules a BPMN script task may not import (#154).
+//
+// The JavaScript sandbox has no filesystem, no process and no network to
+// withhold — they simply are not there. Python is different: Pyodide ships a
+// real CPython, so `import os` and `import socket` SUCCEED, and `open()` reads
+// its in-memory filesystem. Their capabilities are heavily curtailed already,
+// but "curtailed" is not the same claim as "unreachable", and the story's
+// requirement is that the two front-ends reach the same surface — not that one
+// is merely harder to misuse than the other.
+//
+// So for script tasks these are refused outright, which is what makes the
+// parity assertion true rather than approximately true.
+const ScriptTaskDeniedModules = [
+  "os", "subprocess", "socket", "shutil", "ctypes", "multiprocessing",
+  "threading", "urllib", "http", "ssl", "pathlib", "tempfile", "glob",
+  "importlib", "sysconfig", "platform", "webbrowser", "pty", "signal",
+];
+
+// The `variables` façade plus the import and filesystem guards. Kept separate
+// from the author's code so the guard is installed before that code runs and
+// cannot be edited by it.
+function scriptTaskPreamble(): string {
+  const denied = ScriptTaskDeniedModules.map((m) => `"${m}"`).join(", ");
+  // Names here are single-underscore-prefixed on purpose. Python mangles a
+  // double-underscore name referenced inside a class body to
+  // `_ClassName__name`, so `__mutations` read from within `__Variables` becomes
+  // `_Variables__mutations` and fails with a NameError that points nowhere near
+  // the cause.
+  return `import json as __json
+import builtins as _an8_builtins
+import sys as _an8_sys
+
+_an8_vars = __json.loads(__variables_json)
+_an8_mutations = {}
+del __variables_json
+
+class _An8Variables:
+    def get(self, name):
+        # Reads see writes made earlier in this same script, or a set followed
+        # by a get would return the stale snapshot.
+        if name in _an8_mutations:
+            return _an8_mutations[name]
+        return _an8_vars.get(name)
+
+    def set(self, name, value):
+        if not isinstance(name, str) or not name:
+            raise ValueError("variables.set requires a non-empty variable name.")
+        _an8_mutations[name] = value
+        return value
+
+variables = _An8Variables()
+
+_an8_denied = {${denied}}
+
+class _An8DenyImports:
+    def find_module(self, name, path=None):
+        return self.find_spec(name, path)
+
+    def find_spec(self, name, path=None, target=None):
+        root = name.split(".")[0]
+        if root in _an8_denied:
+            raise ImportError(
+                "'" + root + "' is not available to script tasks: scripts run in a sandbox "
+                "with no access to the operating system, the filesystem or the network."
+            )
+        return None
+
+# Purge anything already imported, then refuse future imports. Both are needed:
+# the finder does not help against a module already in sys.modules.
+for _an8_k in [k for k in _an8_sys.modules if k.split(".")[0] in _an8_denied]:
+    del _an8_sys.modules[_an8_k]
+_an8_sys.meta_path.insert(0, _An8DenyImports())
+
+def _an8_denied_open(*args, **kwargs):
+    raise PermissionError(
+        "open() is not available to script tasks: scripts run in a sandbox with no filesystem."
+    )
+
+_an8_builtins.open = _an8_denied_open
+`;
+}
+
 function wrapper(job: PythonJob): string {
   // `__inputs_json` / `__config_json` are set on the Python globals by the
   // worker (never spliced into source — archived-64). Entry-point check runs in a
@@ -65,6 +147,24 @@ __result = transform(__inputs, __config)`
 if "analyze" not in globals():
     raise RuntimeError("Python analyzer must define an 'analyze(input, config)' function.")
 __result = analyze(__inputs[0], __config)`;
+  if (job.kind === "scripttask") {
+    // The author writes bare statements, as a BPMN script task does. Python has
+    // no top-level `return`, so the body is indented into a function to keep the
+    // surface identical to JavaScript's rather than making Python authors write
+    // something different for the same job.
+    const body = job.code
+      .split("\n")
+      .map((line) => (line.trim() === "" ? line : `    ${line}`))
+      .join("\n");
+    return `${scriptTaskPreamble()}
+def __script():
+${body}
+
+__result = __script()
+__json.dumps({"result": __result, "mutations": _an8_mutations}, default=str)
+`;
+  }
+
   return `import json as __json
 __inputs = __json.loads(__inputs_json)
 __config = __json.loads(__config_json)
@@ -120,6 +220,7 @@ async function main(): Promise<void> {
     try {
       py.globals.set("__inputs_json", job.inputsJson);
       py.globals.set("__config_json", job.configJson);
+      py.globals.set("__variables_json", job.variablesJson ?? "{}");
       const raw = await py.runPythonAsync(wrapper(job));
       post({ type: "result", ok: true, json: String(raw ?? "null") });
     } catch (err) {

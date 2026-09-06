@@ -14,6 +14,7 @@ public interface IScriptTaskRunner
         string processInstanceId,
         string nodeId,
         string code,
+        string language,
         IReadOnlyDictionary<string, object?> variables,
         CancellationToken cancellationToken);
 }

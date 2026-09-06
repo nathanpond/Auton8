@@ -199,6 +199,22 @@ class ExecutorScriptTaskActivityBehaviorTests {
     }
 
     @Test
+    void aPythonScriptTaskIsForwardedWithItsDeclaredFormat() throws Exception {
+        // #154: the language is a front-end choice, so it travels with the
+        // script rather than being assumed. Without this the host would route
+        // every script task to the JavaScript runner.
+        var captured = new AtomicReference<String>();
+        try (var fixture = HttpFixture.start(captured, 200, "{\"result\":null,\"mutations\":{}}")) {
+            var behavior = new ExecutorScriptTaskActivityBehavior(
+                "ScriptTask_1", "variables.set('x', 1)", "python", null, null, false,
+                HttpClient.newHttpClient(), Mapper, propertiesFor(fixture.baseUrl()));
+            behavior.runInSandbox(newExecution("p-1", "e-1", "ScriptTask_1", Map.of()));
+
+            assertEquals("python", Mapper.readTree(captured.get()).get("scriptFormat").asText());
+        }
+    }
+
+    @Test
     void supportIsReportedFromTheSandboxConfigurationNotTheJvmsScriptEngines() {
         // Before #147 this asked "is a JSR-223 JavaScript engine installed?",
         // which is now inverted: script tasks work because they do not use one.

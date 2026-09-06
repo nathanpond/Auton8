@@ -23,6 +23,32 @@ namespace AutoNate.Web.Services.Workflow;
 // and these are its complement.
 public static class ScriptSurfaceRules
 {
+    /// <summary>
+    /// The `scriptFormat` values a script task may declare (#154).
+    /// </summary>
+    /// <remarks>
+    /// A list rather than a single value: both languages are front-ends onto
+    /// the same host surface, executed by the same sandbox. Adding one should
+    /// be an entry here, not a new execution path — that is the property the
+    /// executor's parity suite holds us to.
+    /// </remarks>
+    public static readonly IReadOnlyList<string> SupportedScriptFormats = ["javascript", "python"];
+
+    /// <summary>
+    /// Translates a BPMN `scriptFormat` into the executor's runner name.
+    /// </summary>
+    /// <remarks>
+    /// BPMN says "javascript"; the executor's wire format says "js". The two
+    /// vocabularies meet here and nowhere else, so a third caller cannot invent
+    /// a third spelling.
+    /// </remarks>
+    public static string ToExecutorLanguage(string? scriptFormat) =>
+        string.Equals(scriptFormat, "python", StringComparison.OrdinalIgnoreCase) ? "python" : "js";
+
+    public static bool IsSupportedScriptFormat(string? scriptFormat) =>
+        scriptFormat is not null
+        && SupportedScriptFormats.Contains(scriptFormat, StringComparer.OrdinalIgnoreCase);
+
     /// <param name="Identifier">
     /// The bare name a sandbox refusal reports. When the sandbox rejects a
     /// script it does so as an ordinary <c>ReferenceError</c> — "Java is not

@@ -70,12 +70,14 @@ public sealed class JetStreamCodeNodeRunner(
         string processInstanceId,
         string nodeId,
         string code,
+        string language,
         IReadOnlyDictionary<string, object?> variables,
         CancellationToken cancellationToken)
     {
         var request = CodeNodeWireFormat.ForScriptTask(
             nodeId: nodeId,
             code: code,
+            language: language,
             variables: variables,
             timeoutMs: (int)DefaultTimeout.TotalMilliseconds,
             memoryMb: DefaultMemoryMb);
