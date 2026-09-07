@@ -636,7 +636,7 @@ jobs:
       # runs under emulation and takes ~45 minutes for this image. Multi-arch is
       # the release workflow's job.
       - name: Build the image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: src/AutoNate.Web/Dockerfile
