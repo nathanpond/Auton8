@@ -179,6 +179,63 @@ public sealed class WorkflowEndpointsTests
         Assert.Contains("Two of three", result.Model.BpmnXml, StringComparison.Ordinal);
     }
 
+    // #160: the story's demo, at the endpoint that actually gates the SPA.
+    //
+    // Written against /prepare rather than /publish deliberately: /publish goes
+    // straight to DeployProcessAsync and does not validate, so the same test
+    // pointed at /publish would pass with a successful deploy — which is the
+    // silent no-op this milestone exists to end, reproduced in the test suite.
+    [Fact]
+    public async Task PrepareWorkflow_RefusesHandAuthoredLinkEvents_AndOffersTheAlternative()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="link_flow" name="Link Flow" isExecutable="true">
+                <bpmn:startEvent id="StartEvent_1" />
+                <bpmn:intermediateThrowEvent id="Throw_1" name="Skip ahead">
+                  <bpmn:linkEventDefinition id="Link_1" name="Ahead" />
+                </bpmn:intermediateThrowEvent>
+                <bpmn:intermediateCatchEvent id="Catch_1" name="Ahead">
+                  <bpmn:linkEventDefinition id="Link_2" name="Ahead" />
+                </bpmn:intermediateCatchEvent>
+                <bpmn:endEvent id="EndEvent_1" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var request = new PrepareWorkflowRequest(
+            new WorkflowModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "Link Flow",
+                ProcessKey = "link_flow",
+                BpmnXml = xml
+            },
+            Array.Empty<WorkflowElementSnapshot>());
+
+        var response = await client.PostAsJsonAsync("/api/workflows/prepare", request);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<PrepareWorkflowResponse>();
+
+        Assert.NotNull(result);
+        Assert.Contains(result.Errors, e => e.Contains("Intermediate Throw (Link)", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Contains("Intermediate Catch (Link)", StringComparison.Ordinal));
+        Assert.All(
+            result.Errors.Where(e => e.Contains("(Link)", StringComparison.Ordinal)),
+            e => Assert.Contains("sequence flow", e, StringComparison.OrdinalIgnoreCase));
+
+        // The diagram still comes back, so an author who already had one can open
+        // it and replace the pair rather than losing the work.
+        Assert.Contains("linkEventDefinition", result.Model.BpmnXml, StringComparison.Ordinal);
+    }
+
     // The complement: an element the studio has not wired yet but Flowable runs is
     // NOT refused. The old deny-lists refused 25 such elements, and a fix that
     // simply turned those warnings into errors would have made this fail.

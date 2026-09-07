@@ -251,11 +251,11 @@
     {
       "name": "Intermediate Throw (Link)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "withdrawn",
       "engine": "cannot-execute",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "link",
-      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it. Descoped by spike #217.",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead — BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
       "evidence": "no link type in the BPMN model at all (spike #217)"
     },
     {
@@ -301,11 +301,11 @@
     {
       "name": "Intermediate Catch (Link)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "withdrawn",
       "engine": "cannot-execute",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "link",
-      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it. Descoped by spike #217.",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead — BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
       "evidence": "no link type in the BPMN model at all (spike #217)"
     },
     {

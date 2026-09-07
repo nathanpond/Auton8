@@ -2430,3 +2430,40 @@ level, though the palette offers it as a process start — relevant to #158 and 
   `UnsupportedRuntimeControlElementNames` before the skill was touched, which is the
   drift check working as intended.
   **Issue:** #107, #174
+
+## /n8-exec M4 — #160, 2026-09-07 — link events withdrawn
+
+- **Decision:** #160 was a manifest edit plus its tests, not new validation code.
+  **Why:** #107 landed the `withdrawn` status and the refusal path, so both link
+  events needed `studio: "withdrawn"` and a `reason` naming the sequence-flow
+  alternative. The story's own Discretion note anticipated exactly this ("#107 lands
+  first and may make this a list entry rather than new code").
+  **Issue:** #160
+
+- **Decision:** AC2's "the refusal fires on the raw XML, not a parsed model" is
+  asserted by a test in the engine-free backend suite, with the reasoning written
+  into the test rather than left implied.
+  **Why:** `ValidateProcess` reads the submitted string with `XDocument` and has no
+  Flowable dependency; the class boots no engine. A refusal there could not have come
+  from a parsed model, because there is none. The alternative — round-tripping
+  through Flowable's converter to show the element disappears — would need a live
+  engine to prove a negative.
+  **Issue:** #160
+
+- **Rule 1 (fix + regression test), against work committed earlier this run:** the
+  manifest's `engine` axis claims to be #103's measurement, and nothing enforced it.
+  Cross-checking by hand found seven apparent disagreements with the probe results;
+  six are principled and already carried written `evidence`, but the check existed
+  only in my head. `The_engine_axis_agrees_with_the_inventory_or_declares_why_not`
+  now reads `tests/fixtures/bpmn-inventory/rows.json` and fails on any undeclared
+  departure. Verified by flipping Timer Boundary and watching it fail.
+  **Issue:** #107
+
+- **Finding filed, not fixed:** Conditional Start Event is rejected by Flowable at
+  process level (`flowable-start-event-invalid-event-definition`) and is legal only
+  inside an event subprocess — yet the studio offers it as a process start. This
+  makes #158's AC1 unsatisfiable as written. Recorded on #158 with two options and a
+  recommendation (refuse the invalid placement with a reason now; leave the working
+  event-subprocess case to #162). Not fixed inline: it is #158/#162 territory, not
+  #160's.
+  **Issue:** #158, #162, #107

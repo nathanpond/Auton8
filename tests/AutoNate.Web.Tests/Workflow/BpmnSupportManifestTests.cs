@@ -38,6 +38,9 @@ public sealed class BpmnSupportManifestTests
     private static string SpaSupportModulePath => Path.Combine(
         RepoRoot.Path, "src", "AutoNate.Spa", "src", "lib", "bpmn", "support.ts");
 
+    private static string InventoryRowsPath => Path.Combine(
+        RepoRoot.Path, "tests", "fixtures", "bpmn-inventory", "rows.json");
+
     // ── The manifest is internally coherent ─────────────────────────────────
 
     [Fact]
@@ -179,6 +182,88 @@ public sealed class BpmnSupportManifestTests
         return end < 0 ? studio[start..] : studio[start..end];
     }
 
+    [Fact]
+    public void The_engine_axis_agrees_with_the_inventory_or_declares_why_not()
+    {
+        // The `engine` field claims to be #103's measurement. Nothing enforced
+        // that, and "assignment is not delivery" is the lesson this milestone has
+        // already learned once: a manifest can carry a value that quietly
+        // contradicts the evidence it cites, and no reader would know.
+        //
+        // `rows.json` is #103's *corrected* table — the raw probe reclassified
+        // where a failure turned out to be a fixture limitation rather than an
+        // engine gap. Departures from it are legitimate but must be deliberate,
+        // so each one is named here with its reason. An undeclared departure fails.
+        var expected = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["executes"] = BpmnSupportManifest.EngineExecutes,
+            ["fails at deployment"] = BpmnSupportManifest.EngineCannotExecute,
+            ["DEPLOYS BUT DOES NOTHING"] = BpmnSupportManifest.EngineCannotExecute,
+        };
+
+        // Declared departures. Keep this list short and argued; a growing list is
+        // the signal that the manifest has stopped deriving from the evidence.
+        var declared = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // BPMN artifacts deploy and do nothing BY DESIGN, so "executes" is
+            // technically right and useless. The third value exists to say so.
+            ["Text Annotation"] = BpmnSupportManifest.EngineAnnotation,
+            ["Group"] = BpmnSupportManifest.EngineAnnotation,
+            ["Association"] = BpmnSupportManifest.EngineAnnotation,
+
+            // "needs configuration" is not a verdict the engine axis has, because
+            // it is not a property of the element — it is a property of the
+            // diagram. The two cases split on whether an author can fix it:
+            //
+            //   Send Task      — an author supplies `type`/`operationRef` and it
+            //                    runs. Author-fixable, so: executes.
+            //   Business Rule  — the DMN engine is absent from the image
+            //                    (NoClassDefFoundError org/kie/api). No diagram
+            //                    can fix that, so: cannot-execute, until #105.
+            ["Send Task"] = BpmnSupportManifest.EngineExecutes,
+            ["Business Rule Task"] = BpmnSupportManifest.EngineCannotExecute,
+
+            // #103 probed this at process level, where Flowable rejects it
+            // (flowable-start-event-invalid-event-definition). Inside an event
+            // subprocess it runs — EventSubProcessConditionalStartEventActivityBehavior
+            // ships. So the element is not the problem; where the studio lets you
+            // put it is, and the studio currently offers it as a process start.
+            //
+            // Recorded on #158, which owns conditional events, and #162, which
+            // owns event subprocesses. Marking it cannot-execute here would be
+            // wrong in the other direction and would block #162.
+            ["Conditional Start Event"] = BpmnSupportManifest.EngineExecutes,
+        };
+
+        var rows = JsonNode.Parse(File.ReadAllText(InventoryRowsPath))!.AsArray();
+        var manifest = BpmnSupportManifest.Default.Elements.ToDictionary(e => e.Name, StringComparer.Ordinal);
+
+        Assert.Equal(manifest.Count, rows.Count);
+
+        var undeclared = new List<string>();
+        foreach (var row in rows)
+        {
+            var name = (string)row!["name"]!;
+            var verdict = (string)row["verdict"]!;
+            var element = Assert.Contains(name, manifest);
+
+            var want = declared.TryGetValue(name, out var override_)
+                ? override_
+                : expected.GetValueOrDefault(verdict);
+
+            if (want is null)
+            {
+                undeclared.Add($"{name}: inventory verdict '{verdict}' maps to nothing, and no departure is declared");
+            }
+            else if (element.Engine != want)
+            {
+                undeclared.Add($"{name}: inventory says '{verdict}' (expected engine '{want}'), manifest says '{element.Engine}'");
+            }
+        }
+
+        Assert.Empty(undeclared);
+    }
+
     // ── One source: publish validation follows the manifest, not a list ─────
 
     [Fact]
@@ -283,6 +368,97 @@ public sealed class BpmnSupportManifestTests
         var errors = WorkflowBpmnXml.ValidateProcess(xml).Errors;
 
         Assert.Contains(errors, error => error.Contains("Business Rule Task", StringComparison.Ordinal));
+    }
+
+    // ── #160: link events ───────────────────────────────────────────────────
+
+    [Fact]
+    public void A_link_event_is_refused_without_any_engine_present()
+    {
+        // AC2's test plan asks for proof that the refusal fires on the raw XML
+        // rather than on a parsed Flowable model. This test IS that proof, and it
+        // is worth saying why rather than leaving it implied.
+        //
+        // `flowable-bpmn-model-8.0.0.jar` carries no link event type, so the XML
+        // converter discards the element before validation ever runs. A check
+        // written against a parsed model would therefore find nothing and pass for
+        // a validator that does nothing at all — the shape #217 established.
+        //
+        // `ValidateProcess` reads the submitted string with XDocument and has no
+        // Flowable dependency; this test class boots no engine and reaches no
+        // network. So a refusal here can only have come from the XML itself.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="p" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:intermediateThrowEvent id="jump_out" name="Go to review">
+                                 <bpmn:linkEventDefinition id="l1" name="Review" />
+                               </bpmn:intermediateThrowEvent>
+                               <bpmn:intermediateCatchEvent id="jump_in" name="Review">
+                                 <bpmn:linkEventDefinition id="l2" name="Review" />
+                               </bpmn:intermediateCatchEvent>
+                               <bpmn:endEvent id="e" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var errors = WorkflowBpmnXml.ValidateProcess(xml).Errors;
+
+        // Both halves of the pair are named — refusing only the throw would leave
+        // an author deleting one and hitting the same wall.
+        var thrown = Assert.Single(errors, e => e.Contains("Intermediate Throw (Link)", StringComparison.Ordinal));
+        var caught = Assert.Single(errors, e => e.Contains("Intermediate Catch (Link)", StringComparison.Ordinal));
+
+        Assert.Contains("Go to review", thrown, StringComparison.Ordinal);
+        Assert.Contains("Review", caught, StringComparison.Ordinal);
+
+        // AC3: the message names what to use instead. "Cannot be deployed" alone
+        // leaves an author with a diagram and no way forward.
+        Assert.Contains("sequence flow", thrown, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("sequence flow", caught, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void A_process_that_merely_mentions_link_events_still_publishes()
+    {
+        // The false-positive guard. `linkEventDefinition` is substring-friendly:
+        // a documentation annotation explaining why link events are unavailable
+        // would be refused by a naive text search, which is a memorable way to
+        // make the refusal itself unusable.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="p" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:userTask id="t" name="Approve" />
+                               <bpmn:endEvent id="e" />
+                               <bpmn:textAnnotation id="note">
+                                 <bpmn:text>No linkEventDefinition here — use a sequence flow.</bpmn:text>
+                               </bpmn:textAnnotation>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateProcess(xml).Errors,
+            error => error.Contains("cannot be deployed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_studio_offers_no_link_events()
+    {
+        // AC1. Asserted on the manifest because that is now the only place the
+        // panel could get them from; #107's E2E covers the rendering half.
+        var links = BpmnSupportManifest.Default.Elements
+            .Where(element => element.EventDefinition == "link")
+            .ToArray();
+
+        Assert.Equal(2, links.Length);
+        Assert.All(links, element =>
+            Assert.Equal(BpmnSupportManifest.StudioStatusWithdrawn, element.Studio));
     }
 
     [Fact]

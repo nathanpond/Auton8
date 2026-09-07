@@ -33,9 +33,27 @@ same commit** — "later" does not happen. #174 is the scheduled consolidation p
 #157, #158, #160 and #161 each correct this skill in their own PR. #107 rewrote
 step 1 and the manifest checks in `scripts/verify-symbols.sh`.
 
-Read the element's story and #103's inventory row first. If the inventory says
-Flowable has no behaviour for the element, stop — that is #155/#165 territory and
-needs a custom `ActivityBehavior`, not this skill.
+Read the element's story and #103's inventory row first, then ask the two questions
+**in this order** — asking them the other way round is what cost #217 a spike:
+
+1. **Does `flowable-bpmn-model-8.0.0.jar` have a type for this element at all?**
+   ```sh
+   unzip -l ~/.m2/.../flowable-bpmn-model-8.0.0.jar | grep -i '<ElementName>'
+   ```
+   If not, stop and say so on the story. Nothing downstream can help: the XML
+   converter has no type to build, so the element is **discarded before validation
+   or behaviour lookup ever runs**, and the diagram deploys with the element simply
+   gone. Link events are this case (#160, #217) — implementing them would mean a
+   model type, a converter, a parse handler, a replacement validator, a behaviour
+   *and* a token transfer, which is six layers rather than one.
+
+2. **Does it have an `ActivityBehavior`?** If the model type exists but the
+   behaviour does not, that is #155/#165 territory — a custom `ActivityBehavior`
+   through the existing factory, one layer, not this skill.
+
+The distinction matters because both present identically from the studio: you draw
+it, it deploys, nothing happens. Only the remedy differs, and the model-layer case
+has no proportionate remedy at all.
 
 ## The load-bearing facts
 
