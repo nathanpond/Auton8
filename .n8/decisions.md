@@ -2237,3 +2237,67 @@ Earlier attempts were vacuous and worth recording as a pattern: publishing a
 random workflow id returns 403 from the route's own instance filter before this
 gate is reached, and the signed-in `admin` is a SuperAdmin, which
 short-circuits to Allow inside the authorizer.
+
+## M4 re-plan, 2026-09-07 — the claim now matches its source
+
+**The finding.** M4 claimed "full BPMN 2.0" while enumerating
+`COMING_SOON_BPMN_TYPES`, a hand-maintained SPA constant. That proxy had
+already failed once — multi-instance was invisible to #103's survey "by
+construction" — and the response in September was to widen the list rather than
+change the source, which keeps the proxy.
+
+Opened the defining source instead: BPMN 2.0.2 (OMG formal/13-12-09) §2.2.1
+and the normative `Semantic.xsd`. Full Process Modeling Conformance is four
+packages including **Conversation diagrams**; the XSD carries **114** concrete
+elements once Choreography is excluded. Auton8 models no Conversations at all.
+
+The owner chose to keep the 54-item scope with those numbers in hand, so the
+epic title, the epic AC and the milestone goal were rewritten to say exactly
+what the 54 are. The specification comparison is preserved in the coverage
+claim as a recorded deviation, so the next reader sees what the constant omits
+instead of rediscovering it.
+
+**Assignment is not delivery.** A mechanical map check said all 54 items had an
+owner and passed. A fresh coverage agent asked whether the owner's acceptance
+criteria actually built them, and found four that nothing built —
+`Intermediate Throw (Message)` (which the epic commits *in writing* to
+implementing, and whose twin has its own story), `Message End`,
+`Escalation End` and `Compensation Start Event`. Plus two mapped to a story
+that never mentions them. The lesson is the check, not the four: a map that
+verifies ownership can be complete and still cover a fraction of the milestone.
+
+**Engine arithmetic corrected.** The milestone said "52 of the 54 already have
+an activity behaviour… only ComplexGateway and intermediate throw Message have
+no behaviour class." Enumerating `flowable-engine-8.0.0.jar` gives **three**
+without one: ComplexGateway, intermediate throw Message, and the
+event-subprocess compensation start event. #103's AC asserted the wrong
+expected answer, which would have produced a survey that either contradicted
+itself or quietly matched a wrong number.
+
+**Compensation Start Event descoped** (owner) with the engine finding recorded;
+#107 removes it from the palette, applying this epic's own rule to itself.
+
+**Outcome 9 rewritten.** It claimed authors would be told which conditions "can
+never be satisfied". Nothing delivers unsatisfiability analysis, and #158
+deliberately makes the unset-variable case a warning because a variable can
+legitimately arrive from outside.
+
+**#191 triaged into M4 and split into three** (#191, #214, #215) once the owner
+scoped cleanup to "everything the suite creates" — a scope I flagged as most
+likely to grow past the backstop, chosen deliberately.
+
+**Two findings from the executor simulation**, both verified against the code
+rather than taken on trust:
+- `BackgroundExceptionTrap` subscribes process-global exception events from
+  every concurrently-hosted test factory, so one stray exception writes a
+  `system_issues` row into every live host's database. It explains
+  `SystemIssueEndpointsTests` and **not** `SystemIssueRemediationTests`, which
+  boots no host — a plausible cause that is wrong for two thirds of a symptom
+  stops the search early, so #215 requires each class diagnosed separately.
+- `PluginSchemaProvisioner.RoleNameFor` is production code, so a test plugin
+  role is indistinguishable by name from a real one. A `plg_*` sweep could drop
+  a live plugin's role; #214 carries an AC against exactly that.
+
+**Left deliberately:** seven ACs reading "handled in a defined, documented way",
+which any behaviour satisfies. Owner's call — they concern engine behaviour
+nobody has established yet.
