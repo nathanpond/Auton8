@@ -194,6 +194,38 @@ public static class WorkflowEndpoints
         }).DisableAntiforgery()
           .RequireKindPermission(EntityKinds.WorkflowModel, Actions.Edit);
 
+        // #194: which saved models were written against the API #147 removed.
+        //
+        // #151 protects everything authored from now on; this is for the
+        // diagrams that were already published, which otherwise fail at
+        // runtime with nothing having warned anyone. Reads script bodies, so
+        // it carries the same View gate the detail endpoint does.
+        group.MapGet("/legacy-scripts", async (
+            IWorkflowModelStore store,
+            CancellationToken cancellationToken) =>
+        {
+            var models = await store.ListAsync(cancellationToken);
+            var affected = models
+                .Select(m => new LegacyScriptInventory.ModelFindings(
+                    m.Id, m.Name, m.ProcessKey, !m.IsDraft,
+                    LegacyScriptInventory.Scan(m.BpmnXml)))
+                .Where(r => r.Findings.Count > 0)
+                .OrderByDescending(r => r.IsPublished)
+                .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            return Results.Ok(new
+            {
+                scanned = models.Count,
+                affected = affected.Length,
+                // Published models are the urgent ones: they are deployed and
+                // will fail on their next run. A draft fails only when someone
+                // tries to publish it, where #151 explains why.
+                publishedAffected = affected.Count(r => r.IsPublished),
+                models = affected,
+            });
+        }).RequireKindPermission(EntityKinds.WorkflowModel, Actions.View);
+
         group.MapPost("/{id:guid}/publish", async (
             Guid id,
             WorkflowModel model,

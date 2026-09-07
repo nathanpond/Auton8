@@ -2192,3 +2192,48 @@ test rewinds instead — re-adds the column, clears the `schema_versions` row so
 the batch is eligible, restarts the host over the same database, and asserts
 the column is gone. That is the sequence a real deployment goes through, and it
 carries a positive control that the rewind actually put the column back.
+
+## #194 — inventory and warn, do not rewrite
+
+Found by `/n8-verify M3`, not by execution: every AC in #147 and #151 was met,
+and the gap fell between them. #147 changed the script API, #151 catches the
+old shape at publish, and nothing owned diagrams that were already published.
+#147's body even acknowledged the breakage without a story picking it up.
+
+Measured on the developer database: **4 of 5 workflows containing a script task
+were affected, 3 of them already published.**
+
+**Remedies 1 and 2 taken, 3 deliberately not.** An inventory endpoint and a
+startup warning. No automatic rewrite: `execution.setVariable(a, b)` maps
+cleanly to `variables.set(a, b)`, but rewriting author code unattended is a
+larger decision than a bug fix, and a script that fails loudly is better than
+one silently changed into something its author did not write. Recorded in the
+docs as a choice rather than an omission.
+
+**A warning, not a refusal to start.** The problem is in authored content, not
+in the deployment. An operator who cannot start the application is worse off
+than one who cannot run four workflows — they could not even open the studio to
+fix them.
+
+**Detection reuses `ScriptSurfaceRules`**, and a test asserts the inventory and
+the publish validator produce identical output. A fourth consumer with its own
+copy of the rules is how they start disagreeing; there are now four consumers
+(validator, test-panel classifier, inventory, docs table) and one source.
+
+**Cost measured rather than assumed**, since the plan flagged it as the likely
+difficulty: 11 models / 60 kB total / 9 kB largest, and the endpoint answers in
+7–11 ms. No caching, and no need to revisit until a corpus is orders of
+magnitude larger.
+
+## #153 — permission gate verified live
+
+Verified with a purpose-built `publisher` account (the owner authorised
+creating local accounts): `runAs="system"` without `elevatescript` → 403 naming
+the permission; the same actor with `runAs` unset → 200; the same actor after
+being granted `elevatescript` → 200. The middle case is what stops the first
+from being a test that everything is forbidden.
+
+Earlier attempts were vacuous and worth recording as a pattern: publishing a
+random workflow id returns 403 from the route's own instance filter before this
+gate is reached, and the signed-in `admin` is a SuperAdmin, which
+short-circuits to Allow inside the authorizer.
