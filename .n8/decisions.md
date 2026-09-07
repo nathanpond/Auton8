@@ -2588,3 +2588,92 @@ level, though the palette offers it as a process start — relevant to #158 and 
   as databases, schemas and roles — worth folding into "everything the suite
   creates".
   **Issue:** #191, #214
+
+## /n8-plan M4 (re-plan) — 2026-09-07, mid-execution
+
+Run while M4 was being executed, so the slate was live. Deltas only.
+
+- **Decision (owner):** the complex gateway is delivered as a **composed capability**,
+  not as an element. The author drops a `bpmn:ComplexGateway` from bpmn-js's own
+  replace menu and configures it through the existing context-menu path; at publish it
+  is expanded into a script task plus an exclusive gateway, and the routing decision is
+  author code in the M3 sandbox.
+  **Why:** spike #155 proved no extension point reaches the element. The owner
+  proposed offloading the decision to the executor sidecar, which works — but only if
+  the element is replaced by nodes Flowable runs, since nothing of ours ever executes
+  at the gateway.
+  **Issue:** #218, closes #165
+
+- **Correction to my own framing, mid-question.** I put "where does expansion happen"
+  and "how is it offered" as independent choices and pushed toward a custom bpmn-js
+  module. The owner asked what they were missing; they were right. bpmn-js already
+  offers `complex-gateway` (5 occurrences in the vendored bundle) and
+  `RequestConfigureElement` describes whatever node is selected, so authoring needs no
+  new machinery — and the single-node experience *entails* publish-time expansion.
+  **Issue:** #218
+
+- **Consequence the owner accepted:** the execution view must render the **stored
+  published version's** BPMN, version-pinned, rather than Flowable's deployed
+  resource. The second executor simulation found that mapping activity ids cannot work
+  otherwise — after expansion the deployed XML contains no `complexGateway`, so there
+  is no shape to highlight. This is the largest piece of work in #218 and was not in
+  #165 at all.
+  **Issue:** #218
+
+- **Consequence:** a hand-authored complex gateway is **no longer refused** — it is
+  expanded and runs. The manifest row moves to `studio: supported` / `engine:
+  executes`, which keeps #107's `studio=supported ⟹ engine≠cannot-execute` invariant
+  intact without restating it. The owner's "just offer it" answer for the types panel
+  therefore needed no compromise.
+  **Issue:** #218, #107
+
+- **Decision:** the accumulating join is a **spike**, not a story. Per-branch identity
+  needs one accumulator per incoming flow, and per-iteration scoping needs a
+  `setVariableLocal` the sandbox wire protocol cannot express — both need running code
+  rather than a decision. M4 therefore commits to a complex gateway that routes but
+  does not accumulate.
+  **Why:** #155 already showed once that this element punishes assumptions.
+  **Issue:** #219
+
+- **Decision (owner):** where a story says an edge case is "handled in a defined,
+  documented way", a hang, silent no-op or vanished instance is a defect to fix, not a
+  behaviour to document. Added as an epic-level AC and as clauses on #114, #157, #159,
+  #161, #163.
+  **Why:** #158 hit one of these and the engine's answer was an indefinite park.
+  **Issue:** #40
+
+- **Systemic coverage hole, found by the checker:** 13 of 16 element stories had no
+  acceptance criterion moving their manifest row, so each could have closed with the
+  element working and the milestone's own coverage instrument unmoved. #167's AC is
+  now in all of them.
+  **Issue:** #112, #113, #114, #115, #156, #157, #159, #161, #162, #163, #164, #220
+
+- **Four items were mapped to stories that did not build them** — `Loop Marker`
+  (#159), `Compensation End` and `Compensation Marker` (#115), `Intermediate Catch
+  (Message)` (#112). ACs added to each. `Call Activity` was missing from the map
+  entirely; the rows totalled 46, not 47.
+  **Issue:** #159, #115, #112, #113
+
+- **Decision (owner):** data store references become typed process-variable
+  declarations, not annotations. #166's AC contradicted #107's ticked AC and the
+  manifest's `engine: executes`, making it a silent fourth descope inside the
+  milestone that exists to end offered-but-does-nothing.
+  **Issue:** #166, #107
+
+- **Split:** #115 carried 7 items on 8 ACs, only 4 naming an element — the worst
+  density in the set, and where two of the four misses above occurred. Transaction,
+  Cancel Boundary and Cancel End became #220.
+  **Issue:** #115, #220
+
+- **Coverage claim repointed.** Its locator was `const COMING_SOON_BPMN_TYPES` in
+  `WorkflowStudio.tsx`, which #107 deleted. Same item names and count, so it was
+  repointed to `src/shared/bpmn-support.json` rather than re-enumerated.
+  **Issue:** #107
+
+- **Triage:** #187 (docx-editor line deprecated) moved to M7 and relabelled `spike` —
+  it closes with a decision about the publisher's intent, not code. It had been
+  sitting unmilestoned since 2026-09-06.
+  **Issue:** #187
+
+- **Housekeeping:** all five project invariants in CLAUDE.md carry `test-enforced:`
+  annotations, so no guard stories were needed.
