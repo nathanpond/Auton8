@@ -269,15 +269,19 @@ public sealed class TimerBoundaryExecutionTests : E2ETestBase
     private static async Task PublishAsync(IAPIRequestContext api, string key, string xml)
     {
         var id = Guid.NewGuid();
+        // #214: the workflow NAME becomes the Flowable deployment name, and the
+        // sweep keys on the `e2e-` prefix TestNames.Prefixed produces. Computed once
+        // — a fresh call here and in the publish below would rename the model.
+        var displayName = TestNames.Prefixed(key);
         var created = await api.PostAsync("/api/workflows/", new APIRequestContextOptions
         {
-            DataObject = new { id, name = key, processKey = key, bpmnXml = xml }
+            DataObject = new { id, name = displayName, processKey = key, bpmnXml = xml }
         });
         Assert.True(created.Ok, $"Creating the model failed: {created.Status} {await created.TextAsync()}");
 
         var published = await api.PostAsync($"/api/workflows/{id}/publish", new APIRequestContextOptions
         {
-            DataObject = new { id, name = key, processKey = key, bpmnXml = xml }
+            DataObject = new { id, name = displayName, processKey = key, bpmnXml = xml }
         });
         Assert.True(published.Ok, $"Publishing failed: {published.Status} {await published.TextAsync()}");
     }

@@ -3011,3 +3011,44 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   **Then the threading analyzer rejected my second attempt too** — `Lazy<Task>.Value`
   (VSTHRD011) is the same deadlock class. Replaced with a `SemaphoreSlim` gate.
   **Issue:** #191
+
+## /n8-exec M4 — #214, 2026-09-07 — sweeping roles, schemas, directories, deployments
+
+- **Decision:** a `plg_*` role is swept only when **no live database holds a schema of
+  that name**. `PluginSchemaProvisioner.RoleNameFor` is production code, so a test's
+  plugin role and a real one are identical by name — and "the code looks randomly
+  generated" is exactly the heuristic that eventually deletes a developer's working
+  plugin. The structural signal is that a plugin role exists to own a schema; no
+  schema, nothing served. Verified against the dev cluster: 1 matched, 405 orphaned.
+  **Issue:** #214
+
+- **Finding:** Postgres provides a second backstop for free — `DROP ROLE` fails while
+  the role owns anything. `plg_readers` on this cluster owns 99 objects in `AutoNate`
+  and 92 in `AutoNate_E2E`, and the sweep correctly skipped it even though no schema
+  carries its name. Asserted in a test rather than relied on silently, so a future
+  `CASCADE` or reassign-owned step trips a test before it trips a developer's data.
+  **Issue:** #214
+
+- **Decision:** schemas are swept only inside databases the suite owns
+  (`autonate_test_*`, `AutoNate_E2E`) — never `AutoNate` or `autonate_datastores`,
+  where a developer's installed plugins live. Most of this class is already handled by
+  #191 dropping the database the schema lives in.
+  **Issue:** #214, #191
+
+- **Decision:** the Flowable sweep keys on the **`e2e-` prefix** `TestNames.Prefixed`
+  produces. The shared engine held 388 deployments — 303 from the suite, the rest
+  named `autonate`, `default`, `car`, `account`: a developer's real work, which a
+  looser rule would have deleted.
+  **Rule 1 (my own leak, fixed):** the E2E fixtures I wrote for #157/#158/#161/#167
+  named their workflow models with raw process keys (`tb_both_…`, `cond_catch_…`), so
+  they fell outside the convention and leaked. Now `TestNames.Prefixed(key)`, computed
+  **once** per publish — a second call would have generated a different suffix and
+  silently renamed the model between create and publish.
+  **Issue:** #214
+
+- **Discovered and filed, not fixed:** #221 —
+  `AssignedWorkflowTask_CompleteFromMyTasks_RemovesItFromTheTable` fails on a clean
+  tree (verified by stashing every working change). Pre-existing, outside this story,
+  and invisible to CI because its class carries `RequiresService=Flowable`, which CI
+  excludes by trait.
+  **Issue:** #214, #221

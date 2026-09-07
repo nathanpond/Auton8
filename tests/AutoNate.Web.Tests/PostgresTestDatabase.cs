@@ -127,6 +127,15 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
                 Console.WriteLine(
                     $"[test-db-sweep] Dropped {dropped} abandoned test database(s) left by earlier runs.");
             }
+
+            // #214: roles are cluster-wide and survive a dropped database, so they
+            // need their own pass. Counts are reported per class — one number for
+            // everything would let a category quietly stop working.
+            var resources = await Infrastructure.TestResourceSweep.SweepAsync(AbandonedAfter);
+            if (resources.Roles + resources.Schemas + resources.Directories > 0)
+            {
+                Console.WriteLine($"[test-db-sweep] Also removed {resources}.");
+            }
         }
         catch (Exception exception)
         {

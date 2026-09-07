@@ -52,11 +52,43 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
     public IBrowser Browser =>
         _browser ?? throw new InvalidOperationException("Fixture not initialized.");
 
+    /// <summary>
+    /// Removes Flowable deployments left by earlier E2E runs (#214).
+    /// </summary>
+    /// <remarks>
+    /// The engine is a single shared instance and nothing dropped these before — 388
+    /// deployments had accumulated, 303 of them from this suite. Only the `e2e-`
+    /// prefix is swept, so a developer's own work on the same engine is untouched.
+    /// Never fails the run: a suite that cannot start because cleanup failed is worse
+    /// than the mess it was clearing.
+    /// </remarks>
+    private static async Task SweepStaleFlowableDeploymentsAsync()
+    {
+        try
+        {
+            using var client = Support.FlowableDeploymentSweep.CreateClient(
+                Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+                Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+                Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+            var deleted = await Support.FlowableDeploymentSweep.SweepAsync(client);
+            if (deleted > 0)
+            {
+                Console.WriteLine($"[e2e-flowable-sweep] Removed {deleted} deployment(s) from earlier runs.");
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"[e2e-flowable-sweep] Skipped: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
     public async Task InitializeAsync()
     {
         var repoRoot = FindRepoRoot();
         WipeStaleStaticWebAssetsManifests(repoRoot);
         WipeWwwroot(repoRoot);
+        await SweepStaleFlowableDeploymentsAsync();
 
         // Build a fresh `AutoNate_E2E` database before the app starts so the
         // app's `DatabaseSchemaInitializer.EnsureAsync` (Program.cs) runs
