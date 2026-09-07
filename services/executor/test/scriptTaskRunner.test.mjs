@@ -11,7 +11,6 @@ function request(code, variables = {}, overrides = {}) {
     language: "js",
     kind: "scripttask",
     code,
-    isUnsafe: false,
     config: {},
     inputs: [],
     variables,

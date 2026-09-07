@@ -136,7 +136,6 @@ public partial class AutoNateDbContext
             entity.Property(e => e.Kind).HasColumnName("kind");
             entity.Property(e => e.Language).HasColumnName("language");
             entity.Property(e => e.Code).HasColumnName("code");
-            entity.Property(e => e.IsUnsafe).HasColumnName("is_unsafe");
             entity.Property(e => e.OwnerUserId).HasColumnName("owner_user_id");
             entity.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");

@@ -12,7 +12,6 @@ function request(code, overrides = {}) {
     language: "python",
     kind: "transformer",
     code,
-    isUnsafe: false,
     config: { factor: "10", quoted: 'x"y\\z' },
     inputs: [{ columns: [{ name: "a", type: 0 }, { name: "n", type: 1 }], rows }],
     timeoutMs: 3000,

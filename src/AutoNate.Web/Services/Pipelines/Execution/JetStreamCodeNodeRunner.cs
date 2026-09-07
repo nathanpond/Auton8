@@ -47,7 +47,6 @@ public sealed class JetStreamCodeNodeRunner(
             language: codeRow.Language,
             kind: codeRow.Kind,
             code: codeRow.Code,
-            isUnsafe: codeRow.IsUnsafe,
             config: config,
             inputs: inputs,
             timeoutMs: (int)DefaultTimeout.TotalMilliseconds,

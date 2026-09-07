@@ -23,7 +23,6 @@ function request(language, code, variables = {}) {
     language,
     kind: "scripttask",
     code,
-    isUnsafe: false,
     config: {},
     inputs: [],
     variables,

@@ -7,8 +7,8 @@ using Xunit;
 
 namespace AutoNate.Web.Tests.Authorization;
 
-// archived-22: GET /api/code-transformers/{id} returned the full source body — for
-// unsafe rows too — to any authenticated caller holding a GUID.
+// archived-22: GET /api/code-transformers/{id} returned the full source body to
+// any authenticated caller holding a GUID.
 // archived-23: create gated on (Transformer, Run) whatever kind was requested, so a
 // grant meant to let someone execute a pipeline node let them author the
 // sandboxed code that later runs execute, and analyzer:* was never enforced.
@@ -151,8 +151,7 @@ public sealed class CodeTransformerEnforcementTests
             description = (string?)null,
             kind,
             language = "python",
-            code,
-            isUnsafe = false
+            code
         });
 
     private static async Task<Guid> CreateTransformerAsync(HttpClient client, string code)

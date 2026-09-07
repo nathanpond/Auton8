@@ -13,7 +13,6 @@ import {
   Modal,
   NativeSelect,
   Stack,
-  Switch,
   Text,
   Textarea,
   TextInput,
@@ -80,7 +79,6 @@ export default function CodeTransformersPage() {
   const [kind, setKind] = useState<CodeTransformerKind>("transformer");
   const [language, setLanguage] = useState<CodeTransformerLanguage>("js");
   const [code, setCode] = useState(JS_TRANSFORMER_STARTER);
-  const [isUnsafe, setIsUnsafe] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Test-run panel state. Only meaningful in edit mode (the test endpoint
@@ -103,7 +101,6 @@ export default function CodeTransformersPage() {
     setKind("transformer");
     setLanguage("js");
     setCode(JS_TRANSFORMER_STARTER);
-    setIsUnsafe(false);
     setSubmitError(null);
     setTestInputJson(DEFAULT_TEST_INPUT);
     setTestConfigJson("{}");
@@ -146,7 +143,6 @@ export default function CodeTransformersPage() {
         name,
         description: description || null,
         code,
-        isUnsafe
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
@@ -244,7 +240,6 @@ export default function CodeTransformersPage() {
     setKind(row.kind);
     setLanguage(row.language);
     setCode(row.code);
-    setIsUnsafe(row.isUnsafe);
     setSubmitError(null);
     setModalOpen(true);
   }
@@ -264,7 +259,6 @@ export default function CodeTransformersPage() {
         kind,
         language,
         code,
-        isUnsafe
       });
     }
   }
@@ -283,17 +277,6 @@ export default function CodeTransformersPage() {
         accessorKey: "language",
         header: "Language",
         cell: ({ row }) => <Badge variant="light">{row.original.language}</Badge>
-      },
-      {
-        id: "isUnsafe",
-        accessorKey: "isUnsafe",
-        header: "Sandbox",
-        cell: ({ row }) =>
-          row.original.isUnsafe ? (
-            <Badge color="red">Trusted (unsafe)</Badge>
-          ) : (
-            <Badge color="green">Sandboxed</Badge>
-          )
       },
       {
         id: "updatedAtUtc",
@@ -405,11 +388,6 @@ export default function CodeTransformersPage() {
                 disabled={editingId !== null}
               />
             </Group>
-            <Switch
-              label="Trusted code — skip sandbox (requires executeunsafe permission)"
-              checked={isUnsafe}
-              onChange={(e) => setIsUnsafe(e.currentTarget.checked)}
-            />
             <Box>
               <Text size="sm" fw={500} mb={4}>
                 Code

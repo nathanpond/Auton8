@@ -3,7 +3,7 @@ import { prewarmPython, runPythonScriptTask, shutdownPython } from "../dist/pyth
 
 const req = (language, code) => ({
   version: 1, nodeId: "m", language, kind: "scripttask", code,
-  isUnsafe: false, config: {}, inputs: [], variables: { a: 1 },
+  config: {}, inputs: [], variables: { a: 1 },
   timeoutMs: 30000, memoryMb: 128,
 });
 

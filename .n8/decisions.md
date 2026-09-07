@@ -2151,3 +2151,44 @@ because their start events are start events, in their own scope.
 Worth noting how it was found: the full suite, not the story's own tests, which
 all passed. Running the milestone suite rather than the story's slice is what
 turned a false positive into a two-line fix instead of an author's problem.
+
+## #190 — the inert `isUnsafe` flag and `executeunsafe` permission are removed
+
+Owner decision, 2026-09-06: option 1, remove entirely.
+
+The flag selected a full-CPython runner planned in the Phase 0 scaffold and
+never built, so it was inert for its whole life while the permission read as
+though it guarded a sandbox escape. A gate that protects nothing is worse than
+no gate — an admin granting it believes they have allowed something, and a
+reader auditing the code believes something is guarded.
+
+Removed: the `is_unsafe` column, `Actions.ExecuteUnsafe`, its registration on
+two entity types, both endpoint permission checks, the wire field on both sides
+of the executor protocol, the store contracts, and the SPA toggle and column.
+
+**Facts checked before the decision rather than after**: 0 of 1
+`code_transformers` rows had the flag set, and 0 `permission_grants` carried
+the action. Orphaned grants would be harmless in any case — the evaluator
+string-matches, so a grant naming a removed action simply never matches.
+
+**Two sites still asserted a present-tense effect** that earlier work on this
+issue had missed: the comment above `CodeTransformersSchemaSql` and the
+property comment on `CodeTransformer.IsUnsafe`. My completion note on #190 said
+"two sites"; there were five in total. Moot now that all of it is gone, but the
+count was wrong.
+
+**The SPA switch said "Trusted code — skip sandbox".** It never skipped
+anything. That string was the most misleading artefact of the whole thing,
+because it was the one an end user actually read.
+
+**The `Sandbox` column went too.** With nothing able to set the flag it could
+only ever render one value, and a column that can say one thing is noise rather
+than reassurance. The E2E test asserting its badge is updated — it would
+otherwise have failed CI.
+
+**Testing the migration honestly.** A guard on a fresh database proves nothing:
+the CREATE no longer mentions the column, so the drop is a no-op there. The
+test rewinds instead — re-adds the column, clears the `schema_versions` row so
+the batch is eligible, restarts the host over the same database, and asserts
+the column is gone. That is the sequence a real deployment goes through, and it
+carries a positive control that the rewind actually put the column back.

@@ -3905,9 +3905,13 @@ internal static class DatabaseSchemaInitializer
         """;
 
     // User-authored transformers / analyzers (Phase 6 of the Data Stores
-    // plan). The code itself executes in `services/executor/` under V8 or
-    // Pyodide isolates unless `is_unsafe` flips the runtime to host-side
-    // CPython (which the `transformer:executeunsafe` permission gates).
+    // plan). The code executes in `services/executor/` under V8 or Pyodide
+    // isolates — always, with no opt-out.
+    //
+    // This used to carry an `is_unsafe` column described here as flipping the
+    // runtime to host-side CPython. That runner was planned in the Phase 0
+    // scaffold and never built, so the flag was inert for its whole life and
+    // the permission gating it protected nothing. Both are gone (#190).
     // Identity providers (#87). One table with a `kind` discriminator rather
     // than one per protocol: OIDC and SAML share display name, enabled state,
     // the encrypted secret and the audit columns, and differ in three or four
@@ -4085,6 +4089,22 @@ internal static class DatabaseSchemaInitializer
 
         """;
 
+    // #190. `is_unsafe` was permission-gated as though it relaxed the sandbox
+    // and was never read by the executor: it selected a full-CPython runner
+    // that the Phase 0 scaffold planned and Phase 6 did not build.
+    //
+    // Editing CodeTransformersSchemaSql above keeps the column off fresh
+    // installs; this removes it from databases that already ran that batch,
+    // which the ledger will never re-run. Idempotent, so it is safe on both.
+    //
+    // No data is lost that meant anything: the flag had no effect on any code
+    // path, so a row with it set behaved identically to one without.
+    private const string DropCodeTransformerIsUnsafeSql =
+        """
+        ALTER TABLE code_transformers
+            DROP COLUMN IF EXISTS is_unsafe;
+        """;
+
     private const string IdentityProvidersSchemaSql =
         """
         CREATE TABLE IF NOT EXISTS identity_providers (
@@ -4140,7 +4160,6 @@ internal static class DatabaseSchemaInitializer
             kind TEXT NOT NULL,
             language TEXT NOT NULL,
             code TEXT NOT NULL DEFAULT '',
-            is_unsafe BOOLEAN NOT NULL DEFAULT FALSE,
             owner_user_id UUID NOT NULL,
             created_at_utc TIMESTAMPTZ NOT NULL,
             updated_at_utc TIMESTAMPTZ NOT NULL,
@@ -4426,6 +4445,7 @@ internal static class DatabaseSchemaInitializer
         await ApplyStepAsync(dbContext, applied, nameof(SavedQueryShareTokensSchemaSql), SavedQueryShareTokensSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(PipelinesSchemaSql), PipelinesSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(CodeTransformersSchemaSql), CodeTransformersSchemaSql, cancellationToken);
+        await ApplyStepAsync(dbContext, applied, nameof(DropCodeTransformerIsUnsafeSql), DropCodeTransformerIsUnsafeSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersSchemaSql), IdentityProvidersSchemaSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(IdentityProvidersMenuSeedSql), IdentityProvidersMenuSeedSql, cancellationToken);
         await ApplyStepAsync(dbContext, applied, nameof(GroupMemberProvenanceColumnsSql), GroupMemberProvenanceColumnsSql, cancellationToken);

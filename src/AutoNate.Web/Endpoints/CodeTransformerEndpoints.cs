@@ -15,9 +15,7 @@ namespace AutoNate.Web.Endpoints;
 // alongside built-ins in a Phase 6.1 follow-up; today the list endpoint
 // here is the single read surface.
 //
-// Setting `IsUnsafe=true` requires the `executeunsafe` action on the
-// matching kind so a non-trusted author can't silently flip a sandbox
-// off. Authoring is gated on Create/Edit/Delete and reading on View, each
+// Authoring is gated on Create/Edit/Delete and reading on View, each
 // resolved against the *requested* kind via MapKindToEntityKind — a row
 // can be an analyzer, and gating everything on Transformer meant
 // `analyzer:*` grants were never enforced while a Transformer:Run grant
@@ -44,8 +42,8 @@ public static class CodeTransformerEndpoints
         {
             var row = await store.GetAsync(id, ct);
             if (row is null) return Results.NotFound();
-            // The response carries the full Python/JS body, including for rows
-            // flagged IsUnsafe, so it needs View on the row's own kind. A
+            // The response carries the full Python/JS body, so it needs View
+            // on the row's own kind. A
             // denial is a NotFound so holding a GUID reveals nothing (archived-22).
             if (!await CanAsync(authorizer, http, row.Kind, Actions.View, ct))
             {
@@ -72,22 +70,12 @@ public static class CodeTransformerEndpoints
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
-            if (request.IsUnsafe)
-            {
-                var decision = await authorizer.AuthorizeAsync(
-                    http.User, Actions.ExecuteUnsafe,
-                    new EntityRef(MapKindToEntityKind(request.Kind), string.Empty), ct);
-                if (!decision.IsAllowed)
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-            }
             try
             {
                 var row = await store.CreateAsync(
                     new CreateCodeTransformerInput(
                         request.Name, request.Description, request.Kind,
-                        request.Language, request.Code ?? string.Empty, request.IsUnsafe),
+                        request.Language, request.Code ?? string.Empty),
                     actorId, ct);
                 return Results.Created($"/api/code-transformers/{row.Id}", MapDto(row));
             }
@@ -101,8 +89,7 @@ public static class CodeTransformerEndpoints
             }
         }).AuthorizedInHandler(
               "Create requires Create on the requested kind (Transformer or " +
-              "Analyzer); IsUnsafe=true additionally requires executeunsafe " +
-              "on that same kind.")
+              "Analyzer).")
           .DisableAntiforgery();
 
         group.MapPut("/{id:guid}", async (
@@ -124,24 +111,12 @@ public static class CodeTransformerEndpoints
             }
             // Owner-only edit for v1 (same convention as saved queries).
             if (existing.OwnerUserId != actorId) return Results.NotFound();
-            // Toggling on IsUnsafe requires the per-kind executeunsafe gate;
-            // toggling off does not (you're closing the door).
-            if (request.IsUnsafe is true && !existing.IsUnsafe)
-            {
-                var decision = await authorizer.AuthorizeAsync(
-                    http.User, Actions.ExecuteUnsafe,
-                    new EntityRef(MapKindToEntityKind(existing.Kind), string.Empty), ct);
-                if (!decision.IsAllowed)
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-            }
             try
             {
                 var row = await store.UpdateAsync(
                     id,
                     new UpdateCodeTransformerInput(
-                        request.Name, request.Description, request.Code, request.IsUnsafe),
+                        request.Name, request.Description, request.Code),
                     actorId, ct);
                 return Results.Ok(MapDto(row));
             }
@@ -157,8 +132,7 @@ public static class CodeTransformerEndpoints
         }).DisableAntiforgery()
           .AuthorizedInHandler(
               "Requires Edit on the row's kind, then store-side owner-only; " +
-              "either failure is NotFound. IsUnsafe toggle-on additionally " +
-              "requires executeunsafe on the matching kind.");
+              "either failure is NotFound.");
 
         // Synchronous "test run" — author dispatches their current editor
         // buffer (the request body's `code` overrides the stored row so
@@ -193,9 +167,7 @@ public static class CodeTransformerEndpoints
 
             // Layer the request body over the stored row so unsaved edits
             // can be exercised. We do NOT let the request override
-            // language / kind / isUnsafe — those are sticky to the saved
-            // identity. If the author wants to flip isUnsafe they save
-            // first (which goes through the executeunsafe gate).
+            // language / kind — those are sticky to the saved identity.
             var transient = new CodeTransformer
             {
                 Id = existing.Id,
@@ -204,7 +176,6 @@ public static class CodeTransformerEndpoints
                 Kind = existing.Kind,
                 Language = existing.Language,
                 Code = string.IsNullOrEmpty(request.Code) ? existing.Code : request.Code,
-                IsUnsafe = existing.IsUnsafe,
                 OwnerUserId = existing.OwnerUserId,
                 CreatedAtUtc = existing.CreatedAtUtc,
                 UpdatedAtUtc = existing.UpdatedAtUtc,
@@ -296,7 +267,7 @@ public static class CodeTransformerEndpoints
 
     private static CodeTransformerDto MapDto(CodeTransformer row) =>
         new(row.Id, row.Name, row.Description, row.Kind, row.Language, row.Code,
-            row.IsUnsafe, row.OwnerUserId, row.CreatedAtUtc, row.UpdatedAtUtc);
+            row.OwnerUserId, row.CreatedAtUtc, row.UpdatedAtUtc);
 
     // Build a single-frame input list out of the test request's row
     // array. Columns are inferred from the union of keys across all
@@ -333,14 +304,12 @@ public sealed record class CreateCodeTransformerRequest(
     string? Description,
     string Kind,
     string Language,
-    string? Code,
-    bool IsUnsafe);
+    string? Code);
 
 public sealed record class UpdateCodeTransformerRequest(
     string? Name,
     string? Description,
-    string? Code,
-    bool? IsUnsafe);
+    string? Code);
 
 public sealed record class CodeTransformerDto(
     Guid Id,
@@ -349,7 +318,6 @@ public sealed record class CodeTransformerDto(
     string Kind,
     string Language,
     string Code,
-    bool IsUnsafe,
     Guid OwnerUserId,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);

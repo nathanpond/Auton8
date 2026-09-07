@@ -19,14 +19,12 @@ public sealed record class CreateCodeTransformerInput(
     string? Description,
     string Kind,
     string Language,
-    string Code,
-    bool IsUnsafe);
+    string Code);
 
 public sealed record class UpdateCodeTransformerInput(
     string? Name,
     string? Description,
-    string? Code,
-    bool? IsUnsafe);
+    string? Code);
 
 public sealed class CodeTransformerNotFoundException(Guid id)
     : Exception($"Code transformer '{id}' was not found.");
