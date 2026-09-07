@@ -290,13 +290,22 @@ public sealed class BpmnSupportManifestTests
     }
 
     [Fact]
-    public void Nothing_the_engine_runs_is_refused()
+    public void Nothing_the_engine_runs_is_refused_unless_the_studio_withdrew_it()
     {
         // The complement, and the half that catches the bug #103 found: the old
         // deny-lists keyed on localName alone, so denying `boundaryEvent` blocked
         // all eight variants although Flowable executes seven. A test that only
         // asserted refusals would pass for a validator that refuses everything.
-        foreach (var element in BpmnSupportManifest.Default.Elements.Where(e => !e.CannotExecute))
+        //
+        // **Widened for #167.** Manual Task and Task (Generic) keep `engine:
+        // executes` — the engine really does run them, straight through, without
+        // waiting for anyone — and are refused at publish anyway, because running
+        // into silence is the failure this milestone exists to end. So the rule is
+        // "nothing the engine runs is refused UNLESS the studio withdrew it", and
+        // the withdrawn set is the exemption. Wording those refusals to dodge the
+        // substring this test greps for would have been evasion rather than a fix.
+        foreach (var element in BpmnSupportManifest.Default.Elements
+                     .Where(e => !e.CannotExecute && e.Studio != BpmnSupportManifest.StudioStatusWithdrawn))
         {
             var result = WorkflowBpmnXml.ValidateProcess(ProcessContaining(element));
 

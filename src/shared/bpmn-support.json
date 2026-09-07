@@ -81,12 +81,12 @@
     {
       "name": "Task (Generic)",
       "category": "Tasks",
-      "studio": "supported",
+      "studio": "withdrawn",
       "engine": "executes",
       "localName": "task",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "A plain bpmn:task is the same silent pass-through as a manual task. The studio converts it to a user task at design time (#167).",
+      "evidence": "deployed and started, then re-probed for #167 and observed NOT to wait. The earlier 'deployed and started' verdict was true and misleading"
     },
     {
       "name": "User Task",
@@ -211,12 +211,12 @@
     {
       "name": "Intermediate Throw (None)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": null,
       "reason": null,
-      "evidence": "deployed and started"
+      "evidence": "deployed and executed: the token passes straight through, which is the whole behaviour (#167)"
     },
     {
       "name": "Intermediate Throw (Message)",
@@ -471,12 +471,12 @@
     {
       "name": "Manual Task",
       "category": "Tasks",
-      "studio": "coming-soon",
+      "studio": "withdrawn",
       "engine": "executes",
       "localName": "manualTask",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "A manual task does not wait — the engine passes straight through it, creating no task and pausing nowhere. The studio converts it to a user task at design time (#167).",
+      "evidence": "deployed, started, and observed NOT to wait: the process reached the next activity immediately"
     },
     {
       "name": "Business Rule Task",

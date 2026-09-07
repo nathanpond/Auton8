@@ -475,6 +475,11 @@ const MENU_GROUP_ORDER = [
 
 const WORKFLOW_JS_VERSION = "20260425_01";
 
+// #167: what the most recent import converted, drained by the studio so it can say
+// so once. Module scope on purpose — createModeler writes it during importXML,
+// before any handle exists for a caller to read from.
+let convertedOnImport = [];
+
 export async function createModeler(container, xml, dotNetRef) {
   if (typeof window.BpmnJS === "undefined") {
     throw new Error("bpmn-js is not available on window.");
@@ -511,12 +516,30 @@ export async function createModeler(container, xml, dotNetRef) {
   suppressDirtyEvents = true;
   try {
     const importResult = await modeler.importXML(xml);
+    // #167: an imported or hand-edited diagram is the path the drop handler cannot
+    // reach, and the one a happy-path test misses.
+    convertedOnImport = convertNonWaitingTasks(modeler);
     fitAndCenter(modeler);
     refreshScriptIdentityMarkers({ modeler });
     lastImportDebug = buildImportDebug(modeler, container, importResult?.warnings ?? []);
   } finally {
     suppressDirtyEvents = false;
   }
+
+  // #167: and on drop, so an author who reaches for a manual task from bpmn-js's own
+  // menu gets a user task immediately rather than at save time.
+  modeler.get("eventBus", false)?.on("shape.added", (event) => {
+    const type = event?.element?.businessObject?.$type;
+    if (!CONVERTED_TASK_TYPES[type]) return;
+    // Deferred: replacing inside the shape.added handler re-enters the command
+    // stack while it is still applying the addition.
+    setTimeout(() => {
+      const converted = convertNonWaitingTasks(modeler);
+      if (converted.length > 0 && dotNetRef) {
+        dotNetRef.invokeMethodAsync("NotifyTasksConverted", converted).catch(() => {});
+      }
+    }, 0);
+  });
 
   const configureMenu = createConfigureContextMenu(cssScopeAttribute);
   const elementRegistry = modeler.get("elementRegistry", false);
@@ -2093,14 +2116,88 @@ export function updateGenericElementName(modelerHandle, payload) {
   });
 }
 
+// #167: manual tasks and plain tasks become user tasks, at design time.
+//
+// Neither waits. Verified against Flowable 8.0.0 by running both: the process passed
+// straight through each one, creating no task and pausing nowhere.
+// `ManualTaskActivityBehavior` is 488 bytes, and BPMN specifies a manual task as work
+// done outside the system with no engine involvement; a plain `bpmn:task` is the
+// same. So a diagram containing either reaches its end having done nothing a person
+// was meant to do — the silent no-op this milestone exists to end.
+//
+// Converting at DESIGN time rather than at publish is what keeps the stored diagram,
+// the deployed diagram and the execution view identical. There is nothing to map
+// back, because nothing was rewritten on the way out.
+const CONVERTED_TASK_TYPES = {
+  "bpmn:ManualTask": "manual task",
+  "bpmn:Task": "task"
+};
+
+function convertNonWaitingTasks(modeler) {
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const bpmnReplace = modeler?.get?.("bpmnReplace", false);
+  if (!elementRegistry || !bpmnReplace) return [];
+
+  // Snapshot first: replacing mutates the registry we would otherwise be iterating.
+  const targets = elementRegistry
+    .filter((element) => Boolean(CONVERTED_TASK_TYPES[element?.businessObject?.$type]))
+    .slice();
+
+  if (targets.length === 0) return [];
+
+  // The marker below is written as `flowable:autonateConvertedFrom`, and bpmn-moddle
+  // drops an attribute whose prefix the document never declares. Auton8's own starter
+  // diagram declares xmlns:flowable, but a diagram authored in another modeller does
+  // not — which is exactly the diagram this conversion exists for. Without this the
+  // marker vanishes on save and the publish-time assignee check never fires on the
+  // tasks that need it most.
+  const definitions = modeler.get("canvas", false)?.getRootElement?.()?.businessObject?.$parent;
+  if (definitions) {
+    const attrs = definitions.$attrs ?? (definitions.$attrs = {});
+    if (!attrs["xmlns:flowable"]) {
+      attrs["xmlns:flowable"] = "http://flowable.org/bpmn";
+    }
+  }
+
+  const converted = [];
+  for (const element of targets) {
+    const was = CONVERTED_TASK_TYPES[element.businessObject.$type];
+    const name = typeof element.businessObject.name === "string" ? element.businessObject.name : null;
+
+    const replacement = bpmnReplace.replaceElement(element, { type: "bpmn:UserTask" });
+
+    // Marks what it came from, so publish validation can require an assignee on
+    // exactly these and not on every user task in the product — an unassigned user
+    // task is a first-class state elsewhere in Auton8.
+    writeFlowableAttribute(replacement.businessObject, "autonateConvertedFrom", was);
+    converted.push({ id: replacement.id, name, was });
+  }
+
+  return converted;
+}
+
 export async function loadXml(modelerHandle, xml) {
   modelerHandle.setSuppressDirtyEvents(true);
+  let converted = [];
   try {
     await modelerHandle.modeler.importXML(xml);
+    // #167. Same reason as the import inside createModeler: opening an existing
+    // diagram is how a manual task authored elsewhere arrives.
+    converted = convertNonWaitingTasks(modelerHandle.modeler);
     fitAndCenter(modelerHandle.modeler);
   } finally {
     modelerHandle.setSuppressDirtyEvents(false);
   }
+  return converted;
+}
+
+// #167: what the last import converted, so the studio can say so once rather than
+// once per element — the author did nothing on this path and a toast per task
+// would be noise.
+export function takeConvertedTasks() {
+  const converted = convertedOnImport;
+  convertedOnImport = [];
+  return converted;
 }
 
 export async function createNewDiagram(modelerHandle, xml) {

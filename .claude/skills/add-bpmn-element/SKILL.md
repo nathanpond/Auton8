@@ -137,6 +137,33 @@ question each step asks is "does this element carry configuration the studio mus
 round-trip?" — when the answer is no, the story is a validation story and the honest
 completion comment says which steps did not apply and why.
 
+**7. Some elements are removed rather than added, and that is a real outcome.**
+Three ways so far, each with a different mechanism — pick by *why* it cannot work:
+
+| Why | Treatment | Example |
+|---|---|---|
+| No model type at any layer | `studio: withdrawn`, refused at publish | link events (#160, spike #217) |
+| No seam reaches it | delivered by composition instead | complex gateway (#218, spike #155) |
+| It runs, but does nothing useful | **converted at design time** to the element that does | manual task, generic task (#167) |
+
+The third is the newest and the least obvious: `bpmn:manualTask` and `bpmn:task` both
+deploy and pass straight through, so a diagram containing one finishes having skipped
+the step somebody was meant to perform. The studio replaces them with a user task on
+**drop and on load**, and publish refuses any that survive.
+
+⚠️ **Converting is not free, and the trap is namespaces.** A marker written with
+`writeFlowableAttribute` is `flowable:`-prefixed, and bpmn-moddle **silently drops an
+attribute whose prefix the document never declares**. Auton8's own starter diagram
+declares `xmlns:flowable`; a diagram authored in another modeller does not — which is
+exactly the diagram a conversion exists for. #167 lost its marker this way and only
+caught it because the test read the saved XML instead of trusting the on-screen
+notice. If you write an attribute during a conversion, declare the namespace on
+`definitions.$attrs` first.
+
+⚠️ **A conversion needs both paths.** Drop-only leaves every imported diagram
+untouched, which is the population that most needs converting. `loadXml` and the
+`importXML` inside `createModeler` are separate call sites; both need it.
+
 ## Steps in order
 
 ### 1. Move it in the support manifest — one edit

@@ -355,6 +355,8 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
             // #161: a subprocess the engine cannot enter.
             errors.AddRange(BuildSubProcessValidationErrors(document));
+            // #167: elements the studio converts away, and converted tasks nobody can do.
+            errors.AddRange(BuildNonWaitingTaskErrors(document));
 
             // #158: every condition in the diagram, through the one shared check.
             // Sequence flows included, so exclusive and inclusive gateways benefit
@@ -1696,6 +1698,75 @@ public static partial class WorkflowBpmnXml
     //
     // Event subprocesses are excluded: they are triggered rather than entered, and
     // #162 owns their own start-event rule.
+    // #167: a manual task and a plain task both deploy and pass straight through.
+    //
+    // Verified by running both against Flowable 8.0.0: the process reached the
+    // activity beyond without creating a task or pausing anywhere.
+    // `ManualTaskActivityBehavior` is 488 bytes, and BPMN specifies a manual task as
+    // work done outside the system with no engine involvement; a plain `bpmn:task`
+    // is the same. So a process containing either reaches its end having done
+    // nothing a person was meant to do.
+    //
+    // The studio converts both to user tasks at design time. This is the backstop
+    // for diagrams the studio never touched — a hand-edited file, or one imported
+    // straight to the API.
+    // Written by the studio when it converts a manual or generic task, so the
+    // unassignable rule below applies to exactly those and to nothing else.
+    // `flowable:` because bpmn-js loads no moddle extension for our own namespace —
+    // raw prefixed attributes in $attrs are the only round-trip-safe shape.
+    internal const string ConvertedFromAttribute = "autonateConvertedFrom";
+
+    private static readonly HashSet<string> NonWaitingTaskElementNames =
+    [
+        "manualTask",
+        "task"
+    ];
+
+    private static IReadOnlyList<string> BuildNonWaitingTaskErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            if (NonWaitingTaskElementNames.Contains(element.Name.LocalName))
+            {
+                var kind = element.Name.LocalName == "manualTask" ? "Manual task" : "Task";
+                errors.Add(
+                    $"{kind} '{LabelOf(element)}' cannot be deployed: it looks like a step " +
+                    "somebody performs, but the engine passes straight through it without " +
+                    "waiting for anyone. Auton8 runs work through user tasks — the studio " +
+                    "converts these automatically, so this diagram was authored elsewhere.");
+                continue;
+            }
+
+            // A converted task nobody can do. Scoped to user tasks, and deliberately
+            // NOT applied to every user task in the product: an unassigned task is a
+            // first-class state elsewhere (the execution view renders "(unassigned)"),
+            // and a blanket rule would refuse workflows that run today.
+            //
+            // The marker is what the studio writes when it converts, so this catches
+            // exactly the tasks this story created and nothing else.
+            var convertedFrom = element.Attribute(FlowableNamespace + ConvertedFromAttribute)?.Value;
+            if (element.Name.LocalName == "userTask"
+                && !string.IsNullOrWhiteSpace(convertedFrom)
+                && !HasSomeoneToDoIt(element))
+            {
+                errors.Add(
+                    $"User task '{LabelOf(element)}' has nobody to do it. It was converted " +
+                    "from a task the engine cannot wait on, so it needs an assignee or " +
+                    "candidate users or groups before it can be published.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static bool HasSomeoneToDoIt(XElement userTask) =>
+        new[] { "assignee", "candidateUsers", "candidateGroups" }
+            .Any(name => !string.IsNullOrWhiteSpace(userTask.Attribute(FlowableNamespace + name)?.Value));
+
     private static IReadOnlyList<string> BuildSubProcessValidationErrors(XDocument document)
     {
         var errors = new List<string>();

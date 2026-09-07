@@ -426,6 +426,12 @@ export default function WorkflowStudio() {
     useState<ConditionalEventEditor | null>(null);
   const [timerBoundaryEditor, setTimerBoundaryEditor] =
     useState<TimerBoundaryEventEditor | null>(null);
+  // #167. A diagram opened with manual or generic tasks in it has been changed
+  // without the author doing anything, so this is a condition belonging to the page
+  // rather than feedback on an action — an in-page Alert, not a toast (CLAUDE.md).
+  const [convertedTasks, setConvertedTasks] = useState<
+    Array<{ id: string; name: string | null; was: string }>
+  >([]);
 
   const sortedWorkflows = useMemo(
     () => [...workflows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
@@ -787,12 +793,22 @@ export default function WorkflowStudio() {
     }
   }, []);
 
+  const onTasksConverted = useCallback(
+    (converted: Array<{ id: string; name: string | null; was: string }>) => {
+      // Accumulate rather than replace: a drop after an import should not erase the
+      // notice explaining what the import already changed.
+      setConvertedTasks((previous) => [...previous, ...converted]);
+    },
+    []
+  );
+
   const callbacks = useMemo(
     () => ({
       NotifyDiagramChanged: onDiagramChanged,
-      RequestConfigureElement: onRequestConfigure
+      RequestConfigureElement: onRequestConfigure,
+      NotifyTasksConverted: onTasksConverted
     }),
-    [onDiagramChanged, onRequestConfigure]
+    [onDiagramChanged, onRequestConfigure, onTasksConverted]
   );
 
   const { containerRef, handle, loading: modelerLoading, error: modelerError } = useBpmnModeler({
@@ -1306,6 +1322,32 @@ export default function WorkflowStudio() {
       {error && (
         <Alert color="red" variant="light" mb="sm">
           {error}
+        </Alert>
+      )}
+      {convertedTasks.length > 0 && (
+        <Alert
+          color="blue"
+          variant="light"
+          mb="sm"
+          withCloseButton
+          onClose={() => setConvertedTasks([])}
+          title={
+            convertedTasks.length === 1
+              ? "Converted to a user task"
+              : `Converted ${convertedTasks.length} steps to user tasks`
+          }
+        >
+          Auton8 runs work through user tasks. A manual task or a plain task looks
+          like a step somebody performs, but the engine passes straight through it
+          without waiting for anyone — so the process would finish having skipped it.
+          {convertedTasks.some((task) => task.name) && (
+            <>
+              {" "}
+              Converted:{" "}
+              {convertedTasks.map((task) => task.name ?? task.id).join(", ")}.
+            </>
+          )}{" "}
+          Give each one an assignee, or candidate users or groups, before publishing.
         </Alert>
       )}
       {status && (

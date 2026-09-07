@@ -2877,3 +2877,59 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   edited during planning. #167's own acceptance criterion moves them, and editing them
   here would mark that criterion satisfied before the behaviour existed.
   **Issue:** #167
+
+## /n8-exec M4 — #167, 2026-09-07 — manual and generic tasks converted away
+
+- **Verify-first, as the story's own new criterion requires:** a plain `bpmn:task`
+  passes straight through exactly as a manual task does. Deployed and started one; the
+  process reached the activity beyond, creating no task. That confirmed the second
+  half of the owner's decision on measured behaviour rather than by analogy.
+  **Issue:** #167
+
+- **Rule 1 (bug found + fixed, with the test that caught it):** the
+  `autonateConvertedFrom` marker was being **silently dropped** on save. It is written
+  as a `flowable:`-prefixed attribute, and bpmn-moddle discards an attribute whose
+  prefix the document never declares — Auton8's starter diagram declares
+  `xmlns:flowable`, but a diagram authored in another modeller does not, which is
+  precisely the population this conversion exists for. So the publish-time assignee
+  check would never have fired on imported diagrams. The converter now declares the
+  namespace on `definitions.$attrs` before writing.
+  **How it was caught:** my first E2E asserted only that the on-screen notice
+  appeared, and passed in one second. Strengthening it to read the saved XML failed
+  immediately. The lesson is the one this milestone keeps re-teaching — assert the
+  observable consequence one step further out.
+  **Issue:** #167
+
+- **Decision:** the final E2E asserts the **publish refusal** rather than reading the
+  XML back. The refusal fires only on tasks carrying the marker, so it proves three
+  things at once: the elements became user tasks, the marker was written, and it
+  survived serialisation.
+  **Also worth recording:** when the save step first failed, my instinct was that the
+  test was wrong. It was not — my own backstop was correctly refusing a diagram whose
+  converted tasks had nobody to do them. Reading the failure rather than assuming a
+  fixture problem is what produced the better assertion.
+  **Issue:** #167
+
+- **Decision (Discretion, planner):** the notice is an in-page `Alert`, not a toast.
+  CLAUDE.md's rule is that a toast is feedback on something the user just caused; a
+  diagram converted on *load* changed without the author doing anything, which is a
+  condition belonging to the page. One summary rather than one per element, and
+  conversions accumulate so a later drop does not erase the explanation for an
+  earlier import.
+  **Issue:** #167
+
+- **Decision:** `Nothing_the_engine_runs_is_refused` was widened rather than worked
+  around, and renamed to say what it now means. Manual and generic tasks keep
+  `engine: executes` — the engine really does run them, into silence — so the rule
+  became "nothing the engine runs is refused **unless the studio withdrew it**".
+  Wording the refusals to dodge the substring the test greps for would have been
+  evasion.
+  **Issue:** #167, #107
+
+- **Skill:** gained load-bearing fact 7 — **some elements are removed rather than
+  added**, by three different mechanisms depending on *why* they cannot work: no model
+  type at any layer (link events), no seam reaches it (complex gateway), or it runs
+  and does nothing useful (manual and generic tasks, converted at design time). The
+  namespace trap and the both-paths requirement are recorded with it, since neither is
+  discoverable before it bites.
+  **Issue:** #167, #174
