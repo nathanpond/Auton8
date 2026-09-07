@@ -2301,3 +2301,42 @@ rather than taken on trust:
 **Left deliberately:** seven ACs reading "handled in a defined, documented way",
 which any behaviour satisfies. Owner's call — they concern engine behaviour
 nobody has established yet.
+
+## Ad-hoc — 2026-09-07 (during /n8-exec M4) — link events have no engine implementation
+
+**Change:** #160 ("Jump between points in a diagram with link events") cannot be
+executed as written. Spike #217 created and #160 sequenced behind it.
+
+**Why:** Executing #103's inventory — which exists to gate exactly this — deployed
+all 68 palette entries to Flowable 8.0.0 and started each. Link events fail
+deployment:
+
+    Problem: 'flowable-intermediate-catch-event-no-eventdefinition' : No event definition
+
+and the jar confirms it independently: `Link.*ActivityBehavior` returns nothing,
+while the intermediate-catch family is Conditional, EventRegistry, Message,
+Signal, Timer and VariableListener.
+
+**This makes the "no engine implementation" group five, not three.** #103's own
+acceptance criterion expected three and said "a fourth would be a finding worth
+surfacing": ComplexGateway, intermediate throw Message, the event-subprocess
+compensation start (descoped 2026-09-07), and now both link events.
+
+**Why a spike rather than a decision now (owner's call).** Link events differ from
+ComplexGateway in a way that changes the remedy: the rejection comes from
+`flowable-process-validation`, *before* `ActivityBehaviorFactory` is consulted. A
+custom behaviour may therefore be unable to help at all. And a link pair is a GOTO
+to a node no sequence flow reaches — neither `AutoNateBehaviorDelegate` nor M3's
+`ExecutorScriptTaskActivityBehavior` exercises that shape.
+
+**Affects:** #160 (blocked, rewritten or closed against the verdict), the milestone
+map (2 items move to the spike's outcome), #103's findings section (49 of 54 have a
+behaviour, not the 52 it claimed).
+
+**Also corrected while here, from the same probe:** two raw failures were my
+fixtures rather than engine gaps — Call Activity executes given a real callee, and
+cancel events are implemented (`BoundaryCancelEventActivityBehavior`,
+`CancelEndEventActivityBehavior`) but my minimal transaction completed before the
+cancel could apply. Separated in the #103 write-up rather than reported as gaps.
+Conditional Start Event is legal only inside an event subprocess, not at process
+level, though the palette offers it as a process start — relevant to #158 and #162.
