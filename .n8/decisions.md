@@ -2933,3 +2933,45 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   namespace trap and the both-paths requirement are recorded with it, since neither is
   discoverable before it bites.
   **Issue:** #167, #174
+
+## /n8-exec M4 — #177, 2026-09-07 — cancelled vs completed in the execution diagram
+
+- **The story's stated mechanism does not exist.** #177 said the per-activity truth
+  "is available and already mapped: `DeleteReason` on `WorkflowExecutionHistoryEvent`
+  … simply not consulted". Consulting it changes nothing: **Flowable 8.0.0 does not
+  populate it** when a boundary event cancels an activity. Verified by firing a timer
+  boundary and reading the history —
+
+      work     type=userTask      end=19:38:17  deleteReason=None
+      timeout  type=boundaryEvent end=19:38:17  deleteReason=None
+
+  — the cancelled task is indistinguishable from a completed one by that field.
+  **How it was caught:** I implemented the specified fix, its unit tests passed
+  (because I had stubbed a `deleteReason` the engine never sends), and the E2E against
+  the real engine failed. The unit tests were asserting my assumption back at me.
+  **Issue:** #177
+
+- **Decision:** cancellation is derived from the **diagram**, which the method already
+  loads — an activity is cancelled when an *interrupting* boundary event attached to
+  it has ended. `cancelActivity="false"` is excluded deliberately: a non-interrupting
+  boundary fires alongside its activity and cancels nothing, so treating one as a
+  cancellation would render a healthy running task as killed, which is a worse error
+  than the bug. A test pins that complement.
+  **Why a correction rather than a blocker:** the AC's intent — an operator can tell a
+  timed-out task from a finished one — is unchanged, no invariant is in tension, and
+  the alternative was to implement something that provably does nothing. AC2 and the
+  Evidence section were corrected in place on the issue.
+  **Issue:** #177
+
+- **Decision:** the instance-level path keeps its 5-second `cancelWindow` fallback and
+  the two sources are unioned rather than swapped. AC3 protects whole-instance
+  cancellation as a regression risk, and that heuristic covers Flowable versions whose
+  REST history omits the field on a torn-down process.
+  **Issue:** #177
+
+- **Skill:** `references/testing-bpmn-elements.md` gains the rule this cost a false
+  green to learn — do not assert on a history row's `DeleteReason`; assert on
+  `CancelledActivityIds`, **with the instance still running**, and assert the
+  complement, because `CompletedActivityIds` is built by excluding the cancelled set
+  so an activity wrongly missing from one silently appears in the other.
+  **Issue:** #177, #174

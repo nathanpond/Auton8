@@ -517,7 +517,42 @@ public sealed class FlowableClient(
         var isCancelled = !string.IsNullOrWhiteSpace(processInstance.DeleteReason);
         var cancelWindow = TimeSpan.FromSeconds(5);
 
-        var cancelledActivityIds = isCancelled
+        // #177: an activity cancelled by an interrupting boundary event was rendering
+        // as COMPLETED, so an operator saw a timed-out task exactly as if somebody
+        // had finished it.
+        //
+        // The cancelled set used to be gated on the *instance* having a DeleteReason,
+        // and a boundary event cancels one activity inside a process that keeps
+        // running. The activity then fell through into `completedActivityIds` below,
+        // which is built by excluding this set.
+        //
+        // **The story specified reading each activity's own DeleteReason. Flowable
+        // 8.0.0 does not populate it for this case** — verified by firing a timer
+        // boundary and reading the history: the cancelled `userTask` carries an
+        // EndTime and `deleteReason: null`, indistinguishable by that field from one
+        // completed normally.
+        //
+        // What does distinguish it is the diagram, which this method already has:
+        // an interrupting boundary event that fired. Its own history row ends at the
+        // same moment it tore down the activity it was attached to, so an activity
+        // is cancelled when an INTERRUPTING boundary event attached to it has ended.
+        // `cancelActivity="false"` is excluded deliberately — a non-interrupting
+        // boundary fires alongside the activity and cancels nothing.
+        var interruptingBoundaryTargets = BuildInterruptingBoundaryMap(bpmnXml);
+        var endedActivityIds = activitiesPayload.Data
+            .Where(activity => activity.EndTime is not null && !string.IsNullOrWhiteSpace(activity.ActivityId))
+            .Select(activity => activity.ActivityId!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var perActivityCancelled = interruptingBoundaryTargets
+            .Where(pair => endedActivityIds.Contains(pair.Key))
+            .Select(pair => pair.Value)
+            .Concat(activitiesPayload.Data
+                .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId)
+                                && !string.IsNullOrWhiteSpace(activity.DeleteReason))
+                .Select(activity => activity.ActivityId!));
+
+        var instanceCancelled = isCancelled
             ? activitiesPayload.Data
                 .Where(activity => !string.IsNullOrWhiteSpace(activity.ActivityId)
                                 && (
@@ -527,9 +562,12 @@ public sealed class FlowableClient(
                                         && (processInstance.EndTime.Value - activity.EndTime.Value).Duration() <= cancelWindow)
                                 ))
                 .Select(activity => activity.ActivityId!)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray()
-            : Array.Empty<string>();
+            : Enumerable.Empty<string>();
+
+        var cancelledActivityIds = perActivityCancelled
+            .Concat(instanceCancelled)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         var cancelledSet = new HashSet<string>(cancelledActivityIds, StringComparer.Ordinal);
 
@@ -1641,6 +1679,50 @@ public sealed class FlowableClient(
         }
 
         return max;
+    }
+
+    /// <summary>
+    /// Interrupting boundary event id → the activity id it is attached to.
+    /// </summary>
+    /// <remarks>
+    /// #177. Non-interrupting boundary events are excluded: they fire alongside the
+    /// activity and cancel nothing, so treating one as a cancellation would render a
+    /// perfectly healthy task as killed — the opposite error.
+    /// </remarks>
+    private static Dictionary<string, string> BuildInterruptingBoundaryMap(string bpmnXml)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(bpmnXml)) return map;
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(bpmnXml);
+        }
+        catch
+        {
+            // The diagram is rendered from this same string, so a parse failure is
+            // already visible to the caller. Losing the cancellation highlight is
+            // not worth throwing over.
+            return map;
+        }
+
+        foreach (var boundary in document.Descendants(BpmnNamespace + "boundaryEvent"))
+        {
+            var id = boundary.Attribute("id")?.Value;
+            var attachedTo = boundary.Attribute("attachedToRef")?.Value;
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(attachedTo)) continue;
+
+            // BPMN defaults cancelActivity to true when the attribute is absent.
+            if (string.Equals(boundary.Attribute("cancelActivity")?.Value, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            map[id] = attachedTo;
+        }
+
+        return map;
     }
 
     private static void EnsureDiagramXmlPresent(string bpmnXml, string processInstanceId, FlowableProcessDefinitionResponse processDefinition)

@@ -83,3 +83,26 @@ For validation assertions, post to **`/api/workflows/prepare`** and read `errors
 invalid diagram posted there returns 200 and deploys. A test written against
 `/publish` to prove "misconfiguration is refused" passes while proving nothing, which
 is the failure this whole skill is about.
+
+---
+
+## Asserting that an activity was cancelled (#177)
+
+**Do not assert on a history row's `DeleteReason`.** Flowable 8.0.0 does not populate
+it when a boundary event cancels an activity — the cancelled row carries an `endTime`
+and a null `deleteReason`, which is indistinguishable from one that completed:
+
+```
+work       type=userTask      end=19:38:17  deleteReason=None
+timeout    type=boundaryEvent end=19:38:17  deleteReason=None
+```
+
+`CancelledActivityIds` on the diagram detail **is** correct as of #177, so assert on
+that. It derives cancellation from the diagram — an activity is cancelled when an
+*interrupting* boundary event attached to it has ended — rather than from a field the
+engine leaves empty.
+
+Two traps worth knowing:
+
+- **Assert with the instance still RUNNING.** Cancellation used to be read from the *process instance's* `DeleteReason`, so a test on a cancelled instance passed for two years while a boundary-cancelled activity rendered as completed. A test that tears the process down cannot see the bug.
+- **Assert the complement.** `CompletedActivityIds` is built by *excluding* the cancelled set, so an activity wrongly absent from one silently appears in the other. Assert both: in cancelled, and **not** in completed.

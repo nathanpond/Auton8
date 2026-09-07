@@ -1171,6 +1171,134 @@ public sealed class FlowableClientTests
         Assert.Contains("AutoNate script task capability probe", ex.Message);
     }
 
+    // --- #177: cancelled vs completed in the execution diagram -----------------
+
+    [Fact]
+    public async Task An_activity_cancelled_by_a_boundary_event_renders_as_cancelled()
+    {
+        // The defect: cancellation was read from the PROCESS INSTANCE's DeleteReason,
+        // so an activity cancelled by an interrupting boundary event inside a
+        // still-running process contributed nothing — and then fell through into
+        // completedActivityIds, which is built by excluding the cancelled set.
+        //
+        // The instance here has NO DeleteReason and no EndTime: it is still running,
+        // which is the whole point. A test on a cancelled instance passes today and
+        // proves nothing.
+        var (client, stub) = CreateClient();
+        StubDiagram(stub, "pi-177",
+            instance: new { id = "pi-177", processDefinitionId = "pd-1" },
+            activities: new object[]
+            {
+                // Flowable records NO deleteReason here — verified against 8.0.0 by
+                // firing a real timer boundary. The cancelled task is
+                // indistinguishable from a completed one by that field, which is why
+                // the fix reads the diagram instead.
+                new { activityId = "work", endTime = "2026-09-07T10:00:05Z" },
+                new { activityId = "timeout", endTime = "2026-09-07T10:00:05Z" },
+                new { activityId = "before", endTime = "2026-09-07T10:00:00Z" },
+                new { activityId = "escalated" }
+            });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("pi-177");
+
+        Assert.Contains("work", detail.CancelledActivityIds);
+        // The half that was actually broken: it must not ALSO read as completed.
+        Assert.DoesNotContain("work", detail.CompletedActivityIds);
+        // And a genuinely completed activity beside it is unaffected.
+        Assert.Contains("before", detail.CompletedActivityIds);
+        Assert.Contains("escalated", detail.CurrentActivityIds);
+    }
+
+    [Fact]
+    public async Task A_non_interrupting_boundary_does_not_mark_its_activity_cancelled()
+    {
+        // The complement, and the error that would be worse than the bug: a
+        // non-interrupting boundary fires ALONGSIDE its activity and cancels
+        // nothing, so treating it as a cancellation would render a healthy running
+        // task as killed.
+        var (client, stub) = CreateClient();
+        StubDiagram(stub, "pi-noncancel",
+            instance: new { id = "pi-noncancel", processDefinitionId = "pd-1" },
+            activities: new object[]
+            {
+                new { activityId = "notify", endTime = "2026-09-07T10:00:05Z" },
+                new { activityId = "alongside", endTime = "2026-09-07T10:00:06Z" },
+                // Something still live, so the method does not fall back to a
+                // runtime lookup for the current activity.
+                new { activityId = "after" }
+            });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("pi-noncancel");
+
+        Assert.DoesNotContain("alongside", detail.CancelledActivityIds);
+        Assert.Contains("alongside", detail.CompletedActivityIds);
+    }
+
+    [Fact]
+    public async Task A_wholly_cancelled_instance_still_renders_as_it_did()
+    {
+        // AC3's regression guard. The instance-level path keeps its 5-second
+        // cancelWindow fallback, which covers Flowable versions whose REST history
+        // omits the per-activity field on a torn-down process — here `late` carries
+        // no deleteReason and is caught only by that window.
+        var (client, stub) = CreateClient();
+        StubDiagram(stub, "pi-whole",
+            instance: new
+            {
+                id = "pi-whole",
+                processDefinitionId = "pd-1",
+                deleteReason = "cancelled by operator",
+                endTime = "2026-09-07T10:00:10Z"
+            },
+            activities: new object[]
+            {
+                new { activityId = "late", endTime = "2026-09-07T10:00:09Z" },
+                new { activityId = "early", endTime = "2026-09-07T09:00:00Z" }
+            });
+
+        var detail = await client.GetWorkflowExecutionDiagramDetailAsync("pi-whole");
+
+        Assert.Contains("late", detail.CancelledActivityIds);
+        Assert.DoesNotContain("late", detail.CompletedActivityIds);
+        // Well outside the window, so it finished normally before the cancellation.
+        Assert.Contains("early", detail.CompletedActivityIds);
+    }
+
+    private static void StubDiagram(
+        StubHttpMessageHandler stub, string instanceId, object instance, object[] activities)
+    {
+        stub.WhenJson(HttpMethod.Get, $"service/history/historic-process-instances/{instanceId}", instance);
+        stub.WhenJson(HttpMethod.Get, $"service/repository/process-definitions/pd-1",
+            new { id = "pd-1", key = "k", name = "N", graphicalNotationDefined = true });
+        stub.WhenStatus(HttpMethod.Get, "service/repository/process-definitions/pd-1/resourcedata",
+            HttpStatusCode.OK,
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                         xmlns:dc="http://www.omg.org/spec/DD/20100524/DC">
+              <process id="k" isExecutable="true">
+                <startEvent id="s" />
+                <userTask id="work" />
+                <boundaryEvent id="timeout" attachedToRef="work" cancelActivity="true" />
+                <userTask id="alongside" />
+                <boundaryEvent id="notify" attachedToRef="alongside" cancelActivity="false" />
+              </process>
+              <bpmndi:BPMNDiagram id="d">
+                <bpmndi:BPMNPlane id="p" bpmnElement="k">
+                  <bpmndi:BPMNShape id="sh" bpmnElement="s">
+                    <dc:Bounds x="1" y="1" width="36" height="36" />
+                  </bpmndi:BPMNShape>
+                </bpmndi:BPMNPlane>
+              </bpmndi:BPMNDiagram>
+            </definitions>
+            """);
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-activity-instances",
+            new { data = activities, total = activities.Length });
+        stub.WhenJson(HttpMethod.Get, "service/history/historic-variable-instances",
+            new { data = Array.Empty<object>(), total = 0 });
+    }
+
     // --- #158: the conditional-event nudge ------------------------------------
 
     [Fact]

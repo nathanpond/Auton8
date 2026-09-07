@@ -185,6 +185,65 @@ public sealed class TimerBoundaryExecutionTests : E2ETestBase
         Assert.DoesNotContain("Escalated", after);
     }
 
+    [Fact]
+    public async Task A_boundary_cancelled_activity_renders_as_cancelled_not_completed()
+    {
+        // #177, asserted through #157's feature because an interrupting timer
+        // boundary is the first construct that makes this reachable by ordinary
+        // authoring.
+        //
+        // The assertion is made with the instance STILL RUNNING. That is the whole
+        // point: cancellation used to be read from the process instance's
+        // DeleteReason, so a test on a cancelled instance passed while the defect was
+        // live, and the cancelled activity fell through into "completed" — an
+        // operator saw a timed-out task rendered exactly like one somebody finished.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"tb_cancel_{Guid.NewGuid():N}"[..24];
+        await PublishAsync(api, key, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="{{key}}" name="Cancelled render" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="work" />
+                <bpmn:userTask id="work" name="Timed out work" />
+                <bpmn:sequenceFlow id="f1" sourceRef="work" targetRef="e" />
+                <bpmn:endEvent id="e" />
+                <bpmn:boundaryEvent id="timeout" name="Too slow" attachedToRef="work" cancelActivity="true">
+                  <bpmn:timerEventDefinition>
+                    <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT2S</bpmn:timeDuration>
+                  </bpmn:timerEventDefinition>
+                </bpmn:boundaryEvent>
+                <bpmn:sequenceFlow id="f2" sourceRef="timeout" targetRef="escalated" />
+                <bpmn:userTask id="escalated" name="Escalated" />
+              </bpmn:process>
+              {{Di(key, "s", "work", "e", "timeout", "escalated")}}
+            </bpmn:definitions>
+            """);
+
+        var instanceId = await StartAsync(api, key);
+        await EventuallyAsync(api, instanceId, n => n.Contains("Escalated"), "the timer to cancel the task");
+
+        var diagram = await api.GetAsync($"/api/executions/{instanceId}/diagram");
+        Assert.True(diagram.Ok, $"Reading the diagram failed: {diagram.Status}");
+        using var document = JsonDocument.Parse(await diagram.TextAsync());
+
+        string[] Ids(string field) => document.RootElement.GetProperty(field)
+            .EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+        // The instance is alive — `escalated` is waiting — so nothing here depends
+        // on the process having been torn down.
+        Assert.Contains("escalated", Ids("currentActivityIds"));
+
+        Assert.Contains("work", Ids("cancelledActivityIds"));
+        // The half that was broken: it must not ALSO read as completed, since
+        // completedActivityIds is built by excluding the cancelled set.
+        Assert.DoesNotContain("work", Ids("completedActivityIds"));
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static string Di(string processKey, params string[] elementIds)
