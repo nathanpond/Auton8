@@ -2329,7 +2329,24 @@ custom behaviour may therefore be unable to help at all. And a link pair is a GO
 to a node no sequence flow reaches — neither `AutoNateBehaviorDelegate` nor M3's
 `ExecutorScriptTaskActivityBehavior` exercises that shape.
 
-**Affects:** #160 (blocked, rewritten or closed against the verdict), the milestone
+**Resolved by spike #217, same day.** Verdict: **descope**. The binding
+constraint turned out not to be the missing behaviour or the validator — it is
+that `flowable-bpmn-model-8.0.0.jar` contains **no link event type at all**, so
+the XML converter cannot represent one and the parsed model has nowhere to put
+it. Implementing link events would mean a model type, a converter, a parse
+handler, a replacement validator, a behaviour, and a token transfer to a node no
+sequence flow reaches — six layers, versus ComplexGateway's one custom behaviour
+through an existing factory.
+
+The capability lost is diagram aesthetics: BPMN 2.0 defines link events as a
+GOTO for visual tidiness, adding no execution semantics a sequence flow lacks.
+
+#160 was **rewritten rather than closed** — it becomes the removal-and-refusal
+work, so the palette stops advertising them and a hand-authored link event is
+refused at publish rather than silently discarded by the converter. No issue was
+closed on my initiative.
+
+**Affects:** #160 (rewritten), the milestone
 map (2 items move to the spike's outcome), #103's findings section (49 of 54 have a
 behaviour, not the 52 it claimed).
 
