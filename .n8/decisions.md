@@ -2796,3 +2796,84 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   **Not half-built:** the throw-none half was left unimplemented too, since both
   elements map to this story and shipping one would leave the manifest half-moved.
   **Issue:** #167, #40
+
+## /n8-plan M4 (2nd re-plan) — 2026-09-07 — manual tasks, and two planner errors
+
+- **Decision (owner):** Auton8 does not support manual tasks or generic tasks. An
+  author who reaches for either gets a **user task, converted in the studio at design
+  time**, with a notice. No Java behaviour, no publish-time rewrite, no diagram
+  divergence — the stored diagram already contains the user task.
+  **Why the owner changed direction:** the first answer was "make manual tasks wait"
+  via a custom `ActivityBehavior`. The executor simulation then found
+  `ActivityBehaviorFactory.createManualTaskActivityBehavior` is typed to return
+  `ManualTaskActivityBehavior` (extends `TaskActivityBehavior`, not
+  `UserTaskActivityBehavior`), so the cheap base class was unavailable and the work
+  meant reimplementing large parts of Flowable's task creation. Seeing that cost, the
+  owner chose conversion instead.
+  **Issue:** #167
+
+- **Planner error 1, corrected:** I told the owner that "make manual tasks wait" would
+  breach epic #40's AC6. It would not — that AC explicitly blesses *"a custom
+  `ActivityBehavior` registered into the engine"*, and `createManualTaskActivityBehavior`
+  exists with a parse handler that consults it. I had carried over the shape of #155's
+  no-seam verdict for the complex gateway without checking this element.
+  **Issue:** #167, #40
+
+- **Planner error 2, corrected by the coverage checker:** the owner said a *converted*
+  task needs "an assignee or a rule that determines assignee". I generalised that into
+  a publish refusal for **every** user task. 49 of the 50 `userTask` fixtures in the
+  repo carry no assignee — including two guards in `BpmnSupportManifestTests`, every
+  engine fixture in #157/#158/#161, and every downstream story's demo — and
+  `workflow.js` renders `(unassigned)` as a first-class execution state. Narrowed back
+  to the conversion.
+  **Issue:** #167
+
+- **Decision:** `Task (Generic)` is withdrawn too. It was marked `studio: supported`
+  with evidence "deployed and started" — true and misleading, since a plain
+  `bpmn:task` never waits either. Withdrawing it corrects a claim in shipped work; it
+  was one of the 14 baseline-supported, so it sits outside the 54 and outside the 47,
+  and the close-out arithmetic gains a row that was previously in no count at all.
+  **Issue:** #167, #103, #107
+
+- **Decision:** `Nothing_the_engine_runs_is_refused` (#107) is updated rather than
+  worked around. Manual and generic tasks keep `engine: executes` — the engine does
+  run them, into silence — so refusing them at publish trips that guard. Its rule
+  becomes "nothing the engine runs is refused **unless the studio withdrew it**".
+  Wording the refusal to dodge the substring would be evasion.
+  **Issue:** #167, #107
+
+- **Decision:** a **verify-first AC** on all twelve remaining element stories — confirm
+  what the element actually does against the running engine before implementing, and
+  say so if it differs. Four stories (#161, #167, #163, and #112 below) were found
+  resting on unverified behaviour; #103's inventory proved instantiation only and said
+  so in its own completion comment.
+  **Issue:** #112, #113, #114, #115, #156, #159, #162, #163, #164, #166, #218, #220
+
+- **Found by verify-first, immediately:** #163's artifacts said `IFlowableClient` would
+  list and execute ad-hoc activities, but **Flowable ships no REST endpoint for any of
+  it** — the engine has the commands, `flowable-rest-8.0.0.jar` exposes none. Buildable
+  via a custom `@RestController` in `flowable-extension` (M3's
+  `FlowableScriptTaskSupportController` precedent), but Java work the story never
+  mentioned. Added to its ACs and artifacts.
+  **Issue:** #163
+
+- **Found by the coverage checker:** #112 still prescribed the
+  `ActivityBehaviorFactory` seam that spike #155 disproved, for an element the manifest
+  records as *harder* than the complex gateway — Intermediate Throw (Message) fails at
+  deployment because its validator rejects the event definition. Rewritten to require
+  verification before committing to an approach.
+  **Issue:** #112, #155
+
+- **Found by the coverage checker:** #166 contradicted itself — its AC says a data
+  store reference is a typed process-variable declaration, its test plan said to assert
+  they "present as annotations". It was also the only element-owning story with no
+  manifest AC. Both fixed. #162 had four items and two dedicated ACs; `Escalation
+  Start` and `Conditional Start` now have their own. #218 must rebase
+  `A_refusal_names_the_offending_element_in_the_diagram`, which uses a complex gateway
+  as its refusal fixture and would pass while testing nothing once they publish.
+  **Issue:** #166, #162, #218
+
+- **Note:** the manifest rows for Manual Task and Task (Generic) were deliberately NOT
+  edited during planning. #167's own acceptance criterion moves them, and editing them
+  here would mark that criterion satisfied before the behaviour existed.
+  **Issue:** #167
