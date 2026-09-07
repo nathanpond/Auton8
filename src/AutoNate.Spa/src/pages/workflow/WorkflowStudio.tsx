@@ -166,6 +166,18 @@ type TimerStartEventEditor = {
 type TimerIntermediateMode = "duration" | "date";
 type TimerIntermediateValueKind = "literal" | "expression";
 
+// #158. One editor for all three placements a conditional event can occupy —
+// intermediate catch, boundary, and the event-subprocess start (#162) — because the
+// thing being edited is the same condition in each. `interrupting` is meaningful
+// only on a boundary event and is null elsewhere.
+type ConditionalEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  conditionExpression: string;
+  interrupting: boolean | null;
+};
+
 type TimerIntermediateCatchEventEditor = {
   id: string;
   type: string;
@@ -248,6 +260,10 @@ type ElementSelection = {
   sourceType?: string | null;
   userFormMode?: string | null;
   userFormShortCode?: string | null;
+  // #158. Present only on elements carrying a conditionalEventDefinition — the
+  // key's ABSENCE is what keeps timer intermediate catch events out of the
+  // conditional editor, since onRequestConfigure routes on $type plus key presence.
+  cancelActivity?: boolean | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -386,6 +402,8 @@ export default function WorkflowStudio() {
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
+  const [conditionalEventEditor, setConditionalEventEditor] =
+    useState<ConditionalEventEditor | null>(null);
 
   const sortedWorkflows = useMemo(
     () => [...workflows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
@@ -412,6 +430,37 @@ export default function WorkflowStudio() {
 
   const onRequestConfigure = useCallback((raw: unknown) => {
     const selection = raw as ElementSelection;
+    // #158. First branch, because a conditional BOUNDARY event is the one shape no
+    // other branch below claims — and routing on $type alone would send every
+    // intermediate catch event here, timer ones included. describeConditionalEvent
+    // omits these keys entirely unless a conditionalEventDefinition is present, so
+    // presence is the discriminator.
+    const isConditionalEvent =
+      !!selection &&
+      ("conditionExpression" in selection && "cancelActivity" in selection) &&
+      (selection.type === "bpmn:IntermediateCatchEvent" ||
+        selection.type === "bpmn:BoundaryEvent" ||
+        selection.type === "bpmn:StartEvent");
+    if (isConditionalEvent && selection) {
+      setConditionalEventEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        conditionExpression: selection.conditionExpression ?? "",
+        interrupting:
+          selection.type === "bpmn:BoundaryEvent" ? selection.cancelActivity !== false : null
+      });
+      setTimerStartEditor(null);
+      setSignalStartEditor(null);
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
+      setGatewayEditor(null);
+      setGenericEditor(null);
+      return;
+    }
     const isTimerIntermediateCatch =
       !!selection &&
       selection.type === "bpmn:IntermediateCatchEvent" &&
@@ -437,6 +486,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
       return;
     }
     const isTimerStart =
@@ -472,6 +522,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
       return;
     }
     const isSignalStart =
@@ -505,6 +556,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
       return;
     }
     const isServiceTask =
@@ -530,6 +582,7 @@ export default function WorkflowStudio() {
       setTimerIntermediateEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
       return;
     }
     if (selection && selection.type === "bpmn:ScriptTask") {
@@ -553,6 +606,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -569,6 +623,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
     } else if (
       selection &&
       (selection.type === "bpmn:ExclusiveGateway" || selection.type === "bpmn:InclusiveGateway")
@@ -598,6 +653,7 @@ export default function WorkflowStudio() {
       setTimerIntermediateEditor(null);
       setServiceTaskEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -635,6 +691,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
     } else if (selection) {
       setGenericEditor({
         id: selection.id,
@@ -659,6 +716,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGatewayEditor(null);
       setGenericEditor(null);
+    setConditionalEventEditor(null);
     }
   }, []);
 
@@ -709,6 +767,7 @@ export default function WorkflowStudio() {
     setServiceTaskEditor(null);
     setGatewayEditor(null);
     setGenericEditor(null);
+    setConditionalEventEditor(null);
     // Fire-and-forget audit ping. The studio reuses one workflow list call
     // for the whole session, so without this the audit log would only ever
     // see the list-view event; this ensures one ModelViewed event per
@@ -954,6 +1013,31 @@ export default function WorkflowStudio() {
       setTimerIntermediateEditor(null);
     });
 
+  const applyConditionalEvent = () =>
+    runBusy("applying conditional event changes", async () => {
+      if (!handle || !conditionalEventEditor) {
+        throw new Error("Select a conditional event before applying changes.");
+      }
+
+      const expression = conditionalEventEditor.conditionExpression.trim();
+      if (!expression) {
+        // Refused here as well as at publish: an empty condition is written as a
+        // condition element that never evaluates, so the process waits forever.
+        throw new Error("Enter a condition (e.g. ${approved == true}) before applying.");
+      }
+
+      await workflow.updateConditionalEventProperties(handle, {
+        id: conditionalEventEditor.id,
+        name: conditionalEventEditor.name,
+        conditionExpression: expression,
+        cancelActivity:
+          conditionalEventEditor.interrupting === null
+            ? undefined
+            : conditionalEventEditor.interrupting
+      });
+      setConditionalEventEditor(null);
+    });
+
   const applyServiceTask = () =>
     runBusy("applying service task changes", async () => {
       if (!handle || !serviceTaskEditor) {
@@ -982,6 +1066,7 @@ export default function WorkflowStudio() {
         name: genericEditor.name
       });
       setGenericEditor(null);
+    setConditionalEventEditor(null);
     });
 
   const applyGateway = () =>
@@ -1379,6 +1464,19 @@ export default function WorkflowStudio() {
         />
       )}
 
+      {conditionalEventEditor && (
+        <ConditionalEventModal
+          editor={conditionalEventEditor}
+          onChange={setConditionalEventEditor}
+          onClose={() => {
+            if (busy) return;
+            setConditionalEventEditor(null);
+          }}
+          onApply={applyConditionalEvent}
+          disabled={!!busy || !handle}
+        />
+      )}
+
       {serviceTaskEditor && (
         <ServiceTaskModal
           editor={serviceTaskEditor}
@@ -1412,6 +1510,7 @@ export default function WorkflowStudio() {
           onClose={() => {
             if (busy) return;
             setGenericEditor(null);
+    setConditionalEventEditor(null);
           }}
           onApply={applyGeneric}
           disabled={!!busy || !handle}
@@ -3828,6 +3927,96 @@ function UserTaskModal({
 // disagreeing on 47 of them — 22 shown as "coming soon" that deployed unhindered, and
 // 25 refused at runtime that the engine runs. Adding support for an element is now
 // one edit to `src/shared/bpmn-support.json`, and this panel follows.
+// #158. One editor for every conditional event placement.
+//
+// The condition is a raw expression, matching how exclusive gateways already work
+// — consistency with what ships, and a builder would need a raw escape hatch
+// anyway. What the editor adds over a bare text box is the two things an author
+// cannot infer: that the condition is not re-checked continuously, and (on a
+// boundary event) what interrupting actually does to the attached activity.
+function ConditionalEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: ConditionalEventEditor;
+  onChange: (next: ConditionalEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isBoundary = editor.interrupting !== null;
+  const expression = editor.conditionExpression.trim();
+
+  return (
+    <Modal opened onClose={onClose} title="Conditional Event" size="lg">
+      <Stack gap="md">
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(event) => onChange({ ...editor, name: event.currentTarget.value })}
+          placeholder="When approved"
+        />
+
+        <TextInput
+          label="Condition"
+          description="A Flowable expression. The process continues when it evaluates to true."
+          value={editor.conditionExpression}
+          onChange={(event) =>
+            onChange({ ...editor, conditionExpression: event.currentTarget.value })
+          }
+          placeholder="${approved == true}"
+          error={
+            expression.length > 0 && !expression.startsWith("${")
+              ? "Wrap the condition in ${ } so Flowable evaluates it."
+              : null
+          }
+        />
+
+        {isBoundary && (
+          <Radio.Group
+            label="When the condition becomes true"
+            value={editor.interrupting ? "interrupt" : "continue"}
+            onChange={(value) => onChange({ ...editor, interrupting: value === "interrupt" })}
+          >
+            <Stack gap="xs" mt="xs">
+              <Radio
+                value="interrupt"
+                label="Cancel the attached activity and take this path"
+              />
+              <Radio
+                value="continue"
+                label="Take this path as well, and let the attached activity carry on"
+              />
+            </Stack>
+          </Radio.Group>
+        )}
+
+        {/* The one thing an author cannot discover by trying it, because trying it
+            looks like the feature is broken. Established by running it against
+            Flowable 8.0.0, not read from documentation. */}
+        <Alert color="blue" variant="light" title="Conditions are checked when something changes">
+          Flowable does not watch this condition continuously. Auton8 asks it to
+          re-check after a process variable is set or a user task is completed, which
+          covers the usual ways a condition becomes true. A condition that is already
+          true when the process arrives here still waits for the next such change.
+        </Alert>
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || expression.length === 0}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 function BpmnTypesModal({ onClose }: { onClose: () => void }) {
   // Three display buckets from two manifest axes. "Coming soon" and "not available"
   // both read as unsupported to an author, but they are opposite problems — one is

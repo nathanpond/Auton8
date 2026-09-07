@@ -20,7 +20,15 @@ public sealed record class WorkflowElementSnapshot(
     string? TimerDuration = null,
     string? TimerDate = null,
     string? ServiceTaskKind = null,
-    string? BehaviorKey = null);
+    string? BehaviorKey = null,
+    // #158. Appended, never inserted — this is a positional record and existing
+    // callers bind by position.
+    //
+    // ConditionExpression above is reused for a conditional event's condition
+    // rather than a new field: it is the same concept, and the studio routes on
+    // $type plus key presence, so a sequence flow and an intermediate catch event
+    // cannot be confused.
+    bool? CancelActivity = null);
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr

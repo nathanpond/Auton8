@@ -537,6 +537,15 @@ public static class ExecutionEndpoints
             CancellationToken cancellationToken) =>
         {
             await flowable.UpdateProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            // #158: Flowable does not re-evaluate conditional events when a variable
+            // changes. Without this, a process parked on `${approved == true}` stays
+            // parked after someone sets `approved` to true here — the feature looks
+            // broken, and nothing says why. Established by running it against 8.0.0.
+            //
+            // Unconditional rather than gated on "does this definition have a
+            // conditional event": the check would need the diagram, and asking the
+            // engine to evaluate an instance with no conditional events is a no-op.
+            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionVariablesSet,
@@ -556,6 +565,15 @@ public static class ExecutionEndpoints
             CancellationToken cancellationToken) =>
         {
             await flowable.AddProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            // #158: Flowable does not re-evaluate conditional events when a variable
+            // changes. Without this, a process parked on `${approved == true}` stays
+            // parked after someone sets `approved` to true here — the feature looks
+            // broken, and nothing says why. Established by running it against 8.0.0.
+            //
+            // Unconditional rather than gated on "does this definition have a
+            // conditional event": the check would need the diagram, and asking the
+            // engine to evaluate an instance with no conditional events is a no-op.
+            await flowable.EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionVariablesAdded,

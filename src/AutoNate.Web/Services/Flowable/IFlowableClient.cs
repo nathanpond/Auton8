@@ -102,6 +102,18 @@ public interface IFlowableClient
 
     Task UpdateProcessVariablesAsync(string processInstanceId, IReadOnlyList<ProcessVariableUpdate> updates, CancellationToken cancellationToken = default);
 
+    // #158: asks the engine to re-evaluate the instance's conditional events.
+    //
+    // Flowable does NOT re-evaluate them when a variable changes — established by
+    // running it, not by reading docs: a catch on `${approved == true}` stays parked
+    // after `approved` is set to true, and advances only when this is called. Same
+    // for conditional boundary events, interrupting and not.
+    //
+    // So this is the link that makes conditional events work at all. Without it they
+    // deploy, wait forever, and look exactly like a broken feature — which is the
+    // silent no-op this epic exists to end.
+    Task EvaluateConditionalEventsAsync(string processInstanceId, CancellationToken cancellationToken = default);
+
     // Creates one or more new variables on the running instance. Flowable's
     // REST API splits create vs. update — POST .../variables 409s if any
     // entry already exists, and PUT .../variables 4xxs when one doesn't —

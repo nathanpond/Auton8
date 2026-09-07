@@ -72,6 +72,9 @@ export type WorkflowElementSnapshot = {
   timerDate?: string | null;
   serviceTaskKind?: string | null;
   behaviorKey?: string | null;
+  // #158. `conditionExpression` above carries a conditional event's condition too —
+  // same concept as a sequence flow's, and `type` tells the two apart.
+  cancelActivity?: boolean | null;
 };
 
 export type PrepareWorkflowRequest = {

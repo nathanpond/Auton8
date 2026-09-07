@@ -2467,3 +2467,86 @@ level, though the palette offers it as a process start — relevant to #158 and 
   event-subprocess case to #162). Not fixed inline: it is #158/#162 territory, not
   #160's.
   **Issue:** #158, #162, #107
+
+## /n8-exec M4 — #158, 2026-09-07 — conditional events, and the trigger Flowable does not provide
+
+- **Finding (established by running it, not by reading docs):** Flowable 8.0.0 does
+  **not** re-evaluate conditional events when a variable changes. A catch on
+  `${approved == true}` stays parked after `approved` is set true. Something must
+  call `POST /runtime/process-instances/{id}/evaluate-conditions` — POST, not PUT;
+  PUT answers 500 with "Request method 'PUT' is not supported", which reads like an
+  engine fault rather than a wrong verb. My own plan comment on the issue said PUT
+  and was wrong.
+  **Why it matters:** this is the story's key link. Without it conditional events
+  deploy, wait forever, and are indistinguishable from a broken feature — the exact
+  silent no-op #40 exists to end.
+  **Issue:** #158
+
+- **Decision:** `EvaluateConditionalEventsAsync` is called after every variable
+  write, after every task completion, and after starting an instance.
+  **Why:** those are the three moments a token can arrive somewhere it could already
+  leave. Variable writes alone would have satisfied the AC's demo while leaving two
+  ways to strand a process permanently.
+  **Issue:** #158
+
+- **Decision (AC3):** "A condition already true when reached is handled in a defined,
+  documented way rather than hanging" — Flowable's own answer is that it hangs. It
+  parks at the catch regardless and waits to be asked. That is not a defined
+  behaviour, so it was closed rather than documented, with an E2E proving a process
+  started with its condition already satisfied passes straight through.
+  **Issue:** #158
+
+- **Decision:** both the pre-completion task lookup and the conditional-event nudge
+  are **best-effort**, logged and swallowed.
+  **Why:** found by the full suite — my first cut made `CompleteTaskAsync` throw when
+  the lookup failed, so a lookup hiccup would have started failing task completions.
+  The completion is the user's action; the nudge is our housekeeping. Trading a rare
+  silent hang for a common loud failure is a worse bug than the one being fixed.
+  Three tests pin it: the nudge fires, a failing nudge still completes, and an
+  unreadable task still completes.
+  **Issue:** #158
+
+- **Rule 1 (efficiency defect in my own new code):** the pre-flight lookup first used
+  `GetTaskAsync`, which backfills the instance's display name with a *second* round
+  trip nothing here reads — two extra calls on the task-completion path, not one.
+  Replaced with a minimal read of the task's `processInstanceId`.
+  **Issue:** #158
+
+- **Decision (AC1, conditional start):** a conditional start event at process level
+  is refused at publish with a sentence naming the constraint, and the working
+  event-subprocess case is left to #162. Taken from the two options recorded on the
+  issue; the owner did not respond, and this is the option deliverable now that
+  turns a raw `flowable-start-event-invalid-event-definition` into something an
+  author can act on. #162 is blocked by #158, so waiting would have deadlocked both.
+  **Issue:** #158, #162
+
+- **Decision:** `WorkflowConditionValidation` is a shared check with a public
+  `Check(Site, assigned)` entry point, and the reuse is asserted by comparing the
+  *message text* the sequence-flow path and the conditional-event path produce for
+  the same mistake.
+  **Why:** AC8 asks that reuse cannot silently become a copy. Two implementations
+  drift in wording long before they drift in behaviour, so wording is the sensitive
+  detector.
+  **Issue:** #158, #159, #163
+
+- **Decision:** the unset-variable tracer is deliberately generous — script bodies,
+  service task result variables, data objects, multi-instance element variables,
+  call activity output targets.
+  **Why:** AC9 makes the false-positive guard the binding constraint. Every source
+  missed becomes a warning on a correct diagram, and a few of those are all it takes
+  for authors to stop reading warnings — at which point the real one is invisible
+  too. Cost of being generous is a missed warning; cost of being strict is a useless
+  feature.
+  **Issue:** #158
+
+- **Ratchet lowered 104 → 103.** The conditional-event modal used `Radio`, which was
+  imported and unused. The project rule is that the budget tracks reality downward
+  only, so `package.json` and the skill's quoted number moved together (the verify
+  script cross-checks them).
+  **Issue:** #158
+
+- **Skill:** `add-bpmn-element` gained load-bearing fact 5 — *a behaviour class is
+  not the same as a trigger*. #103's inventory says conditional events execute, and
+  they do; they just never fire on their own. The inventory structurally cannot catch
+  this, because a process parked forever looks identical to one correctly waiting.
+  **Issue:** #158, #174

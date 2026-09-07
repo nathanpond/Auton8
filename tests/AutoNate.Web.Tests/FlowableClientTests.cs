@@ -6,6 +6,7 @@ using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
 using AutoNate.Web.Services.Flowable;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -167,7 +168,7 @@ public sealed class FlowableClientTests
         Assert.Equal("inst-1", summary.Id);
         Assert.Equal("pd-1", summary.ProcessDefinitionId);
 
-        var sent = Assert.Single(stub.Requests);
+        var sent = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances");
         Assert.Contains("\"processDefinitionKey\":\"my_flow\"", sent.Body);
         // No variables provided — empty variables array.
         Assert.Contains("\"variables\":[]", sent.Body);
@@ -184,7 +185,7 @@ public sealed class FlowableClientTests
             "my_flow",
             variables: new Dictionary<string, object?> { ["foo"] = 42, ["bar"] = "baz" });
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances").Body!;
         Assert.Contains("\"name\":\"foo\"", body);
         Assert.Contains("\"value\":42", body);
         Assert.Contains("\"name\":\"bar\"", body);
@@ -201,7 +202,7 @@ public sealed class FlowableClientTests
 
         var summary = await client.StartProcessInstanceAsync("my_flow", name: "Lead Qualification (3)");
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances").Body!;
         Assert.Contains("\"name\":\"Lead Qualification (3)\"", body);
         Assert.Equal("Lead Qualification (3)", summary.Name);
     }
@@ -215,7 +216,7 @@ public sealed class FlowableClientTests
 
         await client.StartProcessInstanceAsync("my_flow");
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances").Body!;
         // Body should not include a top-level name field at all when null.
         Assert.DoesNotContain("\"name\"", body);
     }
@@ -436,7 +437,7 @@ public sealed class FlowableClientTests
 
         await client.CompleteTaskAsync("t-1");
 
-        var sent = Assert.Single(stub.Requests);
+        var sent = RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-1");
         Assert.Contains("\"action\":\"complete\"", sent.Body);
         Assert.Contains("\"variables\":[]", sent.Body);
     }
@@ -450,7 +451,7 @@ public sealed class FlowableClientTests
         await client.CompleteTaskAsync("t-2",
             new Dictionary<string, object?> { ["approved"] = true });
 
-        var body = Assert.Single(stub.Requests).Body!;
+        var body = RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-2").Body!;
         Assert.Contains("\"name\":\"approved\"", body);
         Assert.Contains("\"value\":true", body);
     }
@@ -1170,14 +1171,98 @@ public sealed class FlowableClientTests
         Assert.Contains("AutoNate script task capability probe", ex.Message);
     }
 
+    // --- #158: the conditional-event nudge ------------------------------------
+
+    [Fact]
+    public async Task CompleteTaskAsync_AsksTheEngineToReevaluateConditions()
+    {
+        // Flowable does not re-evaluate conditional events when a token moves, so
+        // completing a task can land a process on a catch whose condition is already
+        // true and leave it there forever. This is the call that prevents it.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/runtime/tasks/t-9",
+            new { id = "t-9", processInstanceId = "pi-9" });
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-9", HttpStatusCode.OK);
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/process-instances/pi-9/evaluate-conditions", HttpStatusCode.OK);
+
+        await client.CompleteTaskAsync("t-9");
+
+        var evaluated = RequestFor(stub, HttpMethod.Post, "service/runtime/process-instances/pi-9/evaluate-conditions");
+        Assert.NotNull(evaluated);
+
+        // After the completion, not before: evaluating first would evaluate a world
+        // the completion had not yet changed.
+        var completedAt = stub.Requests.ToList().FindIndex(r =>
+            r.Method == HttpMethod.Post && r.Url.EndsWith("service/runtime/tasks/t-9", StringComparison.Ordinal));
+        var evaluatedAt = stub.Requests.ToList().FindIndex(r =>
+            r.Url.EndsWith("evaluate-conditions", StringComparison.Ordinal));
+        Assert.True(completedAt < evaluatedAt, "Conditions were evaluated before the task was completed.");
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_StillCompletes_WhenTheNudgeFails()
+    {
+        // The nudge is housekeeping; the completion is the user's action. Reporting
+        // failure for work that succeeded would be a worse bug than the one the
+        // nudge prevents, so a failing evaluate must not propagate.
+        var (client, stub) = CreateClient();
+        stub.WhenJson(HttpMethod.Get, "service/runtime/tasks/t-10",
+            new { id = "t-10", processInstanceId = "pi-10" });
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-10", HttpStatusCode.OK);
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/process-instances/pi-10/evaluate-conditions",
+            HttpStatusCode.InternalServerError);
+
+        // The assertion is the absence of a throw.
+        await client.CompleteTaskAsync("t-10");
+
+        Assert.NotNull(RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-10"));
+    }
+
+    [Fact]
+    public async Task CompleteTaskAsync_StillCompletes_WhenTheTaskCannotBeRead()
+    {
+        // The pre-flight lookup exists only to enable the nudge. If it fails we lose
+        // the nudge, not the completion — otherwise a lookup hiccup would start
+        // failing task completions, trading a rare silent hang for a common loud
+        // failure.
+        var (client, stub) = CreateClient();
+        stub.WhenStatus(HttpMethod.Get, "service/runtime/tasks/t-11", HttpStatusCode.InternalServerError);
+        stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-11", HttpStatusCode.OK);
+
+        await client.CompleteTaskAsync("t-11");
+
+        Assert.NotNull(RequestFor(stub, HttpMethod.Post, "service/runtime/tasks/t-11"));
+        Assert.DoesNotContain(stub.Requests, r => r.Url.EndsWith("evaluate-conditions", StringComparison.Ordinal));
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    /// <summary>
+    /// The one request whose URL ends with <paramref name="path"/> and whose method
+    /// matches.
+    /// </summary>
+    /// <remarks>
+    /// #158 gave both <c>CompleteTaskAsync</c> and <c>StartProcessInstanceAsync</c>
+    /// a second call — a task lookup before completing, and a conditional-event
+    /// nudge afterwards — so <c>Assert.Single(stub.Requests)</c> no longer says what
+    /// these tests mean. Selecting the request under test keeps them about the body
+    /// they were written to pin, and leaves the extra calls to the tests that
+    /// actually assert on them.
+    /// </remarks>
+    private static StubHttpMessageHandler.RecordedRequest RequestFor(StubHttpMessageHandler stub, HttpMethod method, string path) =>
+        Assert.Single(stub.Requests, request =>
+            request.Method == method && request.Url.EndsWith(path, StringComparison.Ordinal));
 
     private static (FlowableClient client, StubHttpMessageHandler stub) CreateClient()
     {
         var stub = new StubHttpMessageHandler();
         var http = new HttpClient(stub) { BaseAddress = new Uri(BaseAddress) };
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var client = new FlowableClient(http, Options.Create(new FlowableOptions { BaseUrl = BaseAddress }), cache);
+        var client = new FlowableClient(
+            http,
+            Options.Create(new FlowableOptions { BaseUrl = BaseAddress }),
+            cache,
+            NullLogger<FlowableClient>.Instance);
         return (client, stub);
     }
 }

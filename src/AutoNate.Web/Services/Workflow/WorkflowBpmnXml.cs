@@ -347,8 +347,19 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildRecordTypeFilterMisplacementErrors(document));
             // #107: silence becomes a refusal with a reason.
             errors.AddRange(BuildUnsupportedElementErrors(document, support ?? BpmnSupportManifest.Default));
+            // #158: a conditional start event is legal only inside an event
+            // subprocess. Flowable rejects it anywhere else with a parse error an
+            // author cannot act on, so say what the constraint is instead.
+            errors.AddRange(BuildConditionalStartPlacementErrors(document));
+
+            // #158: every condition in the diagram, through the one shared check.
+            // Sequence flows included, so exclusive and inclusive gateways benefit
+            // here rather than in a story of their own.
+            var conditions = WorkflowConditionValidation.CheckDocument(document);
+            errors.AddRange(conditions.Errors);
 
             var warnings = new List<string>();
+            warnings.AddRange(conditions.Warnings);
             warnings.AddRange(BuildGatewayWarnings(document));
 
             return new WorkflowBpmnValidationResult(errors, warnings);
@@ -596,6 +607,62 @@ public static partial class WorkflowBpmnXml
             {
                 ApplyServiceTaskSnapshot(element, snapshot);
             }
+
+            // #158. Not `else if` — a boundary event is both a conditional event
+            // and, potentially, something else the chain above handled.
+            if (element.Element(BpmnNamespace + "conditionalEventDefinition") is not null)
+            {
+                ApplyConditionalEventSnapshot(element, snapshot);
+            }
+        }
+    }
+
+    // #158: the condition an author wrote, plus whether a boundary event
+    // interrupts.
+    //
+    // One handler for all three placements — intermediate catch, boundary, and the
+    // event-subprocess start (#162) — because the condition is the same element in
+    // each and BPMN spells it the same way. `cancelActivity` is meaningful only on
+    // a boundary event; writing it elsewhere would be noise in the XML.
+    private static void ApplyConditionalEventSnapshot(XElement eventElement, WorkflowElementSnapshot snapshot)
+    {
+        var definition = eventElement.Element(BpmnNamespace + "conditionalEventDefinition");
+        if (definition is null)
+        {
+            return;
+        }
+
+        if (snapshot.ConditionExpression is not null)
+        {
+            var condition = definition.Element(BpmnNamespace + "condition");
+            if (string.IsNullOrWhiteSpace(snapshot.ConditionExpression))
+            {
+                // An empty condition is refused at publish rather than written as
+                // an empty element that never evaluates.
+                condition?.Remove();
+            }
+            else
+            {
+                if (condition is null)
+                {
+                    condition = new XElement(BpmnNamespace + "condition");
+                    definition.Add(condition);
+                }
+
+                // Flowable reads the condition body; the xsi:type is what marks it
+                // a formal expression, exactly as sequence flow conditions do.
+                condition.SetAttributeValue(XsiNamespace + "type", "bpmn:tFormalExpression");
+                condition.Value = snapshot.ConditionExpression;
+            }
+        }
+
+        if (snapshot.CancelActivity is { } cancelActivity
+            && string.Equals(eventElement.Name.LocalName, "boundaryEvent", StringComparison.Ordinal))
+        {
+            // Written explicitly in both directions. BPMN defaults cancelActivity
+            // to true when absent, so leaving it off to mean "interrupting" would
+            // make a non-interrupting event impossible to turn back.
+            eventElement.SetAttributeValue("cancelActivity", cancelActivity ? "true" : "false");
         }
     }
 
@@ -1529,6 +1596,49 @@ public static partial class WorkflowBpmnXml
         return errors;
     }
 
+
+    // #158: `EventSubProcessConditionalStartEventActivityBehavior` is the only
+    // conditional start behaviour Flowable 8.0.0 ships, and its own validator
+    // rejects a process-level conditional start with
+    // `flowable-start-event-invalid-event-definition` — a message that tells an
+    // author nothing about what to do.
+    //
+    // The element is fine; where the studio lets you put it is the problem. So this
+    // refuses the invalid placement and names the constraint, rather than marking
+    // the element unrunnable in the manifest — which would be wrong in the other
+    // direction and would block #162's event-subprocess work.
+    private static IReadOnlyList<string> BuildConditionalStartPlacementErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var definition in document.Descendants(BpmnNamespace + "conditionalEventDefinition"))
+        {
+            var start = definition.Parent;
+            if (start is null || start.Name != BpmnNamespace + "startEvent") continue;
+
+            // An event subprocess is a subProcess carrying triggeredByEvent, which
+            // is the one container where this start event is legal.
+            var container = start.Parent;
+            var inEventSubProcess = container is not null
+                && container.Name == BpmnNamespace + "subProcess"
+                && string.Equals(
+                    container.Attribute("triggeredByEvent")?.Value,
+                    "true",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (inEventSubProcess) continue;
+
+            var label = start.Attribute("name")?.Value ?? start.Attribute("id")?.Value ?? "(unnamed)";
+            errors.Add(
+                $"Conditional start event '{label}' cannot start a process. BPMN allows a " +
+                "conditional start event only inside an event subprocess, where it reacts to a " +
+                "condition becoming true while the process is already running. To start a " +
+                "process when a condition holds, start it another way and wait on an " +
+                "intermediate catch conditional event instead.");
+        }
+
+        return errors;
+    }
 
     private static IReadOnlyList<string> BuildGatewayWarnings(XDocument document)
     {

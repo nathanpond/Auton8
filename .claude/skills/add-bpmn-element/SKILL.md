@@ -18,6 +18,7 @@ recognisable half-wired failure:
 | The manifest entry | Element works and the studio still calls it "coming soon" |
 | Validation | Misconfiguration fails at runtime, on whoever ran the process |
 | Fixture | #103's inventory has a verdict with no evidence behind it |
+| The wake-up trigger | Element deploys, waits correctly, and never resumes (load-bearing fact 5) |
 
 **The silent no-op is the failure this epic exists to end.** An element that deploys
 and does nothing is worse than one that refuses, because nobody finds out until a
@@ -96,6 +97,27 @@ does not block the API. A test that posts an invalid diagram to `/publish` and e
 a 4xx **passes with a 200 deploy**, which is the exact silent-no-op-shaped test
 failure this skill exists to prevent. Write endpoint-level validation tests against
 `/prepare`.
+
+**5. A behaviour class is not the same as a trigger.** #158 found this the hard
+way, and it is the newest way to ship a silent no-op. Flowable has
+`IntermediateCatchConditionalEventActivityBehavior` and
+`BoundaryConditionalEventActivityBehavior` — so #103's inventory says conditional
+events execute, and they do. They still never fire, because **Flowable does not
+re-evaluate conditional events when a variable changes.** Something has to call
+`POST /runtime/process-instances/{id}/evaluate-conditions` (POST, not PUT — PUT
+returns a 500 reading "Request method 'PUT' is not supported", which looks like an
+engine fault rather than a wrong verb).
+
+So for any element that *waits*, ask the third question: **what makes it wake up,
+and does Auton8 do that?** The inventory cannot answer it — deploying and starting
+proves instantiation, and a process parked forever looks identical to one that is
+correctly waiting. `IFlowableClient.EvaluateConditionalEventsAsync` is called after
+every variable write, after every task completion, and after starting an instance;
+those are the three moments a token can arrive somewhere it could already leave.
+
+The test that catches this is behavioural and cannot be faked: change the world from
+outside the process and assert it moved. See
+`tests/AutoNate.E2E.Tests/ConditionalEventExecutionTests.cs`.
 
 ## Steps in order
 
@@ -241,9 +263,12 @@ that is where most of the value is.
 - [ ] Configuration round-trips through save and reload
 - [ ] Misconfiguration is refused at `/prepare`, naming the element
 - [ ] A fixture backs the inventory row
-- [ ] A test asserts behaviour, not deployment
+- [ ] A test asserts behaviour, not deployment — and for anything that waits, that it *resumes*
 - [ ] **This skill is corrected for anything it got wrong, in this PR** — and if it needed no change, the completion comment says so explicitly
-- [ ] `npm run lint` passes without raising `--max-warnings` (currently 104 — a ratchet)
+- [ ] `npm run lint` passes without raising `--max-warnings` (currently 103 — a
+      ratchet). If your story consumes a warning, **lower it to the new count in the
+      same commit**: the budget tracks reality downward only. #158 took it 104 → 103
+      by using an import that was sitting unused.
 - [ ] Full backend suite passes (`cd infra && docker compose -p infra up -d postgres nats nats-init redis`)
 
 ## Worked example

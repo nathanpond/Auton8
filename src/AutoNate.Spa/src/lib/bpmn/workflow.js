@@ -1044,6 +1044,7 @@ function describeBusinessObject(businessObject) {
   const signal = describeSignalStartEvent(businessObject);
   const timer = describeTimerStartEvent(businessObject);
   const timerCatch = describeTimerIntermediateCatchEvent(businessObject);
+  const conditionalEvent = describeConditionalEvent(businessObject);
   const serviceTask = describeServiceTask(businessObject);
   const description = {
     id: businessObject.id,
@@ -1092,6 +1093,17 @@ function describeBusinessObject(businessObject) {
     // different $type values), so the studio can route on whichever is set.
     description.timerDuration = timerCatch.timerDuration;
     description.timerDate = timerCatch.timerDate;
+  }
+
+  if (conditionalEvent) {
+    // #158. Merged only when the element actually carries a conditional event
+    // definition — see describeConditionalEvent for why the key must be absent
+    // rather than null on everything else.
+    //
+    // conditionExpression is deliberately the same key sequence flows use: it is
+    // the same concept, and $type separates the two.
+    description.conditionExpression = conditionalEvent.conditionExpression;
+    description.cancelActivity = conditionalEvent.cancelActivity;
   }
 
   if (serviceTask) {
@@ -1239,6 +1251,40 @@ function describeTimerIntermediateCatchEvent(businessObject) {
     : null;
 
   return { timerDuration: duration, timerDate: date };
+}
+
+// #158: the condition on a conditional event, in all three placements —
+// intermediate catch, boundary, and the event-subprocess start (#162).
+//
+// Returns null for anything without a conditionalEventDefinition, so the key is
+// ABSENT rather than null on other elements. That is load-bearing:
+// onRequestConfigure routes on $type plus key presence, and an unconditional
+// `conditionExpression` here would send every intermediate catch event to the
+// conditional modal, including the timer ones.
+function describeConditionalEvent(businessObject) {
+  if (!businessObject) return null;
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const conditionalEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:ConditionalEventDefinition"
+  );
+  if (!conditionalEventDefinition) {
+    return null;
+  }
+
+  const condition = conditionalEventDefinition.condition;
+  return {
+    conditionExpression: typeof condition?.body === "string" ? condition.body : null,
+    // Only a boundary event interrupts. BPMN defaults cancelActivity to true when
+    // the attribute is absent, so the default here has to match or a
+    // non-interrupting event would read back as interrupting.
+    cancelActivity:
+      businessObject.$type === "bpmn:BoundaryEvent"
+        ? businessObject.cancelActivity !== false
+        : null
+  };
 }
 
 function describeTimerStartEvent(businessObject) {
@@ -1697,6 +1743,64 @@ export function updateTimerIntermediateCatchEventProperties(modelerHandle, paylo
   modeling.updateProperties(element, {
     name: normalizeOptionalString(payload.name)
   });
+}
+
+// #158: writes the condition, and on a boundary event whether it interrupts.
+//
+// One function for all three placements. The $type assertion accepts the set BPMN
+// allows a conditional event definition on, and the definition check is what makes
+// the error useful — telling an author to drop the right element rather than
+// reporting that something generic failed.
+export function updateConditionalEventProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the conditional event.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  const businessObject = element?.businessObject;
+  const allowedTypes = ["bpmn:IntermediateCatchEvent", "bpmn:BoundaryEvent", "bpmn:StartEvent"];
+  if (!businessObject || !allowedTypes.includes(businessObject.$type)) {
+    throw new Error(`Conditional event '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const conditionalEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:ConditionalEventDefinition"
+  );
+  if (!conditionalEventDefinition) {
+    throw new Error(
+      `'${payload.id}' is not a conditional event — drop a conditional event from the palette instead.`
+    );
+  }
+
+  const expression = normalizeOptionalString(payload.conditionExpression);
+
+  // updateModdleProperties rather than assigning the property directly: it always
+  // pushes a command onto the stack, so the studio's dirty flag flips and the edit
+  // survives a reload. Assigning straight to the moddle object looks identical in
+  // the editor and is silently lost.
+  modeling.updateModdleProperties(element, conditionalEventDefinition, {
+    condition: expression
+      ? moddle.create("bpmn:FormalExpression", { body: expression })
+      : undefined
+  });
+
+  const properties = { name: normalizeOptionalString(payload.name) };
+
+  // Only a boundary event interrupts, and it is written explicitly in both
+  // directions: BPMN treats an absent cancelActivity as true, so omitting it to
+  // mean "interrupting" would make non-interrupting impossible to undo.
+  if (businessObject.$type === "bpmn:BoundaryEvent" && typeof payload.cancelActivity === "boolean") {
+    properties.cancelActivity = payload.cancelActivity;
+  }
+
+  modeling.updateProperties(element, properties);
 }
 
 export function updateServiceTaskProperties(modelerHandle, payload) {

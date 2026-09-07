@@ -178,6 +178,32 @@ public sealed class ExecutionEndpointsTests
     }
 
     [Fact]
+    public async Task AddProcessVariables_AsksTheEngineToReevaluateConditions()
+    {
+        // The add path is a separate endpoint from the update path — Flowable's
+        // REST API splits create and update — so it needs its own assertion or the
+        // two drift.
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        (await client.GetAsync("/api/executions/")).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/inst-eval/variables",
+            new ExecutionEndpoints.UpdateProcessVariablesRequest(new[]
+            {
+                new ProcessVariableUpdate { Name = "approved", Value = true, Type = "boolean" }
+            }));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        var calls = factory.FlowableStub.Calls;
+        var added = calls.IndexOf("AddVariables:inst-eval");
+        var evaluated = calls.IndexOf("EvaluateConditionalEvents:inst-eval");
+        Assert.True(evaluated >= 0, "The conditional events were never re-evaluated after the write.");
+        Assert.True(added < evaluated, "Conditions were evaluated before the variable was written.");
+    }
+
+    [Fact]
     public async Task UpdateProcessVariables_Returns204AndCallsClient()
     {
         await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
@@ -194,6 +220,20 @@ public sealed class ExecutionEndpointsTests
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Contains("UpdateVariables:inst-vars", factory.FlowableStub.Calls);
+
+        // #158: and the engine is asked to re-evaluate conditional events, in that
+        // order. Flowable does not do it on a variable change, so without this a
+        // process parked on `${approved == true}` stays parked after someone sets
+        // approved here — the feature looks broken and nothing says why.
+        //
+        // Asserted as an ORDER, not just presence: evaluating before the write
+        // would evaluate the old values and be silently useless.
+        var calls = factory.FlowableStub.Calls;
+        var wrote = calls.IndexOf("UpdateVariables:inst-vars");
+        var evaluated = calls.IndexOf("EvaluateConditionalEvents:inst-vars");
+        Assert.True(evaluated >= 0, "The conditional events were never re-evaluated after the write.");
+        Assert.True(wrote < evaluated, "Conditions were evaluated before the variable was written.");
+
         Assert.True(factory.FlowableStub.VariableUpdatesByInstance.TryGetValue("inst-vars", out var captured));
         Assert.Equal(2, captured!.Count);
         Assert.Equal("amount", captured[0].Name);

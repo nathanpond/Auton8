@@ -336,6 +336,18 @@ internal sealed class StubFlowableClient : IFlowableClient
             : (IReadOnlyList<string>)Array.Empty<string>());
     }
 
+    // #158. Recorded rather than ignored: the tests that matter here assert this
+    // was called AFTER a variable write, because Flowable does not re-evaluate
+    // conditional events on its own and a process parked on an already-true
+    // condition is indistinguishable from a broken feature.
+    public Task EvaluateConditionalEventsAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"EvaluateConditionalEvents:{processInstanceId}");
+        return Task.CompletedTask;
+    }
+
     public Task UpdateProcessVariablesAsync(
         string processInstanceId,
         IReadOnlyList<ProcessVariableUpdate> updates,

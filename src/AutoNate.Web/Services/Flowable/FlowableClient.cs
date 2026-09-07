@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using AutoNate.Web.Configuration;
 using AutoNate.Web.Models;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AutoNate.Web.Services.Flowable;
@@ -14,7 +15,8 @@ namespace AutoNate.Web.Services.Flowable;
 public sealed class FlowableClient(
     HttpClient httpClient,
     IOptions<FlowableOptions> options,
-    IMemoryCache cache) : IFlowableClient
+    IMemoryCache cache,
+    ILogger<FlowableClient> logger) : IFlowableClient
 {
     private const int WorkflowExecutionQuerySize = 200;
     private const int WorkflowExecutionActivityQuerySize = 2000;
@@ -36,6 +38,7 @@ public sealed class FlowableClient(
     private readonly HttpClient _httpClient = httpClient;
     private readonly FlowableOptions _options = options.Value;
     private readonly IMemoryCache _cache = cache;
+    private readonly ILogger<FlowableClient> _logger = logger;
 
     public async Task<WorkflowDeploymentInfo> DeployProcessAsync(WorkflowModel model, CancellationToken cancellationToken = default)
     {
@@ -172,6 +175,22 @@ public sealed class FlowableClient(
         await EnsureSuccessAsync(response, "start the process instance");
 
         var responsePayload = await DeserializeAsync<FlowableProcessInstanceResponse>(response, cancellationToken);
+
+        // #158: a process whose first wait is a conditional catch, started with the
+        // condition already satisfied, parks there and never moves — Flowable does
+        // not evaluate conditional events on its own at any point. This closes the
+        // one remaining way to strand an instance the moment it begins.
+        //
+        // Skipped when the instance already finished, which is the common case for
+        // a process with no wait states at all.
+        // Best-effort for the same reason as above: the instance has started, and
+        // reporting a start failure for a successful start would be worse than a
+        // conditional event waiting one beat longer.
+        if (!string.IsNullOrWhiteSpace(responsePayload.Id) && responsePayload.Ended != true)
+        {
+            await TryEvaluateConditionalEventsAsync(responsePayload.Id, cancellationToken);
+        }
+
         return new FlowableProcessInstanceSummary
         {
             Id = responsePayload.Id ?? string.Empty,
@@ -1093,6 +1112,16 @@ public sealed class FlowableClient(
 
     public async Task CompleteTaskAsync(string taskId, IReadOnlyDictionary<string, object?>? variables = null, CancellationToken cancellationToken = default)
     {
+        // #158: read the task before completing it, so we still know which instance
+        // it belonged to — completing removes the runtime task, so afterwards there
+        // is nothing left to ask.
+        //
+        // Best-effort, and that is the important part. This lookup exists only to
+        // enable the conditional-event nudge below; it must never be the reason a
+        // completion fails. Making the user's action depend on our housekeeping
+        // would trade a rare silent hang for a common loud failure.
+        var processInstanceId = await TryReadProcessInstanceIdAsync(taskId, cancellationToken);
+
         using var response = await _httpClient.PostAsJsonAsync(
             $"service/runtime/tasks/{Uri.EscapeDataString(taskId)}",
             new
@@ -1103,6 +1132,78 @@ public sealed class FlowableClient(
             cancellationToken);
 
         await EnsureSuccessAsync(response, "complete the user task");
+
+        // Completing moves the token, which may land it on a conditional catch whose
+        // condition is ALREADY true. Flowable parks there regardless and waits to be
+        // asked — verified against 8.0.0 — so ask.
+        //
+        // Also best-effort: the task IS complete by now, and throwing here would
+        // report failure for work that succeeded.
+        if (!string.IsNullOrWhiteSpace(processInstanceId))
+        {
+            await TryEvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Which instance a runtime task belongs to, or null if that cannot be learned.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="GetTaskAsync"/>, which backfills the instance's
+    /// display name with a second round trip. Nothing here reads that name, and
+    /// this sits on the task-completion path — one call, not two.
+    /// </remarks>
+    private async Task<string?> TryReadProcessInstanceIdAsync(
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"service/runtime/tasks/{Uri.EscapeDataString(taskId)}",
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var task = await DeserializeAsync<FlowableTaskResponse>(response, cancellationToken);
+            return string.IsNullOrWhiteSpace(task?.ProcessInstanceId) ? null : task.ProcessInstanceId;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(
+                exception,
+                "Could not read task {TaskId} before completing it; conditional events will not be re-evaluated for its process.",
+                taskId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Nudges the engine to re-check conditional events, swallowing failure.
+    /// </summary>
+    /// <remarks>
+    /// Used where the caller's real work has already succeeded. The cost of a
+    /// missed nudge is a process that waits until the next variable write; the cost
+    /// of throwing is telling the caller their completed action failed.
+    /// </remarks>
+    private async Task TryEvaluateConditionalEventsAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EvaluateConditionalEventsAsync(processInstanceId, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Could not re-evaluate conditional events for process instance {ProcessInstanceId}. A conditional event waiting on an already-true condition will stay parked until the next variable change.",
+                processInstanceId);
+        }
     }
 
     public async Task UpdateTaskAssigneeAsync(string taskId, string? assignee, CancellationToken cancellationToken = default)
@@ -1186,6 +1287,21 @@ public sealed class FlowableClient(
             cancellationToken);
 
         await EnsureSuccessAsync(response, "create the process variables");
+    }
+
+    // #158. POST, not PUT — the resource rejects PUT with "Request method 'PUT' is
+    // not supported", which is a 500 rather than a 405 and so reads like an engine
+    // fault rather than a wrong verb. Verified against Flowable 8.0.0.
+    public async Task EvaluateConditionalEventsAsync(
+        string processInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/evaluate-conditions",
+            new { },
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, "evaluate the conditional events");
     }
 
     public async Task MoveWorkflowExecutionStateAsync(
@@ -1624,6 +1740,11 @@ public sealed class FlowableClient(
         public bool Suspended { get; init; }
 
         public string? StartUserId { get; init; }
+
+        // #158: Flowable reports whether the instance finished during the start
+        // call. A process with no wait states ends immediately, and asking it to
+        // evaluate conditional events afterwards is a wasted round trip at best.
+        public bool? Ended { get; init; }
     }
 
     // Trimmed-down execution row for the runtime executions listing — only

@@ -291,12 +291,12 @@
     {
       "name": "Intermediate Catch (Conditional)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "conditional",
       "reason": null,
-      "evidence": "deployed and started"
+      "evidence": "deployed, started, and advanced by an explicit evaluate-conditions call (#158)"
     },
     {
       "name": "Intermediate Catch (Link)",
@@ -341,12 +341,12 @@
     {
       "name": "Conditional Boundary",
       "category": "Boundary Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "conditional",
       "reason": null,
-      "evidence": "deployed and started"
+      "evidence": "deployed, started, and advanced by an explicit evaluate-conditions call (#158)"
     },
     {
       "name": "Error Boundary",
