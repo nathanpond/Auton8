@@ -75,6 +75,12 @@ export type WorkflowElementSnapshot = {
   // #158. `conditionExpression` above carries a conditional event's condition too —
   // same concept as a sequence flow's, and `type` tells the two apart.
   cancelActivity?: boolean | null;
+  // #157. Distinct from timerDuration/timerDate/timerCycleCron so a boundary event
+  // cannot route to the start-event or intermediate-catch editors.
+  boundaryTimerDuration?: string | null;
+  boundaryTimerDate?: string | null;
+  boundaryTimerCycle?: string | null;
+  attachedTo?: string | null;
 };
 
 export type PrepareWorkflowRequest = {

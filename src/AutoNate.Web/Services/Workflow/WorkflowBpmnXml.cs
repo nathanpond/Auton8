@@ -351,6 +351,8 @@ public static partial class WorkflowBpmnXml
             // subprocess. Flowable rejects it anywhere else with a parse error an
             // author cannot act on, so say what the constraint is instead.
             errors.AddRange(BuildConditionalStartPlacementErrors(document));
+            // #157: a timer boundary with no time set never fires.
+            errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
 
             // #158: every condition in the diagram, through the one shared check.
             // Sequence flows included, so exclusive and inclusive gateways benefit
@@ -613,6 +615,15 @@ public static partial class WorkflowBpmnXml
             if (element.Element(BpmnNamespace + "conditionalEventDefinition") is not null)
             {
                 ApplyConditionalEventSnapshot(element, snapshot);
+            }
+
+            // #157: a timer boundary event. Matched on boundaryEvent PLUS a timer
+            // definition so it cannot claim the conditional boundary events above,
+            // nor the timer start and intermediate catch handlers earlier.
+            if (string.Equals(element.Name.LocalName, "boundaryEvent", StringComparison.Ordinal) &&
+                element.Element(BpmnNamespace + "timerEventDefinition") is not null)
+            {
+                ApplyTimerBoundaryEventSnapshot(element, snapshot);
             }
         }
     }
@@ -1607,6 +1618,102 @@ public static partial class WorkflowBpmnXml
     // refuses the invalid placement and names the constraint, rather than marking
     // the element unrunnable in the manifest — which would be wrong in the other
     // direction and would block #162's event-subprocess work.
+    // #157: the three timer kinds a boundary event can carry, plus whether it
+    // interrupts.
+    //
+    // Established against a live engine rather than assumed: a timer boundary does
+    // NOT require `flowable:async` on the activity it is attached to. Four such
+    // timers fired correctly on plain user tasks with no async anywhere, so nothing
+    // here sets it.
+    private static void ApplyTimerBoundaryEventSnapshot(XElement boundaryElement, WorkflowElementSnapshot snapshot)
+    {
+        var timer = boundaryElement.Element(BpmnNamespace + "timerEventDefinition");
+        if (timer is null)
+        {
+            return;
+        }
+
+        var duration = NullIfBlank(snapshot.BoundaryTimerDuration);
+        var date = NullIfBlank(snapshot.BoundaryTimerDate);
+        var cycle = NullIfBlank(snapshot.BoundaryTimerCycle);
+
+        // Only rewrite when the snapshot actually carries one. A snapshot with all
+        // three absent describes some other element and must not blank this one.
+        if (duration is not null || date is not null || cycle is not null)
+        {
+            // Clear every kind first. Flowable rejects a definition carrying two,
+            // and a stale timeCycle beside a new timeDuration is a valid-looking
+            // diagram that behaves unpredictably.
+            timer.Element(BpmnNamespace + "timeDuration")?.Remove();
+            timer.Element(BpmnNamespace + "timeDate")?.Remove();
+            timer.Element(BpmnNamespace + "timeCycle")?.Remove();
+
+            var (name, value) = duration is not null
+                ? ("timeDuration", duration)
+                : date is not null
+                    ? ("timeDate", date)
+                    : ("timeCycle", cycle!);
+
+            timer.Add(new XElement(
+                BpmnNamespace + name,
+                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                value));
+        }
+
+        if (snapshot.CancelActivity is { } cancelActivity)
+        {
+            // Written explicitly in both directions: BPMN defaults an absent
+            // cancelActivity to true, so leaving it off to mean "interrupting"
+            // would make a non-interrupting timer impossible to turn back.
+            boundaryElement.SetAttributeValue("cancelActivity", cancelActivity ? "true" : "false");
+        }
+    }
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // #157: a timer boundary event carrying no time is a hang.
+    //
+    // It deploys cleanly, produces no job, and simply never fires — so the author
+    // sees an activity that waits forever with nothing to show why. Epic #40's rule
+    // is that a hang is a defect rather than a documented behaviour, so this is
+    // refused at publish.
+    private static IReadOnlyList<string> BuildTimerBoundaryEventValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var boundary in document.Descendants(BpmnNamespace + "boundaryEvent"))
+        {
+            var timer = boundary.Element(BpmnNamespace + "timerEventDefinition");
+            if (timer is null) continue;
+
+            var kinds = new[] { "timeDuration", "timeDate", "timeCycle" }
+                .Select(name => timer.Element(BpmnNamespace + name))
+                .Where(element => element is not null && !string.IsNullOrWhiteSpace(element.Value))
+                .ToArray();
+
+            var label = boundary.Attribute("name")?.Value ?? boundary.Attribute("id")?.Value ?? "(unnamed)";
+
+            if (kinds.Length == 0)
+            {
+                errors.Add(
+                    $"Timer boundary event '{label}' has no time set. Give it a duration " +
+                    "(PT15M), a date (2026-12-31T09:00:00) or a repeating cycle (R3/PT1H) — " +
+                    "without one it deploys, never fires, and the activity it guards waits forever.");
+            }
+            else if (kinds.Length > 1)
+            {
+                // Flowable rejects this at deployment with a parse error that names
+                // the definition rather than the event, which is not actionable.
+                errors.Add(
+                    $"Timer boundary event '{label}' sets more than one kind of time. " +
+                    "Choose a duration, a date or a cycle — not several.");
+            }
+        }
+
+        return errors;
+    }
+
     private static IReadOnlyList<string> BuildConditionalStartPlacementErrors(XDocument document)
     {
         var errors = new List<string>();

@@ -2677,3 +2677,50 @@ Run while M4 was being executed, so the slate was live. Deltas only.
 
 - **Housekeeping:** all five project invariants in CLAUDE.md carry `test-enforced:`
   annotations, so no guard stories were needed.
+
+## /n8-exec M4 — #157, 2026-09-07 — timer boundary events
+
+- **Finding (established by running it):** a timer boundary event does **not** require
+  `flowable:async` on the activity it guards. Four such timers on plain user tasks
+  with no async anywhere all fired correctly against Flowable 8.0.0. The AC asked for
+  this "documented rather than left as folklore"; the answer is that there is no trap,
+  so the studio sets nothing.
+  **Issue:** #157
+
+- **Finding:** `R3/PT1S` fires exactly three times and stops; completing the guarded
+  activity removes the timer *job* rather than merely not firing it; deleting the
+  instance removes pending timers. All three asserted on the observable consequence
+  one step further out than the AC's wording required, because "nothing happened yet"
+  is true of any duration long enough.
+  **Issue:** #157
+
+- **Decision (owner's fix-hangs policy):** a timer boundary with **no time set** and
+  one setting **two kinds** are both refused at publish rather than documented. The
+  first deploys, produces no job, and leaves the guarded activity waiting forever; the
+  second is rejected by Flowable with a parse error naming the definition rather than
+  the event, which an author cannot act on.
+  **Issue:** #157, #40
+
+- **Decision:** three new snapshot fields (`BoundaryTimerDuration`,
+  `BoundaryTimerDate`, `BoundaryTimerCycle`) rather than reusing the existing timer
+  fields.
+  **Why:** `describeBusinessObject`'s output *is* the snapshot wire format and the
+  studio routes on `$type` plus key presence, so reusing them would send a timer
+  boundary to whichever of the start-event or intermediate-catch editors matched
+  first. This is the skill's worked example's own advice, followed.
+  **Issue:** #157
+
+- **Method note:** my first probe read said the timers had not fired after 6 seconds.
+  That was wrong — I queried before the job executor's poll cycle, and the `PT30S` job
+  I inspected was not due. Re-reading a moment later showed all three had fired.
+  "Timers do not work" would have been an expensive conclusion to act on, and the only
+  thing that caught it was re-reading rather than reporting the first observation.
+  **Issue:** #157
+
+- **Skill:** the worked example is written for this story and needed two corrections —
+  step 5 said to append `bool? CancelActivity`, which #158 had already added, and the
+  N×N clearing count moved 12 → 14. SKILL.md's load-bearing fact 5 gained the contrast
+  that matters: conditional events have a behaviour class and never fire on their own,
+  while **timers wake themselves** through the job executor. "What makes it wake up?"
+  has two different answers.
+  **Issue:** #157, #174

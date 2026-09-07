@@ -119,6 +119,12 @@ The test that catches this is behavioural and cannot be faked: change the world 
 outside the process and assert it moved. See
 `tests/AutoNate.E2E.Tests/ConditionalEventExecutionTests.cs`.
 
+**Not every waiting element has this problem, so check rather than assume.** #157
+established that timers *wake themselves* — the job executor polls for due jobs, and a
+timer boundary fires with no `flowable:async` on the activity it guards. Conditional
+events sit at the other end: a behaviour class, and no trigger at all. Ask which kind
+your element is.
+
 ## Steps in order
 
 ### 1. Move it in the support manifest — one edit
@@ -240,7 +246,7 @@ forbids.
 **The state clearing is N×N, not 1×N.** Clear every other editor in your branch —
 *and* add `set<YourEditor>(null)` to every existing branch, including `selectWorkflow`.
 Grep for an existing `set*Editor(null)` and match its occurrence count exactly — it
-was 12 at the time of writing and it moves.
+was 12 when written, 14 after #157, and it moves with every editor added.
 
 Mantine v9 only. `Tooltip` from `@mantine/core`, never a native `title`. Toasts through
 `toast` from `@/components/notifications/toast` — importing `@mantine/notifications`

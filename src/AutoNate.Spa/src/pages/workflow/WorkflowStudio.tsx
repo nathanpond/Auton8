@@ -170,6 +170,19 @@ type TimerIntermediateValueKind = "literal" | "expression";
 // intermediate catch, boundary, and the event-subprocess start (#162) — because the
 // thing being edited is the same condition in each. `interrupting` is meaningful
 // only on a boundary event and is null elsewhere.
+// #157. A timer boundary carries all three timer kinds; the start-event editor
+// knows only cycle and the intermediate-catch editor only duration and date.
+type TimerBoundaryEventEditor = {
+  id: string;
+  name: string;
+  mode: "duration" | "date" | "cycle";
+  duration: string;
+  date: string;
+  cycle: string;
+  interrupting: boolean;
+  attachedTo: string | null;
+};
+
 type ConditionalEventEditor = {
   id: string;
   type: string;
@@ -264,6 +277,13 @@ type ElementSelection = {
   // key's ABSENCE is what keeps timer intermediate catch events out of the
   // conditional editor, since onRequestConfigure routes on $type plus key presence.
   cancelActivity?: boolean | null;
+  // #157. Present only on a boundary event carrying a timer definition — their
+  // ABSENCE is what keeps conditional boundary events out of the timer editor,
+  // since both kinds carry cancelActivity.
+  boundaryTimerDuration?: string | null;
+  boundaryTimerDate?: string | null;
+  boundaryTimerCycle?: string | null;
+  attachedTo?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -404,6 +424,8 @@ export default function WorkflowStudio() {
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
   const [conditionalEventEditor, setConditionalEventEditor] =
     useState<ConditionalEventEditor | null>(null);
+  const [timerBoundaryEditor, setTimerBoundaryEditor] =
+    useState<TimerBoundaryEventEditor | null>(null);
 
   const sortedWorkflows = useMemo(
     () => [...workflows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
@@ -430,6 +452,42 @@ export default function WorkflowStudio() {
 
   const onRequestConfigure = useCallback((raw: unknown) => {
     const selection = raw as ElementSelection;
+    // #157. Before the conditional branch: both boundary shapes carry
+    // cancelActivity, and only the timer one carries the boundaryTimer* keys, so
+    // presence of those is what tells them apart.
+    const isTimerBoundary =
+      !!selection &&
+      selection.type === "bpmn:BoundaryEvent" &&
+      ("boundaryTimerDuration" in selection ||
+        "boundaryTimerDate" in selection ||
+        "boundaryTimerCycle" in selection);
+    if (isTimerBoundary && selection) {
+      const duration = (selection.boundaryTimerDuration ?? "").trim();
+      const date = (selection.boundaryTimerDate ?? "").trim();
+      const cycle = (selection.boundaryTimerCycle ?? "").trim();
+      setTimerBoundaryEditor({
+        id: selection.id,
+        name: selection.name ?? "",
+        // Default to duration for a freshly dropped event, which is the common case.
+        mode: cycle ? "cycle" : date ? "date" : "duration",
+        duration,
+        date,
+        cycle,
+        interrupting: selection.cancelActivity !== false,
+        attachedTo: selection.attachedTo ?? null
+      });
+      setConditionalEventEditor(null);
+      setTimerStartEditor(null);
+      setSignalStartEditor(null);
+      setScriptTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setTimerIntermediateEditor(null);
+      setServiceTaskEditor(null);
+      setGatewayEditor(null);
+      setGenericEditor(null);
+      return;
+    }
     // #158. First branch, because a conditional BOUNDARY event is the one shape no
     // other branch below claims — and routing on $type alone would send every
     // intermediate catch event here, timer ones included. describeConditionalEvent
@@ -487,6 +545,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
       return;
     }
     const isTimerStart =
@@ -523,6 +582,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
       return;
     }
     const isSignalStart =
@@ -557,6 +617,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
       return;
     }
     const isServiceTask =
@@ -583,6 +644,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
       return;
     }
     if (selection && selection.type === "bpmn:ScriptTask") {
@@ -607,6 +669,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -624,6 +687,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     } else if (
       selection &&
       (selection.type === "bpmn:ExclusiveGateway" || selection.type === "bpmn:InclusiveGateway")
@@ -654,6 +718,7 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -692,6 +757,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     } else if (selection) {
       setGenericEditor({
         id: selection.id,
@@ -717,6 +783,7 @@ export default function WorkflowStudio() {
       setGatewayEditor(null);
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     }
   }, []);
 
@@ -768,6 +835,7 @@ export default function WorkflowStudio() {
     setGatewayEditor(null);
     setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     // Fire-and-forget audit ping. The studio reuses one workflow list call
     // for the whole session, so without this the audit log would only ever
     // see the list-view event; this ensures one ModelViewed event per
@@ -1013,6 +1081,37 @@ export default function WorkflowStudio() {
       setTimerIntermediateEditor(null);
     });
 
+  const applyTimerBoundary = () =>
+    runBusy("applying timer boundary event changes", async () => {
+      if (!handle || !timerBoundaryEditor) {
+        throw new Error("Select a timer boundary event before applying changes.");
+      }
+
+      const { mode, duration, date, cycle } = timerBoundaryEditor;
+      const value = (mode === "duration" ? duration : mode === "date" ? date : cycle).trim();
+      if (!value) {
+        // Refused here as well as at publish: a timer with no time deploys, never
+        // fires, and the activity it guards waits forever.
+        throw new Error(
+          mode === "duration"
+            ? "Enter a duration (e.g. PT15M) before applying."
+            : mode === "date"
+              ? "Enter a date/time (e.g. 2026-12-31T09:00:00) before applying."
+              : "Enter a repeating cycle (e.g. R3/PT1H) before applying."
+        );
+      }
+
+      await workflow.updateTimerBoundaryEventProperties(handle, {
+        id: timerBoundaryEditor.id,
+        name: timerBoundaryEditor.name,
+        boundaryTimerDuration: mode === "duration" ? value : "",
+        boundaryTimerDate: mode === "date" ? value : "",
+        boundaryTimerCycle: mode === "cycle" ? value : "",
+        cancelActivity: timerBoundaryEditor.interrupting
+      });
+      setTimerBoundaryEditor(null);
+    });
+
   const applyConditionalEvent = () =>
     runBusy("applying conditional event changes", async () => {
       if (!handle || !conditionalEventEditor) {
@@ -1036,6 +1135,7 @@ export default function WorkflowStudio() {
             : conditionalEventEditor.interrupting
       });
       setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     });
 
   const applyServiceTask = () =>
@@ -1067,6 +1167,7 @@ export default function WorkflowStudio() {
       });
       setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
     });
 
   const applyGateway = () =>
@@ -1464,6 +1565,19 @@ export default function WorkflowStudio() {
         />
       )}
 
+      {timerBoundaryEditor && (
+        <TimerBoundaryEventModal
+          editor={timerBoundaryEditor}
+          onChange={setTimerBoundaryEditor}
+          onClose={() => {
+            if (busy) return;
+            setTimerBoundaryEditor(null);
+          }}
+          onApply={applyTimerBoundary}
+          disabled={!!busy || !handle}
+        />
+      )}
+
       {conditionalEventEditor && (
         <ConditionalEventModal
           editor={conditionalEventEditor}
@@ -1471,6 +1585,7 @@ export default function WorkflowStudio() {
           onClose={() => {
             if (busy) return;
             setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
           }}
           onApply={applyConditionalEvent}
           disabled={!!busy || !handle}
@@ -1511,6 +1626,7 @@ export default function WorkflowStudio() {
             if (busy) return;
             setGenericEditor(null);
     setConditionalEventEditor(null);
+    setTimerBoundaryEditor(null);
           }}
           onApply={applyGeneric}
           disabled={!!busy || !handle}
@@ -3927,6 +4043,117 @@ function UserTaskModal({
 // disagreeing on 47 of them — 22 shown as "coming soon" that deployed unhindered, and
 // 25 refused at runtime that the engine runs. Adding support for an element is now
 // one edit to `src/shared/bpmn-support.json`, and this panel follows.
+// #157. The timer boundary editor.
+//
+// Three kinds, one at a time — Flowable rejects a definition carrying two, so the
+// picker is a radio rather than three independent fields. What the editor adds over
+// three text boxes is the interrupting choice, worded as what it does to the work
+// rather than as the BPMN attribute name.
+function TimerBoundaryEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: TimerBoundaryEventEditor;
+  onChange: (next: TimerBoundaryEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const value =
+    editor.mode === "duration" ? editor.duration : editor.mode === "date" ? editor.date : editor.cycle;
+
+  const field = {
+    duration: {
+      label: "Duration",
+      description: "An ISO-8601 duration measured from when the activity starts.",
+      placeholder: "PT15M"
+    },
+    date: {
+      label: "Date and time",
+      description: "A fixed moment. The timer fires then, whatever the activity is doing.",
+      placeholder: "2026-12-31T09:00:00"
+    },
+    cycle: {
+      label: "Repeating cycle",
+      description: "An ISO-8601 repeating interval. Bound the repeats, or it fires forever.",
+      placeholder: "R3/PT1H"
+    }
+  }[editor.mode];
+
+  return (
+    <Modal opened onClose={onClose} title="Timer Boundary Event" size="lg">
+      <Stack gap="md">
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(event) => onChange({ ...editor, name: event.currentTarget.value })}
+          placeholder="Escalate after 15 minutes"
+        />
+
+        <Radio.Group
+          label="When it fires"
+          value={editor.mode}
+          onChange={(mode) =>
+            onChange({ ...editor, mode: mode as TimerBoundaryEventEditor["mode"] })
+          }
+        >
+          <Stack gap="xs" mt="xs">
+            <Radio value="duration" label="After a period of time" />
+            <Radio value="date" label="At a specific date and time" />
+            <Radio value="cycle" label="Repeatedly, on a cycle" />
+          </Stack>
+        </Radio.Group>
+
+        <TextInput
+          label={field.label}
+          description={field.description}
+          value={value}
+          placeholder={field.placeholder}
+          onChange={(event) => {
+            const next = event.currentTarget.value;
+            onChange({
+              ...editor,
+              duration: editor.mode === "duration" ? next : editor.duration,
+              date: editor.mode === "date" ? next : editor.date,
+              cycle: editor.mode === "cycle" ? next : editor.cycle
+            });
+          }}
+        />
+
+        <Radio.Group
+          label="When it fires, what happens to the activity?"
+          value={editor.interrupting ? "interrupt" : "continue"}
+          onChange={(choice) => onChange({ ...editor, interrupting: choice === "interrupt" })}
+        >
+          <Stack gap="xs" mt="xs">
+            <Radio value="interrupt" label="Cancel it and take the timer's path instead" />
+            <Radio value="continue" label="Leave it running and take the timer's path as well" />
+          </Stack>
+        </Radio.Group>
+
+        {editor.mode === "cycle" && editor.interrupting && (
+          <Alert color="yellow" variant="light" title="A repeating timer that interrupts fires once">
+            Cancelling the activity removes the timer with it, so the remaining repeats
+            never happen. Repeating timers are usually left non-interrupting.
+          </Alert>
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || value.trim().length === 0}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 // #158. One editor for every conditional event placement.
 //
 // The condition is a raw expression, matching how exclusive gateways already work

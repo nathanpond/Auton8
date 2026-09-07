@@ -104,14 +104,23 @@ they also push a `name` update.
 
 ## 5. Snapshot fields
 
-`WorkflowElementSnapshot.cs` — the timer fields exist already (`TimerCycleCron`,
-`TimerEndDate`, `TimerDuration`, `TimerDate`). Append one:
+**Corrected 2026-09-07, when #157 shipped.** `bool? CancelActivity` was already
+appended by #158 for conditional boundary events — do not add it again.
+
+The timer fields that exist (`TimerCycleCron`, `TimerEndDate`, `TimerDuration`,
+`TimerDate`) are **not** reusable here, for the same reason the describe helpers are
+not: `describeBusinessObject`'s output *is* the snapshot wire format, and the studio
+routes on `$type` plus key presence. Reusing them would send a timer boundary to
+whichever of the start-event or intermediate-catch editors matched first. #157
+appended three of its own:
 
 ```csharp
-bool? CancelActivity = null);
+string? BoundaryTimerDuration = null,
+string? BoundaryTimerDate = null,
+string? BoundaryTimerCycle = null);
 ```
 
-Append only — the record is positional.
+Append only — the record is positional, and existing callers bind by position.
 
 ## 6. Apply
 
@@ -183,3 +192,27 @@ if #103 has not landed you are creating that directory.
 
 **This example was written from reading the code, not from doing the work.** #157
 carries an AC to correct it against what was actually required; #174 consolidates.
+
+---
+
+## What #157 actually found (2026-09-07)
+
+**A timer boundary does NOT require `flowable:async` on the activity it guards.**
+This was the story's open question and the answer is measured, not assumed: four
+timer boundary events on plain user tasks with no `async` anywhere all fired
+correctly against Flowable 8.0.0. Nothing in the studio sets it, and there is no trap
+to document.
+
+That is worth contrasting with SKILL.md's load-bearing fact 5. Conditional events
+have a behaviour class and still never fire on their own; **timers wake themselves**,
+because the engine's job executor polls for due jobs. So "what makes it wake up?" has
+two different answers depending on whether the element schedules a job or waits to be
+asked — check which before assuming either.
+
+**A timer boundary with no time set is a hang**, so #157 refuses it at publish rather
+than documenting it, per epic #40's rule. Same for one setting two kinds, which
+Flowable rejects at deployment with a parse error that names the definition rather
+than the event.
+
+**The N×N clearing count is now 14**, not the 12 SKILL.md quoted when it was written.
+It moves with every editor added; grep and match, never trust the number.

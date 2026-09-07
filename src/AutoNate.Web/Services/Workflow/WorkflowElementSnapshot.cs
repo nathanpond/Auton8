@@ -28,7 +28,17 @@ public sealed record class WorkflowElementSnapshot(
     // rather than a new field: it is the same concept, and the studio routes on
     // $type plus key presence, so a sequence flow and an intermediate catch event
     // cannot be confused.
-    bool? CancelActivity = null);
+    bool? CancelActivity = null,
+    // #157. Appended, never inserted — positional record.
+    //
+    // Separate from TimerDuration/TimerDate/TimerCycleCron rather than reusing them:
+    // describeBusinessObject's output IS the snapshot wire format, and the studio
+    // routes on $type PLUS key presence. Reusing the start-event and
+    // intermediate-catch keys would send a timer boundary to whichever of those
+    // editors matched first.
+    string? BoundaryTimerDuration = null,
+    string? BoundaryTimerDate = null,
+    string? BoundaryTimerCycle = null);
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr

@@ -1045,6 +1045,7 @@ function describeBusinessObject(businessObject) {
   const timer = describeTimerStartEvent(businessObject);
   const timerCatch = describeTimerIntermediateCatchEvent(businessObject);
   const conditionalEvent = describeConditionalEvent(businessObject);
+  const timerBoundary = describeTimerBoundaryEvent(businessObject);
   const serviceTask = describeServiceTask(businessObject);
   const description = {
     id: businessObject.id,
@@ -1104,6 +1105,17 @@ function describeBusinessObject(businessObject) {
     // the same concept, and $type separates the two.
     description.conditionExpression = conditionalEvent.conditionExpression;
     description.cancelActivity = conditionalEvent.cancelActivity;
+  }
+
+  if (timerBoundary) {
+    // #157. Only present on a boundary event carrying a timer definition, so the
+    // keys are ABSENT on conditional boundary events — which is what keeps the two
+    // boundary editors apart, since both carry cancelActivity.
+    description.boundaryTimerDuration = timerBoundary.boundaryTimerDuration;
+    description.boundaryTimerDate = timerBoundary.boundaryTimerDate;
+    description.boundaryTimerCycle = timerBoundary.boundaryTimerCycle;
+    description.cancelActivity = timerBoundary.cancelActivity;
+    description.attachedTo = timerBoundary.attachedTo;
   }
 
   if (serviceTask) {
@@ -1284,6 +1296,45 @@ function describeConditionalEvent(businessObject) {
       businessObject.$type === "bpmn:BoundaryEvent"
         ? businessObject.cancelActivity !== false
         : null
+  };
+}
+
+// #157: a timer boundary event's time and whether it interrupts.
+//
+// Neither existing timer helper is reusable. describeTimerStartEvent returns null
+// unless $type is bpmn:StartEvent and reads only timeCycle;
+// describeTimerIntermediateCatchEvent is gated on bpmn:IntermediateCatchEvent and
+// reads only duration and date. A boundary event needs all three kinds and is a
+// third $type, so this is a third helper.
+//
+// The keys are deliberately NOT timerDuration/timerDate/timerCycleCron: those are
+// what routes the other two editors, and onRequestConfigure routes on $type plus
+// key presence.
+function describeTimerBoundaryEvent(businessObject) {
+  if (!businessObject || businessObject.$type !== "bpmn:BoundaryEvent") {
+    return null;
+  }
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const timerEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:TimerEventDefinition"
+  );
+  if (!timerEventDefinition) {
+    return null;
+  }
+
+  const body = (expression) => (typeof expression?.body === "string" ? expression.body : null);
+
+  return {
+    boundaryTimerDuration: body(timerEventDefinition.timeDuration),
+    boundaryTimerDate: body(timerEventDefinition.timeDate),
+    boundaryTimerCycle: body(timerEventDefinition.timeCycle),
+    // BPMN treats an absent cancelActivity as true, so the default here has to
+    // match or a non-interrupting timer reads back as interrupting.
+    cancelActivity: businessObject.cancelActivity !== false,
+    attachedTo: typeof businessObject.attachedToRef?.id === "string" ? businessObject.attachedToRef.id : null
   };
 }
 
@@ -1801,6 +1852,57 @@ export function updateConditionalEventProperties(modelerHandle, payload) {
   }
 
   modeling.updateProperties(element, properties);
+}
+
+// #157: writes the timer boundary's time and whether it interrupts.
+export function updateTimerBoundaryEventProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the timer boundary event.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:BoundaryEvent") {
+    throw new Error(`Timer boundary event '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const eventDefinitions = Array.isArray(element.businessObject.eventDefinitions)
+    ? element.businessObject.eventDefinitions
+    : [];
+  const timerEventDefinition = eventDefinitions.find(
+    (definition) => definition && definition.$type === "bpmn:TimerEventDefinition"
+  );
+  if (!timerEventDefinition) {
+    throw new Error(
+      `Boundary event '${payload.id}' is not a timer boundary event — drop a timer boundary event from the palette instead.`
+    );
+  }
+
+  const duration = normalizeOptionalString(payload.boundaryTimerDuration);
+  const date = normalizeOptionalString(payload.boundaryTimerDate);
+  const cycle = normalizeOptionalString(payload.boundaryTimerCycle);
+
+  // Clear every kind before setting one. Flowable rejects a definition carrying
+  // two, and a stale timeCycle beside a new timeDuration behaves unpredictably.
+  //
+  // updateModdleProperties rather than direct assignment: it always pushes a
+  // command, so the studio's dirty flag flips and the edit survives a reload. The
+  // older timer functions get away with assignment only because they also push a
+  // name update.
+  modeling.updateModdleProperties(element, timerEventDefinition, {
+    timeDuration: duration ? moddle.create("bpmn:FormalExpression", { body: duration }) : undefined,
+    timeDate: !duration && date ? moddle.create("bpmn:FormalExpression", { body: date }) : undefined,
+    timeCycle: !duration && !date && cycle ? moddle.create("bpmn:FormalExpression", { body: cycle }) : undefined
+  });
+
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name),
+    // A standard BPMN attribute, so it goes through modeling rather than $attrs.
+    cancelActivity: payload.cancelActivity !== false
+  });
 }
 
 export function updateServiceTaskProperties(modelerHandle, payload) {
