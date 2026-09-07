@@ -2550,3 +2550,41 @@ level, though the palette offers it as a process start — relevant to #158 and 
   they do; they just never fire on their own. The inventory structurally cannot catch
   this, because a process parked forever looks identical to one correctly waiting.
   **Issue:** #158, #174
+
+## /n8-exec M4 — #155, 2026-09-07 — complex gateway: no seam exists
+
+- **Blocker:** Spike #155 closes **blocked**. Flowable 8.0.0 has no extension point
+  that can attach a behaviour to `bpmn:complexGateway`, so #165's premise — a custom
+  `ActivityBehavior` registered through the existing factory — cannot be built.
+  **Evidence, all from the running engine:** `ActivityBehaviorFactory` has no
+  `createComplexGatewayActivityBehavior` hook (gateway hooks are Exclusive,
+  Inclusive, Parallel, EventBased). Both parse-handler routes were tried and neither
+  fires; the control — the same handler registered for `ComplexGateway` *and*
+  `UserTask`, deployed in one diagram — fired for the user task and never for the
+  gateway, which is what makes it conclusive rather than suggestive. The element
+  deploys 201 and is walked past: with `${count >= 2}` and `count = 0` the token
+  still proceeded, so the activation condition is not evaluated at all.
+  **Question for the owner:** withdraw it (one manifest edit, #107's mechanism,
+  recommended), fork the parse layer, or emulate with an inclusive gateway (loses the
+  activation condition; rejected in planning).
+  **Holds up:** #165. Marked `blocked` + `needs-owner-action`.
+  **Issue:** #155, #165
+
+- **Note:** unlike the link events of #217, the complex gateway's *model* layer is
+  complete — the type and its XML converter exist and the converter is registered.
+  That is why it warranted a spike where link events did not, and it is also why the
+  failure is subtler: the element survives into the model and is then never
+  dispatched to any handler.
+  **Issue:** #155
+
+- **Environment:** the spike rebuilt the Flowable image twice with probe code and
+  once more to restore it. `flowable-extension/` is byte-identical to its committed
+  state, `mvn test` passes, and the probe deployments were deleted from the engine.
+  **Issue:** #155
+
+- **Observation for #191/#214 (filed as a comment there, not fixed here):** the
+  engine is holding 374 deployments, including leftovers from this session's own E2E
+  runs (`cond_catch_*`, `cond_bnd_*`). The suite leaks Flowable deployments as well
+  as databases, schemas and roles — worth folding into "everything the suite
+  creates".
+  **Issue:** #191, #214
