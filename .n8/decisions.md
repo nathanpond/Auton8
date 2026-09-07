@@ -2770,3 +2770,29 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   applying at every depth is the ordinary flat `Descendants` case and needs none of
   the scope-container machinery the validation section describes.
   **Issue:** #161, #174
+
+## /n8-exec M4 — #167, 2026-09-07 — BLOCKER: a manual task does not wait
+
+- **Blocker:** three of #167's acceptance criteria describe a feature BPMN does not
+  have. A manual task is a **pass-through** — `ManualTaskActivityBehavior` is 488
+  bytes and the spec says a manual task is work performed outside the system with no
+  engine involvement. Verified by running one: the process went straight through the
+  manual task and the throw event to the user task beyond, creating no task and
+  pausing nowhere.
+  **Invalidates:** AC1 ("pauses until someone marks it done"), AC3 ("appears in the
+  task list... completing it advances the process"), AC6 ("completing is gated and
+  audited like a user task").
+  **Confirmed working:** AC4 — intermediate throw (none) passes straight through.
+  **Question for the owner:** (A) ship it as BPMN defines it, a documented
+  pass-through, dropping AC1/AC3/AC6 under the epic's "implemented or closed with the
+  reason it will not be" clause — my recommendation; (B) make manual tasks wait by
+  implementing them as something else under the hood, which delivers all six ACs and
+  **breaches epic #40's AC6**, "no BPMN execution semantics are implemented in
+  Auton8"; (C) withdraw Manual Task from scope and keep only the throw-none half.
+  **Why not decided alone:** unlike #161's correction — where the fix was to *not*
+  refuse something that works — the two ways forward here sit on opposite sides of an
+  invariant the epic states in writing. That is a conversation, not a judgment call.
+  **Holds up:** #167 only. Nothing in M4 depends on it.
+  **Not half-built:** the throw-none half was left unimplemented too, since both
+  elements map to this story and shipping one would leave the manifest half-moved.
+  **Issue:** #167, #40
