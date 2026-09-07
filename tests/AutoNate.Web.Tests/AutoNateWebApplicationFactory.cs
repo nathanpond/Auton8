@@ -159,10 +159,22 @@ internal sealed class AutoNateWebApplicationFactory : WebApplicationFactory<Prog
 
     public override async ValueTask DisposeAsync()
     {
-        await base.DisposeAsync();
-        if (_ownsDatabase)
+        // #191: the database drop must happen even when the base disposal throws.
+        //
+        // It used to run after `await base.DisposeAsync()` with nothing between them,
+        // so anything the host tore down badly stranded the database — and a stranded
+        // database is invisible until someone counts them, which is how the suite
+        // reached 1,680.
+        try
         {
-            await _database.DisposeAsync();
+            await base.DisposeAsync();
+        }
+        finally
+        {
+            if (_ownsDatabase)
+            {
+                await _database.DisposeAsync();
+            }
         }
     }
 }

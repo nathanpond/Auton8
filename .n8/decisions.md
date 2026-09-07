@@ -2975,3 +2975,39 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   complement, because `CompletedActivityIds` is built by excluding the cancelled set
   so an activity wrongly missing from one silently appears in the other.
   **Issue:** #177, #174
+
+## /n8-exec M4 — #191, 2026-09-07 — the test-database leak
+
+- **The backlog was real and larger than the story knew: 1,680** leaked
+  `autonate_test_*` databases in the shared Postgres. Now 0.
+  **Issue:** #191
+
+- **Root cause (Rule 1):** `AutoNateWebApplicationFactory.DisposeAsync` called
+  `await base.DisposeAsync()` and *then* dropped the database, with nothing between
+  them — so anything the host threw on teardown stranded it, invisibly. Now
+  try/finally, with a test that forces a double disposal and asserts the database is
+  gone regardless.
+  **Issue:** #191
+
+- **Decision:** liveness is decided by a **creation timestamp stamped as a database
+  comment** at create. Postgres records no creation time, and AC3 is explicit that a
+  sweep which cannot tell live from stranded is worse than the leak — it would drop a
+  database out from under a running class and the failure would look like a random
+  flake elsewhere. A database with **no** comment predates this change and cannot
+  belong to a live run, which is exactly how the 1,680 cleared on first contact.
+  Candidates are additionally required to have no active connections, and an
+  unparseable stamp is treated as live rather than as garbage: being wrong that way
+  costs disk, the other way costs a running test.
+  **Issue:** #191
+
+- **Bug I introduced and fixed before shipping:** the first version ran the sweep from
+  a `[ModuleInitializer]`. That **hung the test run** — a module initializer executes
+  while the assembly loads, during xunit discovery, and blocking there on async I/O
+  deadlocks before a single test reports. Caught because the verification run timed
+  out at ten minutes with the planted databases untouched, rather than because
+  anything failed. Replaced with a gate on the first database creation, which runs in
+  a normal async context and which every leak-capable test passes through by
+  definition.
+  **Then the threading analyzer rejected my second attempt too** — `Lazy<Task>.Value`
+  (VSTHRD011) is the same deadlock class. Replaced with a `SemaphoreSlim` gate.
+  **Issue:** #191
