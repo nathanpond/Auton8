@@ -162,6 +162,33 @@ identity are marked on the diagram.
 > arrives with the first permission-gated helper. An unenforced property here
 > is deliberate, not a bug.
 
+> ### Upgrading: workflows authored before the sandbox
+>
+> Script tasks used to run in the Flowable JVM with an `execution` object
+> bound. They now run in the sandbox, where the binding is `variables`
+> (#147). **A workflow published before that change keeps its old script and
+> fails on its next run** — the publish-time check below protects new
+> authoring, not diagrams that are already deployed.
+>
+> Find them before they bite:
+>
+> ```
+> GET /api/workflows/legacy-scripts
+> ```
+>
+> It lists every saved model whose script tasks use a removed shape, naming the
+> model, the script task and the replacement, and marks which are already
+> published — those are the urgent ones. The same scan runs at startup and logs
+> a warning when anything matches, so an upgrade surfaces this without anyone
+> going looking.
+>
+> There is deliberately **no automatic rewrite**. `execution.setVariable(a, b)`
+> maps cleanly to `variables.set(a, b)`, but rewriting author code
+> unattended is a bigger decision than this note, and a script that fails
+> loudly is better than one silently changed into something its author did not
+> write. Edit each task in the studio; the test-run panel will confirm it
+> before you publish.
+
 **Shapes rejected at publish time.** These fail in the sandbox anyway, but
 publish-time rejection turns a runtime failure on whoever happened to run the
 process into a message the author can act on. The list is generated from

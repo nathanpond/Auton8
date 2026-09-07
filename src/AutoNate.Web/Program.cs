@@ -263,6 +263,8 @@ builder.Services.AddSingleton<RecordTypeShortCodeCache>();
 builder.Services.AddSingleton<IRecordTypeShortCodeResolver>(
     sp => sp.GetRequiredService<RecordTypeShortCodeCache>());
 builder.Services.AddHostedService<RecordTypeShortCodeCacheInitializer>();
+// #194: warn at startup when saved workflows use the API #147 removed.
+builder.Services.AddHostedService<AutoNate.Web.Services.Workflow.LegacyScriptStartupWarning>();
 builder.Services.AddSingleton<WorkflowSignalDispatcher>();
 builder.Services.AddDaprPubSubClient((sp, b) =>
 {
