@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" xmlns:autonate="http://autonate.dev/workflows" targetNamespace="http://autonate.dev/workflows">
+<message id="Msg1" name="msg1"/>
+<collaboration id="c"><participant id="p1" name="A" processRef="col_messageflow"/><participant id="p2" name="B"/><messageFlow id="mf" sourceRef="p1" targetRef="p2" messageRef="Msg1"/></collaboration>
+<process id="col_messageflow" name="col_messageflow" isExecutable="true">
+  <startEvent id="s"/>
+  <sequenceFlow id="f1" sourceRef="s" targetRef="e"/>
+  <endEvent id="e"/>
+</process>
+</definitions>

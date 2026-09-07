@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" xmlns:autonate="http://autonate.dev/workflows" targetNamespace="http://autonate.dev/workflows">
+<process id="mk_compensation" name="mk_compensation" isExecutable="true">
+  <startEvent id="s"/>
+  <sequenceFlow id="f1" sourceRef="s" targetRef="t"/>
+  <userTask id="t" name="T"/>
+  <sequenceFlow id="f2" sourceRef="t" targetRef="e"/>
+  <endEvent id="e"/>
+  <boundaryEvent id="cb" attachedToRef="t"><compensateEventDefinition/></boundaryEvent>
+  <userTask id="m" name="Undo" isForCompensation="true"/>
+  <association id="a1" sourceRef="cb" targetRef="m" associationDirection="One"/>
+</process>
+</definitions>

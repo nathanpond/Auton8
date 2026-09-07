@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" xmlns:autonate="http://autonate.dev/workflows" targetNamespace="http://autonate.dev/workflows">
+<process id="gw_eventbased" name="gw_eventbased" isExecutable="true">
+  <startEvent id="s"/>
+  <sequenceFlow id="f1" sourceRef="s" targetRef="m"/>
+  <eventBasedGateway id="m"/>
+  <sequenceFlow id="f2" sourceRef="m" targetRef="c1"/>
+  <intermediateCatchEvent id="c1"><timerEventDefinition><timeDuration>PT1M</timeDuration></timerEventDefinition></intermediateCatchEvent>
+  <sequenceFlow id="f3" sourceRef="c1" targetRef="e"/>
+  <endEvent id="e"/>
+</process>
+</definitions>

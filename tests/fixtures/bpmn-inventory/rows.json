@@ -1,0 +1,410 @@
+[
+ {
+  "group": "supported",
+  "name": "Start Event (None)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Signal Start Event",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Timer Start Event",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Intermediate Catch (Timer)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "End Event (None)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "End Event (Terminate)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Task (Generic)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "User Task",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Script Task",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Service Task (Behavior)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Exclusive Gateway (XOR)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Inclusive Gateway (OR)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Parallel Gateway (AND)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "supported",
+  "name": "Sequence Flow",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Message Start Event",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Conditional Start Event",
+  "verdict": "fails at deployment",
+  "note": "legal only inside an event subprocess, not at process level"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Error Start Event",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Escalation Start Event",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Compensation Start Event",
+  "verdict": "fails at deployment",
+  "note": "no EventSubProcessCompensationStartEventActivityBehavior; descoped"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Throw (None)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Throw (Message)",
+  "verdict": "fails at deployment",
+  "note": "no behaviour class; validator rejects the definition"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Throw (Signal)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Throw (Escalation)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Throw (Link)",
+  "verdict": "fails at deployment",
+  "note": "no link type in the BPMN model at all (spike #217)"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Throw (Compensation)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Catch (Message)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Catch (Signal)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Catch (Conditional)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Intermediate Catch (Link)",
+  "verdict": "fails at deployment",
+  "note": "no link type in the BPMN model at all (spike #217)"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Message Boundary",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Timer Boundary",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Signal Boundary",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Conditional Boundary",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Error Boundary",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Escalation Boundary",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Cancel Boundary",
+  "verdict": "executes",
+  "note": "BoundaryCancelEventActivityBehavior ships; minimal transaction completed before the cancel applied"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Compensation Boundary",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Message End",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Signal End",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Error End",
+  "verdict": "executes",
+  "note": "raw probe had no catching boundary; a modelling requirement, not an engine gap"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Escalation End",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Cancel End",
+  "verdict": "executes",
+  "note": "CancelEndEventActivityBehavior ships; same fixture limitation"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Compensation End",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Send Task",
+  "verdict": "needs configuration",
+  "note": "flowable-sendtask-invalid-implementation \u2014 needs a type/implementation attribute"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Receive Task",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Manual Task",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Business Rule Task",
+  "verdict": "needs configuration",
+  "note": "NoClassDefFoundError org/kie/api \u2014 rules engine absent from the image (#105)"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Call Activity",
+  "verdict": "executes",
+  "note": "first probe named a callee that did not exist; with a real callee, executes"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Sub-Process (Embedded)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Event Sub-Process",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Transaction",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Ad-Hoc Sub-Process",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Event-Based Gateway",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Complex Gateway",
+  "verdict": "DEPLOYS BUT DOES NOTHING",
+  "note": "no behaviour class; verified at runtime \u2014 token passes straight through, no activation condition, no join"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Loop Marker",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Multi-Instance (Parallel)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Multi-Instance (Sequential)",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Compensation Marker",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Pool / Participant",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Lane",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Message Flow",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Data Object Reference",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Data Store Reference",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Data Input",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Data Output",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Text Annotation",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Group",
+  "verdict": "executes",
+  "note": "deployed and started"
+ },
+ {
+  "group": "coming-soon",
+  "name": "Association",
+  "verdict": "executes",
+  "note": "deployed and started"
+ }
+]

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" xmlns:autonate="http://autonate.dev/workflows" targetNamespace="http://autonate.dev/workflows">
+<dataStore id="ds1" name="DS"/>
+<process id="data_store" name="data_store" isExecutable="true">
+  <dataStoreReference id="m" name="DS" dataStoreRef="ds1"/>
+  <startEvent id="s"/>
+  <sequenceFlow id="f1" sourceRef="s" targetRef="e"/>
+  <endEvent id="e"/>
+</process>
+</definitions>

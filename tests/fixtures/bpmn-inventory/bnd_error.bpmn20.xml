@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:flowable="http://flowable.org/bpmn" xmlns:autonate="http://autonate.dev/workflows" targetNamespace="http://autonate.dev/workflows">
+<error id="Err1" errorCode="E1"/>
+<process id="bnd_error" name="bnd_error" isExecutable="true">
+  <startEvent id="s"/>
+  <sequenceFlow id="f1" sourceRef="s" targetRef="t"/>
+  <userTask id="t" name="T"/>
+  <sequenceFlow id="f2" sourceRef="t" targetRef="e"/>
+  <endEvent id="e"/>
+  <boundaryEvent id="m" attachedToRef="t" cancelActivity="true"><errorEventDefinition errorRef="Err1"/></boundaryEvent>
+  <sequenceFlow id="f3" sourceRef="m" targetRef="e2"/>
+  <endEvent id="e2"/>
+</process>
+</definitions>

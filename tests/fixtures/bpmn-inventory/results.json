@@ -1,0 +1,478 @@
+[
+ {
+  "name": "Start Event (None)",
+  "key": "start_none",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "ccb21177-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Signal Start Event",
+  "key": "start_signal",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cccf5d81-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Timer Start Event",
+  "key": "start_timer",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cce46c2c-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Catch (Timer)",
+  "key": "catch_timer",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "ccf89075-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "End Event (None)",
+  "key": "end_none",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cd1195c0-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "End Event (Terminate)",
+  "key": "end_terminate",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cd26a469-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Task (Generic)",
+  "key": "task_generic",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cd394212-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "User Task",
+  "key": "task_user",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cd4cca1d-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Script Task",
+  "key": "task_script",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cd62c327-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Service Task (Behavior)",
+  "key": "task_service",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cd7d5014-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Exclusive Gateway (XOR)",
+  "key": "gw_exclusive",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cd9da961-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Inclusive Gateway (OR)",
+  "key": "gw_inclusive",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cdb7e82c-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Parallel Gateway (AND)",
+  "key": "gw_parallel",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cdcea487-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Sequence Flow",
+  "key": "seq_flow",
+  "group": "supported",
+  "verdict": "deploys-and-starts",
+  "detail": "cde2a1c2-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Message Start Event",
+  "key": "start_message",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cdf677ec-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Conditional Start Event",
+  "key": "start_conditional",
+  "group": "coming-soon",
+  "verdict": "fails-at-deployment",
+  "detail": "Errors while parsing:\n[Validation set: 'flowable-executable-process' | Problem: 'flowable-start-event-invalid-event-definition'] : Unsupported event definition on start event - [Extra info : processDefinitionId = start_c"
+ },
+ {
+  "name": "Error Start Event",
+  "key": "start_error",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ce0d8267-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Escalation Start Event",
+  "key": "start_escalation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ce22df31-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Compensation Start Event",
+  "key": "start_compensation",
+  "group": "coming-soon",
+  "verdict": "fails-at-deployment",
+  "detail": "Errors while parsing:\n[Validation set: 'flowable-executable-process' | Problem: 'flowable-event-subprocess-invalid-start-event-definition'] : start event of event subprocess must be of type 'error', 'timer', 'message' or"
+ },
+ {
+  "name": "Intermediate Throw (None)",
+  "key": "throw_none",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ce3c339d-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Throw (Message)",
+  "key": "throw_message",
+  "group": "coming-soon",
+  "verdict": "fails-at-deployment",
+  "detail": "Errors while parsing:\n[Validation set: 'flowable-executable-process' | Problem: 'flowable-throw-event-invalid-eventdefinition'] : Unsupported intermediate throw event type - [Extra info : processDefinitionId = throw_mess"
+ },
+ {
+  "name": "Intermediate Throw (Signal)",
+  "key": "throw_signal",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ce52effa-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Throw (Escalation)",
+  "key": "throw_escalation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ce651875-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Throw (Link)",
+  "key": "throw_link",
+  "group": "coming-soon",
+  "verdict": "fails-at-deployment",
+  "detail": "Errors while parsing:\n[Validation set: 'flowable-executable-process' | Problem: 'flowable-intermediate-catch-event-no-eventdefinition'] : No event definition for intermediate catch event  - [Extra info : processDefinitio"
+ },
+ {
+  "name": "Intermediate Throw (Compensation)",
+  "key": "throw_compensation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ce798ae2-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Catch (Message)",
+  "key": "catch_message",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ce8c4f9d-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Catch (Signal)",
+  "key": "catch_signal",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "ceaad427-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Catch (Conditional)",
+  "key": "catch_conditional",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cec5fd51-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Intermediate Catch (Link)",
+  "key": "catch_link",
+  "group": "coming-soon",
+  "verdict": "fails-at-deployment",
+  "detail": "Errors while parsing:\n[Validation set: 'flowable-executable-process' | Problem: 'flowable-intermediate-catch-event-no-eventdefinition'] : No event definition for intermediate catch event  - [Extra info : processDefinitio"
+ },
+ {
+  "name": "Message Boundary",
+  "key": "bnd_message",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cee2860c-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Timer Boundary",
+  "key": "bnd_timer",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cef6aa59-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Signal Boundary",
+  "key": "bnd_signal",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cf099627-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Conditional Boundary",
+  "key": "bnd_conditional",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cf1d1d34-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Error Boundary",
+  "key": "bnd_error",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cf31b6b0-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Escalation Boundary",
+  "key": "bnd_escalation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cf45b3ec-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Cancel Boundary",
+  "key": "bnd_cancel",
+  "group": "coming-soon",
+  "verdict": "deploys-start-fails",
+  "detail": "No execution found for sub process of boundary cancel event m for Execution[ id 'cf5a4d71-aaaa-11f1-8f03-46d859b0fce5' ] - definition 'bnd_cancel:1:cf576737-aaaa-11f1-8f03-46d859b0fce5' - activity 'm'"
+ },
+ {
+  "name": "Compensation Boundary",
+  "key": "bnd_compensation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cf6c9cf8-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Message End",
+  "key": "end_message",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cf8220d2-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Signal End",
+  "key": "end_signal",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cf950c9b-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Error End",
+  "key": "end_error",
+  "group": "coming-soon",
+  "verdict": "deploys-start-fails",
+  "detail": "No catching boundary event found for error with errorCode 'Err1', neither in same process nor in parent process"
+ },
+ {
+  "name": "Escalation End",
+  "key": "end_escalation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cfc0d79d-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Cancel End",
+  "key": "end_cancel",
+  "group": "coming-soon",
+  "verdict": "deploys-start-fails",
+  "detail": "No execution found for sub process of boundary cancel event cb for Execution[ id 'cfdbd9bf-aaaa-11f1-8f03-46d859b0fce5' ] - definition 'end_cancel:1:cfd80925-aaaa-11f1-8f03-46d859b0fce5' - activity 'c"
+ },
+ {
+  "name": "Compensation End",
+  "key": "end_compensation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "cfeb1c06-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Send Task",
+  "key": "task_send",
+  "group": "coming-soon",
+  "verdict": "fails-at-deployment",
+  "detail": "Errors while parsing:\n[Validation set: 'flowable-executable-process' | Problem: 'flowable-sendtask-invalid-implementation'] : One of the attributes 'type' or 'operation' is mandatory on sendTask - [Extra info : processDe"
+ },
+ {
+  "name": "Receive Task",
+  "key": "task_receive",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d0002ab1-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Manual Task",
+  "key": "task_manual",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d012c85a-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Business Rule Task",
+  "key": "task_businessrule",
+  "group": "coming-soon",
+  "verdict": "fails-at-deployment",
+  "detail": "Handler dispatch failed: java.lang.NoClassDefFoundError: org/kie/api/runtime/rule/AgendaFilter"
+ },
+ {
+  "name": "Call Activity",
+  "key": "task_call",
+  "group": "coming-soon",
+  "verdict": "deploys-start-fails",
+  "detail": "Process definition someOtherProcess was not found in sameDeployment[false] tenantId[] fallbackToDefaultTenant[null]"
+ },
+ {
+  "name": "Sub-Process (Embedded)",
+  "key": "sub_embedded",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d0396340-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Event Sub-Process",
+  "key": "sub_event",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d04c00f1-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Transaction",
+  "key": "sub_transaction",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d05ec5ad-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Ad-Hoc Sub-Process",
+  "key": "sub_adhoc",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d071ff9e-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Event-Based Gateway",
+  "key": "gw_eventbased",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d085aeb8-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Complex Gateway",
+  "key": "gw_complex",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d09b80b5-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Loop Marker",
+  "key": "mk_loop",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d0b23d10-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Multi-Instance (Parallel)",
+  "key": "mk_mi_parallel",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d0ce9eba-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Multi-Instance (Sequential)",
+  "key": "mk_mi_sequential",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d0eb9bb5-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Compensation Marker",
+  "key": "mk_compensation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d1000e29-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Pool / Participant",
+  "key": "col_pool",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d1139633-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Lane",
+  "key": "col_lane",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d126f72c-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Message Flow",
+  "key": "col_messageflow",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d137e725-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Data Object Reference",
+  "key": "data_object",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d14a0f9e-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Data Store Reference",
+  "key": "data_store",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d15c3819-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Data Input",
+  "key": "data_input",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d16ed5c2-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Data Output",
+  "key": "data_output",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d181736b-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Text Annotation",
+  "key": "art_annotation",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d1934dc4-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Group",
+  "key": "art_group",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d1a7991d-aaaa-11f1-8f03-46d859b0fce5"
+ },
+ {
+  "name": "Association",
+  "key": "art_association",
+  "group": "coming-soon",
+  "verdict": "deploys-and-starts",
+  "detail": "d1b97376-aaaa-11f1-8f03-46d859b0fce5"
+ }
+]
