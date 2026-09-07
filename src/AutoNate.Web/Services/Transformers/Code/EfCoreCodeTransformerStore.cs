@@ -57,7 +57,6 @@ public sealed class EfCoreCodeTransformerStore(
             Kind = input.Kind,
             Language = input.Language,
             Code = input.Code ?? string.Empty,
-            IsUnsafe = input.IsUnsafe,
             OwnerUserId = actorId,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -103,11 +102,6 @@ public sealed class EfCoreCodeTransformerStore(
         if (input.Code is not null && !string.Equals(entity.Code, input.Code, StringComparison.Ordinal))
         {
             entity.Code = input.Code;
-            changed = true;
-        }
-        if (input.IsUnsafe is { } unsafe_ && entity.IsUnsafe != unsafe_)
-        {
-            entity.IsUnsafe = unsafe_;
             changed = true;
         }
         if (!changed) return entity;

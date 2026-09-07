@@ -658,11 +658,14 @@ public sealed class PipelinesAdminTests : E2ETestBase
         await modal.GetByLabel("Name").FillAsync(name);
         await modal.GetByRole(AriaRole.Button, new() { Name = "Create" }).ClickAsync();
 
-        // After save the modal closes and the new row appears with the
-        // unique name. The DataTable renders "Sandboxed" as a green badge
-        // when is_unsafe = false (the default).
+        // After save the modal closes and the new row appears with the unique
+        // name.
+        //
+        // This used to also assert a "Sandboxed" badge. That column is gone
+        // (#190): with the is_unsafe flag removed there is nothing it could
+        // report but one constant value, and a column that can only say one
+        // thing is noise rather than reassurance.
         await Assertions.Expect(page.GetByText(name).First).ToBeVisibleAsync(new() { Timeout = 15_000 });
-        await Assertions.Expect(page.GetByText("Sandboxed").First).ToBeVisibleAsync();
     }
 
     [Fact]

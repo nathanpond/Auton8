@@ -11,7 +11,6 @@ export type CodeTransformer = {
   kind: CodeTransformerKind;
   language: CodeTransformerLanguage;
   code: string;
-  isUnsafe: boolean;
   ownerUserId: string;
   createdAtUtc: string;
   updatedAtUtc: string;
@@ -23,14 +22,12 @@ export type CreateCodeTransformerRequest = {
   kind: CodeTransformerKind;
   language: CodeTransformerLanguage;
   code: string;
-  isUnsafe: boolean;
 };
 
 export type UpdateCodeTransformerRequest = {
   name?: string;
   description?: string | null;
   code?: string;
-  isUnsafe?: boolean;
 };
 
 const BASE = "/api/code-transformers";

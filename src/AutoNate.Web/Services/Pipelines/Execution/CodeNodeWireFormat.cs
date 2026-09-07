@@ -11,10 +11,6 @@ public sealed record class CodeNodeRequest(
     string Language,         // "js" | "python"
     string Kind,             // "transformer" | "analyzer"
     string Code,
-    // Received by the sidecar and ignored — the full-CPython runner this was
-    // meant to select was never built. Kept on the wire only because the
-    // column and the permission still exist; see #190.
-    bool IsUnsafe,
     IReadOnlyDictionary<string, string> Config,
     IReadOnlyList<CodeNodeFrame> Inputs,
     int TimeoutMs,
@@ -72,7 +68,6 @@ internal static class CodeNodeWireFormat
             language,
             Kind: "scripttask",
             code,
-            IsUnsafe: false,
             Config: new Dictionary<string, string>(StringComparer.Ordinal),
             Inputs: [],
             timeoutMs,
@@ -84,7 +79,6 @@ internal static class CodeNodeWireFormat
         string language,
         string kind,
         string code,
-        bool isUnsafe,
         IReadOnlyDictionary<string, string> config,
         IReadOnlyList<DataFrame> inputs,
         int timeoutMs,
@@ -96,7 +90,7 @@ internal static class CodeNodeWireFormat
                 frame.Rows))
             .ToList();
         return new CodeNodeRequest(
-            CurrentVersion, nodeId, language, kind, code, isUnsafe,
+            CurrentVersion, nodeId, language, kind, code,
             config, wireInputs, timeoutMs, memoryMb);
     }
 

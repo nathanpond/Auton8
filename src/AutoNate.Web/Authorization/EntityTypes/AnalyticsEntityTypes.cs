@@ -111,7 +111,7 @@ public static class AnalyticsEntityTypes
         actions: new[]
         {
             Actions.List, Actions.View, Actions.Create, Actions.Edit, Actions.Delete,
-            Actions.Run, Actions.ExecuteUnsafe
+            Actions.Run
         },
         tags: Array.Empty<string>());
 
@@ -122,7 +122,7 @@ public static class AnalyticsEntityTypes
         actions: new[]
         {
             Actions.List, Actions.View, Actions.Create, Actions.Edit, Actions.Delete,
-            Actions.Run, Actions.ExecuteUnsafe
+            Actions.Run
         },
         tags: Array.Empty<string>());
 
