@@ -15,7 +15,7 @@ recognisable half-wired failure:
 | Key merged unconditionally | Elements sharing that `$type` misroute to the wrong modal, silently |
 | `update*Properties` | Editor shows values, Apply appears to work, edit is lost on reload |
 | `Apply*Snapshot` | Field reaches the backend, never reaches the XML |
-| A carve-out site | Element works but still warns "deploys but does nothing" |
+| The manifest entry | Element works and the studio still calls it "coming soon" |
 | Validation | Misconfiguration fails at runtime, on whoever ran the process |
 | Fixture | #103's inventory has a verdict with no evidence behind it |
 
@@ -30,7 +30,8 @@ Every path and symbol below is a **claim that may have rotted**. Run
 plus the three load-bearing claims most likely to go stale, and exits non-zero when
 one has. When a code change invalidates a step here, **fix this skill in the
 same commit** — "later" does not happen. #174 is the scheduled consolidation pass;
-#157, #158, #160 and #161 each correct this skill in their own PR.
+#157, #158, #160 and #161 each correct this skill in their own PR. #107 rewrote
+step 1 and the manifest checks in `scripts/verify-symbols.sh`.
 
 Read the element's story and #103's inventory row first. If the inventory says
 Flowable has no behaviour for the element, stop — that is #155/#165 territory and
@@ -80,19 +81,37 @@ failure this skill exists to prevent. Write endpoint-level validation tests agai
 
 ## Steps in order
 
-### 1. Move it in the support manifest — three sites, not one
+### 1. Move it in the support manifest — one edit
 
-Until #107 lands, the truth is split and can disagree:
+**#107 landed.** `src/shared/bpmn-support.json` is the single source of truth. The
+SPA imports it (`src/AutoNate.Spa/src/lib/bpmn/support.ts`, via the `@shared` alias);
+`AutoNate.Web.csproj` embeds the same bytes as `AutoNate.Web.bpmn-support.json`. The
+old `SUPPORTED_BPMN_TYPES` / `COMING_SOON_BPMN_TYPES` arrays and the
+`UnsupportedRuntime*` deny-lists are gone, and `BpmnSupportManifestTests` fails if
+either comes back.
 
-- `SUPPORTED_BPMN_TYPES` / `COMING_SOON_BPMN_TYPES` — `src/AutoNate.Spa/src/pages/workflow/WorkflowStudio.tsx`. Note the two lists use **different category taxonomies** (`Events` vs `Start Events`/`Intermediate Events`/`Boundary Events`/`End Events`). #103's test plan asserts the **combined count is 68**, so any move must be strictly 1-for-1.
-- `BuildUnsupportedRuntimeWarnings` — `src/AutoNate.Web/Services/Workflow/WorkflowBpmnXml.cs`. **This method has two independent blocks** and your element may need a carve-out in both:
-  1. the `UnsupportedRuntime*` element-name sets, where `intermediateCatchEvent` already shows the carve-out pattern for a single event-definition flavour;
-  2. a separate `localName.EndsWith("EventDefinition")` block further down, whose carve-outs whitelist by **definition type *and* parent element type**.
+Each of the 68 entries carries **two independent axes**, and picking the wrong one is
+the mistake this step exists to prevent:
 
-  Missing the second is the standard trap: the element works, and still warns.
+- **`studio`** — `supported` | `coming-soon` | `withdrawn`. What the BPMN types panel
+  advertises. **This is the field your story moves**, from `coming-soon` to
+  `supported`, once the element is authorable, configurable and round-tripping.
+- **`engine`** — `executes` | `annotation` | `cannot-execute`. What Flowable does
+  with it, established by deploying it in #103. This drives publish validation. Do
+  not touch it unless you have re-run the element against a live engine; it is a
+  measurement, not a preference.
 
-⚠️ These feed **`warnings`**, not `errors` — which is why unsupported elements deploy
-today. #107 owns changing that; don't do it as a side effect.
+The invariant `studio=supported ⟹ engine≠cannot-execute` is enforced by test. If
+your element's `engine` is `cannot-execute`, moving `studio` to `supported` fails the
+suite — correctly: see the note under "Before you start" about #155/#165 territory.
+
+Entries are keyed on **`(localName, eventDefinition)`**, not on `localName`. That is
+what lets the manifest refuse one boundary variant while permitting the other seven.
+`localName: "*"` means an activity marker, keyed on the marker alone.
+
+⚠️ An element the manifest marks `cannot-execute` is now a **deployment error**
+carrying its `reason`, not a warning. So a `reason` is required on those entries and
+is user-facing text — write a sentence an author can act on.
 
 ### 2. Authoring affordance — usually no code
 
@@ -190,7 +209,7 @@ page; toast for transient feedback.
 
 ### 9. Fixture and tests
 
-- **Fixture** — a minimal `.bpmn` using the element. #103's must-haves name `tests/AutoNate.E2E.Tests/Bpmn/Fixtures/` (or equivalent); **that directory does not exist yet** and there are no `.bpmn` files in the repo. If #103 hasn't landed, you are creating it.
+- **Fixture** — a minimal `.bpmn` using the element. #103 landed these in `tests/fixtures/bpmn-inventory/`, one per manifest entry, generated and then deployed against a live engine. Yours almost certainly exists already; extend it rather than starting a new directory.
 - **`tests/AutoNate.Web.Tests/WorkflowBpmnXmlTests.cs`** — round-trip and every validation branch. No engine needed; these are where most per-element logic lives.
 - **E2E** — `RequiresService=Flowable` trait, or CI's exclusion stops holding and `ci.yml`'s shard reconciliation will notice.
 - **`tests/AutoNate.Web.Tests/Invariants/DoNotRenameGuardTests.cs`** must still pass if you touched the namespace.

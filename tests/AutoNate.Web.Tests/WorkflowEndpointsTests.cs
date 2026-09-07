@@ -126,6 +126,103 @@ public sealed class WorkflowEndpointsTests
         Assert.False(string.IsNullOrWhiteSpace(result.Model.ProcessKey));
     }
 
+    // #107: refusing to deploy must not make an old diagram unopenable.
+    //
+    // This is the regression a naive validation change causes, and it is easy to
+    // miss because nobody tests with a diagram they can no longer publish. The two
+    // are different paths — validation runs on prepare, loading does not — so the
+    // test has to show the diagram survives the round trip, not merely that publish
+    // rejects it.
+    [Fact]
+    public async Task PrepareWorkflow_RefusesAnUnrunnableElement_ButStillReturnsTheDiagram()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="legacy_flow" name="Legacy Flow" isExecutable="true">
+                <bpmn:startEvent id="StartEvent_1" />
+                <bpmn:complexGateway id="Gateway_1" name="Two of three" />
+                <bpmn:endEvent id="EndEvent_1" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var request = new PrepareWorkflowRequest(
+            new WorkflowModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "Legacy Flow",
+                ProcessKey = "legacy_flow",
+                BpmnXml = xml
+            },
+            Array.Empty<WorkflowElementSnapshot>());
+
+        var response = await client.PostAsJsonAsync("/api/workflows/prepare", request);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<PrepareWorkflowResponse>();
+
+        Assert.NotNull(result);
+
+        // Publishing is refused, and the author is told which element and why.
+        Assert.Contains(result.Errors, e => e.Contains("Complex Gateway", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Contains("Two of three", StringComparison.Ordinal));
+
+        // And the diagram comes back intact, so the studio still renders it. If
+        // validation ever stripped or rejected the payload, this is what would fail.
+        Assert.Contains("complexGateway", result.Model.BpmnXml, StringComparison.Ordinal);
+        Assert.Contains("Two of three", result.Model.BpmnXml, StringComparison.Ordinal);
+    }
+
+    // The complement: an element the studio has not wired yet but Flowable runs is
+    // NOT refused. The old deny-lists refused 25 such elements, and a fix that
+    // simply turned those warnings into errors would have made this fail.
+    [Fact]
+    public async Task PrepareWorkflow_AcceptsAnElementFlowableRuns_EvenWhileTheStudioCallsItComingSoon()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="boundary_flow" name="Boundary Flow" isExecutable="true">
+                <bpmn:startEvent id="StartEvent_1" />
+                <bpmn:userTask id="Task_1" name="Approve" />
+                <bpmn:boundaryEvent id="Boundary_1" name="Escalate" attachedToRef="Task_1">
+                  <bpmn:escalationEventDefinition id="Escalation_1" />
+                </bpmn:boundaryEvent>
+                <bpmn:endEvent id="EndEvent_1" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var request = new PrepareWorkflowRequest(
+            new WorkflowModel
+            {
+                Id = Guid.NewGuid(),
+                Name = "Boundary Flow",
+                ProcessKey = "boundary_flow",
+                BpmnXml = xml
+            },
+            Array.Empty<WorkflowElementSnapshot>());
+
+        var response = await client.PostAsJsonAsync("/api/workflows/prepare", request);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<PrepareWorkflowResponse>();
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain(result.Errors, e => e.Contains("cannot be deployed", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task PrepareWorkflow_ReturnsWarning_WhenSignalFilterReferencesUnknownShortCode()
     {

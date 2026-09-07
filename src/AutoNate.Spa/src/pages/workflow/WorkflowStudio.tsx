@@ -24,7 +24,8 @@ import {
   Text,
   TextInput,
   Textarea,
-  Title
+  Title,
+  Tooltip
 } from "@mantine/core";
 import { useBpmnModeler } from "@/hooks/useBpmnModeler";
 import { permissionKey, usePermissionChecks } from "@/hooks/usePermissionChecks";
@@ -55,6 +56,14 @@ import {
 } from "@/types/flowable";
 import * as workflow from "@/lib/bpmn/workflow.js";
 import { extractProcessVariables } from "@/lib/bpmn/processVariables";
+import {
+  ANNOTATION_ELEMENTS,
+  COMING_SOON_ELEMENTS,
+  EXECUTABLE_SUPPORTED_ELEMENTS,
+  FLOWABLE_VERSION,
+  groupByCategory,
+  type BpmnSupportGroup
+} from "@/lib/bpmn/support";
 import {
   defaultRecurrenceState,
   describeRecurrence,
@@ -1089,18 +1098,23 @@ export default function WorkflowStudio() {
             to Flowable, and start new executions from the current model.
           </Text>
         </Stack>
-        <Button
-          variant="gradient"
-          gradient={{ from: "#2680c2", to: "#0f609b", deg: 135 }}
-          radius="xl"
-          size="sm"
-          onClick={() => setShowBpmnTypesModal(true)}
-          title="View supported BPMN node types"
-          leftSection={<i className="fa fa-sitemap" aria-hidden="true" />}
-          rightSection={<i className="fa fa-arrow-right" aria-hidden="true" />}
-        >
-          Supported BPMN Types
-        </Button>
+        {/* #107: was "Supported BPMN Types", which the panel outgrew — it now also
+            says what is coming, what the engine cannot run, and what never
+            executes by design. The native `title` went with it; tooltips in this
+            app are Mantine's, which screen readers announce. */}
+        <Tooltip label="What the studio offers, and what Flowable will run">
+          <Button
+            variant="gradient"
+            gradient={{ from: "#2680c2", to: "#0f609b", deg: 135 }}
+            radius="xl"
+            size="sm"
+            onClick={() => setShowBpmnTypesModal(true)}
+            leftSection={<i className="fa fa-sitemap" aria-hidden="true" />}
+            rightSection={<i className="fa fa-arrow-right" aria-hidden="true" />}
+          >
+            BPMN element support
+          </Button>
+        </Tooltip>
       </Group>
 
       {error && (
@@ -3805,133 +3819,46 @@ function UserTaskModal({
   );
 }
 
-type BpmnTypeGroup = {
-  category: string;
-  items: string[];
-};
-
-const SUPPORTED_BPMN_TYPES: BpmnTypeGroup[] = [
-  {
-    category: "Events",
-    items: [
-      "Start Event (None)",
-      "Signal Start Event",
-      "Timer Start Event",
-      "Intermediate Catch (Timer)",
-      "End Event (None)",
-      "End Event (Terminate)"
-    ]
-  },
-  {
-    category: "Tasks",
-    items: ["Task (Generic)", "User Task", "Script Task", "Service Task (Behavior)"]
-  },
-  {
-    category: "Gateways",
-    items: ["Exclusive Gateway (XOR)", "Inclusive Gateway (OR)", "Parallel Gateway (AND)"]
-  },
-  {
-    category: "Flows",
-    items: ["Sequence Flow"]
-  }
-];
-
-const COMING_SOON_BPMN_TYPES: BpmnTypeGroup[] = [
-  {
-    category: "Start Events",
-    items: [
-      "Message Start Event",
-      "Conditional Start Event",
-      "Error Start Event",
-      "Escalation Start Event",
-      "Compensation Start Event"
-    ]
-  },
-  {
-    category: "Intermediate Events",
-    items: [
-      "Intermediate Throw (None)",
-      "Intermediate Throw (Message)",
-      "Intermediate Throw (Signal)",
-      "Intermediate Throw (Escalation)",
-      "Intermediate Throw (Link)",
-      "Intermediate Throw (Compensation)",
-      "Intermediate Catch (Message)",
-      "Intermediate Catch (Signal)",
-      "Intermediate Catch (Conditional)",
-      "Intermediate Catch (Link)"
-    ]
-  },
-  {
-    category: "Boundary Events",
-    items: [
-      "Message Boundary",
-      "Timer Boundary",
-      "Signal Boundary",
-      "Conditional Boundary",
-      "Error Boundary",
-      "Escalation Boundary",
-      "Cancel Boundary",
-      "Compensation Boundary"
-    ]
-  },
-  {
-    category: "End Events",
-    items: [
-      "Message End",
-      "Signal End",
-      "Error End",
-      "Escalation End",
-      "Cancel End",
-      "Compensation End"
-    ]
-  },
-  {
-    category: "Tasks",
-    items: [
-      "Send Task",
-      "Receive Task",
-      "Manual Task",
-      "Business Rule Task",
-      "Call Activity"
-    ]
-  },
-  {
-    category: "Sub-Processes",
-    items: ["Sub-Process (Embedded)", "Event Sub-Process", "Transaction", "Ad-Hoc Sub-Process"]
-  },
-  {
-    category: "Gateways",
-    items: ["Event-Based Gateway", "Complex Gateway"]
-  },
-  {
-    category: "Activity Markers",
-    items: ["Loop Marker", "Multi-Instance (Parallel)", "Multi-Instance (Sequential)", "Compensation Marker"]
-  },
-  {
-    category: "Collaboration",
-    items: ["Pool / Participant", "Lane", "Message Flow"]
-  },
-  {
-    category: "Data",
-    items: ["Data Object Reference", "Data Store Reference", "Data Input", "Data Output"]
-  },
-  {
-    category: "Artifacts",
-    items: ["Text Annotation", "Group", "Association"]
-  }
-];
-
+// #107: the BPMN types panel is derived from the support manifest, not from two
+// hand-kept arrays beside it.
+//
+// It used to be `SUPPORTED_BPMN_TYPES` and `COMING_SOON_BPMN_TYPES` declared here,
+// maintained in parallel with the palette and with the backend's `UnsupportedRuntime*`
+// deny-lists. #103 deployed all 68 to a running Flowable and found the three lists
+// disagreeing on 47 of them — 22 shown as "coming soon" that deployed unhindered, and
+// 25 refused at runtime that the engine runs. Adding support for an element is now
+// one edit to `src/shared/bpmn-support.json`, and this panel follows.
 function BpmnTypesModal({ onClose }: { onClose: () => void }) {
-  const supportedCount = SUPPORTED_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
-  const comingSoonCount = COMING_SOON_BPMN_TYPES.reduce((n, g) => n + g.items.length, 0);
+  // Three display buckets from two manifest axes. "Coming soon" and "not available"
+  // both read as unsupported to an author, but they are opposite problems — one is
+  // work we have not done, the other is work the engine cannot do — and an author
+  // deciding whether to wait or to redraw needs to know which.
+  const supported = groupByCategory(EXECUTABLE_SUPPORTED_ELEMENTS);
+  const comingSoon = groupByCategory(
+    COMING_SOON_ELEMENTS.filter((element) => element.engine !== "cannot-execute")
+  );
+  const unavailable = COMING_SOON_ELEMENTS.filter(
+    (element) => element.engine === "cannot-execute"
+  );
+  const annotations = ANNOTATION_ELEMENTS;
+
+  const count = (groups: BpmnSupportGroup[]) =>
+    groups.reduce((n, group) => n + group.items.length, 0);
 
   return (
-    <Modal opened onClose={onClose} title="Supported BPMN Types" size="xl">
+    <Modal
+      opened
+      onClose={onClose}
+      title="BPMN element support"
+      size="xl"
+      classNames={{ content: "workflow-bpmn-types-modal" }}
+    >
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          The full set of BPMN 2.0 node types the Auton8 workflow studio can model and execute
-          today, alongside what is on the roadmap.
+          What the Auton8 workflow studio can model and execute today, and what is still
+          to come. Every verdict here was established by deploying the element to
+          Flowable {FLOWABLE_VERSION} and starting it. An element the engine cannot run
+          is refused when you publish, rather than deploying and quietly doing nothing.
         </Text>
 
         <div className="workflow-bpmn-types-grid">
@@ -3941,14 +3868,14 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
                 <i className="fa fa-circle-check" aria-hidden="true"></i>
                 Supported
               </h3>
-              <span className="workflow-bpmn-types-count">{supportedCount}</span>
+              <span className="workflow-bpmn-types-count">{count(supported)}</span>
             </header>
-            {SUPPORTED_BPMN_TYPES.map((group) => (
+            {supported.map((group) => (
               <div key={group.category} className="workflow-bpmn-types-group">
                 <h4>{group.category}</h4>
                 <ul>
                   {group.items.map((item) => (
-                    <li key={item}>{item}</li>
+                    <li key={item.name}>{item.name}</li>
                   ))}
                 </ul>
               </div>
@@ -3959,22 +3886,71 @@ function BpmnTypesModal({ onClose }: { onClose: () => void }) {
             <header className="workflow-bpmn-types-column-header">
               <h3>
                 <i className="fa fa-hourglass-half" aria-hidden="true"></i>
-                Coming Soon
+                Coming soon
               </h3>
-              <span className="workflow-bpmn-types-count">{comingSoonCount}</span>
+              <span className="workflow-bpmn-types-count">{count(comingSoon)}</span>
             </header>
-            {COMING_SOON_BPMN_TYPES.map((group) => (
+            <p className="workflow-bpmn-types-note">
+              Flowable runs these. The studio has no property editor for them yet, so
+              publishing one is refused until its story lands.
+            </p>
+            {comingSoon.map((group) => (
               <div key={group.category} className="workflow-bpmn-types-group">
                 <h4>{group.category}</h4>
                 <ul>
                   {group.items.map((item) => (
-                    <li key={item}>{item}</li>
+                    <li key={item.name}>{item.name}</li>
                   ))}
                 </ul>
               </div>
             ))}
           </section>
         </div>
+
+        {unavailable.length > 0 && (
+          <section className="workflow-bpmn-types-column workflow-bpmn-types-column-unavailable">
+            <header className="workflow-bpmn-types-column-header">
+              <h3>
+                <i className="fa fa-circle-exclamation" aria-hidden="true"></i>
+                Not available
+              </h3>
+              <span className="workflow-bpmn-types-count">{unavailable.length}</span>
+            </header>
+            <p className="workflow-bpmn-types-note">
+              Flowable {FLOWABLE_VERSION} cannot run these, so publishing a diagram that
+              uses one is refused with the reason below.
+            </p>
+            <ul className="workflow-bpmn-types-reasons">
+              {unavailable.map((item) => (
+                <li key={item.name}>
+                  <span className="workflow-bpmn-types-reason-name">{item.name}</span>
+                  <span className="workflow-bpmn-types-reason-text">{item.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section className="workflow-bpmn-types-column workflow-bpmn-types-column-annotations">
+          <header className="workflow-bpmn-types-column-header">
+            <h3>
+              <i className="fa fa-note-sticky" aria-hidden="true"></i>
+              Annotations
+            </h3>
+            <span className="workflow-bpmn-types-count">{annotations.length}</span>
+          </header>
+          <p className="workflow-bpmn-types-note">
+            Draw these freely — BPMN defines them as documentation. They never execute,
+            and that is not a gap in Auton8.
+          </p>
+          <div className="workflow-bpmn-types-group">
+            <ul>
+              {annotations.map((item) => (
+                <li key={item.name}>{item.name}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
 
         <Group justify="flex-end">
           <Button onClick={onClose}>Close</Button>

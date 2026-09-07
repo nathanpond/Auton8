@@ -6,8 +6,19 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    // Rewritten for #107. This asserted that a business rule task, an event
+    // subprocess and a participant all produced *warnings* and no errors.
+    //
+    // Two of those three were wrong, which #103 established by deploying them:
+    // Flowable executes event subprocesses and participants perfectly well. They
+    // were warned about because the old deny-lists keyed on BPMN localName alone,
+    // so `subProcess` denied every subprocess and `participant` denied every pool.
+    // The business rule task genuinely cannot run — the rules engine is absent
+    // from the image — and is now a deployment *error*, because deploying
+    // something that will throw NoClassDefFoundError at runtime is the silence
+    // this epic exists to end.
     [Fact]
-    public void ValidateProcess_ReturnsWarnings_ForUnsupportedRuntimeConstructs()
+    public void ValidateProcess_RefusesAnElementTheEngineCannotRun()
     {
         const string xml = """
                            <?xml version="1.0" encoding="UTF-8"?>
@@ -29,13 +40,18 @@ public sealed class WorkflowBpmnXmlTests
 
         var result = WorkflowBpmnXml.ValidateProcess(xml);
 
-        Assert.Empty(result.Errors);
-        Assert.NotEmpty(result.Warnings);
-        Assert.Contains(result.Warnings, warning => warning.Contains("business rule tasks", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("service tasks", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("exclusive gateways", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result.Warnings, warning => warning.Contains("event subprocesses", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result.Warnings, warning => warning.Contains("participants", StringComparison.OrdinalIgnoreCase));
+        // The business rule task is refused, and the message says why rather
+        // than merely rejecting.
+        Assert.Contains(result.Errors, e => e.Contains("Business Rule Task", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Contains("rules engine", StringComparison.OrdinalIgnoreCase));
+
+        // The complement, which is the half that would have caught the old bug:
+        // elements the engine DOES run must not be refused. An assertion that
+        // only checked the refusal above would pass for a validator that refuses
+        // everything.
+        Assert.DoesNotContain(result.Errors, e => e.Contains("Event Sub-Process", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Errors, e => e.Contains("Pool / Participant", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Errors, e => e.Contains("Exclusive Gateway", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1687,10 +1703,20 @@ public sealed class WorkflowBpmnXmlTests
     }
 
     [Fact]
-    public void ValidateProcess_StillWarnsAboutNonTimerIntermediateCatchEvent()
+    public void ValidateProcess_AcceptsASignalIntermediateCatchEvent()
     {
-        // A signal/message intermediate catch event is still unsupported —
-        // make sure we didn't accidentally whitelist the entire element type.
+        // Rewritten for #107. This asserted a signal intermediate catch event
+        // still *warned*, with the comment "make sure we didn't accidentally
+        // whitelist the entire element type".
+        //
+        // That concern was right and the mechanism was wrong. The old deny-list
+        // keyed on `intermediateCatchEvent`, so it denied every variant, and a
+        // hand-written carve-out re-permitted the timer one. #103 deployed the
+        // rest: message, signal and conditional catches all execute.
+        //
+        // The manifest keys on (localName, eventDefinition), so "don't whitelist
+        // the whole element type" is now structural rather than a carve-out —
+        // which is why this test can assert acceptance without weakening a gate.
         const string xml = """
                            <?xml version="1.0" encoding="UTF-8"?>
                            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -1707,7 +1733,11 @@ public sealed class WorkflowBpmnXmlTests
 
         var result = WorkflowBpmnXml.ValidateProcess(xml);
 
-        Assert.Contains(
+        // It executes, so it is neither refused nor warned about.
+        Assert.DoesNotContain(
+            result.Errors,
+            e => e.Contains("Intermediate Catch (Signal)", StringComparison.Ordinal));
+        Assert.DoesNotContain(
             result.Warnings,
             w => w.Contains("intermediate catch events", StringComparison.OrdinalIgnoreCase));
     }

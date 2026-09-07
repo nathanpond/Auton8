@@ -37,12 +37,22 @@ export default defineConfig({
   customLogger: wsNoiseLogger,
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src")
+      "@": path.resolve(__dirname, "src"),
+      // #107: the BPMN support manifest lives outside this project because both
+      // the SPA and AutoNate.Web read it. Aliased rather than copied — a copy is
+      // the drift this file exists to end.
+      "@shared": path.resolve(__dirname, "../shared")
     }
   },
   server: {
     port: 5173,
     strictPort: true,
+    fs: {
+      // src/shared/ sits above this project root, so dev-server reads of it need
+      // explicit permission; without this the manifest import 403s in `npm run dev`
+      // while building fine, which is a confusing way to find out.
+      allow: [path.resolve(__dirname), path.resolve(__dirname, "../shared")]
+    },
     // public/drawio/ holds the vendored drawio webapp — ~2.8k files fetched
     // by `npm run fetch:drawio`. Letting Vite's file watcher track all of
     // them saturates macOS kqueue limits; once the watcher falls over, the

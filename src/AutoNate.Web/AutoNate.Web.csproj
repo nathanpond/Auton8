@@ -30,6 +30,9 @@
            exactly one copy: the app and both test fixtures read these same
            bytes, and no build-copied duplicate can drift from it. -->
       <EmbeddedResource Include="Persistence\Sql\BaseSchema.sql" />
+      <!-- #107: the single BPMN support manifest. Embedded so the backend reads the
+           same bytes the SPA imports; two hand-kept copies is the problem it solves. -->
+      <EmbeddedResource Include="..\shared\bpmn-support.json" LogicalName="AutoNate.Web.bpmn-support.json" />
     </ItemGroup>
 
     <ItemGroup>

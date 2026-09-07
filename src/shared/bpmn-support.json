@@ -1,0 +1,702 @@
+{
+  "$comment": "The one source of truth for what the workflow studio offers and what the engine will run (#107). The SPA imports this file for the BPMN types reference panel; AutoNate.Web embeds these same bytes and refuses a deployment containing anything the engine cannot execute. Keyed on (localName, eventDefinition) because a localName-only key cannot tell the eight boundary variants apart, and seven of them execute.",
+  "$fields": {
+    "studio": {
+      "$doc": "What the studio advertises. Drives the BPMN types panel and nothing else.",
+      "supported": "Authorable in the studio today. For an executable element that means configurable and running; for an annotation it means drawable, which is all one can be.",
+      "coming-soon": "Offered by BPMN and runnable by the engine, but Auton8 has not wired the authoring side yet. An M4/M5 story owns it.",
+      "withdrawn": "Will not be built. Not advertised anywhere."
+    },
+    "engine": {
+      "$doc": "What Flowable actually does with it, established by deploying it (#103). Drives publish validation and nothing else.",
+      "executes": "Deploys and runs.",
+      "annotation": "Deploys and carries no execution semantics BY DESIGN — a BPMN artifact, not a gap. Never refused.",
+      "cannot-execute": "Deploys into silence, or is rejected by the engine. Refused at publish, quoting `reason`."
+    },
+    "$invariant": "studio=supported implies engine is not cannot-execute. The studio may not claim support for something the engine will not run; BpmnSupportManifestTests enforces it."
+  },
+  "flowableVersion": "8.0.0",
+  "generatedFrom": "#103 inventory — every verdict produced by deploying to a running engine",
+  "elements": [
+    {
+      "name": "Start Event (None)",
+      "category": "Start Events",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "startEvent",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Signal Start Event",
+      "category": "Start Events",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "startEvent",
+      "eventDefinition": "signal",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Timer Start Event",
+      "category": "Start Events",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "startEvent",
+      "eventDefinition": "timer",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Catch (Timer)",
+      "category": "Intermediate Events",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "timer",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "End Event (None)",
+      "category": "End Events",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "End Event (Terminate)",
+      "category": "End Events",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": "terminate",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Task (Generic)",
+      "category": "Tasks",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "task",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "User Task",
+      "category": "Tasks",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "userTask",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Script Task",
+      "category": "Tasks",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "scriptTask",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Service Task (Behavior)",
+      "category": "Tasks",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "serviceTask",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Exclusive Gateway (XOR)",
+      "category": "Gateways",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "exclusiveGateway",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Inclusive Gateway (OR)",
+      "category": "Gateways",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "inclusiveGateway",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Parallel Gateway (AND)",
+      "category": "Gateways",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "parallelGateway",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Sequence Flow",
+      "category": "Flows",
+      "studio": "supported",
+      "engine": "executes",
+      "localName": "sequenceFlow",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Message Start Event",
+      "category": "Start Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "startEvent",
+      "eventDefinition": "message",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Conditional Start Event",
+      "category": "Start Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "startEvent",
+      "eventDefinition": "conditional",
+      "reason": null,
+      "evidence": "legal only inside an event subprocess, not at process level"
+    },
+    {
+      "name": "Error Start Event",
+      "category": "Start Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "startEvent",
+      "eventDefinition": "error",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Escalation Start Event",
+      "category": "Start Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "startEvent",
+      "eventDefinition": "escalation",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Compensation Start Event",
+      "category": "Start Events",
+      "studio": "withdrawn",
+      "engine": "cannot-execute",
+      "localName": "startEvent",
+      "eventDefinition": "compensate",
+      "reason": "Flowable 8.0.0 has no EventSubProcessCompensationStartEventActivityBehavior. Descoped 2026-09-07 (#115).",
+      "evidence": "no EventSubProcessCompensationStartEventActivityBehavior; descoped"
+    },
+    {
+      "name": "Intermediate Throw (None)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Throw (Message)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "cannot-execute",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "message",
+      "reason": "Flowable 8.0.0 has no behaviour for a message throw; its validator rejects the event definition — see #112.",
+      "evidence": "no behaviour class; validator rejects the definition"
+    },
+    {
+      "name": "Intermediate Throw (Signal)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "signal",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Throw (Escalation)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "escalation",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Throw (Link)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "cannot-execute",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "link",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it. Descoped by spike #217.",
+      "evidence": "no link type in the BPMN model at all (spike #217)"
+    },
+    {
+      "name": "Intermediate Throw (Compensation)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "intermediateThrowEvent",
+      "eventDefinition": "compensate",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Catch (Message)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "message",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Catch (Signal)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "signal",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Catch (Conditional)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "conditional",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Intermediate Catch (Link)",
+      "category": "Intermediate Events",
+      "studio": "coming-soon",
+      "engine": "cannot-execute",
+      "localName": "intermediateCatchEvent",
+      "eventDefinition": "link",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it. Descoped by spike #217.",
+      "evidence": "no link type in the BPMN model at all (spike #217)"
+    },
+    {
+      "name": "Message Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "message",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Timer Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "timer",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Signal Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "signal",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Conditional Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "conditional",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Error Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "error",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Escalation Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "escalation",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Cancel Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "cancel",
+      "reason": null,
+      "evidence": "BoundaryCancelEventActivityBehavior ships; minimal transaction completed before the cancel applied"
+    },
+    {
+      "name": "Compensation Boundary",
+      "category": "Boundary Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "boundaryEvent",
+      "eventDefinition": "compensate",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Message End",
+      "category": "End Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": "message",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Signal End",
+      "category": "End Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": "signal",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Error End",
+      "category": "End Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": "error",
+      "reason": null,
+      "evidence": "raw probe had no catching boundary; a modelling requirement, not an engine gap"
+    },
+    {
+      "name": "Escalation End",
+      "category": "End Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": "escalation",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Cancel End",
+      "category": "End Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": "cancel",
+      "reason": null,
+      "evidence": "CancelEndEventActivityBehavior ships; same fixture limitation"
+    },
+    {
+      "name": "Compensation End",
+      "category": "End Events",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "endEvent",
+      "eventDefinition": "compensate",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Send Task",
+      "category": "Tasks",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "sendTask",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "flowable-sendtask-invalid-implementation — needs a type/implementation attribute"
+    },
+    {
+      "name": "Receive Task",
+      "category": "Tasks",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "receiveTask",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Manual Task",
+      "category": "Tasks",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "manualTask",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Business Rule Task",
+      "category": "Tasks",
+      "studio": "coming-soon",
+      "engine": "cannot-execute",
+      "localName": "businessRuleTask",
+      "eventDefinition": null,
+      "reason": "Requires the DMN/rules engine, which is not in the Flowable image (NoClassDefFoundError org/kie/api) — see #105.",
+      "evidence": "NoClassDefFoundError org/kie/api — rules engine absent from the image (#105)"
+    },
+    {
+      "name": "Call Activity",
+      "category": "Tasks",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "callActivity",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "first probe named a callee that did not exist; with a real callee, executes"
+    },
+    {
+      "name": "Sub-Process (Embedded)",
+      "category": "Sub-Processes",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "subProcess",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Event Sub-Process",
+      "category": "Sub-Processes",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "subProcess",
+      "eventDefinition": "triggeredByEvent",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Transaction",
+      "category": "Sub-Processes",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "transaction",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Ad-Hoc Sub-Process",
+      "category": "Sub-Processes",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "adHocSubProcess",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Event-Based Gateway",
+      "category": "Gateways",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "eventBasedGateway",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Complex Gateway",
+      "category": "Gateways",
+      "studio": "coming-soon",
+      "engine": "cannot-execute",
+      "localName": "complexGateway",
+      "eventDefinition": null,
+      "reason": "Flowable 8.0.0 has no ComplexGatewayActivityBehavior. It deploys and passes the token straight through, evaluating no activation condition — see #165.",
+      "evidence": "no behaviour class; verified at runtime — token passes straight through, no activation condition, no join"
+    },
+    {
+      "name": "Loop Marker",
+      "category": "Activity Markers",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "*",
+      "eventDefinition": "standardLoopCharacteristics",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Multi-Instance (Parallel)",
+      "category": "Activity Markers",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "*",
+      "eventDefinition": "multiInstanceLoopCharacteristics:parallel",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Multi-Instance (Sequential)",
+      "category": "Activity Markers",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "*",
+      "eventDefinition": "multiInstanceLoopCharacteristics:sequential",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Compensation Marker",
+      "category": "Activity Markers",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "*",
+      "eventDefinition": "isForCompensation",
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Pool / Participant",
+      "category": "Collaboration",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "participant",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Lane",
+      "category": "Collaboration",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "lane",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Message Flow",
+      "category": "Collaboration",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "messageFlow",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Data Object Reference",
+      "category": "Data",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "dataObjectReference",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Data Store Reference",
+      "category": "Data",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "dataStoreReference",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Data Input",
+      "category": "Data",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "dataInput",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Data Output",
+      "category": "Data",
+      "studio": "coming-soon",
+      "engine": "executes",
+      "localName": "dataOutput",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Text Annotation",
+      "category": "Artifacts",
+      "studio": "supported",
+      "engine": "annotation",
+      "localName": "textAnnotation",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Group",
+      "category": "Artifacts",
+      "studio": "supported",
+      "engine": "annotation",
+      "localName": "group",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    },
+    {
+      "name": "Association",
+      "category": "Artifacts",
+      "studio": "supported",
+      "engine": "annotation",
+      "localName": "association",
+      "eventDefinition": null,
+      "reason": null,
+      "evidence": "deployed and started"
+    }
+  ]
+}

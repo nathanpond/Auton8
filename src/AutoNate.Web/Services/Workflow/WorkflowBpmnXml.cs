@@ -30,32 +30,6 @@ public static partial class WorkflowBpmnXml
         "receiveTask",
         "manualTask"
     ];
-    private static readonly HashSet<string> UnsupportedRuntimeTaskElementNames =
-    [
-        "businessRuleTask",
-        "sendTask",
-        "receiveTask",
-        "manualTask"
-    ];
-    private static readonly HashSet<string> UnsupportedRuntimeControlElementNames =
-    [
-        "eventBasedGateway",
-        "complexGateway",
-        "boundaryEvent",
-        "callActivity",
-        "subProcess",
-        "transaction",
-        "adHocSubProcess",
-        "intermediateCatchEvent",
-        "intermediateThrowEvent"
-    ];
-    private static readonly HashSet<string> UnsupportedRuntimeCollaborationElementNames =
-    [
-        "collaboration",
-        "participant",
-        "lane",
-        "messageFlow"
-    ];
 
     public static string CreateStarterDiagram(string processKey, string workflowName)
     {
@@ -331,7 +305,14 @@ public static partial class WorkflowBpmnXml
         return string.IsNullOrWhiteSpace(text) ? null : text!.Trim();
     }
 
-    public static WorkflowBpmnValidationResult ValidateProcess(string xml)
+    /// <param name="support">
+    /// The BPMN support manifest to validate against. Defaults to the embedded one;
+    /// tests pass a perturbed manifest to prove validation follows the manifest
+    /// rather than a list of its own.
+    /// </param>
+    public static WorkflowBpmnValidationResult ValidateProcess(
+        string xml,
+        BpmnSupportManifest? support = null)
     {
         try
         {
@@ -364,9 +345,10 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildTimerIntermediateCatchEventValidationErrors(document));
             errors.AddRange(BuildServiceTaskValidationErrors(document));
             errors.AddRange(BuildRecordTypeFilterMisplacementErrors(document));
+            // #107: silence becomes a refusal with a reason.
+            errors.AddRange(BuildUnsupportedElementErrors(document, support ?? BpmnSupportManifest.Default));
 
             var warnings = new List<string>();
-            warnings.AddRange(BuildUnsupportedRuntimeWarnings(document));
             warnings.AddRange(BuildGatewayWarnings(document));
 
             return new WorkflowBpmnValidationResult(errors, warnings);
@@ -1506,99 +1488,47 @@ public static partial class WorkflowBpmnXml
         return errors;
     }
 
-    private static IReadOnlyList<string> BuildUnsupportedRuntimeWarnings(XDocument document)
+    // #107: elements the manifest marks unsupported are a DEPLOYMENT ERROR, not a
+    // warning.
+    //
+    // `BuildUnsupportedRuntimeWarnings` fed `warnings`, so an element the engine
+    // cannot run deployed cleanly and then did nothing — the founding complaint of
+    // #40, and the current default rather than a theoretical risk. #103 confirmed
+    // it mechanically: Complex Gateway deploys, an instance starts, and the token
+    // passes straight through with no activation condition evaluated.
+    //
+    // Keyed by variant through the manifest, so this reports the one boundary
+    // event that cannot run rather than all eight. Note it keys on the manifest's
+    // ENGINE axis, not its studio axis: an element Flowable runs deploys even while
+    // the studio still lists it as coming soon, because "we have not built the
+    // property editor yet" is not a reason to reject a hand-authored diagram.
+    private static IReadOnlyList<string> BuildUnsupportedElementErrors(
+        XDocument document,
+        BpmnSupportManifest support)
     {
-        var taskElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        var controlElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        var collaborationElements = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        var eventDrivenBehaviors = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var errors = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var element in document.Descendants())
+        foreach (var node in document.Descendants())
         {
-            if (element.Name.Namespace != BpmnNamespace)
+            if (node.Name.Namespace != BpmnNamespace) continue;
+
+            foreach (var match in support.Match(node))
             {
-                continue;
-            }
+                if (!match.CannotExecute) continue;
+                if (!seen.Add(match.Name)) continue;
 
-            var localName = element.Name.LocalName;
-
-            if (UnsupportedRuntimeTaskElementNames.Contains(localName))
-            {
-                taskElements.Add(ToFriendlyElementName(localName));
-            }
-
-            if (UnsupportedRuntimeControlElementNames.Contains(localName))
-            {
-                if (localName.Equals("subProcess", StringComparison.Ordinal) &&
-                    string.Equals(element.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase))
-                {
-                    eventDrivenBehaviors.Add("event subprocesses");
-                    continue;
-                }
-
-                // Timer intermediate catch events are first-class — only warn for
-                // the message/signal/conditional flavors that aren't wired up yet.
-                if (localName.Equals("intermediateCatchEvent", StringComparison.Ordinal) &&
-                    element.Element(BpmnNamespace + "timerEventDefinition") is not null)
-                {
-                    continue;
-                }
-
-                controlElements.Add(ToFriendlyElementName(localName));
-            }
-
-            if (UnsupportedRuntimeCollaborationElementNames.Contains(localName))
-            {
-                collaborationElements.Add(ToFriendlyElementName(localName));
-            }
-
-            if (localName.EndsWith("EventDefinition", StringComparison.Ordinal) &&
-                !localName.Equals("terminateEventDefinition", StringComparison.Ordinal))
-            {
-                // Signal and timer start events are now first-class — only warn
-                // for event definitions that are NOT on a start event (boundary,
-                // intermediate, end events still trigger the warning).
-                if ((localName.Equals("signalEventDefinition", StringComparison.Ordinal) ||
-                     localName.Equals("timerEventDefinition", StringComparison.Ordinal)) &&
-                    element.Parent?.Name == BpmnNamespace + "startEvent")
-                {
-                    continue;
-                }
-
-                if (localName.Equals("timerEventDefinition", StringComparison.Ordinal) &&
-                    element.Parent?.Name == BpmnNamespace + "intermediateCatchEvent")
-                {
-                    continue;
-                }
-
-                eventDrivenBehaviors.Add(ToFriendlyElementName(localName));
+                var label = node.Attribute("name")?.Value ?? node.Attribute("id")?.Value;
+                var where = label is null ? "" : $" ('{label}')";
+                errors.Add(
+                    $"{match.Name}{where} cannot be deployed: {match.Reason} " +
+                    "Remove it from the diagram, or replace it with an element that executes.");
             }
         }
 
-        var warnings = new List<string>();
-
-        if (taskElements.Count > 0)
-        {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these non-user task elements in Workflow Studio/runtime yet: {string.Join(", ", taskElements)}.");
-        }
-
-        if (controlElements.Count > 0)
-        {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these orchestration/control constructs in Workflow Studio/runtime yet: {string.Join(", ", controlElements)}.");
-        }
-
-        if (eventDrivenBehaviors.Count > 0)
-        {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these event-driven behaviors in Workflow Studio/runtime yet: {string.Join(", ", eventDrivenBehaviors)}.");
-        }
-
-        if (collaborationElements.Count > 0)
-        {
-            warnings.Add($"This BPMN is valid BPMN and may deploy to Flowable, but AutoNate does not fully support these pool/lane/collaboration constructs in Workflow Studio/runtime yet: {string.Join(", ", collaborationElements)}.");
-        }
-
-        return warnings;
+        return errors;
     }
+
 
     private static IReadOnlyList<string> BuildGatewayWarnings(XDocument document)
     {
@@ -1703,44 +1633,6 @@ public static partial class WorkflowBpmnXml
         }
 
         return gateway.Attribute("id")?.Value ?? "(unnamed)";
-    }
-
-    private static string ToFriendlyElementName(string localName)
-    {
-        return localName switch
-        {
-            "serviceTask" => "service tasks",
-            "scriptTask" => "script tasks",
-            "businessRuleTask" => "business rule tasks",
-            "sendTask" => "send tasks",
-            "receiveTask" => "receive tasks",
-            "manualTask" => "manual tasks",
-            "inclusiveGateway" => "inclusive gateways",
-            "parallelGateway" => "parallel gateways",
-            "eventBasedGateway" => "event-based gateways",
-            "complexGateway" => "complex gateways",
-            "boundaryEvent" => "boundary events",
-            "callActivity" => "call activities",
-            "subProcess" => "sub-processes",
-            "transaction" => "transactions",
-            "adHocSubProcess" => "ad-hoc sub-processes",
-            "intermediateCatchEvent" => "intermediate catch events",
-            "intermediateThrowEvent" => "intermediate throw events",
-            "collaboration" => "collaborations",
-            "participant" => "participants",
-            "lane" => "lanes",
-            "messageFlow" => "message flows",
-            "messageEventDefinition" => "message events",
-            "timerEventDefinition" => "timer events",
-            "conditionalEventDefinition" => "conditional events",
-            "signalEventDefinition" => "signal events",
-            "escalationEventDefinition" => "escalation events",
-            "errorEventDefinition" => "error events",
-            "cancelEventDefinition" => "cancel events",
-            "compensateEventDefinition" => "compensation events",
-            "linkEventDefinition" => "link events",
-            _ => localName
-        };
     }
 }
 

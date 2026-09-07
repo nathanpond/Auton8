@@ -11,35 +11,40 @@ Verify each path before following it. These were accurate on 2026-09-05.
 
 ## 1. Support manifest
 
-`WorkflowStudio.tsx` — move `"Timer Boundary"` out of `COMING_SOON_BPMN_TYPES`
-(category `Boundary Events`) into `SUPPORTED_BPMN_TYPES`.
+**Rewritten 2026-09-07, when #107 landed.** The three carve-out sites this section
+used to walk through are gone; what follows is what replaced them, and the shape of
+the old advice is kept at the end because the reason it was wrong is the point.
 
-`WorkflowBpmnXml.cs` — `boundaryEvent` sits in `UnsupportedRuntimeControlElementNames`.
-It cannot simply be removed: that set covers *all* boundary events, and the others
-are not supported yet. Narrow it the way `intermediateCatchEvent` already is —
-that entry has a carve-out for the timer flavour:
+One edit, to `src/shared/bpmn-support.json`:
 
-```csharp
-// Timer intermediate catch events are first-class — only warn for
-// the message/signal/conditional flavors that aren't wired up yet.
-if (localName.Equals("intermediateCatchEvent", StringComparison.Ordinal) &&
-    element.Element(BpmnNamespace + "timerEventDefinition") is not null)
+```json
 {
-    continue;
+  "name": "Timer Boundary",
+  "category": "Boundary Events",
+  "studio": "coming-soon",     ← change this to "supported"
+  "engine": "executes",        ← leave alone; #103 measured it
+  "localName": "boundaryEvent",
+  "eventDefinition": "timer",
+  ...
 }
 ```
 
-Add the same shape for `boundaryEvent`. **This is the pattern for any element whose
-support arrives one event-definition at a time**, and most of M4 is that shape.
+The SPA's types panel and the backend's publish validation both derive from this
+file, so nothing else needs touching and `BpmnSupportManifestTests` fails if a
+consumer stops deriving.
 
-⚠️ **This is not sufficient on its own.** `BuildUnsupportedRuntimeWarnings` has a
-*second* block further down, matching `localName.EndsWith("EventDefinition")`, whose
-carve-outs whitelist by definition type **and parent element type** — currently
-`signalEventDefinition`/`timerEventDefinition` on a `startEvent`, and
-`timerEventDefinition` on an `intermediateCatchEvent`. A timer *boundary* event needs
-a third carve-out there, or it works and still emits a "timer events" warning. An
-earlier draft of this example stopped at the first block and would have shipped #157
-half-fixed.
+Note the entry is keyed `("boundaryEvent", "timer")`, not `"boundaryEvent"`. That is
+the whole reason the old advice was long: the deny-list keyed on `localName` alone,
+so it covered all eight boundary variants at once, and supporting one meant adding a
+hand-written carve-out — *and then a second carve-out* in a separate
+`localName.EndsWith("EventDefinition")` block further down, or the element worked and
+still emitted a "timer events" warning. An earlier draft of this example stopped at
+the first block and would have shipped #157 half-fixed.
+
+**That trap no longer exists**, because the key distinguishes variants structurally
+rather than by exception. If you find yourself writing a carve-out for a BPMN element
+anywhere in `WorkflowBpmnXml.cs`, stop: it means something is keyed too coarsely, and
+that is the bug this milestone spent #103 and #107 removing.
 
 ## 2. Authoring affordance — zero code
 

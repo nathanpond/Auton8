@@ -2357,3 +2357,76 @@ cancel events are implemented (`BoundaryCancelEventActivityBehavior`,
 cancel could apply. Separated in the #103 write-up rather than reported as gaps.
 Conditional Start Event is legal only inside an event subprocess, not at process
 level, though the palette offers it as a process start — relevant to #158 and #162.
+
+## /n8-exec M4 — #107, 2026-09-07 — one manifest, two axes
+
+- **Decision:** The support manifest carries **two independent fields**, `studio`
+  (`supported` | `coming-soon` | `withdrawn`) and `engine` (`executes` |
+  `annotation` | `cannot-execute`), rather than the single `supported` flag the
+  first cut had.
+  **Why:** The flag conflated two different questions and would have rebuilt the
+  bug. #103 established that Flowable runs 59 of the 68 entries while the studio
+  advertises only 14 as supported — so "unsupported" means *"we have not written a
+  property editor"* in one breath and *"the engine will not run it"* in the next.
+  Keying publish validation off the studio axis would refuse 45 elements the engine
+  runs, which is the old deny-list bug with the sign flipped; keying the panel off
+  the engine axis would advertise 59 elements as ready when they have no editor.
+  The manifest states the invariant `studio=supported ⟹ engine≠cannot-execute` and a
+  test enforces it.
+  **Issue:** #107
+
+- **Decision:** The manifest lives at `src/shared/bpmn-support.json`, imported by the
+  SPA through a new `@shared` Vite/tsconfig alias and embedded by
+  `AutoNate.Web.csproj` as `AutoNate.Web.bpmn-support.json`.
+  **Why:** The story left the mechanism to discretion and asked only for one edit
+  plus a failing test on drift. A generated TS module would have added a build step
+  and a second artifact to keep in step. Both consumers now read the same bytes, and
+  `The_embedded_manifest_is_the_shared_file_byte_for_byte` fails if they stop.
+  Cost: the SPA needed `server.fs.allow` for a path above its root, which is
+  otherwise a confusing dev-only 403.
+  **Issue:** #107
+
+- **Decision:** `BpmnSupportManifest` is an instance type with a static `Default`,
+  and `ValidateProcess` takes an optional manifest.
+  **Why:** The acceptance criterion asks for a test that flips one element and shows
+  the consumers follow. Against a static class that test cannot be written — only
+  read and believed. The seam lets the flip test drive the real validation path with
+  a perturbed manifest, and asserts afterwards that the embedded one is untouched.
+  **Issue:** #107
+
+- **Decision:** `Match` returns every manifest entry describing a node, not the
+  first.
+  **Why:** Found while writing it: a business rule task carrying a multi-instance
+  marker has two descriptions, and a first-match lookup in manifest order answers
+  "Multi-Instance (Parallel), executes" and lets it deploy. Covered by
+  `An_activity_carrying_a_marker_is_still_judged_on_the_activity`.
+  **Issue:** #107
+
+- **Decision (deviation from my own plan comment):** #107 removes **only** the
+  Compensation Start Event from what users are shown. The plan comment said both
+  link events would leave in the same edit.
+  **Why:** #160 was rewritten on 2026-09-07 to *be* the link-event removal and
+  refusal, and its acceptance criteria name those two removals explicitly. Doing
+  them here would have left #160 with nothing to close honestly. #107 builds the
+  `withdrawn` mechanism; #160 applies it, which is now a one-line manifest edit plus
+  the raw-XML refusal its own AC requires.
+  **Issue:** #107, #160
+
+- **Rule 1 (fix + regression test):** `ToFriendlyElementName` in `WorkflowBpmnXml.cs`
+  was orphaned by removing the deny-lists — 24 lines of switch with no caller.
+  Deleted.
+  **Issue:** #107
+
+- **Rule 2 (missing critical functionality):** the button opening the panel used a
+  native `title` attribute, which screen readers do not reliably announce; the
+  project rule is Mantine `Tooltip`. Replaced. Its label also changed from
+  "Supported BPMN Types" to "BPMN element support", because the panel now also
+  states what is coming, what cannot run, and what never executes by design.
+  **Issue:** #107
+
+- **Note:** the `add-bpmn-element` skill's step 1, its worked example's step 1, and
+  the manifest checks in `scripts/verify-symbols.sh` were rewritten in this same
+  change. The script had already gone red on `BuildUnsupportedRuntimeWarnings` and
+  `UnsupportedRuntimeControlElementNames` before the skill was touched, which is the
+  drift check working as intended.
+  **Issue:** #107, #174
