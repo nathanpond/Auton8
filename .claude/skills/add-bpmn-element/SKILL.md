@@ -125,6 +125,18 @@ timer boundary fires with no `flowable:async` on the activity it guards. Conditi
 events sit at the other end: a behaviour class, and no trigger at all. Ask which kind
 your element is.
 
+**6. Not every element needs all nine steps — some need only validation.** #161
+(embedded subprocess) added no describe helper, no `update*Properties`, no snapshot
+field and no modal: bpmn-js already authors subprocesses and their expand/collapse
+(12 `sub-process` entries in the vendored bundle), the engine already executes them,
+and the only Auton8-side work was *refusing the shapes that fail*. Steps 3–6 and 8
+were correctly skipped.
+
+So read the nine steps as a checklist to answer, not a sequence to perform. The
+question each step asks is "does this element carry configuration the studio must
+round-trip?" — when the answer is no, the story is a validation story and the honest
+completion comment says which steps did not apply and why.
+
 ## Steps in order
 
 ### 1. Move it in the support manifest — one edit
@@ -226,6 +238,12 @@ Every message must name the element (`name` attribute, falling back to `id`) —
 "validation failed" tells an author nothing about which of forty elements to look at.
 
 ⚠️ Per load-bearing fact 4, write endpoint tests against `/prepare`, never `/publish`.
+
+A rule that should apply at *every* depth — "every subprocess anywhere must have a
+start event" — is the ordinary flat `document.Descendants(...)` case and needs none of
+the machinery below. #161 is that shape, and its test asserts a nested subprocess is
+caught, because a check that walked only top-level children would pass a diagram that
+fails one level down.
 
 **If your rule is scope-sensitive** — link events matching per process level, for
 instance — note that **every existing validator uses flat `document.Descendants(...)`

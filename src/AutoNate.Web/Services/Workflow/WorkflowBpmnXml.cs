@@ -353,6 +353,8 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildConditionalStartPlacementErrors(document));
             // #157: a timer boundary with no time set never fires.
             errors.AddRange(BuildTimerBoundaryEventValidationErrors(document));
+            // #161: a subprocess the engine cannot enter.
+            errors.AddRange(BuildSubProcessValidationErrors(document));
 
             // #158: every condition in the diagram, through the one shared check.
             // Sequence flows included, so exclusive and inclusive gateways benefit
@@ -1678,6 +1680,71 @@ public static partial class WorkflowBpmnXml
     // sees an activity that waits forever with nothing to show why. Epic #40's rule
     // is that a hang is a defect rather than a documented behaviour, so this is
     // refused at publish.
+    // #161: an embedded subprocess with no start event cannot be entered.
+    //
+    // It deploys cleanly and then fails when the process reaches it, with a 500 and
+    // "No initial activity found for subprocess <id>" — a failure that lands on
+    // whoever *ran* the process rather than on the author who published it.
+    // Established by deploying one; the story's premise said it hangs, and it does
+    // not, but the remedy is the same because the person who sees the failure is the
+    // wrong person.
+    //
+    // Deliberately NOT a rule about missing end events. A subprocess whose inner
+    // flow simply stops **works correctly** — Flowable completes it once no tokens
+    // remain inside, verified by running one. Refusing that would break diagrams
+    // that run today.
+    //
+    // Event subprocesses are excluded: they are triggered rather than entered, and
+    // #162 owns their own start-event rule.
+    private static IReadOnlyList<string> BuildSubProcessValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+        var containers = new[] { "subProcess", "transaction", "adHocSubProcess" };
+
+        foreach (var container in document.Descendants()
+                     .Where(e => e.Name.Namespace == BpmnNamespace
+                                 && containers.Contains(e.Name.LocalName, StringComparer.Ordinal)))
+        {
+            if (string.Equals(container.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // An ad-hoc subprocess has no sequence flows by design — its activities
+            // are chosen at runtime — so it is exempt from needing a start event.
+            if (string.Equals(container.Name.LocalName, "adHocSubProcess", StringComparison.Ordinal))
+            {
+                if (!container.Elements().Any(child => child.Name.Namespace == BpmnNamespace))
+                {
+                    errors.Add(BuildEmptyMessage(container, "ad-hoc subprocess"));
+                }
+                continue;
+            }
+
+            if (container.Element(BpmnNamespace + "startEvent") is null)
+            {
+                var label = LabelOf(container);
+                var kind = container.Name.LocalName == "transaction" ? "Transaction" : "Subprocess";
+                errors.Add(
+                    $"{kind} '{label}' has no start event, so the engine cannot enter it. " +
+                    "Add a start event inside it — without one the process fails when it " +
+                    "reaches this subprocess, and the failure lands on whoever ran it rather " +
+                    "than on you.");
+            }
+        }
+
+        return errors;
+    }
+
+    private static string BuildEmptyMessage(XElement container, string kind) =>
+        $"The {kind} '{LabelOf(container)}' is empty. Put at least one activity inside it, " +
+        "or remove it — an empty one cannot do anything when the process reaches it.";
+
+    private static string LabelOf(XElement element) =>
+        element.Attribute("name")?.Value is { Length: > 0 } name
+            ? name
+            : element.Attribute("id")?.Value ?? "(unnamed)";
+
     private static IReadOnlyList<string> BuildTimerBoundaryEventValidationErrors(XDocument document)
     {
         var errors = new List<string>();

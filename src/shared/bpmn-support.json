@@ -501,12 +501,12 @@
     {
       "name": "Sub-Process (Embedded)",
       "category": "Sub-Processes",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "subProcess",
       "eventDefinition": null,
       "reason": null,
-      "evidence": "deployed and started"
+      "evidence": "deployed and executed two levels deep (#161); variables cross the boundary in both directions, and the subprocess reports its own activity instance so the execution view shows where the process is"
     },
     {
       "name": "Event Sub-Process",

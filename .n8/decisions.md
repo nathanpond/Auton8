@@ -2724,3 +2724,49 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   while **timers wake themselves** through the job executor. "What makes it wake up?"
   has two different answers.
   **Issue:** #157, #174
+
+## /n8-exec M4 — #161, 2026-09-07 — embedded subprocesses
+
+- **AC premise was wrong on both halves, and the story was NOT implemented as
+  written.** The criterion said "an empty subprocess, or one with no end event, is
+  refused at publish — both deploy today and hang". Measured against Flowable 8.0.0:
+  - An **empty subprocess** deploys and then fails at *start* with a 500, "No initial
+    activity found for subprocess <id>". Not a hang. The remedy still holds — the
+    failure lands on whoever ran the process rather than the author who published it
+    — but the real rule is about the **start event**, which is what the engine's own
+    message names. So the check also catches a subprocess with activities and no
+    start event, which an emptiness rule would miss.
+  - A subprocess with **no end event works correctly.** Flowable completes it once no
+    tokens remain inside; a run finished normally. **Implementing this half would
+    have refused diagrams that run today**, so it was deliberately not implemented,
+    and both a unit test and an E2E pin that it stays unrefused.
+  **Why not a blocker:** the AC's *intent* (no subprocess that cannot complete) is
+  better served by refusing only what actually fails. Implementing it literally would
+  have introduced a defect, which is a worse outcome than a corrected criterion.
+  **Issue:** #161
+
+- **Finding:** a subprocess reports its own activity instance in Flowable's history
+  (`outer`, `inner` as `subProcess`), so AC7's "an operator can see execution is
+  inside one" needs no id-mapping work. This was the difficulty I flagged in the plan
+  comment and it dissolved on inspection.
+  **Issue:** #161
+
+- **Finding:** variables cross the boundary in both directions, verified two levels
+  deep — a variable set inside the inner subprocess is visible at parent instance
+  scope after it completes.
+  **Issue:** #161
+
+- **Decision:** AC4 (multi-instance on a subprocess) is delivered as
+  **serialisation round-trip only**; the execution assertion belongs to #159, which
+  owns the marker and has not landed. Stated on the issue rather than silently
+  half-done.
+  **Issue:** #161, #159
+
+- **Skill:** gained load-bearing fact 6 — **not every element needs all nine steps.**
+  #161 added no describe helper, no `update*Properties`, no snapshot field and no
+  modal, because bpmn-js already authors subprocesses and the engine already runs
+  them; the only Auton8-side work was refusing the shapes that fail. The nine steps
+  are a checklist to answer, not a sequence to perform. Also clarified that a rule
+  applying at every depth is the ordinary flat `Descendants` case and needs none of
+  the scope-container machinery the validation section describes.
+  **Issue:** #161, #174
