@@ -87,3 +87,34 @@ public sealed record class WorkflowMessageDeclaration(
     // The process variable whose value picks out the one waiting instance.
     // Null on a Start declaration: nothing is waiting, so nothing is correlated.
     string? CorrelationKey);
+
+
+// #112. A point in a published definition that SENDS a message: an intermediate
+// throw event, a message end event, or a send task.
+//
+// Flowable 8.0.0 executes none of these as written — the intermediate throw is
+// rejected outright by the deploy validator
+// ("flowable-throw-event-invalid-eventdefinition"), and the message end event is
+// worse: it deploys, ends the process cleanly, and sends nothing at all. Both are
+// therefore expanded at publish into a service task carrying the AutoNate
+// behaviour bridge, which is the same route a send task takes. That keeps one
+// correlation model across the throw side and the receive side rather than two.
+//
+// The authored diagram keeps its original shape; only the published copy is
+// rewritten. That is what lets the behaviour resolve its own configuration from
+// the stored diagram by activity id at run time.
+public sealed record class WorkflowMessageSendDeclaration(
+    string ElementId,
+    // The <bpmn:message> name to deliver. Empty is a modelling error, reported
+    // rather than guessed at.
+    string MessageName,
+    // Which published workflow to address. Broadcast is deliberately not a
+    // feature, so a send with no target goes nowhere and says so.
+    string? TargetProcessKey,
+    // The variable in THIS process whose value addresses the instance over
+    // there. Null means "no narrowing", which only succeeds when exactly one
+    // instance is waiting.
+    string? CorrelationKey,
+    // True for a message end event, which must still end the process after the
+    // send. Drives the shape of the expansion, not the send itself.
+    bool EndsProcess);

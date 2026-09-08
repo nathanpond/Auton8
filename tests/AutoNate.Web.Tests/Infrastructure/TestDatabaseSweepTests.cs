@@ -29,9 +29,22 @@ public sealed class TestDatabaseSweepTests
         // random flake somewhere else entirely.
         await using var live = await PostgresTestDatabase.CreateAsync(seedLocalAdmin: false);
 
-        // Sweep everything older than a minute. The database above was created
-        // seconds ago, so it must survive.
-        await PostgresTestDatabase.SweepAbandonedDatabasesAsync(TimeSpan.FromMinutes(1));
+        // Sweep everything older than an hour. The database above was created
+        // moments ago, so it must survive.
+        //
+        // #112: this used to say "older than a minute", and that made the
+        // assertion depend on how long the test itself took. Under full-suite
+        // load CreateAsync — migrations, seeding, and its own turn through the
+        // connection pool — ran for over six minutes, so by the time the sweep
+        // executed the database really was older than the threshold and really
+        // was abandoned by the rule being tested. It failed honestly; the premise
+        // was wrong.
+        //
+        // An hour cannot be reached by this test on any machine. Nothing is lost
+        // by widening it: what stops this from passing against a sweep that has
+        // given up entirely is A_stamped_database_is_still_swept_when_it_is_old_enough,
+        // not the size of this number.
+        await PostgresTestDatabase.SweepAbandonedDatabasesAsync(TimeSpan.FromHours(1));
 
         Assert.True(await ExistsAsync(live), "The sweep dropped a database created moments earlier.");
 

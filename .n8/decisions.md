@@ -3211,3 +3211,96 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   every role is in use". The pattern is a comment that was true when written and
   became load-bearing after it stopped being true.
   **Issue:** #215
+
+- **Decision (#112, user-approved):** the intermediate throw (Message) and the
+  message end event are **expanded at publish** into a service task on the send
+  behaviour, rather than withdrawn. The issue named both as live options and the
+  user approved expansion.
+  **Why the pair needed a decision at all:** the issue assumed "the two share
+  their send path". They do not. Verified against Flowable 8.0.0 —
+  the intermediate throw is REJECTED at deployment
+  (`flowable-throw-event-invalid-eventdefinition`), while the message end event
+  **deploys, ends the process cleanly, and sends nothing**: a catcher on the same
+  message sat at one instance before and after a full run. One fails loudly, the
+  other is silent decoration that looks like it works.
+  **Issue:** #112
+
+- **Decision (#112):** the expansion runs on the **deploy** path, not in
+  `ApplyProcessMetadata`.
+  **Why:** prepare's output is what the studio SAVES. Expanding there would
+  replace the author's message events with service tasks in their own diagram —
+  losing the shape they drew, and losing the configuration the send behaviour
+  reads back by activity id at run time. Putting it at deploy also means a caller
+  that publishes without preparing cannot deploy something the engine refuses.
+  Caught because the first version put it in `ApplyProcessMetadata` and the E2E
+  publish still failed with the validator error: publish does not call prepare.
+  **Issue:** #112
+
+- **Decision (#112):** one `SendMessageBehavior` for the send task and both
+  expanded throw elements, resolving its configuration from the AUTHORED diagram
+  by activity id.
+  **Why:** it makes "the throw side and the receive side agree on one correlation
+  model" true by construction rather than by inspection. A send that reaches
+  nobody returns Ok with a `sendMessageResult` variable rather than failing the
+  activity — failing would dead-letter a job because someone else's process was
+  not ready, which is not this process's error.
+  **Issue:** #112
+
+- **Rule 3 blocker fixed (#112): `make app-container` has been broken since
+  #107.** The Dockerfile never copied `src/shared/`, so `@shared/bpmn-support.json`
+  could not resolve and the SPA stage failed with TS2307. It builds on a
+  developer's machine, where `../shared` really is there, which is why nobody
+  noticed. Found because the E2E behaviour callback needed a rebuilt container.
+  **Issue:** #112, #107
+
+- **Discovered and filed, not fixed:** #223 — **no E2E test can verify a workflow
+  behaviour end to end.** Flowable's callback reaches the app in the
+  `autonate-web` container (database `AutoNate`); the E2E fixture runs its own app
+  against `AutoNate_E2E`. A behaviour invoked by a workflow an E2E test published
+  executes where that workflow does not exist. #112's send behaviour reported it
+  honestly as `senderNotFound`.
+  **How #112 works around it:** the expansion tests assert that the element now
+  DEPLOYS (it was rejected), that the expanded service task actually ran the
+  behaviour (it writes its outcome variable whatever the outcome), and that the
+  process continues or ends as authored. Delivery is proved separately by seven
+  tests driving the same correlator through the endpoint. Honest, but a
+  workaround — and #218's scripted gateway will hit the same wall.
+  **Issue:** #112, #223
+
+- **Manifest:** seven rows move to `studio: supported` (Message Start,
+  Intermediate Catch, Message Boundary, Message End, Intermediate Throw, Send
+  Task, Receive Task). `Message Flow` stays `coming-soon` — it is M5's, and #112's
+  obligation was only to make the mechanism reusable and say so, which is recorded
+  in `WorkflowMessageCorrelator`'s header.
+  **One engine-axis departure declared**, for Intermediate Throw (Message):
+  `rows.json` records "fails at deployment" and is right about the raw element;
+  the departure is that publish no longer deploys the raw element. Noted in the
+  guard as the one departure of its kind — a verdict overturned by changing what
+  we deploy rather than by the engine changing.
+  **Issue:** #112
+
+- **A sixth load-dependent flake, found by #112's regression run and fixed under
+  #215's remit.** `TestDatabaseSweepTests.The_sweep_leaves_a_database_a_live_run_
+  is_using` created a database, swept everything "older than a minute", and
+  asserted the new one survived. Under full-suite load the test's own
+  `CreateAsync` — migrations, seeding, and its turn through the connection pool —
+  ran for **six minutes nineteen seconds**, so by the time the sweep executed the
+  database genuinely was older than the threshold. The test failed honestly; its
+  premise was wrong.
+  **Fix:** an hour, which this test cannot reach on any machine. Nothing is lost —
+  what stops it passing against a sweep that has given up entirely is the
+  complement (`A_stamped_database_is_still_swept_when_it_is_old_enough`), not the
+  size of the number.
+  **Pattern, now six for six:** every flake in this suite has been a premise that
+  was true when written and quietly stopped being true — "no Task.WhenAll across
+  this service", "any failure means assume every role is in use", "no stamp means
+  it predates #191", and now "this test finishes in under a minute".
+  **Issue:** #215, #112
+
+- **My own error, recorded because it cost a 22-minute run:** I ran the #221 E2E
+  re-checks concurrently with the full backend suite, and the two builds clobbered
+  `AutoNate.Web.staticwebassets.endpoints.json` — 592 failures, all of them either
+  "static resources manifest not found" or a host that could not boot without it.
+  This hazard had already bitten once earlier in the milestone and I knew about
+  it. Nothing else builds while the backend suite runs.
+  **Issue:** #112

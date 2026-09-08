@@ -19,6 +19,15 @@ COPY src/AutoNate.Spa/package.json src/AutoNate.Spa/package-lock.json ./
 RUN npm ci
 
 COPY src/AutoNate.Spa/ ./
+
+# #107 put the BPMN support manifest in src/shared/ and both vite.config.ts and
+# tsconfig.app.json resolve "@shared/*" to "../shared/*". Only the SPA directory
+# was ever copied here, so the alias pointed at nothing inside the image and
+# `npm run build` failed with TS2307 — the app container has not been buildable
+# since. It builds on a developer's machine, where ../shared really is there,
+# which is why nobody noticed.
+COPY src/shared/ ../shared/
+
 RUN npm run build
 
 # ── Backend ─────────────────────────────────────────────────────────────────

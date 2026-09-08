@@ -14,6 +14,7 @@ public static partial class WorkflowBpmnXml
     private static readonly XNamespace BpmndiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
     private static readonly XNamespace XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
     private static readonly XNamespace FlowableNamespace = "http://flowable.org/bpmn";
+    private static readonly XNamespace DcNamespace = "http://www.omg.org/spec/DD/20100524/DC";
 
     // Default Dapr topic for signal start events when the user doesn't override
     // it on the signal in the modeler. External producers publish to this topic
@@ -125,6 +126,135 @@ public static partial class WorkflowBpmnXml
         {
             scriptTask.SetAttributeValue(FlowableNamespace + "async", "true");
         }
+    }
+
+    // #112. Flowable 8.0.0 executes neither message-throwing event as written:
+    //
+    //   * intermediateThrowEvent + messageEventDefinition is REJECTED by the
+    //     deploy validator — "flowable-throw-event-invalid-eventdefinition:
+    //     Unsupported intermediate throw event type".
+    //   * endEvent + messageEventDefinition is worse. It deploys, ends the
+    //     process cleanly, and sends nothing. A catcher on the same message name
+    //     sat at one instance before and after a full run. Silent decoration that
+    //     looks like it works.
+    //
+    // Both are rewritten at publish into a service task on the AutoNate behaviour
+    // bridge — the same route a send task takes, so the throw side and the
+    // receive side share one correlation model instead of growing a second.
+    //
+    // Only the PUBLISHED copy is rewritten. The authored diagram keeps its
+    // message events, which is what lets the behaviour resolve its own message
+    // name and target by activity id at run time, and what lets the studio keep
+    // showing the author the shape they drew.
+    /// <summary>
+    /// The published copy, rewritten for an engine that cannot run what was
+    /// drawn (#112). Applied at DEPLOY, never at save.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not part of ApplyProcessMetadata. That runs on the prepare
+    /// path, and the studio saves what prepare returns — so expanding there would
+    /// replace the author's message events with service tasks in their own
+    /// diagram, losing the shape they drew and the configuration this expansion's
+    /// behaviour reads back at run time.
+    /// </remarks>
+    public static string ExpandForDeployment(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return xml;
+
+        var document = XDocument.Parse(xml);
+        ExpandMessageSendEvents(document);
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    private static void ExpandMessageSendEvents(XDocument document)
+    {
+        foreach (var element in document.Descendants().ToList())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var localName = element.Name.LocalName;
+            if (localName is not ("intermediateThrowEvent" or "endEvent")) continue;
+
+            var definition = element.Elements(BpmnNamespace + "messageEventDefinition").FirstOrDefault();
+            if (definition is null) continue;
+
+            var elementId = element.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var endsProcess = localName == "endEvent";
+
+            // The service task keeps the ORIGINAL id, so every sequence flow and
+            // every BPMNShape that references it stays valid without rewriting a
+            // single one.
+            definition.Remove();
+            element.Name = BpmnNamespace + "serviceTask";
+            element.SetAttributeValue(FlowableNamespace + "delegateExpression", AutoNateBehaviorDelegateExpression);
+            element.SetAttributeValue(FlowableNamespace + "autonateServiceKind", ServiceTaskBehaviorKind);
+            element.SetAttributeValue(FlowableNamespace + "behaviorKey", SendMessageBehaviorKey);
+            // Sending reaches out of the process, so it is its own transaction
+            // boundary: a failure retries the send rather than redoing the work
+            // in front of it. Same reasoning as #168's retry point.
+            element.SetAttributeValue(FlowableNamespace + "async", "true");
+
+            if (!endsProcess) continue;
+
+            // A message end event has to still END. The service task took its id
+            // and its incoming flows, so a terminal end event is appended after
+            // it.
+            var process = element.Parent;
+            if (process is null) continue;
+
+            var endId = $"{elementId}_end";
+            var flowId = $"{elementId}_end_flow";
+            if (process.Elements(BpmnNamespace + "endEvent")
+                    .Any(e => e.Attribute("id")?.Value == endId))
+            {
+                // Publishing twice must not append a second one.
+                continue;
+            }
+
+            process.Add(new XElement(BpmnNamespace + "endEvent", new XAttribute("id", endId)));
+            process.Add(new XElement(BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", flowId),
+                new XAttribute("sourceRef", elementId),
+                new XAttribute("targetRef", endId)));
+
+            AddShapeBeside(document, elementId, endId);
+        }
+    }
+
+    // The execution diagram renders from the DEPLOYED definition, so an element
+    // with no BPMNShape would be invisible there. Cloned from the element it
+    // follows and nudged along, which is close enough to be legible and cannot
+    // fail on a diagram that never had DI in the first place.
+    private static void AddShapeBeside(XDocument document, string existingElementId, string newElementId)
+    {
+        var source = document.Descendants(BpmndiNamespace + "BPMNShape")
+            .FirstOrDefault(shape => shape.Attribute("bpmnElement")?.Value == existingElementId);
+        if (source?.Parent is null) return;
+
+        var clone = new XElement(source);
+        clone.SetAttributeValue("id", $"Shape_{newElementId}");
+        clone.SetAttributeValue("bpmnElement", newElementId);
+
+        var bounds = clone.Element(DcNamespace + "Bounds");
+        if (bounds is not null)
+        {
+            if (double.TryParse(bounds.Attribute("x")?.Value, out var x))
+            {
+                bounds.SetAttributeValue("x", (x + 160).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            bounds.SetAttributeValue("width", "36");
+            bounds.SetAttributeValue("height", "36");
+        }
+
+        source.Parent.Add(clone);
     }
 
     // For every default-mode user task that flows directly into an exclusive
@@ -691,6 +821,12 @@ public static partial class WorkflowBpmnXml
     // service-task types (HTTP webhook, etc.) so adding them later doesn't
     // require an XML migration on existing models.
     private const string AutoNateBehaviorDelegateExpression = "${autonateBehaviorDelegate}";
+
+    // #112. The built-in behaviour every expanded message-throwing element is
+    // wired to. Kept as a literal here rather than referencing the behaviour type,
+    // so this file stays free of a dependency on the behaviours namespace; a test
+    // pins the two together.
+    private const string SendMessageBehaviorKey = "autonate.send-message";
     private const string ServiceTaskBehaviorKind = "behavior";
 
     private static void ApplyServiceTaskSnapshot(XElement serviceTaskElement, WorkflowElementSnapshot snapshot)
@@ -984,6 +1120,79 @@ public static partial class WorkflowBpmnXml
     // attribute whose prefix is undeclared.
     internal const string CorrelationKeyAttribute = "autonateCorrelationKey";
 
+    internal const string TargetProcessKeyAttribute = "autonateTargetProcessKey";
+
+    /// <summary>
+    /// Every point in a definition that sends a message (#112).
+    /// </summary>
+    public static IReadOnlyList<WorkflowMessageSendDeclaration> ExtractMessageSendDeclarations(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<WorkflowMessageSendDeclaration>();
+        }
+
+        var document = XDocument.Parse(xml);
+        var messageNamesById = MessageNamesById(document);
+        var declarations = new List<WorkflowMessageSendDeclaration>();
+
+        foreach (var element in document.Descendants())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var localName = element.Name.LocalName;
+            var isThrow = localName is "intermediateThrowEvent" or "endEvent";
+            var isSendTask = localName == "sendTask";
+            if (!isThrow && !isSendTask) continue;
+
+            var elementId = element.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            // A throw event only counts when it actually carries a message
+            // definition — a plain end event is not a send, and #167 already
+            // established that a bare throw-none passes straight through.
+            string messageName;
+            if (isThrow)
+            {
+                var definition = element.Elements(BpmnNamespace + "messageEventDefinition").FirstOrDefault();
+                if (definition is null) continue;
+
+                var messageRef = definition.Attribute("messageRef")?.Value;
+                messageName = messageRef is not null && messageNamesById.TryGetValue(messageRef, out var resolved)
+                    ? resolved
+                    : string.Empty;
+            }
+            else
+            {
+                // A send task names its message on the element, since it has no
+                // event definition to hang one on.
+                messageName = element.Attribute(FlowableNamespace + "autonateMessageName")?.Value ?? string.Empty;
+            }
+
+            declarations.Add(new WorkflowMessageSendDeclaration(
+                elementId,
+                messageName.Trim(),
+                Trimmed(element.Attribute(FlowableNamespace + TargetProcessKeyAttribute)?.Value),
+                Trimmed(element.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value),
+                EndsProcess: localName == "endEvent"));
+        }
+
+        return declarations;
+    }
+
+    private static string? Trimmed(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static Dictionary<string, string> MessageNamesById(XDocument document) =>
+        document.Root?
+            .Elements(BpmnNamespace + "message")
+            .Where(message => !string.IsNullOrWhiteSpace(message.Attribute("id")?.Value))
+            .ToDictionary(
+                message => message.Attribute("id")!.Value,
+                message => message.Attribute("name")?.Value ?? string.Empty,
+                StringComparer.Ordinal)
+        ?? new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>
     /// Every point in a published definition that can be advanced from outside,
     /// with the variable that addresses it (#112).
@@ -1001,14 +1210,7 @@ public static partial class WorkflowBpmnXml
         // reference it by id. The name is what the engine subscribes under, so a
         // messageRef pointing at nothing is not addressable and is skipped rather
         // than guessed at.
-        var messageNamesById = document.Root?
-            .Elements(BpmnNamespace + "message")
-            .Where(message => !string.IsNullOrWhiteSpace(message.Attribute("id")?.Value))
-            .ToDictionary(
-                message => message.Attribute("id")!.Value,
-                message => message.Attribute("name")?.Value ?? string.Empty,
-                StringComparer.Ordinal)
-            ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        var messageNamesById = MessageNamesById(document);
 
         var declarations = new List<WorkflowMessageDeclaration>();
 

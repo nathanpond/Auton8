@@ -233,6 +233,26 @@ public sealed class BpmnSupportManifestTests
             // owns event subprocesses. Marking it cannot-execute here would be
             // wrong in the other direction and would block #162.
             ["Conditional Start Event"] = BpmnSupportManifest.EngineExecutes,
+
+            // #112. The inventory is right about the raw element: Flowable 8.0.0
+            // rejects an intermediate throw carrying a message definition at
+            // deployment —
+            //   [Validation set: 'flowable-executable-process'
+            //    | Problem: 'flowable-throw-event-invalid-eventdefinition']
+            //   Unsupported intermediate throw event type
+            // — which is why rows.json records "fails at deployment".
+            //
+            // The departure is that publish no longer deploys the raw element.
+            // WorkflowBpmnXml.ExpandForDeployment rewrites it into a service task
+            // on the send behaviour, so what reaches the engine is something the
+            // engine runs, and an author's diagram does what it says. Asserted
+            // end-to-end in MessageCorrelationExecutionTests.
+            //
+            // This is the one departure of its kind: a verdict overturned by
+            // changing what we deploy rather than by the engine changing. If a
+            // second one appears, the honest move is a field on the manifest
+            // saying "executes after expansion", not a longer list here.
+            ["Intermediate Throw (Message)"] = BpmnSupportManifest.EngineExecutes,
         };
 
         var rows = JsonNode.Parse(File.ReadAllText(InventoryRowsPath))!.AsArray();

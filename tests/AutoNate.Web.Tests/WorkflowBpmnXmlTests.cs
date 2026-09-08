@@ -1601,6 +1601,154 @@ public sealed class WorkflowBpmnXmlTests
             .Attribute(flowable + "async")?.Value);
     }
 
+    // #112. Flowable rejects an intermediate throw (Message) at deploy and
+    // silently ignores a message end event, so publish rewrites both onto the
+    // behaviour bridge. Verified against Flowable 8.0.0 first — see the issue.
+    [Fact]
+    public void ExpandForDeployment_ExpandsAnIntermediateMessageThrow_IntoABehaviorServiceTask()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:message id="Msg_1" name="orderShipped" />
+                             <bpmn:process id="sender" name="Sender" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="announce" />
+                               <bpmn:intermediateThrowEvent id="announce"
+                                                            flowable:autonateTargetProcessKey="receiver">
+                                 <bpmn:messageEventDefinition messageRef="Msg_1" />
+                               </bpmn:intermediateThrowEvent>
+                               <bpmn:sequenceFlow id="f1" sourceRef="announce" targetRef="e" />
+                               <bpmn:endEvent id="e" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updated = WorkflowBpmnXml.ExpandForDeployment(xml);
+        var document = XDocument.Parse(updated);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        // The element the validator rejects is gone...
+        Assert.Empty(document.Descendants(bpmn + "intermediateThrowEvent"));
+        Assert.Empty(document.Descendants(bpmn + "messageEventDefinition"));
+
+        // ...replaced by a service task that KEEPS THE ORIGINAL ID, which is what
+        // leaves every sequence flow and diagram shape pointing at it still valid.
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Equal("announce", serviceTask.Attribute("id")?.Value);
+        Assert.Equal("${autonateBehaviorDelegate}", serviceTask.Attribute(flowable + "delegateExpression")?.Value);
+        Assert.Equal("autonate.send-message", serviceTask.Attribute(flowable + "behaviorKey")?.Value);
+
+        // The flows were never rewritten, so they must still name it.
+        Assert.Equal("announce",
+            document.Descendants(bpmn + "sequenceFlow")
+                .Single(f => f.Attribute("id")?.Value == "f0").Attribute("targetRef")?.Value);
+        Assert.Equal("announce",
+            document.Descendants(bpmn + "sequenceFlow")
+                .Single(f => f.Attribute("id")?.Value == "f1").Attribute("sourceRef")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_ExpandsAMessageEndEvent_AndStillEndsTheProcess()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:message id="Msg_1" name="orderShipped" />
+                             <bpmn:process id="sender" name="Sender" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="done" />
+                               <bpmn:endEvent id="done" flowable:autonateTargetProcessKey="receiver">
+                                 <bpmn:messageEventDefinition messageRef="Msg_1" />
+                               </bpmn:endEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updated = WorkflowBpmnXml.ExpandForDeployment(xml);
+        var document = XDocument.Parse(updated);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Equal("done", serviceTask.Attribute("id")?.Value);
+        Assert.Equal("autonate.send-message", serviceTask.Attribute(flowable + "behaviorKey")?.Value);
+
+        // The half a naive expansion drops: the process must still END. Turning
+        // the end event into a service task and stopping there would leave the
+        // instance running forever after its last step.
+        var endEvent = document.Descendants(bpmn + "endEvent").Single();
+        Assert.Equal("done_end", endEvent.Attribute("id")?.Value);
+        Assert.Equal(
+            "done",
+            document.Descendants(bpmn + "sequenceFlow")
+                .Single(f => f.Attribute("targetRef")?.Value == "done_end")
+                .Attribute("sourceRef")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_Twice_DoesNotAppendASecondEndEvent()
+    {
+        // Publish is not once-only. Re-running the expansion over its own output
+        // must be a no-op, or every republish grows the diagram another end event.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:message id="Msg_1" name="orderShipped" />
+                             <bpmn:process id="sender" name="Sender" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="done" />
+                               <bpmn:endEvent id="done" flowable:autonateTargetProcessKey="receiver">
+                                 <bpmn:messageEventDefinition messageRef="Msg_1" />
+                               </bpmn:endEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var once = WorkflowBpmnXml.ExpandForDeployment(xml);
+        var twice = WorkflowBpmnXml.ExpandForDeployment(once);
+
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        Assert.Single(XDocument.Parse(twice).Descendants(bpmn + "endEvent"));
+        Assert.Single(XDocument.Parse(twice).Descendants(bpmn + "serviceTask"));
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesAPlainEndEventAlone()
+    {
+        // The complement. Without it the expansion could rewrite EVERY end event
+        // onto the behaviour bridge and all three tests above would still pass.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="plain" name="Plain" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="done" />
+                               <bpmn:endEvent id="done" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updated = WorkflowBpmnXml.ExpandForDeployment(xml);
+        var document = XDocument.Parse(updated);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        Assert.Empty(document.Descendants(bpmn + "serviceTask"));
+        Assert.Equal("done", document.Descendants(bpmn + "endEvent").Single().Attribute("id")?.Value);
+    }
+
     [Fact]
     public void ApplyProcessMetadata_StripsLegacyClassAttribute_OnServiceTaskSnapshot()
     {

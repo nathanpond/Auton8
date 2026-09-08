@@ -10,13 +10,13 @@
     "engine": {
       "$doc": "What Flowable actually does with it, established by deploying it (#103). Drives publish validation and nothing else.",
       "executes": "Deploys and runs.",
-      "annotation": "Deploys and carries no execution semantics BY DESIGN — a BPMN artifact, not a gap. Never refused.",
+      "annotation": "Deploys and carries no execution semantics BY DESIGN \u2014 a BPMN artifact, not a gap. Never refused.",
       "cannot-execute": "Deploys into silence, or is rejected by the engine. Refused at publish, quoting `reason`."
     },
     "$invariant": "studio=supported implies engine is not cannot-execute. The studio may not claim support for something the engine will not run; BpmnSupportManifestTests enforces it."
   },
   "flowableVersion": "8.0.0",
-  "generatedFrom": "#103 inventory — every verdict produced by deploying to a running engine",
+  "generatedFrom": "#103 inventory \u2014 every verdict produced by deploying to a running engine",
   "elements": [
     {
       "name": "Start Event (None)",
@@ -161,11 +161,11 @@
     {
       "name": "Message Start Event",
       "category": "Start Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "startEvent",
       "eventDefinition": "message",
-      "reason": null,
+      "reason": "#112: started by POST /runtime/process-instances with {message}. Verified against Flowable 8.0.0.",
       "evidence": "deployed and started"
     },
     {
@@ -221,11 +221,11 @@
     {
       "name": "Intermediate Throw (Message)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
-      "engine": "cannot-execute",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "message",
-      "reason": "Flowable 8.0.0 has no behaviour for a message throw; its validator rejects the event definition — see #112.",
+      "reason": "#112: Flowable 8.0.0 REJECTS this at deployment (flowable-throw-event-invalid-eventdefinition). Publish expands it into a service task on the send behaviour, so it executes as authored.",
       "evidence": "no behaviour class; validator rejects the definition"
     },
     {
@@ -255,7 +255,7 @@
       "engine": "cannot-execute",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "link",
-      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead — BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead \u2014 BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
       "evidence": "no link type in the BPMN model at all (spike #217)"
     },
     {
@@ -271,11 +271,11 @@
     {
       "name": "Intermediate Catch (Message)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "message",
-      "reason": null,
+      "reason": "#112: waits, and is advanced by correlating on a declared process variable. Verified.",
       "evidence": "deployed and started"
     },
     {
@@ -305,17 +305,17 @@
       "engine": "cannot-execute",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "link",
-      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead — BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
+      "reason": "Flowable 8.0.0 has no link event type in its BPMN model at all, so the XML converter discards it before validation and the jump silently does not exist. Descoped by spike #217. Use a sequence flow instead \u2014 BPMN defines link events as a drawing convenience, and they add no execution semantics a sequence flow does not already have.",
       "evidence": "no link type in the BPMN model at all (spike #217)"
     },
     {
       "name": "Message Boundary",
       "category": "Boundary Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "message",
-      "reason": null,
+      "reason": "#112: interrupting and non-interrupting both demonstrated against the engine.",
       "evidence": "deployed and started"
     },
     {
@@ -391,11 +391,11 @@
     {
       "name": "Message End",
       "category": "End Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "message",
-      "reason": null,
+      "reason": "#112: on its own this deploys, ends the process, and SENDS NOTHING \u2014 a catcher sat at one instance before and after. Publish expands it into a send plus a terminal end event, so it now does what it says.",
       "evidence": "deployed and started"
     },
     {
@@ -451,21 +451,21 @@
     {
       "name": "Send Task",
       "category": "Tasks",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "sendTask",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "flowable-sendtask-invalid-implementation — needs a type/implementation attribute"
+      "reason": "#112: sends through the same behaviour bridge a service task uses, so it is configured the way an author already knows.",
+      "evidence": "flowable-sendtask-invalid-implementation \u2014 needs a type/implementation attribute"
     },
     {
       "name": "Receive Task",
       "category": "Tasks",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "receiveTask",
       "eventDefinition": null,
-      "reason": null,
+      "reason": "#112: no message subscription, so it is addressed by element id and advanced with `trigger` rather than `messageEventReceived`. Verified.",
       "evidence": "deployed and started"
     },
     {
@@ -475,7 +475,7 @@
       "engine": "executes",
       "localName": "manualTask",
       "eventDefinition": null,
-      "reason": "A manual task does not wait — the engine passes straight through it, creating no task and pausing nowhere. The studio converts it to a user task at design time (#167).",
+      "reason": "A manual task does not wait \u2014 the engine passes straight through it, creating no task and pausing nowhere. The studio converts it to a user task at design time (#167).",
       "evidence": "deployed, started, and observed NOT to wait: the process reached the next activity immediately"
     },
     {
@@ -485,8 +485,8 @@
       "engine": "cannot-execute",
       "localName": "businessRuleTask",
       "eventDefinition": null,
-      "reason": "Requires the DMN/rules engine, which is not in the Flowable image (NoClassDefFoundError org/kie/api) — see #105.",
-      "evidence": "NoClassDefFoundError org/kie/api — rules engine absent from the image (#105)"
+      "reason": "Requires the DMN/rules engine, which is not in the Flowable image (NoClassDefFoundError org/kie/api) \u2014 see #105.",
+      "evidence": "NoClassDefFoundError org/kie/api \u2014 rules engine absent from the image (#105)"
     },
     {
       "name": "Call Activity",
@@ -555,8 +555,8 @@
       "engine": "cannot-execute",
       "localName": "complexGateway",
       "eventDefinition": null,
-      "reason": "Flowable 8.0.0 has no ComplexGatewayActivityBehavior. It deploys and passes the token straight through, evaluating no activation condition — see #165.",
-      "evidence": "no behaviour class; verified at runtime — token passes straight through, no activation condition, no join"
+      "reason": "Flowable 8.0.0 has no ComplexGatewayActivityBehavior. It deploys and passes the token straight through, evaluating no activation condition \u2014 see #165.",
+      "evidence": "no behaviour class; verified at runtime \u2014 token passes straight through, no activation condition, no join"
     },
     {
       "name": "Loop Marker",

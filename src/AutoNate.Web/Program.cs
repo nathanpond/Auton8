@@ -879,6 +879,9 @@ builder.Services.AddOptions<WorkflowBehaviorOptions>()
         $"{WorkflowBehaviorOptions.SectionName}:CallbackSharedSecret must be set outside Development.")
     .ValidateOnStart();
 builder.Services.AddSingleton<IWorkflowBehavior, UnlockAccountBehavior>();
+// #112. The one send path: a send task, and every message-throwing event the
+// publish step expands into a service task.
+builder.Services.AddSingleton<IWorkflowBehavior, SendMessageBehavior>();
 builder.Services.AddSingleton<IWorkflowBehaviorRegistry, WorkflowBehaviorRegistry>();
 builder.Services.AddSingleton<SharedSecretEndpointFilter>();
 

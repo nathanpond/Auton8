@@ -1150,6 +1150,17 @@ function describeBusinessObject(businessObject) {
     description.retryPoint = serviceTask.retryPoint;
   }
 
+  const messageElement = describeMessageElement(businessObject);
+  if (messageElement) {
+    // #112. Present only on message-carrying elements, receive tasks and send
+    // tasks — absence is what keeps every other element out of the message
+    // editor.
+    description.messageDirection = messageElement.messageDirection;
+    description.messageCorrelationKey = messageElement.messageCorrelationKey;
+    description.messageTargetProcessKey = messageElement.messageTargetProcessKey;
+    description.messageName = messageElement.messageName;
+  }
+
   if (businessObject.$type === "bpmn:ExclusiveGateway" || businessObject.$type === "bpmn:InclusiveGateway") {
     // Only Exclusive and Inclusive gateways carry a `default` outgoing flow.
     // Surface it (and the candidate outgoing flows) so the studio panel can
@@ -1260,6 +1271,112 @@ function writeAutoNateAttribute(businessObject, name, value) {
     return;
   }
   businessObject.$attrs[key] = value;
+}
+
+// #112. Message elements split into two directions, and they need different
+// configuration:
+//
+//   catch  — a message start / intermediate catch / boundary event, or a receive
+//            task. Carries a correlation key: which process variable identifies
+//            the instance a sender is addressing. A start event is the exception
+//            (nothing is waiting yet, so nothing is correlated).
+//   send   — an intermediate throw or end event carrying a message definition, or
+//            a send task. Carries the workflow to address and the variable whose
+//            value picks the instance over there.
+//
+// Returns null for everything else so the key is ABSENT rather than null on
+// non-message elements — the studio routes on key presence, the same rule the
+// timer and conditional editors rely on.
+function describeMessageElement(businessObject) {
+  if (!businessObject) return null;
+
+  const type = businessObject.$type;
+  const definitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const hasMessageDefinition = definitions.some(
+    (definition) => definition && definition.$type === "bpmn:MessageEventDefinition"
+  );
+
+  let direction = null;
+  if (type === "bpmn:ReceiveTask") {
+    direction = "catch";
+  } else if (type === "bpmn:SendTask") {
+    direction = "send";
+  } else if (hasMessageDefinition) {
+    if (type === "bpmn:StartEvent") direction = "start";
+    else if (type === "bpmn:IntermediateCatchEvent" || type === "bpmn:BoundaryEvent") direction = "catch";
+    else if (type === "bpmn:IntermediateThrowEvent" || type === "bpmn:EndEvent") direction = "send";
+  }
+
+  if (!direction) return null;
+
+  return {
+    messageDirection: direction,
+    messageCorrelationKey: readAutoNateFlowableAttr(businessObject, "autonateCorrelationKey") ?? "",
+    messageTargetProcessKey: readAutoNateFlowableAttr(businessObject, "autonateTargetProcessKey") ?? "",
+    // A send task has no message element to name it, so the name lives on the
+    // element itself. Empty for everything else, whose name comes from messageRef.
+    messageName:
+      type === "bpmn:SendTask"
+        ? readAutoNateFlowableAttr(businessObject, "autonateMessageName") ?? ""
+        : messageNameOf(businessObject) ?? ""
+  };
+}
+
+// The <bpmn:message> the element's definition points at. bpmn-moddle resolves
+// messageRef to the element when the diagram declares it, and leaves a raw id
+// when it does not, so both shapes are handled.
+function messageNameOf(businessObject) {
+  const definitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const definition = definitions.find(
+    (d) => d && d.$type === "bpmn:MessageEventDefinition"
+  );
+  const ref = definition?.messageRef;
+  if (!ref) return null;
+  return typeof ref === "string" ? ref : ref.name ?? ref.id ?? null;
+}
+
+// Autonate-named attributes live under the FLOWABLE prefix, not an autonate one.
+// #167 found out why: a diagram reliably declares xmlns:flowable, and bpmn-moddle
+// silently discards an attribute whose prefix is undeclared.
+function readAutoNateFlowableAttr(businessObject, name) {
+  const direct = businessObject[name];
+  if (typeof direct === "string" && direct.length > 0) return direct;
+  const value = businessObject.$attrs?.[`flowable:${name}`];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+// #112. Writes the correlation configuration an author sets in the studio.
+export function updateMessageElementProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update this message element.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject) {
+    throw new Error(`Element '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const businessObject = element.businessObject;
+  writeFlowableAttribute(
+    businessObject, "autonateCorrelationKey", normalizeOptionalString(payload.correlationKey));
+  writeFlowableAttribute(
+    businessObject, "autonateTargetProcessKey", normalizeOptionalString(payload.targetProcessKey));
+  if (businessObject.$type === "bpmn:SendTask") {
+    writeFlowableAttribute(
+      businessObject, "autonateMessageName", normalizeOptionalString(payload.messageName));
+  }
+
+  // Through modeling so the command stack records it and the dirty flag flips —
+  // assigning to the businessObject alone looks identical in the editor and is
+  // silently lost on save.
+  modeling.updateProperties(element, { name: normalizeOptionalString(payload.name) });
 }
 
 function readFlowableServiceTaskAttr(businessObject, name) {

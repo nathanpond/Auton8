@@ -218,6 +218,18 @@ type ServiceTaskEditor = {
   retryPoint: boolean;
 };
 
+type MessageElementEditor = {
+  id: string;
+  type: string;
+  name: string;
+  // "start" | "catch" | "send" — decides which fields are meaningful.
+  direction: string;
+  correlationKey: string;
+  targetProcessKey: string;
+  messageName: string;
+  editableMessageName: boolean;
+};
+
 type GenericElementEditor = {
   id: string;
   type: string;
@@ -291,6 +303,12 @@ type ElementSelection = {
   // #168. Present only on service tasks the studio recognises, like
   // serviceTaskKind and behaviorKey above.
   retryPoint?: boolean | null;
+  // #112. Present only on message-carrying elements, receive tasks and send
+  // tasks. Their absence is what keeps everything else out of the message editor.
+  messageDirection?: string | null;
+  messageCorrelationKey?: string | null;
+  messageTargetProcessKey?: string | null;
+  messageName?: string | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -427,6 +445,7 @@ export default function WorkflowStudio() {
   const [timerIntermediateEditor, setTimerIntermediateEditor] =
     useState<TimerIntermediateCatchEventEditor | null>(null);
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
+  const [messageEditor, setMessageEditor] = useState<MessageElementEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
   const [conditionalEventEditor, setConditionalEventEditor] =
@@ -633,6 +652,32 @@ export default function WorkflowStudio() {
     setTimerBoundaryEditor(null);
       return;
     }
+    // #112. Before the service-task branch — a send task is a message element
+    // first, and a receive task would otherwise land in the generic editor with
+    // nowhere to put a correlation key.
+    if (selection && typeof selection.messageDirection === "string") {
+      setMessageEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        direction: selection.messageDirection,
+        correlationKey: selection.messageCorrelationKey ?? "",
+        targetProcessKey: selection.messageTargetProcessKey ?? "",
+        messageName: selection.messageName ?? "",
+        // Only a send task names its own message; everywhere else the name comes
+        // from the <bpmn:message> the diagram declares, and editing it here would
+        // silently diverge from it.
+        editableMessageName: selection.type === "bpmn:SendTask"
+      });
+      setScriptTaskEditor(null);
+      setServiceTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setGenericEditor(null);
+      return;
+    }
+    setMessageEditor(null);
+
     const isServiceTask =
       !!selection &&
       selection.type === "bpmn:ServiceTask" &&
@@ -1181,6 +1226,21 @@ export default function WorkflowStudio() {
       setServiceTaskEditor(null);
     });
 
+  const applyMessageElement = () =>
+    runBusy("applying message settings", async () => {
+      if (!handle || !messageEditor) {
+        throw new Error("Select a message element before applying changes.");
+      }
+      await workflow.updateMessageElementProperties(handle, {
+        id: messageEditor.id,
+        name: messageEditor.name,
+        correlationKey: messageEditor.correlationKey,
+        targetProcessKey: messageEditor.targetProcessKey,
+        messageName: messageEditor.messageName
+      });
+      setMessageEditor(null);
+    });
+
   const applyGeneric = () =>
     runBusy("applying element changes", async () => {
       if (!handle || !genericEditor) {
@@ -1652,6 +1712,19 @@ export default function WorkflowStudio() {
             setServiceTaskEditor(null);
           }}
           onApply={applyServiceTask}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {messageEditor && (
+        <MessageElementModal
+          editor={messageEditor}
+          onChange={setMessageEditor}
+          onClose={() => {
+            if (busy) return;
+            setMessageEditor(null);
+          }}
+          onApply={applyMessageElement}
           disabled={!!busy || !handle}
         />
       )}
@@ -3535,6 +3608,129 @@ function ServiceTaskModal({
             Close
           </Button>
           <Button onClick={onApply} disabled={disabled || !editor.behaviorKey.trim()}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #112. One modal for every message element, because they differ only in which
+// fields mean anything:
+//
+//   start — nothing to correlate to; no instance exists yet, so a key written
+//           here would look like a filter that silently matches everything.
+//   catch — a correlation key: which process variable identifies THIS instance
+//           to a sender.
+//   send  — which workflow to address, and the variable here whose value picks
+//           the instance over there.
+function MessageElementModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: MessageElementEditor;
+  onChange: (next: MessageElementEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isSend = editor.direction === "send";
+  const isStart = editor.direction === "start";
+
+  return (
+    <Modal opened onClose={onClose} title={`${humanizeBpmnType(editor.type)} (Message)`} size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          {isSend
+            ? "Tell another workflow that something happened here. Auton8 finds the one waiting " +
+              "process instance whose correlation value matches, and delivers to it."
+            : isStart
+              ? "Starts a new run of this workflow when this message arrives. Nothing is waiting " +
+                "yet, so there is nothing to correlate against."
+              : "Waits here until this message arrives. The correlation key is how a sender says " +
+                "which run of this workflow it means."}
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Message element name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Await payment"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Message</span>
+          <input
+            className="form-control"
+            aria-label="Message"
+            value={editor.messageName}
+            disabled={!editor.editableMessageName}
+            onChange={(e) => onChange({ ...editor, messageName: e.target.value })}
+            placeholder="paymentCleared"
+          />
+          <p className="workflow-modal-note">
+            {editor.editableMessageName
+              ? "The name a sender uses to address this."
+              : "Comes from the message declared on the diagram, so it always matches what the " +
+                "engine subscribes to."}
+          </p>
+        </label>
+
+        {isSend && (
+          <label className="workflow-field">
+            <span>Send to workflow</span>
+            <input
+              className="form-control"
+              aria-label="Send to workflow"
+              value={editor.targetProcessKey}
+              onChange={(e) => onChange({ ...editor, targetProcessKey: e.target.value })}
+              placeholder="orders"
+            />
+            <p className="workflow-modal-note">
+              The process key of the workflow to notify. Auton8 never broadcasts &mdash; a message
+              goes to exactly one waiting run, or the send reports that it found none.
+            </p>
+          </label>
+        )}
+
+        {!isStart && (
+          <label className="workflow-field">
+            <span>Correlation key</span>
+            <input
+              className="form-control"
+              aria-label="Correlation key"
+              value={editor.correlationKey}
+              onChange={(e) => onChange({ ...editor, correlationKey: e.target.value })}
+              placeholder="orderId"
+            />
+            <p className="workflow-modal-note">
+              {isSend
+                ? "The process variable here whose value identifies the run to notify."
+                : "The process variable that identifies this run. A sender supplies its value."}{" "}
+              It must be unique among waiting runs: if two match, Auton8 refuses and tells the
+              sender how many, rather than picking one.
+            </p>
+          </label>
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled}>
             Apply
           </Button>
         </Group>

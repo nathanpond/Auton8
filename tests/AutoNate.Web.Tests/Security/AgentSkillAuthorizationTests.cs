@@ -193,6 +193,51 @@ public sealed class AgentSkillAuthorizationTests
         Assert.Equal(expected, actual);
     }
 
+    // #112 decided, in planning, that the assistant does NOT gain the ability to
+    // advance someone else's running process in this milestone — that is M8's
+    // subject. The skill-set equality test above already fails on a new skill
+    // TYPE, but it would not notice message-sending grafted onto an existing
+    // skill, which is the cheaper way for the decision to be quietly reversed.
+    //
+    // Source scan rather than reflection for the same reason the authorizer guard
+    // uses one: an IL scan under-reports, and a guard that can fail open is worse
+    // than none.
+    [Fact]
+    public void No_agent_skill_can_send_a_workflow_message()
+    {
+        var skillsDir = SkillSourceDirectory();
+
+        // The correlator is the only way to deliver a message, and the endpoint is
+        // the only way in from outside. A skill touching either has gained the
+        // capability regardless of what it is called.
+        string[] forbidden =
+        [
+            "WorkflowMessageCorrelator",
+            "/api/workflow-messages",
+            "DeliverMessageToExecutionAsync",
+            "StartProcessInstanceByMessageAsync",
+            "TriggerExecutionAsync"
+        ];
+
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(skillsDir, "*.cs", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(file);
+            foreach (var symbol in forbidden)
+            {
+                if (text.Contains(symbol, StringComparison.Ordinal))
+                {
+                    offenders.Add($"{Path.GetFileName(file)} references {symbol}");
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "The assistant must not be able to advance a running process in this milestone (#112). "
+                + "Found: " + string.Join("; ", offenders));
+    }
+
     // Reflection here (not the source scan) so a skill added anywhere in the
     // assembly is caught, including one that never lands in the Skills folder.
     private static IEnumerable<Type> SkillTypes() =>

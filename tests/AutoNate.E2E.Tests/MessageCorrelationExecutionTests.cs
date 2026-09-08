@@ -274,6 +274,175 @@ public sealed class MessageCorrelationExecutionTests : E2ETestBase
         Assert.Equal("42", value);
     }
 
+    // ── The publish-time expansion ──────────────────────────────────────────
+    //
+    // What these can and cannot prove here, stated once.
+    //
+    // Flowable's behaviour callback is configured to reach the app in the
+    // `autonate-web` CONTAINER, which reads the `AutoNate` database. The E2E
+    // fixture runs its own app against `AutoNate_E2E`. So a behaviour invoked by
+    // a workflow these tests publish executes in a process that cannot see the
+    // workflow — the send behaviour reports `senderNotFound`, correctly, because
+    // from where it is running the sender really does not exist.
+    //
+    // That is a property of the test topology, not of the feature, so these
+    // assert the half the topology can carry: the element the engine used to
+    // REJECT now deploys, the expanded service task actually runs, and the
+    // process continues (or ends) exactly as the authored diagram says. The
+    // delivery half is proved by the seven tests above, which drive the same
+    // correlator through the endpoint. Filed as #223.
+
+    [Fact]
+    public async Task An_intermediate_message_throw_deploys_and_runs_as_a_send()
+    {
+        // Publishing at all is the first assertion. Flowable 8.0.0 rejects this
+        // element outright — "flowable-throw-event-invalid-eventdefinition:
+        // Unsupported intermediate throw event type" — so before the expansion
+        // this line failed with a 500.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var receiverKey = $"mc_rcv_{Guid.NewGuid():N}"[..24];
+        var senderKey = $"mc_snd_{Guid.NewGuid():N}"[..24];
+        var messageName = $"{receiverKey}_shipped";
+
+        await PublishAsync(api, receiverKey, ReceiverDiagram(receiverKey, messageName));
+        await PublishAsync(api, senderKey, ThrowDiagram(senderKey, receiverKey, messageName, asEndEvent: false));
+
+        var sender = await StartAsync(api, senderKey, new { orderId = "ORD-1" });
+
+        // The throw is not a wait state: execution continues past it. An
+        // expansion that produced a service task the engine parked on forever
+        // would fail here.
+        await EventuallyAsync(api, sender,
+            names => names.Contains("After announcing"), "the sender to continue past the throw");
+
+        // And the expanded task really invoked the send behaviour rather than
+        // being an inert service task. The behaviour writes its outcome whatever
+        // it is, so this asserts it RAN — see the note above for why the outcome
+        // here is `senderNotFound` rather than `delivered`.
+        var outcome = await ReadProcessVariableAsync(sender, SendMessageResultVariable);
+        Assert.False(
+            string.IsNullOrWhiteSpace(outcome),
+            "The expanded service task did not run the send behaviour: no " +
+            $"{SendMessageResultVariable} variable was written.");
+    }
+
+    [Fact]
+    public async Task A_message_end_event_deploys_runs_as_a_send_and_still_ends_the_process()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var receiverKey = $"mc_erc_{Guid.NewGuid():N}"[..24];
+        var senderKey = $"mc_end_{Guid.NewGuid():N}"[..24];
+        var messageName = $"{receiverKey}_shipped";
+
+        await PublishAsync(api, receiverKey, ReceiverDiagram(receiverKey, messageName));
+        await PublishAsync(api, senderKey, ThrowDiagram(senderKey, receiverKey, messageName, asEndEvent: true));
+
+        var sender = await StartAsync(api, senderKey, new { orderId = "ORD-7" });
+
+        // The assertion this element exists for. On its own a message end event
+        // deploys, ends the process, and sends NOTHING. After the expansion it
+        // must do both — so the process still has to finish, and an expansion
+        // that turned the end event into a service task and stopped there would
+        // leave this instance running forever.
+        await EventuallyEndedAsync(api, sender);
+
+        // Both halves: it ended AND the send ran on the way out.
+        var outcome = await ReadHistoricProcessVariableAsync(sender, SendMessageResultVariable);
+        Assert.False(
+            string.IsNullOrWhiteSpace(outcome),
+            "The message end event ended the process without running the send behaviour.");
+    }
+
+    private const string SendMessageResultVariable = "sendMessageResult";
+
+    private static async Task EventuallyEndedAsync(IAPIRequestContext api, string instanceId)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var response = await api.GetAsync($"/api/executions/{instanceId}/history");
+            if (response.Ok && (await TaskNamesAsync(api, instanceId)).Count == 0)
+            {
+                var body = await response.TextAsync();
+                if (body.Contains("endEvent", StringComparison.Ordinal)) return;
+            }
+
+            await Task.Delay(500);
+        }
+
+        Assert.Fail(
+            "The sending process never ended. A message end event must still end its process " +
+            "after the expansion rewrites it into a send.");
+    }
+
+    private static string ReceiverDiagram(string key, string messageName) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:message id="Msg_1" name="{{messageName}}" />
+          <bpmn:process id="{{key}}" name="Receiver" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="fork" />
+            <bpmn:parallelGateway id="fork" />
+            <bpmn:sequenceFlow id="fa" sourceRef="fork" targetRef="idle" />
+            <bpmn:userTask id="idle" name="Awaiting news" />
+            <bpmn:sequenceFlow id="fb" sourceRef="fork" targetRef="catch" />
+            <bpmn:intermediateCatchEvent id="catch" flowable:autonateCorrelationKey="orderId">
+              <bpmn:messageEventDefinition messageRef="Msg_1" />
+            </bpmn:intermediateCatchEvent>
+            <bpmn:sequenceFlow id="f1" sourceRef="catch" targetRef="heard" />
+            <bpmn:userTask id="heard" name="Heard it" />
+          </bpmn:process>
+          {{Di(key, "s", "fork", "idle", "catch", "heard")}}
+        </bpmn:definitions>
+        """;
+
+    private static string ThrowDiagram(
+        string key, string targetKey, string messageName, bool asEndEvent)
+    {
+        var throwElement = asEndEvent
+            ? $"""
+                 <bpmn:endEvent id="announce"
+                                flowable:autonateTargetProcessKey="{targetKey}"
+                                flowable:autonateCorrelationKey="orderId">
+                   <bpmn:messageEventDefinition messageRef="Msg_1" />
+                 </bpmn:endEvent>
+               """
+            : $"""
+                 <bpmn:intermediateThrowEvent id="announce"
+                                              flowable:autonateTargetProcessKey="{targetKey}"
+                                              flowable:autonateCorrelationKey="orderId">
+                   <bpmn:messageEventDefinition messageRef="Msg_1" />
+                 </bpmn:intermediateThrowEvent>
+                 <bpmn:sequenceFlow id="f1" sourceRef="announce" targetRef="after" />
+                 <bpmn:userTask id="after" name="After announcing" />
+               """;
+
+        var shapes = asEndEvent
+            ? Di(key, "s", "announce")
+            : Di(key, "s", "announce", "after");
+
+        return $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:message id="Msg_1" name="{{messageName}}" />
+              <bpmn:process id="{{key}}" name="Sender" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="announce" />
+            {{throwElement}}
+              </bpmn:process>
+              {{shapes}}
+            </bpmn:definitions>
+            """;
+    }
+
     // start -> catch("paymentCleared", correlate on orderId) -> "Paid",
     // with a user task in front so the instance is observable while it waits.
     private static string CatchDiagram(string key) => $$"""
@@ -317,6 +486,31 @@ public sealed class MessageCorrelationExecutionTests : E2ETestBase
         {
             if (variable.GetProperty("name").GetString() == name)
             {
+                return variable.TryGetProperty("value", out var value) ? value.ToString() : null;
+            }
+        }
+
+        return null;
+    }
+
+    // A finished instance has no runtime variables left, so the ended case reads
+    // the historic copy instead.
+    private static async Task<string?> ReadHistoricProcessVariableAsync(string processInstanceId, string name)
+    {
+        using var client = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var body = await client.GetStringAsync(
+            "service/history/historic-variable-instances?processInstanceId="
+            + Uri.EscapeDataString(processInstanceId) + "&size=200");
+        using var document = JsonDocument.Parse(body);
+        foreach (var row in document.RootElement.GetProperty("data").EnumerateArray())
+        {
+            if (row.GetProperty("variable").GetProperty("name").GetString() == name)
+            {
+                var variable = row.GetProperty("variable");
                 return variable.TryGetProperty("value", out var value) ? value.ToString() : null;
             }
         }

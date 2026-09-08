@@ -11,6 +11,15 @@ namespace AutoNate.Web.Services.Workflow;
 // and over instance-id-only (which pushes the problem onto callers who know a
 // business identifier, not an instance id).
 //
+// M5's full-collaboration work deploys a two-pool diagram as two process
+// definitions, and a message flow drawn between them is a send from one and a
+// catch in the other. That is exactly the shape below: the sender names a target
+// process key and a correlation value, the receiver declares which variable
+// carries it. Nothing here is pool-aware and nothing needs to be — a message flow
+// is addressing by another name, so M5 reuses this rather than growing a second
+// mechanism. Recorded here so the mismatch, if there is one, is found by reading
+// this paragraph rather than by building the pool work first.
+//
 // A multi-match REFUSES. A correlation key is meant to be unique among waiting
 // instances, so more than one match means the process is modelled wrong or the
 // key is badly chosen; delivering to an arbitrary or oldest instance hides that

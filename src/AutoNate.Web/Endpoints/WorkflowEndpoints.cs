@@ -267,7 +267,22 @@ public static class WorkflowEndpoints
                 }
             }
 
-            var deployment = await flowable.DeployProcessAsync(model, cancellationToken);
+            // #112. Expanded at DEPLOY, not at save. Flowable rejects an
+            // intermediate throw (Message) outright and silently ignores a message
+            // end event, so the deployed copy carries service tasks on the
+            // behaviour bridge instead — while the stored model keeps the diagram
+            // the author drew, which is what the send behaviour reads its message
+            // name and target back from.
+            //
+            // Here rather than in the prepare step because prepare's output is
+            // what the studio saves, and because a caller that publishes without
+            // preparing must not be able to deploy something the engine refuses.
+            var deployable = model with
+            {
+                BpmnXml = WorkflowBpmnXml.ExpandForDeployment(model.BpmnXml)
+            };
+
+            var deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);
             var published = await store.PublishAsync(model, deployment, cancellationToken);
             // A fresh deployment is always active in Flowable — null out any
             // stale suspended flag so the SPA shows "Pause" rather than "Resume".
