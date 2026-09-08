@@ -3432,3 +3432,36 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   wrong string I had just written. Only navigating for real finds this class of
   bug.
   **Issue:** #113
+
+- **Two criteria corrected in #164 on engine evidence.**
+  1. The issue says to refuse "anything other than intermediate catch events **or
+     receive tasks**" after an event-based gateway. **Flowable refuses the receive
+     task itself** — `flowable-event-gateway-only-connected-to-intermediate-events`.
+     BPMN permits it; this engine does not. Implementing the criterion as written
+     would have let through a diagram that fails at deploy with a parse error an
+     author cannot act on, so the validation refuses receive tasks too and says
+     why.
+  2. A gateway with **one** outgoing flow **deploys cleanly** (verified), so that
+     rule is genuinely ours and is not redundant with the engine's own check. The
+     bad-target rule IS partly redundant — kept because ours fires earlier and in
+     the author's terms — and that is recorded so nobody later removes it as
+     duplicated.
+  **Issue:** #164
+
+- **Decision: the publish-time rules are now a named set with a membership
+  criterion**, `WorkflowBpmnXml.ValidateStructureForPublish`, rather than
+  individually promoted one-offs. The criterion: *the engine either destroys
+  something or accepts a diagram that cannot work, and the author gets no usable
+  diagnosis.* Members are #114's uncaught error and #164's unresolvable gateway.
+  **Why the change of shape:** this was the third story written assuming publish
+  is a gate, and promoting rules one at a time would arrive at "the whole
+  validation set" by habit rather than by decision. The criterion exists to stop
+  that. Everything else stays advisory until #225 is answered.
+  **Issue:** #164, #114, #225
+
+- **#164 is NOT blocked by #156.** Its last criterion asks that alternatives reuse
+  "signal scope from the signals story", and #156 is blocked on what `process`
+  scope means. Nothing here pins signal-scope semantics: a signal alternative
+  catches a signal, and whatever #156 decides about who receives one applies
+  unchanged.
+  **Issue:** #164, #156

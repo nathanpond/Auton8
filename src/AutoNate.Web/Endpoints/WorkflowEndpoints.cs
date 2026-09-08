@@ -267,17 +267,14 @@ public static class WorkflowEndpoints
                 }
             }
 
-            // #114. An error end event whose code nothing catches destroys the
-            // whole instance at run time — Flowable answers the start call with
-            // 500 and leaves no history to look at. It is fully detectable here,
-            // so it is refused rather than deployed.
-            //
-            // Checked at publish and not only at prepare because prepare is
-            // advisory: the studio calls it, a direct API caller need not.
-            var thrownCodeErrors = WorkflowBpmnXml.ValidateThrownCodesForPublish(model.BpmnXml);
-            if (thrownCodeErrors.Count > 0)
+            // The small set of rules enforced at publish rather than only at
+            // prepare — see ValidateStructureForPublish for the membership
+            // criterion. Prepare is advisory: the studio calls it, a direct API
+            // caller need not.
+            var structureErrors = WorkflowBpmnXml.ValidateStructureForPublish(model.BpmnXml);
+            if (structureErrors.Count > 0)
             {
-                return Results.BadRequest(new { errors = thrownCodeErrors });
+                return Results.BadRequest(new { errors = structureErrors });
             }
 
             // #113. Every call activity is resolved to the child definition that

@@ -488,6 +488,9 @@ public static partial class WorkflowBpmnXml
             // #167: elements the studio converts away, and converted tasks nobody can do.
             errors.AddRange(BuildNonWaitingTaskErrors(document));
             errors.AddRange(BuildUncaughtThrownCodeErrors(document));
+            // #164: a gateway that cannot be a choice, or points somewhere the
+            // engine will not follow.
+            errors.AddRange(BuildEventBasedGatewayErrors(document));
 
             // #158: every condition in the diagram, through the one shared check.
             // Sequence flows included, so exclusive and inclusive gateways benefit
@@ -2224,32 +2227,51 @@ public static partial class WorkflowBpmnXml
     // error in BPMN: it is a notification nobody subscribed to, the engine carries
     // on, and refusing it would block a legitimate diagram.
     /// <summary>
-    /// The uncaught-error check on its own, for the publish path (#114).
+    /// The rules enforced at PUBLISH, not merely at prepare.
     /// </summary>
     /// <remarks>
-    /// ValidateProcess runs on /prepare, which the studio calls before saving —
-    /// but /publish is what deploys, and a caller that publishes without preparing
-    /// reaches the engine unchecked. Only THIS check is applied there, not the
-    /// whole validation set: its failure mode is an instance that is destroyed
-    /// with no history and no error surface, whereas moving every rule onto
-    /// publish would change what that endpoint accepts for every diagram already
-    /// in flight. That broader change deserves its own story, not a side effect of
-    /// this one.
+    /// `ValidateProcess` runs on /prepare, which the studio calls before saving.
+    /// /publish is what actually deploys, and a caller that publishes without
+    /// preparing reaches the engine unchecked — so every rule in that set is
+    /// advisory (#225 puts the general question to the user).
+    ///
+    /// This is the deliberately small set promoted to the publish path. The
+    /// criterion for membership, so it does not grow by habit: **the engine either
+    /// destroys something or accepts a diagram that cannot work, and the author
+    /// gets no usable diagnosis.**
+    ///
+    ///   #114 — an error nobody catches. Flowable answers the start call with 500
+    ///          and the instance never exists: no history, nothing on the error
+    ///          surface, and the failure lands on whoever ran it.
+    ///   #164 — an event-based gateway that cannot resolve. A single-path gateway
+    ///          deploys cleanly and then waits forever; a bad target is refused by
+    ///          the engine, but as a parse error naming a line and column.
+    ///
+    /// Everything else stays on prepare until #225 is decided. Moving the whole
+    /// set changes what publish accepts for every diagram already in flight, which
+    /// is a contract change and not a side effect of whichever story noticed it.
     /// </remarks>
-    public static IReadOnlyList<string> ValidateThrownCodesForPublish(string xml)
+    public static IReadOnlyList<string> ValidateStructureForPublish(string xml)
     {
         if (string.IsNullOrWhiteSpace(xml)) return Array.Empty<string>();
 
+        XDocument document;
         try
         {
-            return BuildUncaughtThrownCodeErrors(XDocument.Parse(xml));
+            document = XDocument.Parse(xml);
         }
         catch (System.Xml.XmlException)
         {
-            // Malformed XML is the deploy path's problem to report; this check has
-            // nothing to say about it and must not mask it.
+            // Malformed XML is the deploy path's problem to report; these checks
+            // have nothing to say about it and must not mask it.
             return Array.Empty<string>();
         }
+
+        return
+        [
+            .. BuildUncaughtThrownCodeErrors(document),
+            .. BuildEventBasedGatewayErrors(document)
+        ];
     }
 
     private static IReadOnlyList<string> BuildUncaughtThrownCodeErrors(XDocument document)
@@ -2306,6 +2328,91 @@ public static partial class WorkflowBpmnXml
                     "same code to the activity it should interrupt. Published as-is, reaching " +
                     "this event destroys the whole process instance — there is no history to " +
                     "look at afterwards and the failure lands on whoever started it.");
+            }
+        }
+
+        return errors;
+    }
+
+    // #164. Two rules, and only one of them duplicates the engine.
+    //
+    // Flowable rejects a bad TARGET itself
+    // ('flowable-event-gateway-only-connected-to-intermediate-events'), but as a
+    // parse error at deploy, which names a line and column rather than telling an
+    // author what to do. Ours says it earlier and in their terms.
+    //
+    // Flowable does NOT object to a gateway with one outgoing flow — verified,
+    // that deploys cleanly. A choice between one thing is a diagram that waits
+    // forever on a single event while looking like it offers alternatives, so
+    // that rule is genuinely ours.
+    //
+    // Receive tasks are refused DESPITE BPMN allowing them after an event-based
+    // gateway, because this engine does not: verified, `flowable:` rejects the
+    // deployment. Saying so here is better than letting the author discover it as
+    // a parse error.
+    private static IReadOnlyList<string> BuildEventBasedGatewayErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        var flowsBySource = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .Where(flow => !string.IsNullOrWhiteSpace(flow.Attribute("sourceRef")?.Value))
+            .GroupBy(flow => flow.Attribute("sourceRef")!.Value, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        var elementsById = document
+            .Descendants()
+            .Where(e => e.Name.Namespace == BpmnNamespace
+                        && !string.IsNullOrWhiteSpace(e.Attribute("id")?.Value))
+            .GroupBy(e => e.Attribute("id")!.Value, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+        foreach (var gateway in document.Descendants(BpmnNamespace + "eventBasedGateway"))
+        {
+            var gatewayId = gateway.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(gatewayId)) continue;
+
+            var label = LabelOf(gateway);
+            var outgoing = flowsBySource.TryGetValue(gatewayId!, out var flows)
+                ? flows
+                : new List<XElement>();
+
+            if (outgoing.Count < 2)
+            {
+                errors.Add(
+                    $"The event-based gateway '{label}' has {outgoing.Count} outgoing " +
+                    (outgoing.Count == 1 ? "path" : "paths") +
+                    ", so there is nothing for it to choose between. Give it at least two " +
+                    "events to wait for, or use a plain intermediate catch event instead — as " +
+                    "drawn, the process waits on one event while the diagram suggests it is " +
+                    "waiting on several.");
+            }
+
+            foreach (var flow in outgoing)
+            {
+                var targetId = flow.Attribute("targetRef")?.Value;
+                if (string.IsNullOrWhiteSpace(targetId)
+                    || !elementsById.TryGetValue(targetId!, out var target))
+                {
+                    continue;
+                }
+
+                if (string.Equals(target.Name.LocalName, "intermediateCatchEvent", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var targetLabel = LabelOf(target);
+                errors.Add(string.Equals(target.Name.LocalName, "receiveTask", StringComparison.Ordinal)
+                    ? $"The event-based gateway '{label}' leads to the receive task " +
+                      $"'{targetLabel}'. BPMN allows that, but this engine does not — it accepts " +
+                      "only intermediate catch events after an event-based gateway, and refuses " +
+                      "the whole deployment otherwise. Use a message intermediate catch event " +
+                      "instead."
+                    : $"The event-based gateway '{label}' leads to '{targetLabel}', which is not " +
+                      "an event. Every path out of an event-based gateway must start with an " +
+                      "intermediate catch event — that is what it waits on. As drawn, this " +
+                      "diagram cannot be deployed.");
             }
         }
 

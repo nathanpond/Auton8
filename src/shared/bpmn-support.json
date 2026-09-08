@@ -541,11 +541,11 @@
     {
       "name": "Event-Based Gateway",
       "category": "Gateways",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "eventBasedGateway",
       "eventDefinition": null,
-      "reason": null,
+      "reason": "#164: the first event to arrive takes its path and the others are cancelled \u2014 verified both ways round, with the loser asserted cancelled rather than merely not taken. Publish refuses a gateway with one path (which Flowable deploys happily) and one pointing at a receive task (which BPMN allows and this engine does not).",
       "evidence": "deployed and started"
     },
     {

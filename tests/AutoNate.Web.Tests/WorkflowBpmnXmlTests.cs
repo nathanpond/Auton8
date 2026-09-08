@@ -1865,6 +1865,92 @@ public sealed class WorkflowBpmnXmlTests
         </bpmn:definitions>
         """;
 
+    // #164. Two rules with different justifications, so both directions are
+    // asserted for each: a validation that refuses everything and one that
+    // refuses nothing both pass a single-case test.
+    [Fact]
+    public void Validate_RefusesAnEventGatewayWithOnlyOnePath()
+    {
+        // Verified against Flowable 8.0.0: this DEPLOYS cleanly, so the engine
+        // will not catch it for us. A choice between one thing waits forever on a
+        // single event while the diagram suggests alternatives.
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(EventGatewayDiagram(secondPath: null));
+
+        Assert.Contains(errors, e => e.Contains("nothing for it to choose between", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_AcceptsAnEventGatewayWithTwoCatchEvents()
+    {
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(
+            EventGatewayDiagram(secondPath: "intermediateCatchEvent"));
+
+        Assert.DoesNotContain(errors, e => e.Contains("event-based gateway", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_RefusesAnEventGatewayPointingAtSomethingThatIsNotAnEvent()
+    {
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(
+            EventGatewayDiagram(secondPath: "userTask"));
+
+        Assert.Contains(errors, e => e.Contains("which is not an event", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_RefusesAReceiveTaskAfterAnEventGateway_AndSaysWhy()
+    {
+        // BPMN allows this; Flowable does not — verified, it refuses the whole
+        // deployment with a parse error naming a line and column. Refusing it here
+        // with an explanation is the point, so the message is asserted rather than
+        // just the refusal.
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(
+            EventGatewayDiagram(secondPath: "receiveTask"));
+
+        Assert.Contains(errors, e => e.Contains("this engine does not", StringComparison.Ordinal));
+    }
+
+    private static string EventGatewayDiagram(string? secondPath)
+    {
+        var second = secondPath switch
+        {
+            "intermediateCatchEvent" => """
+                <bpmn:sequenceFlow id="fb" sourceRef="gw" targetRef="onTimer" />
+                <bpmn:intermediateCatchEvent id="onTimer" name="Timeout">
+                  <bpmn:timerEventDefinition />
+                </bpmn:intermediateCatchEvent>
+              """,
+            "userTask" => """
+                <bpmn:sequenceFlow id="fb" sourceRef="gw" targetRef="plain" />
+                <bpmn:userTask id="plain" name="Just a task" />
+              """,
+            "receiveTask" => """
+                <bpmn:sequenceFlow id="fb" sourceRef="gw" targetRef="rt" />
+                <bpmn:receiveTask id="rt" name="Await something" />
+              """,
+            _ => string.Empty
+        };
+
+        return $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:message id="Msg_1" name="confirm" />
+              <bpmn:process id="p" name="P" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="gw" />
+                <bpmn:eventBasedGateway id="gw" name="First one wins" />
+                <bpmn:sequenceFlow id="fa" sourceRef="gw" targetRef="onMsg" />
+                <bpmn:intermediateCatchEvent id="onMsg" name="Confirmed">
+                  <bpmn:messageEventDefinition messageRef="Msg_1" />
+                </bpmn:intermediateCatchEvent>
+            {{second}}
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+    }
+
     [Fact]
     public void ApplyProcessMetadata_StripsLegacyClassAttribute_OnServiceTaskSnapshot()
     {
