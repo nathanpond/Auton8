@@ -405,7 +405,7 @@
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "signal",
-      "reason": "#156: raises its signal and ends the path.",
+      "reason": "#156: on its own this deploys, ends the process, and RAISES NOTHING -- verified, a catcher waiting on the same name sat untouched while an intermediate throw of that signal fired it instantly. Publish rewrites it into an intermediate throw plus a terminal end event, so it does what it says.",
       "evidence": "deployed and started"
     },
     {

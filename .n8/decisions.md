@@ -3606,3 +3606,28 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   runs too early is indistinguishable from the feature working, like the 405 that
   satisfied `!completed.Ok` and the poll predicate that was true before the save.
   **Issue:** #156
+
+- **A SIGNAL END EVENT RAISES NOTHING — found only because I refused to tick its
+  criterion without a test.** Verified against Flowable 8.0.0: a catcher waiting
+  on the name was untouched after a signal end event ran, while an intermediate
+  throw of that same signal fired it instantly. It deploys and ends the process,
+  which is why #103's inventory recorded "executes" — the element runs, it just
+  does not do the one thing it exists for.
+  **This is the second element in this milestone with that shape**, after #112's
+  message end event, and both are now declared departures in
+  `BpmnSupportManifestTests` rather than silent manifest edits.
+  **Fix:** publish rewrites it into an intermediate throw plus a terminal end
+  event — simpler than the message case, which needed the behaviour bridge,
+  because the signal throw is natively supported.
+  **The process point:** I had ALREADY moved `Signal End` to `supported` and would
+  have ticked the criterion on the strength of the inventory. The over-claim audit
+  is what forced a test, and the test is what found it.
+  **Issue:** #156, #112, #103
+
+- **A test shape that said nothing, corrected (#156).** The first signal-end test
+  put the catcher on a parallel branch of the SAME instance; the end event
+  finished the instance before that branch could react, and the tasks came back
+  empty — a failure that was about my diagram, not the feature. Restructured
+  across two instances with a global signal, where B hearing it proves the signal
+  left A. Same class as #162's interrupting-event-subprocess probe.
+  **Issue:** #156

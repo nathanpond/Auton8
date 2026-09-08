@@ -106,6 +106,174 @@ public sealed class SignalScopeExecutionTests : E2ETestBase
         Assert.Contains("Long work", names);
     }
 
+    [Fact]
+    public async Task An_interrupting_signal_boundary_cancels_its_activity()
+    {
+        // The complement of the non-interrupting test. Asserting only that the
+        // boundary path ran would pass for either, which is the opposite feature.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"sig_ib_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, key, BoundaryDiagram(key, interrupting: true));
+
+        var instance = await StartAsync(api, key);
+        Assert.Contains("Long work", await TaskNamesAsync(api, instance));
+
+        await CompleteTaskAsync(api, instance, "Trigger");
+
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("Boundary fired"), "the interrupting boundary to fire");
+
+        Assert.Contains("Boundary fired", names);
+        Assert.DoesNotContain("Long work", names);
+    }
+
+    [Fact]
+    public async Task A_signal_end_event_raises_its_signal()
+    {
+        // Signal END, in its own right. Unlike the message end event — which
+        // deploys, ends the process and sends nothing (#112) — Flowable executes
+        // this one as authored, so it needs no expansion.
+        //
+        // Two instances with a GLOBAL signal, deliberately: a first attempt put
+        // the catcher on a parallel branch of the SAME instance, and the end event
+        // finished the instance before that branch could react — the tasks came
+        // back empty and the test said nothing about whether the signal was
+        // raised. Across instances there is no such ambiguity: B hearing it proves
+        // the signal left A.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"sig_e_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, key, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:signal id="Sig_1" name="{{key}}_done" />
+              <bpmn:process id="{{key}}" name="Signal End" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="fork" />
+                <bpmn:parallelGateway id="fork" />
+
+                <bpmn:sequenceFlow id="fa" sourceRef="fork" targetRef="gate" />
+                <bpmn:userTask id="gate" name="Trigger" />
+                <bpmn:sequenceFlow id="fa1" sourceRef="gate" targetRef="finish" />
+                <bpmn:endEvent id="finish">
+                  <bpmn:extensionElements>
+                    <flowable:autonateSignalScope value="global" />
+                  </bpmn:extensionElements>
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:endEvent>
+
+                <bpmn:sequenceFlow id="fb" sourceRef="fork" targetRef="catch" />
+                <bpmn:intermediateCatchEvent id="catch" name="Await">
+                  <bpmn:extensionElements>
+                    <flowable:autonateSignalScope value="global" />
+                  </bpmn:extensionElements>
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateCatchEvent>
+                <bpmn:sequenceFlow id="fb1" sourceRef="catch" targetRef="heard" />
+                <bpmn:userTask id="heard" name="Heard the end signal" />
+              </bpmn:process>
+              {{Di(key, "s", "fork", "gate", "finish", "catch", "heard")}}
+            </bpmn:definitions>
+            """);
+
+        var a = await StartAsync(api, key);
+        var b = await StartAsync(api, key);
+
+        await CompleteTaskAsync(api, a, "Trigger");
+
+        var bNames = await EventuallyAsync(api, b,
+            n => n.Contains("Heard the end signal"),
+            "the other instance to hear the signal the end event raised");
+        Assert.Contains("Heard the end signal", bNames);
+    }
+
+    [Fact]
+    public async Task A_signal_nobody_listens_for_is_not_an_error_and_is_visible_in_history()
+    {
+        // Broadcast semantics: reaching nobody is normal, not a failure. But an
+        // author debugging "nothing happened" needs to see that the signal WAS
+        // raised — otherwise a mistyped name and a correctly-raised signal look
+        // identical from the outside.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"sig_n_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, key, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:signal id="Sig_1" name="{{key}}_nobody" />
+              <bpmn:process id="{{key}}" name="Unheard" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="shout" />
+                <bpmn:intermediateThrowEvent id="shout" name="Shout into the void">
+                  <bpmn:extensionElements>
+                    <flowable:autonateSignalScope value="instance" />
+                  </bpmn:extensionElements>
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateThrowEvent>
+                <bpmn:sequenceFlow id="f1" sourceRef="shout" targetRef="after" />
+                <bpmn:userTask id="after" name="Carried on" />
+              </bpmn:process>
+              {{Di(key, "s", "shout", "after")}}
+            </bpmn:definitions>
+            """);
+
+        var instance = await StartAsync(api, key);
+
+        // Not an error: the process carried straight on past the throw.
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("Carried on"), "the process to continue past an unheard signal");
+        Assert.Contains("Carried on", names);
+
+        // And visible: the throw is in history, so "nothing happened" can be told
+        // apart from "the signal was never raised".
+        var history = await api.GetAsync($"/api/executions/{instance}/history");
+        Assert.True(history.Ok, $"Reading history failed: {history.Status}");
+        Assert.Contains("Shout into the void", await history.TextAsync());
+    }
+
+    private static string BoundaryDiagram(string key, bool interrupting) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:signal id="Sig_1" name="{{key}}_raise" />
+          <bpmn:process id="{{key}}" name="Signal Boundary" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="fork" />
+            <bpmn:parallelGateway id="fork" />
+            <bpmn:sequenceFlow id="fa" sourceRef="fork" targetRef="gate" />
+            <bpmn:userTask id="gate" name="Trigger" />
+            <bpmn:sequenceFlow id="fa1" sourceRef="gate" targetRef="throw" />
+            <bpmn:intermediateThrowEvent id="throw">
+              <bpmn:extensionElements>
+                <flowable:autonateSignalScope value="instance" />
+              </bpmn:extensionElements>
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:intermediateThrowEvent>
+            <bpmn:sequenceFlow id="fc" sourceRef="fork" targetRef="work" />
+            <bpmn:userTask id="work" name="Long work" />
+            <bpmn:boundaryEvent id="bnd" attachedToRef="work"
+                                cancelActivity="{{(interrupting ? "true" : "false")}}">
+              <bpmn:extensionElements>
+                <flowable:autonateSignalScope value="instance" />
+              </bpmn:extensionElements>
+              <bpmn:signalEventDefinition signalRef="Sig_1" />
+            </bpmn:boundaryEvent>
+            <bpmn:sequenceFlow id="fc1" sourceRef="bnd" targetRef="bfired" />
+            <bpmn:userTask id="bfired" name="Boundary fired" />
+          </bpmn:process>
+          {{Di(key, "s", "fork", "gate", "throw", "work", "bnd", "bfired")}}
+        </bpmn:definitions>
+        """;
+
     // start -> parallel: [Trigger -> throw -> After throw]
     //                    [catch -> Handled]
     //                    [Long work + non-interrupting signal boundary -> Boundary fired]

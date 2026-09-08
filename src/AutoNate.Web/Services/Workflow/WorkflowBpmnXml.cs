@@ -163,6 +163,7 @@ public static partial class WorkflowBpmnXml
 
         var document = XDocument.Parse(xml);
         ExpandMessageSendEvents(document);
+        ExpandSignalEndEvents(document);
         ApplySignalScopes(document);
 
         var declaration = document.Declaration is null
@@ -242,6 +243,56 @@ public static partial class WorkflowBpmnXml
                 new XAttribute("targetRef", endId)));
 
             AddShapeBeside(document, elementId, endId);
+        }
+    }
+
+    // #156. A signal END event raises nothing.
+    //
+    // Verified against Flowable 8.0.0, and it is the message end event's problem
+    // exactly (#112): it deploys, ends the process cleanly, and sends no signal —
+    // a catcher waiting on the same name sat untouched. An intermediate throw of
+    // that same signal fired it instantly, which is what makes this a defect in
+    // the element rather than in the signal.
+    //
+    // So the end event is rewritten into the thing that works: an intermediate
+    // throw carrying the signal, followed by a plain end event. Simpler than the
+    // message case, which needed the behaviour bridge, because the signal throw is
+    // natively supported.
+    //
+    // Applied to the DEPLOYED copy only; the authored diagram keeps the end event
+    // the author drew.
+    private static void ExpandSignalEndEvents(XDocument document)
+    {
+        foreach (var endEvent in document.Descendants(BpmnNamespace + "endEvent").ToList())
+        {
+            var definition = endEvent.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
+            if (definition is null) continue;
+
+            var elementId = endEvent.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var process = endEvent.Parent;
+            if (process is null) continue;
+
+            var terminalId = $"{elementId}_end";
+            if (process.Elements(BpmnNamespace + "endEvent")
+                    .Any(e => e.Attribute("id")?.Value == terminalId))
+            {
+                // Publishing twice must not append a second terminal event.
+                continue;
+            }
+
+            // Keeps the original id, so every sequence flow and diagram shape
+            // pointing at it stays valid without rewriting one.
+            endEvent.Name = BpmnNamespace + "intermediateThrowEvent";
+
+            process.Add(new XElement(BpmnNamespace + "endEvent", new XAttribute("id", terminalId)));
+            process.Add(new XElement(BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", $"{elementId}_end_flow"),
+                new XAttribute("sourceRef", elementId),
+                new XAttribute("targetRef", terminalId)));
+
+            AddShapeBeside(document, elementId, terminalId);
         }
     }
 

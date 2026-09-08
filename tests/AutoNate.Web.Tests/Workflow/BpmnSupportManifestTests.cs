@@ -253,6 +253,18 @@ public sealed class BpmnSupportManifestTests
             // second one appears, the honest move is a field on the manifest
             // saying "executes after expansion", not a longer list here.
             ["Intermediate Throw (Message)"] = BpmnSupportManifest.EngineExecutes,
+
+            // #156. The same shape as the message end event, and found the same
+            // way — by testing the element instead of trusting the inventory. A
+            // signal end event deploys and ends the process, so #103's probe
+            // recorded "executes"; it raises no signal at all, which a catcher
+            // waiting on the name proved by never firing. Publish rewrites it into
+            // an intermediate throw plus a terminal end event.
+            //
+            // Declared rather than silently edited, because the inventory's
+            // verdict is defensible for what it measured — the element runs — and
+            // the departure is that it does not do the one thing it exists for.
+            ["Signal End"] = BpmnSupportManifest.EngineExecutes,
         };
 
         var rows = JsonNode.Parse(File.ReadAllText(InventoryRowsPath))!.AsArray();
