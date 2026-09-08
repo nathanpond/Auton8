@@ -3140,3 +3140,74 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   the fix.
   **Rule 1** (bug in code this story touches, fixed with the story).
   **Issue:** #215, #214
+
+## /n8-exec M4 (continued) — 2026-09-08
+
+- **Decision (#168):** the retry point is offered on **service tasks** (toggle) and
+  shown as **fixed on** for script tasks, which `ForceAsyncScriptTasks` already
+  forces at publish. No other activity type offers it. Discretion the story
+  delegated; the set is the two activities with real property editors and the two
+  where the failure a retry point exists for actually happens.
+  **Issue:** #168
+
+- **Verify-first paid for itself three times on #168.** Two probe processes against
+  Flowable 8.0.0, identical but for `flowable:async`:
+  1. It established the semantics before any code — unmarked, a failing step rolls
+     the whole start back and **no instance survives**; marked, preceding steps stay
+     recorded and the failure dead-letters with its exception. That is the
+     assert-both-ways pair the test plan demanded, and it is visible in *history*,
+     which is a better instrument than the job tables.
+  2. Asserting a live job with `retries > 0` would have been a **race** — Flowable
+     burns the default three attempts in under a second. The deterministic state is
+     the dead-letter row at `retries=0`.
+  3. `/management/deadletter-jobs` **ignores** a `processInstanceId` query
+     parameter and returns everything. A test trusting it would have asserted over
+     other tests' leftovers.
+  **Issue:** #168
+
+- **My own error, caught by mutation testing (#168):** the unmarked-case test
+  asserts `!completed.Ok`, and my first version used the wrong route — a **405**
+  satisfies that vacuously, so it passed while testing nothing. Fixed the route,
+  then mutated the attribute in both directions (mark both / mark neither, in both
+  the C# and the JS write path) and confirmed each mutation is caught by the
+  correct test. A negative assertion is the easiest kind to pass by accident.
+  **Issue:** #168
+
+- **Second instance of the same mistake, same story:** the studio test polled the
+  saved diagram until it "contained ServiceTask_1" — which the **seeded** XML
+  already satisfied, so it read the pre-save document and both studio tests failed
+  against a correct implementation. The poll now takes its condition from the
+  caller. A poll predicate that is already true before the event is not a wait.
+  **Issue:** #168
+
+- **Discovered and filed, not fixed:** #222 — `WorkflowExecutionErrorRecorder`
+  records only `job.execution.failed`, so a **synchronous** step failure can never
+  reach the executions error surface. Today, marking a step as a retry point is
+  also what makes its failure visible, which is a coupling no author is choosing
+  knowingly. Outside #168 (whose AC asks only that the job is produced and the
+  existing path is not regressed) and real input for M5's job-surface story.
+  **Issue:** #168, #222
+
+- **A fifth flaky class, found by #168's regression run and fixed under #215.**
+  `EntityEdgeWriterTests` failed a full run with `57P01: terminating connection due
+  to administrator command`. Cause: `SweepAbandonedDatabasesAsync` treated a
+  database with no comment as garbage — "predates #191, so it cannot be from a live
+  run". `InitializeAsync` creates a database and stamps it in **two separate
+  statements**, so in between it exists, has no connections, and has no stamp: it
+  passes the liveness filter *and* the missing-stamp rule, and `drop database …
+  with (force)` takes it out from under the test about to open it.
+  **Fix:** an unstamped database is treated as live — the same direction this
+  method already takes for an unparseable stamp, and for the reason stated there
+  ("being wrong in that direction costs disk; the other direction drops a database
+  out from under a running test"). The pre-#191 backlog that rule existed to clear
+  is empty on the cluster, so it was buying nothing and costing that.
+  **A test was changed, deliberately:** `A_database_with_no_stamp_is_treated_as_
+  abandoned` pinned the buggy behaviour and its comment stated the false premise
+  verbatim. It is now `A_database_with_no_stamp_is_left_alone`, with a companion
+  asserting a stamped-and-stale database is still swept so the rule cannot decay
+  into "the sweep spares everything".
+  **Third false premise found in this story's territory**, after ContentAuthorizer's
+  "no Task.WhenAll across this service" and the sweep's "any failure means assume
+  every role is in use". The pattern is a comment that was true when written and
+  became load-bearing after it stopped being true.
+  **Issue:** #215

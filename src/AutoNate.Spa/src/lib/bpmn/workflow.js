@@ -1147,6 +1147,7 @@ function describeBusinessObject(businessObject) {
     // selection to the service-task modal and pre-populate the picker.
     description.serviceTaskKind = serviceTask.serviceTaskKind;
     description.behaviorKey = serviceTask.behaviorKey;
+    description.retryPoint = serviceTask.retryPoint;
   }
 
   if (businessObject.$type === "bpmn:ExclusiveGateway" || businessObject.$type === "bpmn:InclusiveGateway") {
@@ -1206,7 +1207,12 @@ function describeServiceTask(businessObject) {
 
   return {
     serviceTaskKind: kind,
-    behaviorKey: behaviorKey
+    behaviorKey: behaviorKey,
+    // #168. flowable:async is the retry point: the engine commits before the
+    // step, so a failure retries the step alone instead of discarding
+    // everything since the last checkpoint. Absent means off — Flowable's own
+    // default — so anything that is not the string "true" reads as false.
+    retryPoint: readFlowableServiceTaskAttr(businessObject, "async") === "true"
   };
 }
 
@@ -1980,6 +1986,13 @@ export function updateServiceTaskProperties(modelerHandle, payload) {
   writeFlowableAttribute(businessObject, "delegateExpression", "${autonateBehaviorDelegate}");
   writeFlowableAttribute(businessObject, "autonateServiceKind", kind);
   writeFlowableAttribute(businessObject, "behaviorKey", behaviorKey);
+
+  // #168. Written as an attribute for the same reason as the rest: bpmn-js here
+  // loads no Flowable moddle extension, so modeling.updateProperties would
+  // serialise it without the flowable: prefix and the deploy validator would
+  // reject it. Removed rather than written "false" when off, so the XML says
+  // what Flowable's default already means.
+  writeFlowableAttribute(businessObject, "async", payload.retryPoint === true ? "true" : null);
 
   // Clear any plain (no-namespace) leftovers a prior studio iteration may
   // have set via modeling.updateProperties; passing null here removes them

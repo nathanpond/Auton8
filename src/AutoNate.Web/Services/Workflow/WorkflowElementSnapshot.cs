@@ -38,7 +38,13 @@ public sealed record class WorkflowElementSnapshot(
     // editors matched first.
     string? BoundaryTimerDuration = null,
     string? BoundaryTimerDate = null,
-    string? BoundaryTimerCycle = null);
+    string? BoundaryTimerCycle = null,
+    // #168. Appended, never inserted — positional record.
+    //
+    // Nullable rather than bool so "the studio did not send this" and "the
+    // author turned it off" stay distinguishable: a snapshot from an older SPA
+    // build must not silently clear a retry point someone set.
+    bool? RetryPoint = null);
 
 // Pair extracted from a published workflow's BPMN XML: a signal start event's
 // signal name (matched against the inbound message's `eventType`) and the Dapr

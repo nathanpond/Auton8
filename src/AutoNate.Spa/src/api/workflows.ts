@@ -81,6 +81,10 @@ export type WorkflowElementSnapshot = {
   boundaryTimerDate?: string | null;
   boundaryTimerCycle?: string | null;
   attachedTo?: string | null;
+  // #168. Serialises to flowable:async on the activity — the step becomes its
+  // own transaction boundary, so a failure retries it alone. Optional so an
+  // older snapshot leaves an existing setting alone rather than clearing it.
+  retryPoint?: boolean | null;
 };
 
 export type PrepareWorkflowRequest = {

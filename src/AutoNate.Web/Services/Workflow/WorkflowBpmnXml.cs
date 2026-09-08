@@ -729,6 +729,23 @@ public static partial class WorkflowBpmnXml
             serviceTaskElement.SetAttributeValue(FlowableNamespace + "behaviorKey", trimmedKey);
         }
 
+        // #168. The retry point. flowable:async makes the step its own
+        // transaction boundary: the engine commits before running it, so a
+        // failure produces a retryable job for that step alone instead of
+        // rolling back to the last checkpoint. Verified against Flowable 8.0.0
+        // — unmarked, a failing step rolls the whole start back and no instance
+        // survives; marked, the preceding steps stay recorded and the failure
+        // lands in the dead-letter table with its exception.
+        //
+        // Only written when the studio said so. A null RetryPoint means the
+        // snapshot came from a build that does not know about the setting, and
+        // leaving the attribute untouched keeps that build from clearing it.
+        if (snapshot.RetryPoint is { } retryPoint)
+        {
+            serviceTaskElement.SetAttributeValue(
+                FlowableNamespace + "async", retryPoint ? "true" : null);
+        }
+
         // Sweep any leftover field-injection children from the previous
         // implementation so XML produced by an older studio build round-trips
         // cleanly under the new attribute shape.

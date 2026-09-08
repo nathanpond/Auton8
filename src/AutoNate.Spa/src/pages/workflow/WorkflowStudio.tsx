@@ -21,6 +21,7 @@ import {
   ScrollArea,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   Textarea,
@@ -212,6 +213,9 @@ type ServiceTaskEditor = {
   name: string;
   kind: ServiceTaskKind;
   behaviorKey: string;
+  // #168. Serialises to flowable:async — see the switch in the service-task
+  // panel for what it buys the author.
+  retryPoint: boolean;
 };
 
 type GenericElementEditor = {
@@ -284,6 +288,9 @@ type ElementSelection = {
   boundaryTimerDate?: string | null;
   boundaryTimerCycle?: string | null;
   attachedTo?: string | null;
+  // #168. Present only on service tasks the studio recognises, like
+  // serviceTaskKind and behaviorKey above.
+  retryPoint?: boolean | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -639,7 +646,8 @@ export default function WorkflowStudio() {
         type: selection.type,
         name: selection.name ?? "",
         kind: "behavior",
-        behaviorKey: selection.behaviorKey ?? ""
+        behaviorKey: selection.behaviorKey ?? "",
+        retryPoint: selection.retryPoint === true
       });
       setScriptTaskEditor(null);
       setSequenceFlowEditor(null);
@@ -1167,7 +1175,8 @@ export default function WorkflowStudio() {
         id: serviceTaskEditor.id,
         name: serviceTaskEditor.name,
         serviceTaskKind: serviceTaskEditor.kind,
-        behaviorKey
+        behaviorKey,
+        retryPoint: serviceTaskEditor.retryPoint
       });
       setServiceTaskEditor(null);
     });
@@ -2510,6 +2519,25 @@ function ScriptTaskModal({
           scriptFormat={editor.scriptFormat}
         />
 
+        <Divider />
+
+        {/* #168. Script tasks are always retry points — WorkflowBpmnXml's
+            ForceAsyncScriptTasks sets flowable:async on every one at publish,
+            so a thrown error becomes a job failure instead of a 500 on the
+            start call. Shown as fixed rather than as a switch that silently
+            does nothing. */}
+        <Switch
+          label="Retry this step on its own if it fails"
+          description={
+            "Always on for script tasks. Auton8 saves the workflow's progress just before a " +
+            "script runs, so a script that fails is retried by itself and its error is reported " +
+            "rather than failing the whole start."
+          }
+          checked
+          disabled
+          readOnly
+        />
+
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>
             Close
@@ -3484,6 +3512,23 @@ function ServiceTaskModal({
             )}
           </label>
         )}
+
+        <Divider />
+
+        {/* #168. Worded as what it does, not as "async". The trade-off is
+            stated because an author choosing this should know what they are
+            buying: a checkpoint costs a brief pause and saves redoing the work
+            in front of it. */}
+        <Switch
+          label="Retry this step on its own if it fails"
+          description={
+            "Auton8 saves the workflow's progress just before this step. If the step fails it is " +
+            "retried by itself, instead of redoing everything since the last save. The trade-off " +
+            "is that the workflow pauses here briefly even when nothing goes wrong."
+          }
+          checked={editor.retryPoint}
+          onChange={(e) => onChange({ ...editor, retryPoint: e.currentTarget.checked })}
+        />
 
         <Group justify="flex-end" gap="xs">
           <Button variant="default" onClick={onClose}>

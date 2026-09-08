@@ -552,10 +552,27 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
                 var name = reader.GetString(0);
                 var stamp = await reader.IsDBNullAsync(1) ? null : reader.GetString(1);
 
-                // No stamp: predates #191, so it cannot be from a live run.
+                // #215. A missing stamp used to mean "predates #191, so it cannot
+                // be from a live run" — and that was false in one direction that
+                // matters. InitializeAsync creates the database and stamps it in
+                // two separate statements, so between them the database exists,
+                // has no connections yet, and has no comment: it matches the
+                // liveness filter above AND this rule, and `drop database … with
+                // (force)` then terminates the connection the test is about to
+                // open. The symptom is a random class failing with
+                // "57P01: terminating connection due to administrator command".
+                //
+                // Treated as live now, which is the same direction this method
+                // already takes for an unparseable stamp, and for the reason given
+                // there: being wrong this way costs disk, the other way drops a
+                // database out from under a running test. The pre-#191 backlog
+                // this rule existed to clear is empty, so it was buying nothing.
+                //
+                // The residual is a database leaked by a run killed between the
+                // create and the stamp. It is never swept and must be dropped by
+                // hand, which is the cheaper of the two failures.
                 if (stamp is null)
                 {
-                    candidates.Add(name);
                     continue;
                 }
 

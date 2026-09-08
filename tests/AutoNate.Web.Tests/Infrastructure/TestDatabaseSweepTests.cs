@@ -70,26 +70,67 @@ public sealed class TestDatabaseSweepTests
         }
     }
 
+    // #215. This test used to be A_database_with_no_stamp_is_treated_as_abandoned,
+    // and it pinned the behaviour rather than the intent: "a database with no stamp
+    // cannot have been created by a live run of this code". That was false, and the
+    // failure it caused was remote from here.
+    //
+    // InitializeAsync creates a database and stamps it in two separate statements.
+    // In between, the database exists, has no connections yet, and has no comment —
+    // so it satisfies the liveness filter AND the missing-stamp rule at the same
+    // time, and `drop database … with (force)` takes it out from under the test
+    // about to use it. That surfaced as EntityEdgeWriterTests failing a full run
+    // with "57P01: terminating connection due to administrator command", which
+    // reads as a Postgres problem rather than as a sweep dropping a live database.
+    //
+    // The backlog the old rule existed to clear is gone (the cluster holds none),
+    // so it was buying nothing and costing that.
     [Fact]
-    public async Task A_database_with_no_stamp_is_treated_as_abandoned()
+    public async Task A_database_with_no_stamp_is_left_alone()
     {
-        // How the existing backlog clears. Every one of the 1,680 predates the
-        // stamping, so none carries a comment — and a database with no stamp cannot
-        // have been created by a live run of this code.
         var unstamped = $"autonate_test_{Guid.NewGuid():N}";
         await ExecuteOnPostgresAsync($"create database \"{unstamped}\";");
 
         try
         {
-            // Deliberately no comment. A generous threshold, to show the decision
-            // rests on the missing stamp rather than on age.
+            // Deliberately no comment, and a threshold generous enough that age
+            // cannot be what saves it — the missing stamp has to be.
             await PostgresTestDatabase.SweepAbandonedDatabasesAsync(TimeSpan.FromDays(365));
 
-            Assert.False(await ExistsByNameAsync(unstamped), "An unstamped database survived the sweep.");
+            Assert.True(
+                await ExistsByNameAsync(unstamped),
+                "An unstamped database was swept. A database is unstamped for the moment between " +
+                "CREATE DATABASE and COMMENT ON DATABASE, so sweeping one drops a database a run " +
+                "is in the middle of creating.");
         }
         finally
         {
             await ExecuteOnPostgresAsync($"drop database if exists \"{unstamped}\" with (force);");
+        }
+    }
+
+    // The complement, so the rule above cannot decay into "the sweep spares
+    // everything": a stamped, genuinely old database is still swept. Without this,
+    // A_database_with_no_stamp_is_left_alone passes against a sweep that has
+    // stopped working entirely.
+    [Fact]
+    public async Task A_stamped_database_is_still_swept_when_it_is_old_enough()
+    {
+        var abandoned = $"autonate_test_{Guid.NewGuid():N}";
+        await ExecuteOnPostgresAsync($"create database \"{abandoned}\";");
+
+        try
+        {
+            await ExecuteOnPostgresAsync(
+                $"comment on database \"{abandoned}\" is '{DateTimeOffset.UtcNow.AddDays(-2):O}';");
+
+            await PostgresTestDatabase.SweepAbandonedDatabasesAsync(TimeSpan.FromHours(1));
+
+            Assert.False(await ExistsByNameAsync(abandoned), "A stamped, stale database survived the sweep.");
+        }
+        finally
+        {
+            await ExecuteOnPostgresAsync($"drop database if exists \"{abandoned}\" with (force);");
         }
     }
 

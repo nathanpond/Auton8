@@ -1439,6 +1439,168 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Equal("autonate.unlock-account", serviceTask.Attribute(flowable + "behaviorKey")?.Value);
     }
 
+    // #168. The retry point. Every case is asserted in BOTH directions, because
+    // the whole risk with a boolean that serialises to an attribute is that it
+    // writes unconditionally or never — and asserting only the "on" case passes
+    // against both bugs.
+    [Theory]
+    [InlineData(true, "true")]
+    [InlineData(false, null)]
+    public void ApplyProcessMetadata_WritesRetryPoint_AsFlowableAsync(bool retryPoint, string? expected)
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="retry_flow" name="Retry Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1" name="Charge card" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "retry_flow",
+            "Retry Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ServiceTask_1",
+                    "bpmn:ServiceTask",
+                    "Charge card",
+                    BehaviorKey: "autonate.charge-card",
+                    RetryPoint: retryPoint)
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Equal(expected, serviceTask.Attribute(flowable + "async")?.Value);
+    }
+
+    // Turning it off has to REMOVE the attribute, not leave the previous value
+    // standing. Without this, a retry point could be set but never unset — and
+    // the happy-path test above starts from XML with no attribute, so it cannot
+    // catch that.
+    [Fact]
+    public void ApplyProcessMetadata_ClearsRetryPoint_WhenTurnedOff()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="retry_flow" name="Retry Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1" name="Charge card" flowable:async="true" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "retry_flow",
+            "Retry Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ServiceTask_1",
+                    "bpmn:ServiceTask",
+                    "Charge card",
+                    BehaviorKey: "autonate.charge-card",
+                    RetryPoint: false)
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        Assert.Null(document.Descendants(bpmn + "serviceTask").Single()
+            .Attribute(flowable + "async"));
+    }
+
+    // A snapshot from an SPA build that predates the setting sends null, which
+    // must leave an existing retry point alone. Writing "false" for null would
+    // silently clear every retry point in the estate on the next publish from a
+    // stale tab.
+    [Fact]
+    public void ApplyProcessMetadata_LeavesRetryPointAlone_WhenTheSnapshotDoesNotMentionIt()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="retry_flow" name="Retry Flow" isExecutable="true">
+                               <bpmn:serviceTask id="ServiceTask_1" name="Charge card" flowable:async="true" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "retry_flow",
+            "Retry Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ServiceTask_1",
+                    "bpmn:ServiceTask",
+                    "Charge card",
+                    BehaviorKey: "autonate.charge-card")
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        Assert.Equal("true", document.Descendants(bpmn + "serviceTask").Single()
+            .Attribute(flowable + "async")?.Value);
+    }
+
+    // #168 AC: script tasks stay forced on, and the retry-point setting must not
+    // have introduced a path that can turn one off. RetryPoint: false is the
+    // adversarial input — it is what the studio would send if the fixed switch
+    // ever became editable.
+    [Fact]
+    public void ApplyProcessMetadata_KeepsScriptTasksForcedAsync_EvenWhenTheSnapshotSaysOtherwise()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="script_flow" name="Script Flow" isExecutable="true">
+                               <bpmn:scriptTask id="ScriptTask_1" name="Compute">
+                                 <bpmn:script>x = 1;</bpmn:script>
+                               </bpmn:scriptTask>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var updatedXml = WorkflowBpmnXml.ApplyProcessMetadata(
+            xml,
+            "script_flow",
+            "Script Flow",
+            [
+                new WorkflowElementSnapshot(
+                    "ScriptTask_1",
+                    "bpmn:ScriptTask",
+                    "Compute",
+                    ScriptFormat: "javascript",
+                    Script: "x = 1;",
+                    RetryPoint: false)
+            ]);
+
+        var document = XDocument.Parse(updatedXml);
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        Assert.Equal("true", document.Descendants(bpmn + "scriptTask").Single()
+            .Attribute(flowable + "async")?.Value);
+    }
+
     [Fact]
     public void ApplyProcessMetadata_StripsLegacyClassAttribute_OnServiceTaskSnapshot()
     {
