@@ -147,7 +147,7 @@ public sealed class WorkflowEndpointsTests
                               targetNamespace="http://autonate.dev/workflows">
               <bpmn:process id="legacy_flow" name="Legacy Flow" isExecutable="true">
                 <bpmn:startEvent id="StartEvent_1" />
-                <bpmn:complexGateway id="Gateway_1" name="Two of three" />
+                <bpmn:businessRuleTask id="Task_1" name="Two of three" />
                 <bpmn:endEvent id="EndEvent_1" />
               </bpmn:process>
             </bpmn:definitions>
@@ -170,12 +170,13 @@ public sealed class WorkflowEndpointsTests
         Assert.NotNull(result);
 
         // Publishing is refused, and the author is told which element and why.
-        Assert.Contains(result.Errors, e => e.Contains("Complex Gateway", StringComparison.Ordinal));
+        // #218 rebased this fixture off the complex gateway, which now publishes.
+        Assert.Contains(result.Errors, e => e.Contains("Business Rule Task", StringComparison.Ordinal));
         Assert.Contains(result.Errors, e => e.Contains("Two of three", StringComparison.Ordinal));
 
         // And the diagram comes back intact, so the studio still renders it. If
         // validation ever stripped or rejected the payload, this is what would fail.
-        Assert.Contains("complexGateway", result.Model.BpmnXml, StringComparison.Ordinal);
+        Assert.Contains("businessRuleTask", result.Model.BpmnXml, StringComparison.Ordinal);
         Assert.Contains("Two of three", result.Model.BpmnXml, StringComparison.Ordinal);
     }
 

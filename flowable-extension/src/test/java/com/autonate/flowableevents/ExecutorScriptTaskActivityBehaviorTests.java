@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.flowable.bpmn.model.ExtensionAttribute;
 import org.flowable.bpmn.model.ScriptTask;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.engine.delegate.DelegateExecution;
@@ -237,6 +238,104 @@ class ExecutorScriptTaskActivityBehaviorTests {
         return properties;
     }
 
+    // ── #218: the complex gateway's route contract ───────────────────────────
+
+    @Test
+    void aRoutingScriptIsToldWhichRoutesItMayReturn() throws Exception {
+        var captured = new AtomicReference<String>();
+        try (var fixture = HttpFixture.start(captured, 200, "{\"result\":\"fa\",\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "return autonateRoutes[0];", "__autonateRoute_cg");
+            behavior.runInSandbox(routedExecution("fa,fb"));
+
+            var routes = Mapper.readTree(captured.get()).get("variables").get("autonateRoutes");
+            assertNotNull(routes, "the routes must reach the sandbox as a variable");
+            assertEquals(2, routes.size());
+            assertEquals("fa", routes.get(0).asText());
+            assertEquals("fb", routes.get(1).asText());
+        }
+    }
+
+    @Test
+    void aRouteOutsideTheAllowedSetFailsTheActivity() throws Exception {
+        var captured = new AtomicReference<String>();
+        try (var fixture = HttpFixture.start(captured, 200, "{\"result\":\"nowhere\",\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "return 'nowhere';", "__autonateRoute_cg");
+
+            var thrown = assertThrows(FlowableException.class,
+                () -> behavior.runInSandbox(routedExecution("fa,fb")));
+
+            // The message has to name BOTH halves. "Invalid route" sends an
+            // author looking at the gateway; naming what came back and what was
+            // allowed usually shows them the typo directly.
+            assertTrue(thrown.getMessage().contains("nowhere"), thrown.getMessage());
+            assertTrue(thrown.getMessage().contains("fa"), thrown.getMessage());
+            assertTrue(thrown.getMessage().contains("fb"), thrown.getMessage());
+        }
+    }
+
+    @Test
+    void aRoutingScriptReturningNullFailsRatherThanTakingTheDefault() throws Exception {
+        var captured = new AtomicReference<String>();
+        try (var fixture = HttpFixture.start(captured, 200, "{\"result\":null,\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "// forgot to return", "__autonateRoute_cg");
+
+            // A script with no return is the likeliest mistake of all, and it is
+            // exactly the one that would otherwise fall through to the default
+            // flow and look like a deliberate choice.
+            var thrown = assertThrows(FlowableException.class,
+                () -> behavior.runInSandbox(routedExecution("fa,fb")));
+            assertTrue(thrown.getMessage().contains("null"), thrown.getMessage());
+        }
+    }
+
+    @Test
+    void aValidRouteIsStoredAndDoesNotThrow() throws Exception {
+        var captured = new AtomicReference<String>();
+        try (var fixture = HttpFixture.start(captured, 200, "{\"result\":\"fb\",\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "return 'fb';", "__autonateRoute_cg");
+            var execution = routedExecution("fa,fb");
+
+            behavior.runInSandbox(execution);
+
+            // The complement of the two tests above: enforcement that rejected
+            // everything would satisfy them both and break every gateway.
+            assertEquals("fb", execution.getVariable("__autonateRoute_cg"));
+        }
+    }
+
+    @Test
+    void anOrdinaryScriptTaskIsUnaffectedByTheRouteContract() throws Exception {
+        var captured = new AtomicReference<String>();
+        try (var fixture = HttpFixture.start(captured, 200, "{\"result\":\"anything\",\"mutations\":{}}")) {
+            var behavior = newBehavior(fixture.baseUrl(), "return 'anything';", "outcome");
+
+            // No route list on the element, so no contract. Without this the
+            // check would fail every script task in the product that returns a
+            // value, which no other test here would catch.
+            behavior.runInSandbox(routedExecution(null));
+
+            var body = Mapper.readTree(captured.get());
+            assertTrue(body.get("variables").get("autonateRoutes") == null,
+                "an ordinary script task must not be handed a route list");
+        }
+    }
+
+    /**
+     * An execution whose current flow element carries the expansion's route list.
+     * Pass null for an ordinary script task with no route list at all.
+     */
+    private static DelegateExecution routedExecution(String allowedRoutes) {
+        var element = new ScriptTask();
+        element.setId("cg__autonateRoute");
+        if (allowedRoutes != null) {
+            var attribute = new ExtensionAttribute("autonateAllowedRoutes");
+            attribute.setNamespace("http://flowable.org/bpmn");
+            attribute.setValue(allowedRoutes);
+            element.addAttribute(attribute);
+        }
+        return newExecution("p-1", "e-1", "cg__autonateRoute", Map.of(), element);
+    }
+
     private static ExecutorScriptTaskActivityBehavior newBehavior(
         URI baseUrl, String script, String resultVariable
     ) {
@@ -248,6 +347,13 @@ class ExecutorScriptTaskActivityBehaviorTests {
     private static DelegateExecution newExecution(
         String processInstanceId, String executionId, String activityId, Map<String, Object> initial
     ) {
+        return newExecution(processInstanceId, executionId, activityId, initial, null);
+    }
+
+    private static DelegateExecution newExecution(
+        String processInstanceId, String executionId, String activityId, Map<String, Object> initial,
+        Object currentFlowElement
+    ) {
         var variables = new LinkedHashMap<>(initial);
         return (DelegateExecution) Proxy.newProxyInstance(
             DelegateExecution.class.getClassLoader(),
@@ -256,6 +362,7 @@ class ExecutorScriptTaskActivityBehaviorTests {
                 case "getProcessInstanceId" -> processInstanceId;
                 case "getId" -> executionId;
                 case "getCurrentActivityId" -> activityId;
+                case "getCurrentFlowElement" -> currentFlowElement;
                 case "getVariables" -> new HashMap<>(variables);
                 case "getVariable" -> variables.get((String) args[0]);
                 case "setVariable" -> {

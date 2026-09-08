@@ -6,6 +6,222 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    // ── #218: the complex gateway expansion ──────────────────────────────────
+    //
+    // CI excludes engine-backed specs, so these carry the expansion's guarantees
+    // without Flowable. What they cannot check is that the engine routes on the
+    // conditions written here; that is verified separately and recorded on #218.
+
+    private const string ComplexGatewayXml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:autonate="http://autonate.dev/workflows"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="router" name="Router" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+            <bpmn:complexGateway id="cg" name="Choose" scriptFormat="javascript"
+                                 autonate:runAs="system">
+              <bpmn:script>return 'fa';</bpmn:script>
+            </bpmn:complexGateway>
+            <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="ta" />
+            <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="tb" />
+            <bpmn:userTask id="ta" name="Route A" />
+            <bpmn:userTask id="tb" name="Route B" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    private static readonly XNamespace Bpmn218 = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+    private static readonly XNamespace Flowable218 = "http://flowable.org/bpmn";
+    private static readonly XNamespace Autonate218 = "http://autonate.dev/workflows";
+
+    [Fact]
+    public void ExpandForDeployment_PutsAScriptTaskInFrontOfAComplexGateway_AndKeepsTheGateway()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayXml));
+
+        // The gateway SURVIVES. Verified against Flowable 8.0.0: complexGateway
+        // runs as an exclusive gateway, so there is nothing to replace it with,
+        // and keeping it means the engine reports an id the author's diagram has.
+        var gateway = Assert.Single(document.Descendants(Bpmn218 + "complexGateway"));
+        Assert.Equal("cg", gateway.Attribute("id")?.Value);
+
+        var scriptTask = Assert.Single(document.Descendants(Bpmn218 + "scriptTask"));
+        Assert.Equal("cg__autonateRoute", scriptTask.Attribute("id")?.Value);
+
+        // Both the gateway and its routing task appear in history, and both map
+        // onto the same shape, so an operator has only the name to tell them
+        // apart when one of them is the one that failed.
+        Assert.Equal("Choose (routing script)", scriptTask.Attribute("name")?.Value);
+        Assert.Equal("return 'fa';", scriptTask.Element(Bpmn218 + "script")?.Value);
+        // flowable:, not bare. Flowable refuses a bare resultVariable on
+        // bpmn:scriptTask against the strict schema, so this spelling is the
+        // difference between deploying and a 500 at publish.
+        Assert.Equal("__autonateRoute_cg",
+            scriptTask.Attribute(Flowable218 + "resultVariable")?.Value);
+        Assert.Null(scriptTask.Attribute("resultVariable"));
+
+        // The generated task runs on the job executor. ForceAsyncScriptTasks runs
+        // on the prepare path, which this element never passed through, so
+        // forgetting this here would run the sandbox call inline.
+        Assert.Equal("true", scriptTask.Attribute(Flowable218 + "async")?.Value);
+
+        // The author's declared identity follows onto the node that actually runs.
+        Assert.Equal("system", scriptTask.Attribute(Autonate218 + "runAs")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_StripsTheGatewaysAuthoringPropertiesFromTheDeployedCopy()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayXml));
+        var gateway = document.Descendants(Bpmn218 + "complexGateway").Single();
+
+        // Flowable validates the deployed XML against the STRICT BPMN schema,
+        // and bpmn:complexGateway has no scriptFormat and no script child. Left
+        // in place they do not degrade anything — they refuse the entire
+        // deployment with
+        //   cvc-complex-type.3.2.2: Attribute 'scriptFormat' is not allowed to
+        //   appear in element 'bpmn:complexGateway'
+        // which is a 500 at publish for every workflow using the element.
+        Assert.Null(gateway.Attribute("scriptFormat"));
+        Assert.Null(gateway.Element(Bpmn218 + "script"));
+        Assert.Null(gateway.Attribute(Autonate218 + "runAs"));
+
+        // The authoring data is not lost — it moved to the node that runs it.
+        var scriptTask = document.Descendants(Bpmn218 + "scriptTask").Single();
+        Assert.Equal("javascript", scriptTask.Attribute("scriptFormat")?.Value);
+        Assert.Equal("return 'fa';", scriptTask.Element(Bpmn218 + "script")?.Value);
+        Assert.Equal("system", scriptTask.Attribute(Autonate218 + "runAs")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_RewiresTheGatewaysInboundFlowToTheScriptTask()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayXml));
+
+        var flows = document.Descendants(Bpmn218 + "sequenceFlow")
+            .ToDictionary(f => f.Attribute("id")!.Value,
+                f => (Source: f.Attribute("sourceRef")?.Value, Target: f.Attribute("targetRef")?.Value));
+
+        // The token must reach the script BEFORE the gateway, or the gateway
+        // evaluates conditions against a variable nothing has set yet and takes
+        // the default — the silent-wrong-branch failure this story exists to end.
+        Assert.Equal("cg__autonateRoute", flows["f0"].Target);
+        Assert.Equal(("cg__autonateRoute", "cg"), flows["cg__autonateRoute__flow"]);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_ConditionsEachRouteOnTheScriptsResult()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayXml));
+
+        string? ConditionOf(string flowId) => document.Descendants(Bpmn218 + "sequenceFlow")
+            .Single(f => f.Attribute("id")?.Value == flowId)
+            .Element(Bpmn218 + "conditionExpression")?.Value;
+
+        Assert.Equal("${__autonateRoute_cg == 'fa'}", ConditionOf("fa"));
+        Assert.Equal("${__autonateRoute_cg == 'fb'}", ConditionOf("fb"));
+
+        // Both routes are conditioned, not just the first. A condition on only
+        // one would still route correctly for that one and silently take it for
+        // everything else.
+        Assert.Equal(2, document.Descendants(Bpmn218 + "conditionExpression").Count());
+    }
+
+    [Fact]
+    public void ExpandForDeployment_TellsTheScriptTaskWhichRoutesAreAllowed()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayXml));
+        var scriptTask = document.Descendants(Bpmn218 + "scriptTask").Single();
+
+        // Carried on the deployed element rather than injected into the script:
+        // the engine-side behaviour reads it both to hand the routes to the
+        // sandbox and to enforce the contract on the way back.
+        Assert.Equal("fa,fb", scriptTask.Attribute(Flowable218 + "autonateAllowedRoutes")?.Value);
+
+        // And the mapping back to the author's element, recoverable from the
+        // deployed XML alone — the execution view has nothing else to go on.
+        Assert.Equal("cg", scriptTask.Attribute(Flowable218 + "autonateExpandedFrom")?.Value);
+
+        // The generated FLOW carries it too. Flowable records a traversed
+        // sequence flow as an activity, so leaving this off puts an id no
+        // author diagram contains into the execution view's highlight set.
+        var generatedFlow = document.Descendants(Bpmn218 + "sequenceFlow")
+            .Single(f => f.Attribute("id")?.Value == "cg__autonateRoute__flow");
+        Assert.Equal("cg", generatedFlow.Attribute(Flowable218 + "autonateExpandedFrom")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesTheAuthorsDefaultFlowUnconditioned()
+    {
+        var xml = ComplexGatewayXml.Replace(
+            "id=\"cg\" name=\"Choose\" scriptFormat=\"javascript\"",
+            "id=\"cg\" name=\"Choose\" scriptFormat=\"javascript\" default=\"fb\"",
+            StringComparison.Ordinal);
+        Assert.Contains("default=\"fb\"", xml);
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+
+        XElement Flow(string id) => document.Descendants(Bpmn218 + "sequenceFlow")
+            .Single(f => f.Attribute("id")?.Value == id);
+
+        // BPMN forbids a condition on the default flow, and Flowable honours
+        // `default` on this element (verified). Conditioning it would deploy a
+        // diagram the engine rejects.
+        Assert.Null(Flow("fb").Element(Bpmn218 + "conditionExpression"));
+        Assert.NotNull(Flow("fa").Element(Bpmn218 + "conditionExpression"));
+
+        // And it is not offered to the script as a route, because the engine
+        // reaches it only when no route matched.
+        Assert.Equal("fa", document.Descendants(Bpmn218 + "scriptTask").Single()
+            .Attribute(Flowable218 + "autonateAllowedRoutes")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_GivesAGatewayWithNoScriptAWorkingStarterBody()
+    {
+        var xml = ComplexGatewayXml.Replace("<bpmn:script>return 'fa';</bpmn:script>", "");
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        var script = document.Descendants(Bpmn218 + "scriptTask").Single()
+            .Element(Bpmn218 + "script")?.Value;
+
+        // A freshly dropped gateway must publish. Taking the first route is
+        // visibly wrong; an empty script is invisibly broken.
+        Assert.Contains("return 'fa';", script);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_IsIdempotent_ForComplexGateways()
+    {
+        var once = WorkflowBpmnXml.ExpandForDeployment(ComplexGatewayXml);
+        var twice = WorkflowBpmnXml.ExpandForDeployment(once);
+
+        var document = XDocument.Parse(twice);
+
+        // Publishing twice must not stack a second script task in front of the
+        // first, which would leave the gateway reading a variable the wrong node
+        // wrote.
+        Assert.Single(document.Descendants(Bpmn218 + "scriptTask"));
+        Assert.Equal(2, document.Descendants(Bpmn218 + "conditionExpression").Count());
+    }
+
+    [Fact]
+    public void ExpandForDeployment_DoesNotTouchTheStoredModel()
+    {
+        var before = ComplexGatewayXml;
+        _ = WorkflowBpmnXml.ExpandForDeployment(before);
+
+        // The expansion returns a new string; the input it was given is the
+        // author's stored diagram and must be unchanged. This is the assertion
+        // that catches an expansion mutating a shared XDocument.
+        Assert.Equal(before, ComplexGatewayXml);
+        Assert.Contains("complexGateway", ComplexGatewayXml);
+        Assert.DoesNotContain("scriptTask", ComplexGatewayXml);
+    }
+
     // Rewritten for #107. This asserted that a business rule task, an event
     // subprocess and a participant all produced *warnings* and no errors.
     //

@@ -223,6 +223,26 @@ public sealed class BpmnSupportManifestTests
             ["Send Task"] = BpmnSupportManifest.EngineExecutes,
             ["Business Rule Task"] = BpmnSupportManifest.EngineCannotExecute,
 
+            // #218. rows.json records "DEPLOYS BUT DOES NOTHING", and that
+            // verdict is wrong in a way worth stating rather than quietly
+            // overwriting.
+            //
+            // Re-probed against 8.0.0 before this story was implemented:
+            // a complexGateway is recorded in history as activityType
+            // exclusiveGateway, it EVALUATES conditionExpression on its outgoing
+            // flows, it honours `default`, and with two conditions true it takes
+            // the first match. It is not inert — it silently picks a branch. The
+            // inventory's claim holds only for the element's own
+            // `activationCondition`, which Flowable never evaluates because there
+            // is no ComplexGatewayActivityBehavior.
+            //
+            // The departure is that publish no longer deploys the raw element: an
+            // author's routing script goes in front of it and its routes are
+            // conditioned on the result. Spike #155 is not contradicted — it
+            // proved no extension point reaches the element, which is why this is
+            // done by expansion rather than by a behaviour.
+            ["Complex Gateway"] = BpmnSupportManifest.EngineExecutes,
+
             // #103 probed this at process level, where Flowable rejects it
             // (flowable-start-event-invalid-event-definition). Inside an event
             // subprocess it runs — EventSubProcessConditionalStartEventActivityBehavior
@@ -523,13 +543,19 @@ public sealed class BpmnSupportManifestTests
     {
         // "Validation failed" tells an author nothing about which of forty
         // elements to look at.
+        //
+        // #218 rebased this fixture. It used a complex gateway, which now
+        // publishes — leaving the test green while testing nothing. Business Rule
+        // Task is the right replacement: it is cannot-execute for a reason no
+        // diagram can fix (the DMN engine is absent from the image), so it stays
+        // refused until #105 puts the engine there.
         var xml = """
                   <?xml version="1.0" encoding="UTF-8"?>
                   <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                                     targetNamespace="http://autonate.dev/workflows">
                     <bpmn:process id="p" isExecutable="true">
                       <bpmn:startEvent id="s" />
-                      <bpmn:complexGateway id="cg" name="Wait for two of three" />
+                      <bpmn:businessRuleTask id="brt" name="Decide the discount" />
                       <bpmn:endEvent id="e" />
                     </bpmn:process>
                   </bpmn:definitions>
@@ -537,9 +563,9 @@ public sealed class BpmnSupportManifestTests
 
         var error = Assert.Single(
             WorkflowBpmnXml.ValidateProcess(xml).Errors,
-            e => e.Contains("Complex Gateway", StringComparison.Ordinal));
+            e => e.Contains("Business Rule Task", StringComparison.Ordinal));
 
-        Assert.Contains("Wait for two of three", error, StringComparison.Ordinal);
+        Assert.Contains("Decide the discount", error, StringComparison.Ordinal);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

@@ -32,6 +32,17 @@ public interface IFlowableClient
 
     Task<WorkflowExecutionDiagramDetail> GetWorkflowExecutionDiagramDetailAsync(string processInstanceId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Generated activity id -> the author's element it was expanded from, for
+    /// the definition this instance runs (#218).
+    /// </summary>
+    /// <remarks>
+    /// Separate from the diagram detail because the history endpoint needs the
+    /// same mapping and has no reason to pull the whole diagram to get it.
+    /// </remarks>
+    Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
+        string processInstanceId, CancellationToken cancellationToken = default);
+
     // Chronological per-activity history for a process instance, ascending by
     // start time. Drives the History tab on the workflow execution modal.
     Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default);

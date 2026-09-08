@@ -207,6 +207,20 @@ public static class ExecutionEndpoints
             var detail = await flowable.GetWorkflowExecutionDiagramDetailAsync(processInstanceId, cancellationToken);
 
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+            // #218. Show the operator the diagram the author drew, not the one
+            // the engine was given.
+            //
+            // Publish expands elements Flowable cannot run into ones it can, so
+            // the deployed resource contains nodes that exist in no stored
+            // diagram. Rendering it shows an operator a shape nobody authored,
+            // and the ids of those generated nodes highlight nothing.
+            //
+            // Pinned to the version THIS instance is running. Fetching the latest
+            // stored model instead would show an operator a diagram their process
+            // never followed the moment anyone republishes, which is worse than
+            // showing the expansion.
+            detail = await RenderAuthoredDiagramAsync(db, detail, cancellationToken);
             // Project only the three columns the handler actually reads — ErrorStackTrace
             // can be tens of KB and is surfaced on the history endpoint, not here.
             var errorRows = await db.WorkflowExecutionErrors.AsNoTracking()
@@ -214,8 +228,11 @@ public static class ExecutionEndpoints
                 .Select(e => new { e.ActivityId, e.ErrorMessage, e.OccurredAtUtc })
                 .ToListAsync(cancellationToken);
 
+            // Mapped like every other id surface. A half-mapped diagram
+            // highlights nothing and reads as though the process never reached
+            // the element.
             var failedActivityIds = errorRows
-                .Select(e => e.ActivityId)
+                .Select(e => MapActivityId(detail, e.ActivityId))
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
 
@@ -236,7 +253,7 @@ public static class ExecutionEndpoints
             // because retries can produce successively different messages and the
             // most recent one is what the operator wants to see in the tooltip.
             var errorMessagesByActivityId = errorRows
-                .GroupBy(e => e.ActivityId, StringComparer.Ordinal)
+                .GroupBy(e => MapActivityId(detail, e.ActivityId), StringComparer.Ordinal)
                 .Select(g => new
                 {
                     ActivityId = g.Key,
@@ -262,6 +279,20 @@ public static class ExecutionEndpoints
             CancellationToken cancellationToken) =>
         {
             var history = await flowable.GetWorkflowExecutionHistoryAsync(processInstanceId, cancellationToken);
+
+            // #218. The same mapping the diagram gets. History showing an
+            // activity id that appears in no diagram the author has ever seen is
+            // the same defect one surface over.
+            var expansionSources = await flowable.GetExpansionSourceMapAsync(
+                processInstanceId, cancellationToken);
+            if (expansionSources.Count > 0)
+            {
+                history = history
+                    .Select(e => expansionSources.TryGetValue(e.ActivityId, out var source)
+                        ? e with { ActivityId = source }
+                        : e)
+                    .ToList();
+            }
             await auditPublisher.PublishAsync(
                 WorkflowAdminEventTopic.TopicName,
                 WorkflowAdminEventTypes.ExecutionHistoryViewed,
@@ -1083,4 +1114,47 @@ public static class ExecutionEndpoints
         var shortCode = string.IsNullOrWhiteSpace(rawShortCode) ? null : rawShortCode!.Trim();
         return (mode, shortCode);
     }
+
+    // #218. Swap the deployed diagram for the stored one this instance's version
+    // was published from, and map every generated activity id back onto the
+    // author's element.
+    //
+    // Falls back to the deployed XML whenever the stored version cannot be found
+    // — an instance older than version tracking, or a definition deployed outside
+    // Auton8. Showing the expansion is worse than showing the author's diagram,
+    // but far better than showing nothing.
+    private static async Task<WorkflowExecutionDiagramDetail> RenderAuthoredDiagramAsync(
+        AutoNateDbContext db,
+        WorkflowExecutionDiagramDetail detail,
+        CancellationToken cancellationToken)
+    {
+        if (detail.ExpansionSourceIds.Count > 0)
+        {
+            detail = detail with
+            {
+                CompletedActivityIds = MapAll(detail, detail.CompletedActivityIds),
+                CurrentActivityIds = MapAll(detail, detail.CurrentActivityIds),
+                CancelledActivityIds = MapAll(detail, detail.CancelledActivityIds)
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(detail.ProcessDefinitionId)) return detail;
+
+        var storedXml = await db.WorkflowModelVersions.AsNoTracking()
+            .Where(v => v.ProcessDefinitionId == detail.ProcessDefinitionId)
+            .Select(v => v.BpmnXml)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return string.IsNullOrWhiteSpace(storedXml) ? detail : detail with { BpmnXml = storedXml };
+    }
+
+    private static IReadOnlyList<string> MapAll(
+        WorkflowExecutionDiagramDetail detail, IReadOnlyList<string> ids) =>
+        ids.Select(id => MapActivityId(detail, id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+    /// <summary>A generated activity id becomes the author's element (#218).</summary>
+    private static string MapActivityId(WorkflowExecutionDiagramDetail detail, string activityId) =>
+        detail.ExpansionSourceIds.TryGetValue(activityId, out var source) ? source : activityId;
 }

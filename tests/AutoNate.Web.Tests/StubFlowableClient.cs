@@ -133,6 +133,18 @@ internal sealed class StubFlowableClient : IFlowableClient
         return Task.FromResult(new WorkflowExecutionDiagramDetail());
     }
 
+    // #218. Settable so a test can supply a mapping; empty by default, which is
+    // what every existing test assumes.
+    public IReadOnlyDictionary<string, string> ExpansionSourceMap { get; set; }
+        = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    public Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ExpansionMap:{processInstanceId}");
+        return Task.FromResult(ExpansionSourceMap);
+    }
+
     // Tests can seed this to drive the history endpoint response. Defaults to
     // an empty list when not set.
     public Dictionary<string, List<WorkflowExecutionHistoryEvent>> HistoryByInstance { get; } = new();

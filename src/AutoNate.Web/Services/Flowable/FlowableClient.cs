@@ -614,11 +614,60 @@ public sealed class FlowableClient(
             ExecutionId = processInstanceId,
             Name = string.IsNullOrWhiteSpace(processInstance.Name) ? null : processInstance.Name,
             BpmnXml = bpmnXml,
+            ProcessDefinitionId = processInstance.ProcessDefinitionId,
+            // Read from the deployed XML, which is the only place the expansion's
+            // provenance survives. The endpoint applies it to every id surface.
+            ExpansionSourceIds = AutoNate.Web.Services.Workflow.WorkflowBpmnXml
+                .BuildExpansionSourceMap(bpmnXml),
             CompletedActivityIds = completedActivityIds,
             CurrentActivityIds = currentActivityIds,
             CancelledActivityIds = cancelledActivityIds,
             Variables = variables
         };
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        using var instanceResponse = await _httpClient.GetAsync(
+            $"service/history/historic-process-instances/{Uri.EscapeDataString(processInstanceId)}",
+            cancellationToken);
+        if (!instanceResponse.IsSuccessStatusCode)
+        {
+            // A mapping we cannot build is not worth failing a history view for.
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var instance = await DeserializeAsync<FlowableHistoricProcessInstanceResponse>(
+            instanceResponse, cancellationToken);
+        var definitionId = instance.ProcessDefinitionId;
+        if (string.IsNullOrWhiteSpace(definitionId))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        // Keyed on the definition, which is immutable once deployed, so this is
+        // fetched once per definition rather than once per history view.
+        var cacheKey = $"autonate:expansion-map:{definitionId}";
+        if (_cache.TryGetValue<IReadOnlyDictionary<string, string>>(cacheKey, out var cached)
+            && cached is not null)
+        {
+            return cached;
+        }
+
+        using var modelResponse = await _httpClient.GetAsync(
+            $"service/repository/process-definitions/{Uri.EscapeDataString(definitionId)}/resourcedata",
+            cancellationToken);
+        if (!modelResponse.IsSuccessStatusCode)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var map = AutoNate.Web.Services.Workflow.WorkflowBpmnXml.BuildExpansionSourceMap(
+            await modelResponse.Content.ReadAsStringAsync(cancellationToken));
+
+        _cache.Set(cacheKey, map, TimeSpan.FromHours(1));
+        return map;
     }
 
     public async Task<IReadOnlyList<WorkflowExecutionHistoryEvent>> GetWorkflowExecutionHistoryAsync(string processInstanceId, CancellationToken cancellationToken = default)

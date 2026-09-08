@@ -551,12 +551,12 @@
     {
       "name": "Complex Gateway",
       "category": "Gateways",
-      "studio": "coming-soon",
-      "engine": "cannot-execute",
+      "studio": "supported",
+      "engine": "executes",
       "localName": "complexGateway",
       "eventDefinition": null,
-      "reason": "Flowable 8.0.0 has no ComplexGatewayActivityBehavior. It deploys and passes the token straight through, evaluating no activation condition \u2014 see #165.",
-      "evidence": "no behaviour class; verified at runtime \u2014 token passes straight through, no activation condition, no join"
+      "reason": "#218: executes by publish-time expansion. Flowable has no ComplexGatewayActivityBehavior, so the element's own activation condition is never evaluated \u2014 but it is NOT inert, and #103's \"passes the token straight through\" understates it. Verified against 8.0.0: it is recorded as activityType exclusiveGateway, it evaluates conditionExpression on its outgoing flows, it honours `default`, and with two conditions true it takes the first match. So a hand-authored complex gateway silently picks a branch. Publish now puts an author-written routing script in front of it and conditions its routes on the result, and the script must return one of the routes it was given.",
+      "evidence": "deployed and started; routing verified both ways round"
     },
     {
       "name": "Loop Marker",

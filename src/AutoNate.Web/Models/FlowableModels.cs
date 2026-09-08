@@ -156,6 +156,19 @@ public sealed record class WorkflowExecutionDiagramDetail
         = new Dictionary<string, string>(StringComparer.Ordinal);
 
     public IReadOnlyList<FlowableProcessVariable> Variables { get; init; } = [];
+
+    // #218. The definition this instance is actually running, so the diagram can
+    // be pinned to the version it followed rather than the latest stored draft.
+    public string ProcessDefinitionId { get; init; } = string.Empty;
+
+    // #218. Generated activity id -> the author's element it was expanded from,
+    // read out of the DEPLOYED XML's flowable:autonateExpandedFrom attributes.
+    //
+    // Publish-time expansion puts nodes in the deployed diagram that exist in no
+    // stored one. Without this map their ids highlight nothing, and the gateway
+    // the author drew looks like the process never reached it.
+    public IReadOnlyDictionary<string, string> ExpansionSourceIds { get; init; }
+        = new Dictionary<string, string>(StringComparer.Ordinal);
 }
 
 public sealed record class FlowableProcessVariable

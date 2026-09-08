@@ -164,6 +164,7 @@ public static partial class WorkflowBpmnXml
         var document = XDocument.Parse(xml);
         ExpandMessageSendEvents(document);
         ExpandSignalEndEvents(document);
+        ExpandComplexGateways(document);
         ApplySignalScopes(document);
 
         var declaration = document.Declaration is null
@@ -301,6 +302,234 @@ public static partial class WorkflowBpmnXml
     // Applied to the deployed copy only, and only when an override is configured —
     // which it is not in production, so nothing is stamped and every diagram uses
     // the engine's own configured URL exactly as before.
+    // #218. A complex gateway's routing decision is author script, so the deployed
+    // copy gains a script task in front of the gateway and conditions on the
+    // gateway's own outgoing flows.
+    //
+    // VERIFIED AGAINST FLOWABLE 8.0.0 BEFORE THIS WAS WRITTEN, and the result
+    // contradicts both #103's inventory ("DEPLOYS BUT DOES NOTHING") and this
+    // story's original premise ("silently walked past"):
+    //
+    //   * `complexGateway` is recorded in history as activityType
+    //     **exclusiveGateway**;
+    //   * it evaluates `conditionExpression` on its outgoing flows;
+    //   * it honours `default`;
+    //   * with two conditions both true it takes ONE flow — first match wins.
+    //
+    // So the engine already routes. That is why this expansion generates ONE node
+    // and not two: the story's "script task plus an exclusive gateway" would add a
+    // second gateway to do what the author's own gateway does. Keeping the
+    // author's element also means Flowable's history names an id that exists in
+    // the stored diagram.
+    //
+    // It also means an imported diagram containing a complex gateway does not
+    // stall where someone would notice — it silently takes a branch. Refusing the
+    // element at publish is the only reason that has not bitten anyone.
+    //
+    // Only the PUBLISHED copy is rewritten. The stored model keeps the single
+    // gateway the author drew.
+    private static void ExpandComplexGateways(XDocument document)
+    {
+        var flowsBySource = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .GroupBy(flow => flow.Attribute("sourceRef")?.Value ?? string.Empty)
+            .Where(group => !string.IsNullOrEmpty(group.Key))
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        foreach (var gateway in document.Descendants(BpmnNamespace + "complexGateway").ToList())
+        {
+            var gatewayId = gateway.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(gatewayId)) continue;
+            if (gateway.Parent is null) continue;
+
+            // Idempotent: a re-published document already carrying its generated
+            // script task is left alone rather than gaining a second one.
+            var scriptTaskId = ComplexGatewayScriptTaskId(gatewayId);
+            if (document.Descendants(BpmnNamespace + "scriptTask")
+                .Any(t => t.Attribute("id")?.Value == scriptTaskId))
+            {
+                continue;
+            }
+
+            if (!flowsBySource.TryGetValue(gatewayId, out var outgoing) || outgoing.Count == 0)
+            {
+                // Validation refuses this at publish; expansion simply declines to
+                // invent a route out of a gateway that has none.
+                continue;
+            }
+
+            // The default flow, if the author set one, never gets a condition —
+            // BPMN forbids it, and it is the gateway's fallback by definition.
+            var defaultFlowId = Trimmed(gateway.Attribute("default")?.Value);
+
+            var routeIds = outgoing
+                .Select(flow => flow.Attribute("id")?.Value)
+                .Where(id => !string.IsNullOrWhiteSpace(id) && id != defaultFlowId)
+                .Select(id => id!)
+                .ToList();
+            if (routeIds.Count == 0) continue;
+
+            var resultVariable = ComplexGatewayRouteVariable(gatewayId);
+
+            // Rewire every flow INTO the gateway so it lands on the script task
+            // instead, then flow the script task into the gateway.
+            foreach (var inbound in document.Descendants(BpmnNamespace + "sequenceFlow")
+                         .Where(flow => flow.Attribute("targetRef")?.Value == gatewayId))
+            {
+                inbound.SetAttributeValue("targetRef", scriptTaskId);
+            }
+
+            var scriptTask = new XElement(
+                BpmnNamespace + "scriptTask",
+                new XAttribute("id", scriptTaskId),
+                // Named so the two history rows for one gateway are tellable
+                // apart: the routing script ran, then the gateway routed. Both
+                // map onto the same shape in the diagram, and an operator
+                // reading the history needs to know which one failed.
+                new XAttribute("name", ComplexGatewayScriptTaskName(gateway.Attribute("name")?.Value)),
+                new XAttribute("scriptFormat", Trimmed(gateway.Attribute("scriptFormat")?.Value) ?? "javascript"),
+                // flowable:, NOT the bare attribute. Flowable validates the
+                // deployed XML against the strict BPMN schema, which has no
+                // `resultVariable` on bpmn:scriptTask — a bare one is refused
+                // with "Attribute 'resultVariable' is not allowed to appear in
+                // element 'bpmn:scriptTask'". Verified both spellings against
+                // 8.0.0: bare is REFUSED, flowable: DEPLOYS.
+                new XAttribute(FlowableNamespace + "resultVariable", resultVariable),
+                // ForceAsyncScriptTasks runs on the PREPARE path, which this
+                // element never passed through, so async is set here explicitly.
+                new XAttribute(FlowableNamespace + "async", "true"),
+                // The mapping back to the author's gateway, recoverable from the
+                // deployed XML alone — that is what lets the execution view show
+                // the gateway when Flowable reports the script task.
+                new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId),
+                // What the script is allowed to return. The Java behaviour reads
+                // this to hand the routes to the sandbox and to enforce the
+                // contract on the way back.
+                new XAttribute(FlowableNamespace + ComplexGatewayRoutesAttribute, string.Join(",", routeIds)),
+                new XElement(BpmnNamespace + "script",
+                    Trimmed(ReadComplexGatewayScript(gateway)) ?? DefaultRouteScript(routeIds[0])));
+
+            var runAs = ScriptTaskIdentity.ReadRunAs(gateway);
+            if (!string.IsNullOrWhiteSpace(runAs))
+            {
+                scriptTask.SetAttributeValue(
+                    ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute, runAs);
+            }
+
+            // The authoring data has moved to the generated task, and Flowable
+            // validates the DEPLOYED xml against the strict BPMN schema — where
+            // bpmn:complexGateway has no scriptFormat and no script child.
+            // Leaving them refuses the whole deployment:
+            //   cvc-complex-type.3.2.2: Attribute 'scriptFormat' is not allowed
+            //   to appear in element 'bpmn:complexGateway'.
+            // Stripping them here is also just correct: they describe how the
+            // author configured the element, which the stored model keeps and
+            // the engine has no use for.
+            gateway.Attribute("scriptFormat")?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute)?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.RunAsAttribute)?.Remove();
+            gateway.Element(BpmnNamespace + "script")?.Remove();
+
+            gateway.AddBeforeSelf(scriptTask);
+            gateway.Parent.Add(new XElement(
+                BpmnNamespace + "sequenceFlow",
+                new XAttribute("id", $"{scriptTaskId}__flow"),
+                new XAttribute("sourceRef", scriptTaskId),
+                new XAttribute("targetRef", gatewayId),
+                // Tagged like the script task. Flowable records a traversed
+                // sequence flow as an activity, so an untagged generated flow
+                // arrives in completedActivityIds as an id the author's diagram
+                // has never heard of — the same defect as the node, one edge over.
+                new XAttribute(FlowableNamespace + ComplexGatewaySourceAttribute, gatewayId)));
+
+            AddShapeBeside(document, gatewayId, scriptTaskId);
+
+            // Conditions on the author's own outgoing flows. An author-written
+            // condition is left alone, exactly as ApplyAutoNateGatewayConditions
+            // does — the script chooses among the routes it was given, and an
+            // author who has already written a condition meant it.
+            foreach (var flow in outgoing)
+            {
+                var flowId = flow.Attribute("id")?.Value;
+                if (string.IsNullOrWhiteSpace(flowId) || flowId == defaultFlowId) continue;
+                if (flow.Element(BpmnNamespace + "conditionExpression") is not null) continue;
+
+                flow.Add(new XElement(
+                    BpmnNamespace + "conditionExpression",
+                    new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                    $"${{{resultVariable} == '{flowId}'}}"));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Generated element id -> the author's element it came from, read from a
+    /// DEPLOYED document (#218).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately keyed off the attribute rather than the id's shape. A naming
+    /// convention is not a contract, and an id-suffix rule would silently map any
+    /// author element unlucky enough to end in the same characters.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string> BuildExpansionSourceMap(string? deployedXml)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(deployedXml)) return map;
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(deployedXml);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return map;
+        }
+
+        foreach (var element in document.Descendants())
+        {
+            var source = Trimmed(element.Attribute(FlowableNamespace + ComplexGatewaySourceAttribute)?.Value);
+            var id = Trimmed(element.Attribute("id")?.Value);
+            if (source is null || id is null) continue;
+            map[id] = source;
+        }
+
+        return map;
+    }
+
+    /// <summary>The generated routing task's name for a complex gateway (#218).</summary>
+    internal static string ComplexGatewayScriptTaskName(string? gatewayName)
+    {
+        var name = Trimmed(gatewayName);
+        return name is null ? "Routing script" : $"{name} (routing script)";
+    }
+
+    /// <summary>The generated script task's id for a complex gateway (#218).</summary>
+    internal static string ComplexGatewayScriptTaskId(string gatewayId) =>
+        $"{gatewayId}__autonateRoute";
+
+    /// <summary>The variable the routing script's chosen route id lands in (#218).</summary>
+    internal static string ComplexGatewayRouteVariable(string gatewayId) =>
+        $"__autonateRoute_{gatewayId}";
+
+    // Marks a generated node as belonging to an author's element, so the
+    // execution view can map Flowable's activity ids back onto the diagram the
+    // author actually drew.
+    internal const string ComplexGatewaySourceAttribute = "autonateExpandedFrom";
+
+    // The routes the script may return, as a comma-separated list of flow ids.
+    internal const string ComplexGatewayRoutesAttribute = "autonateAllowedRoutes";
+
+    /// <summary>An author's routing script, stored on the gateway itself.</summary>
+    private static string? ReadComplexGatewayScript(XElement gateway) =>
+        gateway.Element(BpmnNamespace + "script")?.Value;
+
+    // A freshly dropped gateway has no script yet, and publishing must not fail
+    // on that — it takes the first route, which is visible and wrong rather than
+    // invisible and wrong.
+    private static string DefaultRouteScript(string firstRouteId) =>
+        $"// Return the id of the route to take.\nreturn '{firstRouteId}';";
+
     public static string StampCallbackBaseUrl(string xml, string? callbackBaseUrl)
     {
         if (string.IsNullOrWhiteSpace(xml) || string.IsNullOrWhiteSpace(callbackBaseUrl))
@@ -323,6 +552,17 @@ public static partial class WorkflowBpmnXml
                 continue;
             }
 
+            task.SetAttributeValue(FlowableNamespace + "autonateCallbackBaseUrl", callbackBaseUrl);
+            stamped++;
+        }
+
+        // #218. Script tasks call back too, and had the same defect one element
+        // over: the engine sent every script to the container's app regardless of
+        // which app published the workflow. #223 fixed it for the behaviour
+        // bridge only, so a routing script — or any script task — reached the
+        // wrong host in E2E.
+        foreach (var task in document.Descendants(BpmnNamespace + "scriptTask"))
+        {
             task.SetAttributeValue(FlowableNamespace + "autonateCallbackBaseUrl", callbackBaseUrl);
             stamped++;
         }
@@ -955,6 +1195,14 @@ public static partial class WorkflowBpmnXml
             if (string.Equals(element.Name.LocalName, "serviceTask", StringComparison.Ordinal))
             {
                 ApplyServiceTaskSnapshot(element, snapshot);
+            }
+
+            // #218. The routing script lives on the gateway the author drew, in
+            // the same shape a script task uses, so the expansion has one place
+            // to read it from and the stored diagram stays the author's.
+            if (string.Equals(element.Name.LocalName, "complexGateway", StringComparison.Ordinal))
+            {
+                ApplyComplexGatewaySnapshot(element, snapshot);
             }
 
             // #158. Not `else if` — a boundary event is both a conditional event
@@ -1704,6 +1952,34 @@ public static partial class WorkflowBpmnXml
         }
     }
 
+    // #218. Reuses Script/ScriptFormat rather than adding snapshot fields: it is
+    // the same concept in the same shape, and the studio routes on $type, so a
+    // script task's snapshot and a gateway's cannot be confused.
+    private static void ApplyComplexGatewaySnapshot(XElement element, WorkflowElementSnapshot snapshot)
+    {
+        if (!string.IsNullOrWhiteSpace(snapshot.ScriptFormat))
+        {
+            element.SetAttributeValue("scriptFormat", snapshot.ScriptFormat);
+        }
+
+        if (snapshot.Script is null) return;
+
+        var scriptElement = element.Element(BpmnNamespace + "script");
+        if (string.IsNullOrWhiteSpace(snapshot.Script))
+        {
+            scriptElement?.Remove();
+            return;
+        }
+
+        if (scriptElement is null)
+        {
+            element.Add(new XElement(BpmnNamespace + "script", snapshot.Script));
+            return;
+        }
+
+        scriptElement.Value = snapshot.Script;
+    }
+
     private static void ApplyUserTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
     {
         SetOrRemoveFlowableAttribute(element, "assignee", snapshot.Assignee);
@@ -2186,6 +2462,74 @@ public static partial class WorkflowBpmnXml
             foreach (var rejection in ScriptSurfaceRules.FindRejected(scriptBody))
             {
                 errors.Add($"Script task '{taskLabel}': {rejection}");
+            }
+        }
+
+        errors.AddRange(BuildComplexGatewayValidationErrors(document));
+        return errors;
+    }
+
+    // #218. A complex gateway's routing script becomes a real script task at
+    // publish, so it is held to the same rules as one the author drew.
+    //
+    // Validated on the AUTHORED document rather than the expanded one, because
+    // the author has to be told which gateway is wrong — after expansion the
+    // offending element is a generated node whose id means nothing to them.
+    private static IReadOnlyList<string> BuildComplexGatewayValidationErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        var flowsBySource = document
+            .Descendants(BpmnNamespace + "sequenceFlow")
+            .GroupBy(flow => flow.Attribute("sourceRef")?.Value ?? string.Empty)
+            .Where(group => !string.IsNullOrEmpty(group.Key))
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        foreach (var gateway in document.Descendants(BpmnNamespace + "complexGateway"))
+        {
+            var gatewayId = gateway.Attribute("id")?.Value;
+            var label = gateway.Attribute("name")?.Value ?? gatewayId ?? "Unnamed complex gateway";
+
+            var scriptFormat = gateway.Attribute("scriptFormat")?.Value;
+            // Unset is fine — the expansion defaults it to javascript. Set to
+            // something the sandbox cannot run is not.
+            if (!string.IsNullOrWhiteSpace(scriptFormat)
+                && !ScriptSurfaceRules.IsSupportedScriptFormat(scriptFormat))
+            {
+                var supported = string.Join(
+                    " or ",
+                    ScriptSurfaceRules.SupportedScriptFormats.Select(f => $"\"{f}\""));
+                errors.Add($"Complex gateway '{label}' must use scriptFormat={supported}.");
+            }
+
+            // The same sandbox, so the same surface rules. Skipping this would
+            // leave one script in the product that can still reach for the JVM
+            // binding, found at run time by whoever starts the process.
+            var scriptBody = gateway.Element(BpmnNamespace + "script")?.Value;
+            if (!string.IsNullOrWhiteSpace(scriptBody))
+            {
+                foreach (var rejection in ScriptSurfaceRules.FindRejected(scriptBody))
+                {
+                    errors.Add($"Complex gateway '{label}': {rejection}");
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(gatewayId)) continue;
+
+            var outgoing = flowsBySource.TryGetValue(gatewayId, out var flows) ? flows : [];
+            var defaultFlowId = Trimmed(gateway.Attribute("default")?.Value);
+            var routeCount = outgoing.Count(flow =>
+                !string.IsNullOrWhiteSpace(flow.Attribute("id")?.Value)
+                && flow.Attribute("id")!.Value != defaultFlowId);
+
+            if (routeCount == 0)
+            {
+                // Flowable deploys this happily and the instance then fails at
+                // the gateway with an engine-level message. Refusing it here
+                // names the gateway while the author still has it open.
+                errors.Add(
+                    $"Complex gateway '{label}' needs at least one outgoing route for its script to choose. " +
+                    "A gateway with only a default flow has nothing to route.");
             }
         }
 

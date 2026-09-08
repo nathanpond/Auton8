@@ -3724,3 +3724,41 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   ABI invariant 2 intact — `BusinessErrorCode` is an init-only property, and
   `PluginAbiVersionTests` passes.
   **Issue:** #223, #114
+
+- **#218: the complex gateway is expanded, not replaced — and the engine's real
+  behaviour changed the design.** Probed 8.0.0 before implementing: a
+  `complexGateway` is recorded as activityType **exclusiveGateway**, evaluates
+  `conditionExpression`, honours `default`, and with two conditions true takes the
+  first match. #103's "DEPLOYS BUT DOES NOTHING" and the story's "silently walked
+  past" are both wrong — it is not inert, it silently picks a branch, and only
+  publish-time refusal has kept that from biting an imported diagram. The
+  inventory's claim holds only for the element's own `activationCondition`.
+  **Consequence:** the AC's "script task **plus an exclusive gateway**" generates a
+  node the engine does not need. The expansion inserts ONE script task in front of
+  the author's gateway and conditions the gateway's own outgoing flows. Fewer
+  generated nodes, a native default flow, and the gateway keeps its id — so
+  Flowable's history names an element that exists in the stored diagram. Declared
+  as a departure here rather than edited into the AC silently.
+  **Rule 2 (privilege escalation this story would have introduced).**
+  `ScriptTaskIdentity.DeclaresSystemIdentity` scanned only `scriptTask`. Since the
+  expansion copies the gateway's `runAs` onto a generated script task, an author
+  without the permission could have reached `runAs="system"` by putting it on a
+  gateway — the gate still present, still passing, no longer covering the way in.
+  Both methods now scan script-BEARING elements, with a test for each direction.
+  **Two engine facts found only by deploying**, each a 500 at publish rather than a
+  degradation: a bare `resultVariable` is refused on `bpmn:scriptTask`
+  (`flowable:resultVariable` deploys), and `scriptFormat`/`<script>` are refused on
+  `bpmn:complexGateway` — so the expansion strips the gateway's authoring
+  properties once they have moved to the generated task. Both now have unit tests
+  that need no engine.
+  **#223's fix extended to script tasks.** It stamped only the behaviour bridge, so
+  a script task in an E2E-published workflow still called the container's app.
+  **Filed, not fixed: #230** — `ApplyScriptTaskSnapshot` writes the same bare
+  `resultVariable`, so an author-drawn script task with a result variable cannot
+  publish today. Out of this story's scope; proof is on the issue.
+  **Still open on #218:** the studio property editor, and whether bpmn-js
+  round-trips a scripted complex gateway at all. bpmn-js is vendored as a browser
+  bundle with no Flowable moddle extension, so that question needs a browser, not
+  reasoning — and guessing it wrong silently loses an author's script, which is the
+  exact failure this milestone exists to end.
+  **Issue:** #218, #230, #103, #223
