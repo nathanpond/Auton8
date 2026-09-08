@@ -386,6 +386,11 @@ builder.Services.AddScoped<IInstanceAuthorizer, DataConnectorInstanceAuthorizer>
 builder.Services.AddScoped<IInstanceAuthorizer, DatasetInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, SavedQueryInstanceAuthorizer>();
 builder.Services.AddScoped<IInstanceAuthorizer, PipelineInstanceAuthorizer>();
+// #112. Kind-level only by design; the handler exists so a missing one cannot
+// mean "deny everyone" in one configuration and "allow everyone" in DryRun.
+builder.Services.AddScoped<IInstanceAuthorizer, WorkflowMessageInstanceAuthorizer>();
+
+builder.Services.AddScoped<AutoNate.Web.Services.Workflow.WorkflowMessageCorrelator>();
 
 builder.Services.AddScoped<IAuthorizer, Authorizer>();
 // Content hierarchy — separate authorization path (project-role baseline +
@@ -1637,6 +1642,7 @@ app.MapHealthEndpoints();
 app.MapUserEndpoints();
 app.MapEventCatalogEndpoints();
 app.MapWorkflowEndpoints();
+app.MapWorkflowMessageEndpoints();
 app.MapWorkflowBehaviorEndpoints();
 app.MapWorkflowScriptTaskEndpoints();
 app.MapExecutionEndpoints();

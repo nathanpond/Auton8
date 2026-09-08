@@ -26,7 +26,7 @@ public static class CoreEntityTypes
         new IEntityType[]
         {
             User!, Group!, Role!, RecordType!, Record!,
-            WorkflowModel!, WorkflowExecution!, WorkflowTask!, Plugin!,
+            WorkflowModel!, WorkflowExecution!, WorkflowTask!, WorkflowMessage!, Plugin!,
             Form!, ExternalConnection!, SystemIssue!, SiteConfig!,
             IdentityProvider!,
             Project!, Cabinet!, Notebook!, Page!, Document!, Folder!
@@ -132,6 +132,19 @@ public static class CoreEntityTypes
         actions: new[] { Actions.View, Actions.Complete },
         // Mirrors WorkflowTaskCacheSelectorCompiler.CompileExpr.
         tags: new[] { "processkey", "definitionkey", "assignee", "candidateuser", "candidategroup" });
+
+    // #112. The right to advance someone else's running process from outside it.
+    // Kind-level only — a message is addressed by process key plus a correlation
+    // value, never by instance id, so there is no instance for a grant to name and
+    // the endpoint uses RequireKindPermission.
+    public static EntityTypeDefinition WorkflowMessage { get; } = new(
+        kind: EntityKinds.WorkflowMessage,
+        clrType: typeof(object),
+        idClrType: typeof(string),
+        actions: new[] { Actions.Send },
+        // Only the process key is knowable before correlation runs, so it is the
+        // only thing a selector can usefully narrow on.
+        tags: new[] { "processkey" });
 
     // Single coarse Manage action gates list/view/upload/enable/disable/delete
     // for plugins. Granular split is a v2 conversation if it ever comes up.

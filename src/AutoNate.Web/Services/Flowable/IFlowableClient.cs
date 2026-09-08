@@ -150,4 +150,50 @@ public interface IFlowableClient
     Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
         string signalName,
         CancellationToken cancellationToken = default);
+
+    // #112. Every execution waiting on `messageName` in a definition, narrowed to
+    // those whose `correlationKey` process variable equals `correlationValue`.
+    //
+    // The narrowing happens in the ENGINE, not here: POST /query/executions takes
+    // messageEventSubscriptionName and processInstanceVariables together. That
+    // matters for the multi-match rule — the count this returns is the number of
+    // instances that genuinely matched, not a page of them, so refusing with "3
+    // instances matched" is exact rather than a guess.
+    Task<IReadOnlyList<string>> ListExecutionsAwaitingMessageAsync(
+        string processDefinitionKey,
+        string messageName,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default);
+
+    // Same, for a receive task. A receive task carries no message subscription, so
+    // it is addressed by its activity id — a genuinely different lookup, verified
+    // against Flowable 8.0.0.
+    Task<IReadOnlyList<string>> ListExecutionsAwaitingReceiveTaskAsync(
+        string processDefinitionKey,
+        string activityId,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default);
+
+    // Delivers to one waiting execution. `messageEventReceived` for a message
+    // event; the receive-task variant uses `trigger`, because a receive task has
+    // no subscription for the engine to match a message name against.
+    Task DeliverMessageToExecutionAsync(
+        string executionId,
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default);
+
+    Task TriggerExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default);
+
+    // Starts a new instance through a message start event. Returns the new
+    // instance id.
+    Task<string> StartProcessInstanceByMessageAsync(
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default);
 }

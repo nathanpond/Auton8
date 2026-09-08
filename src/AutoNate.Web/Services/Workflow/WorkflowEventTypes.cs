@@ -20,6 +20,7 @@ public static class WorkflowResourceKinds
     public const string WorkflowModel = "workflow.model";
     public const string Execution = "workflow.execution";
     public const string Task = "workflow.task";
+    public const string Message = "workflow.message";
 }
 
 public static class WorkflowAdminEventTypes
@@ -46,6 +47,13 @@ public static class WorkflowAdminEventTypes
     public const string TaskReassigned = "workflow.task.reassigned";
     public const string TaskDueDateChanged = "workflow.task.due.date.changed";
     public const string TaskCompleted = "workflow.task.completed";
+
+    // #112. Advancing someone else's running process from outside it is a
+    // privileged mutation on their work, so who did it and to which instance is
+    // on the record — including the refusals, because a multi-match means a
+    // process is modelled wrong and nobody finds that out from a 409 alone.
+    public const string MessageDelivered = "workflow.message.delivered";
+    public const string MessageRefused = "workflow.message.refused";
 
     // View events (Phase 4)
     public const string ModelListViewed = "workflow.model.list.viewed";

@@ -1462,6 +1462,162 @@ public sealed class FlowableClient(
             .ToArray();
     }
 
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingMessageAsync(
+        string processDefinitionKey,
+        string messageName,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(messageName))
+        {
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+
+        var query = new Dictionary<string, object?>
+        {
+            ["messageEventSubscriptionName"] = messageName
+        };
+        AddIfPresent(query, "processDefinitionKey", processDefinitionKey);
+        AddCorrelationFilter(query, correlationKey, correlationValue);
+
+        return QueryExecutionsAsync(
+            query, $"list executions awaiting message '{messageName}'", cancellationToken);
+    }
+
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingReceiveTaskAsync(
+        string processDefinitionKey,
+        string activityId,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(activityId))
+        {
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+
+        var query = new Dictionary<string, object?>
+        {
+            ["activityId"] = activityId
+        };
+        AddIfPresent(query, "processDefinitionKey", processDefinitionKey);
+        AddCorrelationFilter(query, correlationKey, correlationValue);
+
+        return QueryExecutionsAsync(
+            query, $"list executions awaiting receive task '{activityId}'", cancellationToken);
+    }
+
+    // A missing key or value means "do not narrow". That is only ever reached for
+    // a declaration with no correlation key, where every waiting instance is a
+    // genuine match and the multi-match rule is what protects the caller.
+    private static void AddCorrelationFilter(
+        Dictionary<string, object?> query, string? correlationKey, string? correlationValue)
+    {
+        if (string.IsNullOrWhiteSpace(correlationKey) || correlationValue is null)
+        {
+            return;
+        }
+
+        query["processInstanceVariables"] = new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["name"] = correlationKey,
+                ["value"] = correlationValue,
+                ["operation"] = "equals",
+                ["type"] = "string"
+            }
+        };
+    }
+
+    private static void AddIfPresent(Dictionary<string, object?> query, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)) query[name] = value;
+    }
+
+    private async Task<IReadOnlyList<string>> QueryExecutionsAsync(
+        Dictionary<string, object?> query, string what, CancellationToken cancellationToken)
+    {
+        // POST /query/executions rather than the GET form: the GET cannot express
+        // a process-variable filter, and doing that filtering here would mean
+        // paging every waiting instance back and counting locally, which makes the
+        // multi-match count depend on the page size.
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/query/executions", query, cancellationToken);
+        await EnsureSuccessAsync(response, what);
+
+        var page = await DeserializeAsync<FlowableListResponse<FlowableExecutionResponse>>(response, cancellationToken);
+        if (page.Data is null || page.Data.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return page.Data
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => item.Id!)
+            .ToArray();
+    }
+
+    public async Task DeliverMessageToExecutionAsync(
+        string executionId,
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["action"] = "messageEventReceived",
+            ["messageName"] = messageName,
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"service/runtime/executions/{Uri.EscapeDataString(executionId)}",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"deliver message '{messageName}' to execution {executionId}");
+    }
+
+    public async Task TriggerExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["action"] = "trigger",
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PutAsJsonAsync(
+            $"service/runtime/executions/{Uri.EscapeDataString(executionId)}",
+            payload,
+            cancellationToken);
+
+        await EnsureSuccessAsync(response, $"trigger execution {executionId}");
+    }
+
+    public async Task<string> StartProcessInstanceByMessageAsync(
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["message"] = messageName,
+            ["variables"] = ToFlowableVariables(variables)
+        };
+
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/runtime/process-instances", payload, cancellationToken);
+        await EnsureSuccessAsync(response, $"start a process instance by message '{messageName}'");
+
+        var created = await DeserializeAsync<FlowableProcessInstanceResponse>(response, cancellationToken);
+        return created.Id ?? string.Empty;
+    }
+
     public async Task<FlowableTaskSummary?> GetTaskAsync(string taskId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(taskId))

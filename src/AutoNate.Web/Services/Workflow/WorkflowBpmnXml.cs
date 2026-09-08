@@ -977,6 +977,94 @@ public static partial class WorkflowBpmnXml
     // Throws System.Xml.XmlException on malformed XML. Callers that iterate
     // many workflows should catch per-workflow so one bad model doesn't sink
     // the rest of the index (see EfCoreWorkflowSignalRegistry.RefreshAsync).
+    // #112. The correlation key lives on the element, in the flowable namespace
+    // under an autonate name — the same shape as autonateServiceKind and
+    // autonateConvertedFrom, and for the reason #167 found the hard way: a diagram
+    // reliably declares xmlns:flowable, and bpmn-moddle silently discards an
+    // attribute whose prefix is undeclared.
+    internal const string CorrelationKeyAttribute = "autonateCorrelationKey";
+
+    /// <summary>
+    /// Every point in a published definition that can be advanced from outside,
+    /// with the variable that addresses it (#112).
+    /// </summary>
+    public static IReadOnlyList<WorkflowMessageDeclaration> ExtractMessageDeclarations(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return Array.Empty<WorkflowMessageDeclaration>();
+        }
+
+        var document = XDocument.Parse(xml);
+
+        // <bpmn:message id="…" name="…"> lives at definitions level; the events
+        // reference it by id. The name is what the engine subscribes under, so a
+        // messageRef pointing at nothing is not addressable and is skipped rather
+        // than guessed at.
+        var messageNamesById = document.Root?
+            .Elements(BpmnNamespace + "message")
+            .Where(message => !string.IsNullOrWhiteSpace(message.Attribute("id")?.Value))
+            .ToDictionary(
+                message => message.Attribute("id")!.Value,
+                message => message.Attribute("name")?.Value ?? string.Empty,
+                StringComparer.Ordinal)
+            ?? new Dictionary<string, string>(StringComparer.Ordinal);
+
+        var declarations = new List<WorkflowMessageDeclaration>();
+
+        foreach (var element in document.Descendants())
+        {
+            var localName = element.Name.LocalName;
+            var kind = localName switch
+            {
+                "startEvent" => WorkflowMessageTargetKind.Start,
+                "intermediateCatchEvent" or "boundaryEvent" => WorkflowMessageTargetKind.Catch,
+                "receiveTask" => WorkflowMessageTargetKind.ReceiveTask,
+                _ => (WorkflowMessageTargetKind?)null
+            };
+            if (kind is null || element.Name.Namespace != BpmnNamespace) continue;
+
+            var elementId = element.Attribute("id")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId)) continue;
+
+            var correlationKey = element.Attribute(FlowableNamespace + CorrelationKeyAttribute)?.Value;
+            correlationKey = string.IsNullOrWhiteSpace(correlationKey) ? null : correlationKey.Trim();
+
+            if (kind == WorkflowMessageTargetKind.ReceiveTask)
+            {
+                // A receive task has no message element. It is still addressable,
+                // by its own id, so it belongs in this list — leaving it out is how
+                // "a receive task is a process that stops forever" happens.
+                declarations.Add(new WorkflowMessageDeclaration(
+                    elementId, kind.Value, string.Empty, correlationKey));
+                continue;
+            }
+
+            var definition = element.Elements(BpmnNamespace + "messageEventDefinition").FirstOrDefault();
+            if (definition is null) continue;
+
+            var messageRef = definition.Attribute("messageRef")?.Value;
+            if (string.IsNullOrWhiteSpace(messageRef)
+                || !messageNamesById.TryGetValue(messageRef, out var messageName)
+                || string.IsNullOrWhiteSpace(messageName))
+            {
+                continue;
+            }
+
+            declarations.Add(new WorkflowMessageDeclaration(
+                elementId,
+                kind.Value,
+                messageName,
+                // A start event has nothing to correlate to — no instance exists
+                // yet — so any key written on one is ignored rather than honoured,
+                // which would otherwise look like a filter that silently matches
+                // everything.
+                kind == WorkflowMessageTargetKind.Start ? null : correlationKey));
+        }
+
+        return declarations;
+    }
+
     public static IReadOnlyList<WorkflowSignalRegistration> ExtractSignalRegistrations(string xml)
     {
         if (string.IsNullOrWhiteSpace(xml))

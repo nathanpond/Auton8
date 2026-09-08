@@ -47,6 +47,11 @@ public static class Actions
 
     public const string Complete = "complete";
 
+    // #112. Delivering a message to a waiting process instance. No existing verb
+    // fits: this neither starts, completes nor overrides an execution — it tells
+    // one that something happened elsewhere.
+    public const string Send = "send";
+
     public const string Override = "override";
 
     public const string MoveState = "movestate";

@@ -326,6 +326,67 @@ internal sealed class StubFlowableClient : IFlowableClient
     public Dictionary<string, IReadOnlyList<string>> WaitingExecutionsBySignal { get; } =
         new(StringComparer.Ordinal);
 
+    // #112. Keyed by the addressable name — the message name for a message
+    // event, the element id for a receive task, which is how the correlator
+    // names them too.
+    public Dictionary<string, IReadOnlyList<string>> WaitingExecutionsByMessage { get; } = new(StringComparer.Ordinal);
+
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingMessageAsync(
+        string processDefinitionKey,
+        string messageName,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ListExecutionsAwaitingMessage:{processDefinitionKey}:{messageName}:{correlationKey}={correlationValue}");
+        return Task.FromResult(WaitingExecutionsByMessage.TryGetValue(messageName, out var ids)
+            ? ids
+            : (IReadOnlyList<string>)Array.Empty<string>());
+    }
+
+    public Task<IReadOnlyList<string>> ListExecutionsAwaitingReceiveTaskAsync(
+        string processDefinitionKey,
+        string activityId,
+        string? correlationKey,
+        string? correlationValue,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"ListExecutionsAwaitingReceiveTask:{processDefinitionKey}:{activityId}:{correlationKey}={correlationValue}");
+        return Task.FromResult(WaitingExecutionsByMessage.TryGetValue(activityId, out var ids)
+            ? ids
+            : (IReadOnlyList<string>)Array.Empty<string>());
+    }
+
+    public Task DeliverMessageToExecutionAsync(
+        string executionId,
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"DeliverMessageToExecution:{executionId}:{messageName}");
+        return Task.CompletedTask;
+    }
+
+    public Task TriggerExecutionAsync(
+        string executionId,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"TriggerExecution:{executionId}");
+        return Task.CompletedTask;
+    }
+
+    public string StartedByMessageInstanceId { get; set; } = "started-by-message";
+
+    public Task<string> StartProcessInstanceByMessageAsync(
+        string messageName,
+        IReadOnlyDictionary<string, object?>? variables = null,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"StartProcessInstanceByMessage:{messageName}");
+        return Task.FromResult(StartedByMessageInstanceId);
+    }
+
     public Task<IReadOnlyList<string>> ListExecutionsBySignalSubscriptionAsync(
         string signalName,
         CancellationToken cancellationToken = default)

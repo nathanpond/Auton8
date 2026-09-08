@@ -57,3 +57,33 @@ public sealed record class WorkflowSignalRegistration(
     string Topic,
     string ProcessDefinitionKey,
     IReadOnlySet<string> RecordTypeShortCodes);
+
+// #112. One message-catching point in a published definition: which message it
+// listens for, and which process variable addresses the instance waiting on it.
+//
+// Kind is what decides HOW it is advanced, and the two are genuinely different
+// engine calls: a message event carries a subscription and takes
+// `messageEventReceived`, while a receive task has no subscription at all and is
+// found by activity id and taken with `trigger`. Verified against Flowable 8.0.0
+// before this type existed — see #112's verification comment.
+public enum WorkflowMessageTargetKind
+{
+    // startEvent with a messageEventDefinition: no instance exists yet.
+    Start,
+
+    // intermediateCatchEvent or boundaryEvent with a messageEventDefinition.
+    Catch,
+
+    // receiveTask: triggered by activity, not by message name.
+    ReceiveTask
+}
+
+public sealed record class WorkflowMessageDeclaration(
+    string ElementId,
+    WorkflowMessageTargetKind Kind,
+    // The <bpmn:message> name the engine subscribes under. Empty for a receive
+    // task, which has no message of its own — the element id addresses it.
+    string MessageName,
+    // The process variable whose value picks out the one waiting instance.
+    // Null on a Start declaration: nothing is waiting, so nothing is correlated.
+    string? CorrelationKey);
