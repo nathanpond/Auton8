@@ -230,6 +230,18 @@ type MessageElementEditor = {
   editableMessageName: boolean;
 };
 
+type CodedEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  // "error" | "escalation"
+  kind: string;
+  code: string;
+  // null when the element is not a boundary event, or is an error boundary —
+  // BPMN gives an error boundary no choice, it always interrupts.
+  interrupting: boolean | null;
+};
+
 type GenericElementEditor = {
   id: string;
   type: string;
@@ -309,6 +321,10 @@ type ElementSelection = {
   messageCorrelationKey?: string | null;
   messageTargetProcessKey?: string | null;
   messageName?: string | null;
+  // #114. Present only on error/escalation events.
+  codedEventKind?: string | null;
+  codedEventCode?: string | null;
+  codedEventInterrupting?: boolean | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -446,6 +462,7 @@ export default function WorkflowStudio() {
     useState<TimerIntermediateCatchEventEditor | null>(null);
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
   const [messageEditor, setMessageEditor] = useState<MessageElementEditor | null>(null);
+  const [codedEventEditor, setCodedEventEditor] = useState<CodedEventEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
   const [conditionalEventEditor, setConditionalEventEditor] =
@@ -652,6 +669,31 @@ export default function WorkflowStudio() {
     setTimerBoundaryEditor(null);
       return;
     }
+    // #114. Error and escalation events, routed before the message branch: they
+    // carry their own definition type and would otherwise reach the generic
+    // editor with nowhere to put a code.
+    if (selection && typeof selection.codedEventKind === "string") {
+      setCodedEventEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        kind: selection.codedEventKind,
+        code: selection.codedEventCode ?? "",
+        interrupting:
+          typeof selection.codedEventInterrupting === "boolean"
+            ? selection.codedEventInterrupting
+            : null
+      });
+      setScriptTaskEditor(null);
+      setServiceTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setMessageEditor(null);
+      setGenericEditor(null);
+      return;
+    }
+    setCodedEventEditor(null);
+
     // #112. Before the service-task branch — a send task is a message element
     // first, and a receive task would otherwise land in the generic editor with
     // nowhere to put a correlation key.
@@ -1241,6 +1283,21 @@ export default function WorkflowStudio() {
       setMessageEditor(null);
     });
 
+  const applyCodedEvent = () =>
+    runBusy("applying event code", async () => {
+      if (!handle || !codedEventEditor) {
+        throw new Error("Select an error or escalation event before applying changes.");
+      }
+      await workflow.updateCodedEventProperties(handle, {
+        id: codedEventEditor.id,
+        name: codedEventEditor.name,
+        kind: codedEventEditor.kind,
+        code: codedEventEditor.code,
+        interrupting: codedEventEditor.interrupting
+      });
+      setCodedEventEditor(null);
+    });
+
   const applyGeneric = () =>
     runBusy("applying element changes", async () => {
       if (!handle || !genericEditor) {
@@ -1725,6 +1782,19 @@ export default function WorkflowStudio() {
             setMessageEditor(null);
           }}
           onApply={applyMessageElement}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {codedEventEditor && (
+        <CodedEventModal
+          editor={codedEventEditor}
+          onChange={setCodedEventEditor}
+          onClose={() => {
+            if (busy) return;
+            setCodedEventEditor(null);
+          }}
+          onApply={applyCodedEvent}
           disabled={!!busy || !handle}
         />
       )}
@@ -3731,6 +3801,103 @@ function MessageElementModal({
             Close
           </Button>
           <Button onClick={onApply} disabled={disabled}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #114. Error and escalation events share one editor because they share one
+// mechanism: a code thrown at one point and caught at another. The whole risk in
+// that mechanism is that the two codes do not match, in which case nothing
+// happens and nothing says so — which is why the code is the only required field
+// and why the note says out loud what a mismatch costs.
+function CodedEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: CodedEventEditor;
+  onChange: (next: CodedEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isError = editor.kind === "error";
+  const noun = isError ? "Error" : "Escalation";
+  const isThrowing =
+    editor.type === "bpmn:EndEvent" || editor.type === "bpmn:IntermediateThrowEvent";
+
+  return (
+    <Modal opened onClose={onClose} title={`${humanizeBpmnType(editor.type)} (${noun})`} size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          {isError
+            ? isThrowing
+              ? "Stops this stretch of the process and hands control to whichever boundary event " +
+                "carries the same code."
+              : "Catches an error raised inside the activity this is attached to, and takes the " +
+                "process down this path instead. An error boundary always interrupts."
+            : isThrowing
+              ? "Raises a flag for something further out to handle. Unlike an error, the process " +
+                "carries on from here."
+              : "Handles an escalation raised inside the activity this is attached to."}
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Event name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder={isError ? "Payment declined" : "Needs a manager"}
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>{noun} code</span>
+          <input
+            className="form-control"
+            aria-label={`${noun} code`}
+            value={editor.code}
+            onChange={(e) => onChange({ ...editor, code: e.target.value })}
+            placeholder={isError ? "PAYMENT_DECLINED" : "NEEDS_MANAGER"}
+          />
+          <p className="workflow-modal-note">
+            This is what matches one end to the other, character for character. A code that
+            nothing catches is not a warning at publish for escalations &mdash; it just means
+            nobody was listening. For errors it <strong>is</strong> refused at publish, because
+            an error nobody catches destroys the whole run.
+          </p>
+        </label>
+
+        {editor.interrupting !== null && (
+          <Switch
+            label="Stop the attached step while this is handled"
+            description={
+              "On, the step is cancelled and only this path continues. Off, the step keeps " +
+              "running and this path runs alongside it."
+            }
+            checked={editor.interrupting}
+            onChange={(e) => onChange({ ...editor, interrupting: e.currentTarget.checked })}
+          />
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || !editor.code.trim()}>
             Apply
           </Button>
         </Group>

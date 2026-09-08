@@ -267,6 +267,19 @@ public static class WorkflowEndpoints
                 }
             }
 
+            // #114. An error end event whose code nothing catches destroys the
+            // whole instance at run time — Flowable answers the start call with
+            // 500 and leaves no history to look at. It is fully detectable here,
+            // so it is refused rather than deployed.
+            //
+            // Checked at publish and not only at prepare because prepare is
+            // advisory: the studio calls it, a direct API caller need not.
+            var thrownCodeErrors = WorkflowBpmnXml.ValidateThrownCodesForPublish(model.BpmnXml);
+            if (thrownCodeErrors.Count > 0)
+            {
+                return Results.BadRequest(new { errors = thrownCodeErrors });
+            }
+
             // #112. Expanded at DEPLOY, not at save. Flowable rejects an
             // intermediate throw (Message) outright and silently ignores a message
             // end event, so the deployed copy carries service tasks on the

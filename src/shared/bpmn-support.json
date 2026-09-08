@@ -241,11 +241,11 @@
     {
       "name": "Intermediate Throw (Escalation)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "escalation",
-      "reason": null,
+      "reason": "#114: raises its code and execution continues past it, which is what distinguishes escalation from error.",
       "evidence": "deployed and started"
     },
     {
@@ -351,21 +351,21 @@
     {
       "name": "Error Boundary",
       "category": "Boundary Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "error",
-      "reason": null,
+      "reason": "#114: catches a matching error code and interrupts the attached activity. Verified end to end \u2014 the boundary path ran and the normal path did not.",
       "evidence": "deployed and started"
     },
     {
       "name": "Escalation Boundary",
       "category": "Boundary Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "escalation",
-      "reason": null,
+      "reason": "#114: interrupting and non-interrupting both verified \u2014 non-interrupting leaves the attached activity running.",
       "evidence": "deployed and started"
     },
     {
@@ -411,21 +411,21 @@
     {
       "name": "Error End",
       "category": "End Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "error",
-      "reason": null,
+      "reason": "#114: raises its code. An error NOTHING catches destroys the whole instance (Flowable answers the start call with 500 and leaves no history), so publish now refuses that diagram.",
       "evidence": "raw probe had no catching boundary; a modelling requirement, not an engine gap"
     },
     {
       "name": "Escalation End",
       "category": "End Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "escalation",
-      "reason": null,
+      "reason": "#114: ends the subprocess raising its code, asserted directly rather than by analogy with the error end event.",
       "evidence": "deployed and started"
     },
     {

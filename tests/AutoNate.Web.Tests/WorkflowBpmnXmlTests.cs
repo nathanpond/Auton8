@@ -1749,6 +1749,122 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Equal("done", document.Descendants(bpmn + "endEvent").Single().Attribute("id")?.Value);
     }
 
+    // #114. An error nobody catches destroys the whole instance at run time —
+    // Flowable answers the start call with 500 and no instance exists afterwards.
+    // Verified against the engine before this was written. These pin the publish
+    // refusal in BOTH directions, because a validation that rejects everything and
+    // one that rejects nothing both pass a single-case test.
+    [Fact]
+    public void Validate_RefusesAnErrorEndEventNoBoundaryCatches()
+    {
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(ErrorDiagram(boundaryCode: "Err_Other"));
+
+        Assert.Contains(errors, e => e.Contains("raises 'Err_Known'", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("nothing in", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_AcceptsAnErrorEndEventAMatchingBoundaryCatches()
+    {
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(ErrorDiagram(boundaryCode: "Err_Known"));
+
+        Assert.DoesNotContain(errors, e => e.Contains("raises 'Err_Known'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_AcceptsAnErrorCaughtByAnEventSubprocessStartEvent()
+    {
+        // The other way BPMN catches an error. Without this the validation would
+        // reject a correct diagram, which is worse than the defect it fixes:
+        // a false refusal blocks work an author has every right to publish.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:error id="Err_Known" errorCode="E_KNOWN" />
+                             <bpmn:process id="p" name="P" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="sub" />
+                               <bpmn:subProcess id="sub" name="Risky">
+                                 <bpmn:startEvent id="is" />
+                                 <bpmn:sequenceFlow id="if0" sourceRef="is" targetRef="ie" />
+                                 <bpmn:endEvent id="ie">
+                                   <bpmn:errorEventDefinition errorRef="Err_Known" />
+                                 </bpmn:endEvent>
+                               </bpmn:subProcess>
+                               <bpmn:subProcess id="handler" name="Handler" triggeredByEvent="true">
+                                 <bpmn:startEvent id="hs">
+                                   <bpmn:errorEventDefinition errorRef="Err_Known" />
+                                 </bpmn:startEvent>
+                                 <bpmn:sequenceFlow id="hf" sourceRef="hs" targetRef="ht" />
+                                 <bpmn:userTask id="ht" name="Handle" />
+                               </bpmn:subProcess>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateExecutableProcess(xml),
+            e => e.Contains("raises 'Err_Known'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_LeavesAnUncaughtEscalationAlone()
+    {
+        // Escalation is not an error. An uncaught one is a notification nobody
+        // subscribed to; the engine carries on, and refusing it would block a
+        // legitimate diagram. Asserted so the two are not quietly unified.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:escalation id="Esc_1" escalationCode="ESC_1" />
+                             <bpmn:process id="p" name="P" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="sub" />
+                               <bpmn:subProcess id="sub" name="Escalating">
+                                 <bpmn:startEvent id="is" />
+                                 <bpmn:sequenceFlow id="if0" sourceRef="is" targetRef="ie" />
+                                 <bpmn:endEvent id="ie">
+                                   <bpmn:escalationEventDefinition escalationRef="Esc_1" />
+                                 </bpmn:endEvent>
+                               </bpmn:subProcess>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        Assert.Empty(WorkflowBpmnXml.ValidateExecutableProcess(xml).Where(
+            e => e.Contains("Esc_1", StringComparison.Ordinal)));
+    }
+
+    private static string ErrorDiagram(string boundaryCode) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          id="Definitions_1"
+                          targetNamespace="http://autonate.dev/workflows">
+          <bpmn:error id="Err_Known" errorCode="E_KNOWN" />
+          <bpmn:error id="Err_Other" errorCode="E_OTHER" />
+          <bpmn:process id="p" name="P" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="sub" />
+            <bpmn:subProcess id="sub" name="Risky">
+              <bpmn:startEvent id="is" />
+              <bpmn:sequenceFlow id="if0" sourceRef="is" targetRef="ie" />
+              <bpmn:endEvent id="ie" name="Boom">
+                <bpmn:errorEventDefinition errorRef="Err_Known" />
+              </bpmn:endEvent>
+            </bpmn:subProcess>
+            <bpmn:boundaryEvent id="bnd" attachedToRef="sub">
+              <bpmn:errorEventDefinition errorRef="{{boundaryCode}}" />
+            </bpmn:boundaryEvent>
+            <bpmn:sequenceFlow id="fb" sourceRef="bnd" targetRef="caught" />
+            <bpmn:userTask id="caught" name="Caught" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
     [Fact]
     public void ApplyProcessMetadata_StripsLegacyClassAttribute_OnServiceTaskSnapshot()
     {

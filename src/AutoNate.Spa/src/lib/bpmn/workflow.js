@@ -1150,6 +1150,15 @@ function describeBusinessObject(businessObject) {
     description.retryPoint = serviceTask.retryPoint;
   }
 
+  const codedEvent = describeCodedEvent(businessObject);
+  if (codedEvent) {
+    // #114. Present only on error/escalation events; absence keeps everything
+    // else out of the code editor.
+    description.codedEventKind = codedEvent.codedEventKind;
+    description.codedEventCode = codedEvent.codedEventCode;
+    description.codedEventInterrupting = codedEvent.codedEventInterrupting;
+  }
+
   const messageElement = describeMessageElement(businessObject);
   if (messageElement) {
     // #112. Present only on message-carrying elements, receive tasks and send
@@ -1271,6 +1280,118 @@ function writeAutoNateAttribute(businessObject, name, value) {
     return;
   }
   businessObject.$attrs[key] = value;
+}
+
+// #114. Error and escalation events are one shape with two codes. The code lives
+// on a root <bpmn:error>/<bpmn:escalation> element and the event points at it by
+// ref — the same indirection messages use — so the studio edits the code and
+// maintains the root element behind it.
+//
+// Returns null for everything else, so the keys are ABSENT on other elements and
+// the studio can route on presence, as the timer and message editors do.
+function describeCodedEvent(businessObject) {
+  if (!businessObject) return null;
+
+  const definitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+
+  const error = definitions.find((d) => d && d.$type === "bpmn:ErrorEventDefinition");
+  const escalation = definitions.find((d) => d && d.$type === "bpmn:EscalationEventDefinition");
+  if (!error && !escalation) return null;
+
+  const kind = error ? "error" : "escalation";
+  const ref = error ? error.errorRef : escalation.escalationRef;
+
+  return {
+    codedEventKind: kind,
+    // bpmn-moddle resolves the ref to the root element when the diagram declares
+    // it and leaves a raw id when it does not; both shapes are read.
+    codedEventCode:
+      (typeof ref === "string"
+        ? ref
+        : ref?.errorCode ?? ref?.escalationCode ?? ref?.name ?? ref?.id) ?? "",
+    // Only a boundary event interrupts, and only an ESCALATION boundary may
+    // choose: BPMN gives an error boundary no option, it always interrupts. So
+    // the key is null on an error boundary, and the studio offers no switch
+    // rather than one that cannot be honoured.
+    codedEventInterrupting:
+      businessObject.$type === "bpmn:BoundaryEvent" && kind === "escalation"
+        ? businessObject.cancelActivity !== false
+        : null
+  };
+}
+
+// #114. Writes the code, creating or reusing the root element it refers to.
+//
+// A code with no root element behind it is the silent failure this story is
+// about: the ref dangles, nothing matches, and the diagram looks correct.
+export function updateCodedEventProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update this event.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  const businessObject = element?.businessObject;
+  if (!businessObject) {
+    throw new Error(`Element '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const isError = payload.kind === "error";
+  const definition = eventDefinitions.find(
+    (d) => d && d.$type === (isError ? "bpmn:ErrorEventDefinition" : "bpmn:EscalationEventDefinition")
+  );
+  if (!definition) {
+    throw new Error(`Element '${payload.id}' does not carry a ${payload.kind} definition.`);
+  }
+
+  const code = normalizeOptionalString(payload.code);
+  const root = code ? ensureCodedRootElement(modeler, moddle, isError, code) : undefined;
+
+  // updateModdleProperties so the command stack records it — assigning straight
+  // to the moddle object looks identical in the editor and is silently lost.
+  modeling.updateModdleProperties(element, definition, isError ? { errorRef: root } : { escalationRef: root });
+
+  const properties = { name: normalizeOptionalString(payload.name) };
+  // Only an escalation boundary may be non-interrupting; an error boundary always
+  // interrupts, so writing cancelActivity on one would suggest a choice that BPMN
+  // does not offer.
+  if (businessObject.$type === "bpmn:BoundaryEvent" && !isError && typeof payload.interrupting === "boolean") {
+    properties.cancelActivity = payload.interrupting;
+  }
+  modeling.updateProperties(element, properties);
+}
+
+// One root element per code, reused. Creating a second <bpmn:error> for a code
+// that already exists would leave two ids for one code, and a boundary pointing
+// at the other one would never match.
+function ensureCodedRootElement(modeler, moddle, isError, code) {
+  const definitions = modeler.getDefinitions?.();
+  if (!definitions) throw new Error("The BPMN definitions are not available.");
+
+  const rootElements = definitions.get ? definitions.get("rootElements") : definitions.rootElements;
+  const wantedType = isError ? "bpmn:Error" : "bpmn:Escalation";
+  const codeField = isError ? "errorCode" : "escalationCode";
+
+  const existing = (rootElements ?? []).find(
+    (candidate) => candidate?.$type === wantedType && candidate[codeField] === code
+  );
+  if (existing) return existing;
+
+  const created = moddle.create(wantedType, {
+    id: `${isError ? "Error" : "Escalation"}_${code.replace(/[^A-Za-z0-9_-]/g, "_")}`,
+    name: code,
+    [codeField]: code
+  });
+  rootElements.push(created);
+  return created;
 }
 
 // #112. Message elements split into two directions, and they need different

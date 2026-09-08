@@ -487,6 +487,7 @@ public static partial class WorkflowBpmnXml
             errors.AddRange(BuildSubProcessValidationErrors(document));
             // #167: elements the studio converts away, and converted tasks nobody can do.
             errors.AddRange(BuildNonWaitingTaskErrors(document));
+            errors.AddRange(BuildUncaughtThrownCodeErrors(document));
 
             // #158: every condition in the diagram, through the one shared check.
             // Sequence flows included, so exclusive and inclusive gateways benefit
@@ -2108,6 +2109,114 @@ public static partial class WorkflowBpmnXml
                     "Add a start event inside it — without one the process fails when it " +
                     "reaches this subprocess, and the failure lands on whoever ran it rather " +
                     "than on you.");
+            }
+        }
+
+        return errors;
+    }
+
+    // #114. An error thrown with a code no boundary event catches does not hang and
+    // does not continue quietly — Flowable takes the WHOLE INSTANCE down:
+    //
+    //   POST /runtime/process-instances -> 500
+    //   "No catching boundary event found for error with errorCode 'X',
+    //    neither in same process nor in parent process"
+    //
+    // No instance, no history, nothing on the execution error surface, and the
+    // failure lands on whoever started it. The issue pre-decided that an instance
+    // disappearing is a defect to fix rather than a behaviour to document.
+    //
+    // It is fully detectable from the XML, so it is refused at publish. That turns
+    // a vanished production instance into a sentence an author reads while they
+    // still have the diagram open — which is the same argument the rest of this
+    // story makes about codes having to match.
+    //
+    // Escalation is deliberately NOT included. An uncaught escalation is not an
+    // error in BPMN: it is a notification nobody subscribed to, the engine carries
+    // on, and refusing it would block a legitimate diagram.
+    /// <summary>
+    /// The uncaught-error check on its own, for the publish path (#114).
+    /// </summary>
+    /// <remarks>
+    /// ValidateProcess runs on /prepare, which the studio calls before saving —
+    /// but /publish is what deploys, and a caller that publishes without preparing
+    /// reaches the engine unchecked. Only THIS check is applied there, not the
+    /// whole validation set: its failure mode is an instance that is destroyed
+    /// with no history and no error surface, whereas moving every rule onto
+    /// publish would change what that endpoint accepts for every diagram already
+    /// in flight. That broader change deserves its own story, not a side effect of
+    /// this one.
+    /// </remarks>
+    public static IReadOnlyList<string> ValidateThrownCodesForPublish(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return Array.Empty<string>();
+
+        try
+        {
+            return BuildUncaughtThrownCodeErrors(XDocument.Parse(xml));
+        }
+        catch (System.Xml.XmlException)
+        {
+            // Malformed XML is the deploy path's problem to report; this check has
+            // nothing to say about it and must not mask it.
+            return Array.Empty<string>();
+        }
+    }
+
+    private static IReadOnlyList<string> BuildUncaughtThrownCodeErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var process in document.Descendants(BpmnNamespace + "process"))
+        {
+            // Codes catchable anywhere in this process, at any depth. BPMN
+            // propagates an error outward to enclosing scopes, so a boundary event
+            // anywhere up the chain catches it — which is why the whole process is
+            // one pool rather than each subprocess being checked in isolation.
+            var caught = process
+                .Descendants(BpmnNamespace + "boundaryEvent")
+                .Elements(BpmnNamespace + "errorEventDefinition")
+                .Select(definition => definition.Attribute("errorRef")?.Value)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code!)
+                .ToHashSet(StringComparer.Ordinal);
+
+            // An error start event inside an event subprocess catches too (#162's
+            // territory). Counted here so this validation does not reject a
+            // diagram that handles its error that way.
+            foreach (var eventSubProcess in process.Descendants(BpmnNamespace + "subProcess")
+                         .Where(sp => string.Equals(
+                             sp.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase)))
+            {
+                foreach (var definition in eventSubProcess
+                             .Descendants(BpmnNamespace + "startEvent")
+                             .Elements(BpmnNamespace + "errorEventDefinition"))
+                {
+                    var code = definition.Attribute("errorRef")?.Value;
+                    // An error start event with no errorRef catches ANY error, so
+                    // once one exists nothing in this process is uncatchable.
+                    if (string.IsNullOrWhiteSpace(code)) { caught.Clear(); caught.Add("*"); }
+                    else caught.Add(code);
+                }
+            }
+
+            if (caught.Contains("*")) continue;
+
+            foreach (var throwing in process.Descendants(BpmnNamespace + "endEvent")
+                         .Where(e => e.Elements(BpmnNamespace + "errorEventDefinition").Any()))
+            {
+                var code = throwing.Elements(BpmnNamespace + "errorEventDefinition")
+                    .Select(d => d.Attribute("errorRef")?.Value)
+                    .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+
+                if (string.IsNullOrWhiteSpace(code) || caught.Contains(code!)) continue;
+
+                errors.Add(
+                    $"The error end event '{LabelOf(throwing)}' raises '{code}', and nothing in " +
+                    $"'{LabelOf(process)}' catches it. Add an error boundary event carrying the " +
+                    "same code to the activity it should interrupt. Published as-is, reaching " +
+                    "this event destroys the whole process instance — there is no history to " +
+                    "look at afterwards and the failure lands on whoever started it.");
             }
         }
 

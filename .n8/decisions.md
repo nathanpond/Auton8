@@ -3304,3 +3304,77 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   This hazard had already bitten once earlier in the milestone and I knew about
   it. Nothing else builds while the backend suite runs.
   **Issue:** #112
+
+## /n8-exec M4 (resumed) — 2026-09-08
+
+- **BLOCKER (#156): the story contradicts itself on what `process` scope means,
+  and the two readings differ by an order of magnitude in cost.**
+  - *Decisions taken in planning*: "`process` (only instances of the same process
+    **definition**)".
+  - *Test plan*: "a process-scoped throw wakes only the **same-definition**
+    instance".
+  - *Demo*: "Start two instances… **the other instance is untouched**" — which is
+    **instance** scope.
+  **Engine evidence (probed, then cleaned up):** every signal element deploys and
+  executes, including the intermediate throw that its message counterpart cannot.
+  A default signal thrown in instance A woke instance B's catch AND boundary;
+  `flowable:scope="processInstance"` left B untouched. Flowable's native scope is
+  instance-level — it has nothing meaning "same definition".
+  **Why not a judgement call:** instance scope is one native attribute; definition
+  scope needs the throw expanded at publish into app-side dispatch (#112's
+  pattern), which this story does not budget for and which makes the Demo fail as
+  written. Wrong either way is expensive and user-visible.
+  **Options put to the user:** same instance / same definition / all three.
+  **Holds up:** nothing hard, but #162 and #164 both catch signals and may inherit
+  the answer, so their scope semantics are being left unpinned.
+  **Issue:** #156
+
+- **Rule 1 defect fix (#114): an uncaught error code destroys the whole instance,
+  and this is now refused at publish.** Verified against Flowable 8.0.0: an error
+  end event whose code no boundary catches answers the start call with **500** and
+  leaves no instance, no history and nothing on the error surface. The issue
+  pre-decided that an instance disappearing is a defect rather than a behaviour to
+  document. It is fully detectable from the XML, so the diagram is refused while
+  the author still has it open.
+  **Escalation deliberately excluded:** an uncaught escalation is not an error in
+  BPMN — it is a notification nobody subscribed to, the engine carries on, and
+  refusing it would block a legitimate diagram. Asserted so the two are not
+  quietly unified.
+  **Issue:** #114
+
+- **Decision (#114): only the uncaught-error rule was promoted to the publish
+  path, not the whole validation set.** `ValidateProcess` runs on `/prepare`,
+  which the studio calls; `/publish` is what deploys and ran none of it. Promoting
+  every rule would change what publish accepts for every diagram already in
+  flight — a contract change deserving its own decision, not a side effect of this
+  story. This one rule was promoted because its failure mode is an instance
+  destroyed with no diagnostics.
+  **Filed:** #225, which puts the broader question to the user.
+  **Issue:** #114, #225
+
+- **Decision (#114): business errors are opt-in and enforced by the host.**
+  `BehaviorResult.BusinessError(code, …)` becomes a `BpmnError` the engine routes
+  to a matching boundary event; anything the behaviour did not declare in
+  `CatchableErrorCodes` is stripped, logged, and left an ordinary retryable
+  failure. Enforced in the endpoint rather than trusted from the result, so a
+  behaviour cannot make an arbitrary failure routable.
+  **Why the asymmetry:** if every failure became catchable, "the database was
+  briefly unreachable" would travel down the "payment declined" branch.
+  **ABI care (invariant 2):** `BusinessErrorCode` is an init-only PROPERTY, not a
+  positional record parameter — adding a parameter changes the primary
+  constructor's signature and a plugin compiled against the pinned 1.0.0.0 ABI
+  calling `new BehaviorResult(...)` would fail at run time.
+  `CatchableErrorCodes` is a DEFAULT interface member, so existing plugins keep
+  compiling and loading and simply declare nothing. `PluginAbiVersionTests` and
+  `DoNotRenameGuardTests` pass.
+  **Issue:** #114
+
+- **My own near-miss, recorded because it nearly became a false verification.**
+  Mutation-checking the Java bridge, I removed the `throw new BpmnError(...)` and
+  read `rc=1` / `BUILD FAILURE` as "the mutation was caught". It was not — Maven
+  had run from the repo root, where there is no POM, and failed before running a
+  single test. Re-run with `-f flowable-extension/pom.xml` it genuinely failed
+  1 test in `AutoNateBehaviorDelegateTests`, which is the real evidence.
+  **The rule this breaks:** a non-zero exit is not evidence of the failure you
+  expected; read what actually failed. Same class as the static-assets clobber.
+  **Issue:** #114
