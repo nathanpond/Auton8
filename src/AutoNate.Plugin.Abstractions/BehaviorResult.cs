@@ -31,8 +31,11 @@ public sealed record BehaviorResult(
     //
     // Set only when the behaviour DECLARES the code in CatchableErrorCodes. The
     // bridge turns a declared code into a BPMN error the engine routes to a
-    // matching error boundary event; anything undeclared stays an unhandled
-    // failure. That opt-in is the whole point: if every exception became a
+    // matching error boundary event. An UNDECLARED code is stripped by the host
+    // and what remains is an ordinary Failed result - so the engine does not
+    // throw, the process continues down its normal outgoing flow, and only the
+    // gateway-on-a-variable route above is left. It is NOT retried, and it is
+    // NOT caught. That opt-in is the whole point: if every exception became a
     // catchable BPMN error, "the database was briefly unreachable" would travel
     // down the "payment declined" branch, which is the hardest failure of all to
     // diagnose.

@@ -3694,3 +3694,33 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   Not filed as a defect — filed as a difference an author can draw without knowing
   it exists, needing a decision either way.
   **Issue:** #229, #162
+
+- **#223: the deployed diagram names its own callback URL.** The fixture published
+  a workflow into the shared Flowable, and Flowable then called back to
+  `autonate-web:8080` — the container's app, a different database, where that
+  workflow did not exist. Every behaviour invoked from an E2E-published workflow
+  404'd. The fix follows M4's established pattern: stamp
+  `flowable:autonateCallbackBaseUrl` onto the deployed copy at publish
+  (`StampCallbackBaseUrl`), leave the authored diagram untouched, and have the Java
+  delegate prefer that attribute over its configured default. The fixture binds a
+  free port and passes `host.docker.internal:<port>`.
+  **Rule 1 (two wrong comments found in this code and fixed).**
+  `EnforceDeclaredBusinessError`'s log said an undeclared code "stays retryable",
+  and `BehaviorResult`'s doc said it "stays an unhandled failure". It does neither:
+  `BusinessError` sets `Failed=true`, the bridge does not throw on `Failed`, so the
+  process **continues down its normal outgoing flow**. Verified against the engine —
+  the historic trace of an undeclared run is `charge -> f1 -> ok`, never the
+  boundary's flow. A workflow relying on a boundary event for an undeclared code
+  silently takes the SUCCESS path; both comments now say so, because that is the
+  hardest version of this to diagnose from the outside.
+  **Two diagnostic behaviours added, Development-only** (`autonate.always-declines`,
+  `autonate.always-fails-undeclared`). A behaviour that always fails does not belong
+  in a production catalogue, and there was no other way to exercise the contract end
+  to end. They double as the worked example #114's author documentation describes.
+  **Evidence:** the declared-error test FAILED before the Flowable image was rebuilt
+  (timed out with no boundary reached) and passed after; mutating the declaration
+  check to `if (true) return result;` fails exactly
+  `An_error_code_the_behaviour_never_declared_is_not_catchable` and nothing else.
+  ABI invariant 2 intact — `BusinessErrorCode` is an init-only property, and
+  `PluginAbiVersionTests` passes.
+  **Issue:** #223, #114

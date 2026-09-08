@@ -91,8 +91,11 @@ public static class WorkflowBehaviorEndpoints
 
         log.LogWarning(
             "Behavior '{Key}' returned business error '{Code}' without declaring it in "
-                + "CatchableErrorCodes; treating it as an ordinary failure so it stays retryable "
-                + "rather than being routed to an error boundary.",
+                + "CatchableErrorCodes; the code is stripped, so no error boundary event can "
+                + "catch it. The result keeps Failed=true, which the bridge does NOT throw on - "
+                + "the process continues down its normal outgoing flow and the author is expected "
+                + "to branch on the result variable. A workflow relying on a boundary event for "
+                + "this code will silently take the success path until the code is declared.",
             key, code);
 
         return result with { BusinessErrorCode = null };

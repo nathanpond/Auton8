@@ -2,6 +2,8 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Xml.Linq;
 using AutoNate.Web.Authorization;
+using AutoNate.Web.Services.Workflow.Behaviors;
+using Microsoft.Extensions.Options;
 using AutoNate.Web.Authorization.Evaluator;
 using AutoNate.Web.Authorization.EndpointFilters;
 using AutoNate.Web.Models;
@@ -233,6 +235,7 @@ public static class WorkflowEndpoints
             IFlowableClient flowable,
             IAuditEventPublisher auditPublisher,
             IAuthorizer authorizer,
+            IOptions<WorkflowBehaviorOptions> behaviorOptions,
             ClaimsPrincipal actor,
             CancellationToken cancellationToken) =>
         {
@@ -327,9 +330,13 @@ public static class WorkflowEndpoints
             // preparing must not be able to deploy something the engine refuses.
             var deployable = model with
             {
-                BpmnXml = WorkflowBpmnXml.PinCallActivityTargets(
-                    WorkflowBpmnXml.ExpandForDeployment(model.BpmnXml),
-                    definitionIdsByKey)
+                BpmnXml = WorkflowBpmnXml.StampCallbackBaseUrl(
+                    WorkflowBpmnXml.PinCallActivityTargets(
+                        WorkflowBpmnXml.ExpandForDeployment(model.BpmnXml),
+                        definitionIdsByKey),
+                    // #223. Unset in production; nothing is stamped and the engine
+                    // uses its own configured callback URL.
+                    behaviorOptions.Value.CallbackBaseUrlOverride)
             };
 
             var deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);

@@ -118,7 +118,31 @@ public class AutoNateBehaviorDelegate implements JavaDelegate {
                 "' is missing required attribute 'flowable:behaviorKey'.");
         }
 
+        // #223. A diagram may name its own callback base URL, and it wins.
+        //
+        // The configured value is a single global one, which is correct in
+        // production and impossible for an E2E test: Flowable's callback reaches
+        // the app in the autonate-web container, while the test fixture runs its
+        // own app against a different database. A behaviour invoked by a workflow
+        // the test published executed where that workflow did not exist, so no
+        // behaviour could be verified end to end.
+        //
+        // Stamped by publish only when an override is configured, so every
+        // production diagram carries nothing here and falls through to the
+        // configured value unchanged.
         var callbackBase = properties.getCallbackBaseUrl();
+        var override = readFlowableAttribute(baseElement, "autonateCallbackBaseUrl");
+        if (override != null && !override.isBlank()) {
+            try {
+                callbackBase = URI.create(override.trim());
+            } catch (IllegalArgumentException exception) {
+                throw new FlowableException(
+                    "Service task '" + execution.getCurrentActivityId() +
+                    "' carries an unusable flowable:autonateCallbackBaseUrl '" + override + "'.",
+                    exception);
+            }
+        }
+
         var sharedSecret = properties.getCallbackSharedSecret();
         if (callbackBase == null) {
             throw new FlowableException(

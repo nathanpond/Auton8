@@ -296,6 +296,46 @@ public static partial class WorkflowBpmnXml
         }
     }
 
+    // #223. Points every behaviour service task at a specific callback URL.
+    //
+    // Applied to the deployed copy only, and only when an override is configured —
+    // which it is not in production, so nothing is stamped and every diagram uses
+    // the engine's own configured URL exactly as before.
+    public static string StampCallbackBaseUrl(string xml, string? callbackBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(xml) || string.IsNullOrWhiteSpace(callbackBaseUrl))
+        {
+            return xml;
+        }
+
+        XDocument document;
+        try { document = XDocument.Parse(xml); }
+        catch (System.Xml.XmlException) { return xml; }
+
+        var stamped = 0;
+        foreach (var task in document.Descendants(BpmnNamespace + "serviceTask"))
+        {
+            // Only tasks on the behaviour bridge — a service task wired to
+            // something else has no callback to redirect.
+            if (task.Attribute(FlowableNamespace + "delegateExpression")?.Value
+                != AutoNateBehaviorDelegateExpression)
+            {
+                continue;
+            }
+
+            task.SetAttributeValue(FlowableNamespace + "autonateCallbackBaseUrl", callbackBaseUrl);
+            stamped++;
+        }
+
+        if (stamped == 0) return xml;
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
     // #156. The author's signal scope, moved onto the signal the engine reads.
     //
     // Scope is recorded on the EVENT in the authored diagram

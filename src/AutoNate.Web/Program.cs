@@ -882,6 +882,14 @@ builder.Services.AddSingleton<IWorkflowBehavior, UnlockAccountBehavior>();
 // #112. The one send path: a send task, and every message-throwing event the
 // publish step expands into a service task.
 builder.Services.AddSingleton<IWorkflowBehavior, SendMessageBehavior>();
+// #114 / #223. Development only — a behaviour that always raises a declared
+// business error, so the error-boundary contract can be exercised end to end. A
+// behaviour that always fails does not belong in a production catalogue.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<IWorkflowBehavior, AlwaysDeclinesBehavior>();
+    builder.Services.AddSingleton<IWorkflowBehavior, UndeclaredErrorBehavior>();
+}
 builder.Services.AddSingleton<IWorkflowBehaviorRegistry, WorkflowBehaviorRegistry>();
 builder.Services.AddSingleton<SharedSecretEndpointFilter>();
 

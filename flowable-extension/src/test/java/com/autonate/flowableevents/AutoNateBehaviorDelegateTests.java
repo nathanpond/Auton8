@@ -1,6 +1,7 @@
 package com.autonate.flowableevents;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -179,6 +180,42 @@ class AutoNateBehaviorDelegateTests {
             delegate.execute(execution);
 
             assertEquals("declined", execution.getVariable("payResult"));
+        }
+    }
+
+    // #223. A diagram may name its own callback base URL, and it wins over the
+    // configured one. Both directions are asserted: without the attribute the
+    // configured value is still used, which is every production diagram and the
+    // half that would break silently.
+    @Test
+    void executeCallsTheOverrideBaseUrl_WhenTheTaskCarriesOne() throws Exception {
+        var captured = new AtomicReference<CapturedRequest>();
+        try (var fixture = HttpFixture.start(captured, 200, "{}")) {
+            var task = serviceTaskWithBehavior("ServiceTask_1", "behavior", "autonate.test");
+            // Configured base points somewhere unreachable; the override is the
+            // fixture. If the override were ignored this would fail to connect.
+            task.addAttribute(
+                flowableAttribute("autonateCallbackBaseUrl", fixture.baseUrl().toString()));
+            var execution = newExecution("p", "e", "k:1:1", task, Map.of());
+            var delegate = newDelegate(URI.create("http://127.0.0.1:1/"));
+
+            delegate.execute(execution);
+
+            assertNotNull(captured.get(), "The override base URL was not called.");
+        }
+    }
+
+    @Test
+    void executeCallsTheConfiguredBaseUrl_WhenTheTaskCarriesNoOverride() throws Exception {
+        var captured = new AtomicReference<CapturedRequest>();
+        try (var fixture = HttpFixture.start(captured, 200, "{}")) {
+            var task = serviceTaskWithBehavior("ServiceTask_1", "behavior", "autonate.test");
+            var execution = newExecution("p", "e", "k:1:1", task, Map.of());
+            var delegate = newDelegate(fixture.baseUrl());
+
+            delegate.execute(execution);
+
+            assertNotNull(captured.get(), "The configured base URL was not called.");
         }
     }
 

@@ -162,6 +162,23 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
         _appProcess?.Dispose();
     }
 
+    /// <summary>
+    /// A free TCP port, released immediately so Kestrel can take it (#223).
+    /// </summary>
+    /// <remarks>
+    /// Racy in principle — something else could claim it in the gap — but the
+    /// alternative is asking Kestrel for port 0 and never learning the number in
+    /// time to tell Flowable where to call, which is the problem this fixes.
+    /// </remarks>
+    private static int FindFreePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
     private async Task<string> StartAppAsync(string repoRoot)
     {
         // BuildSpa=true forces the .csproj target that runs `npm run build` and
@@ -184,7 +201,22 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
 
         // Random Kestrel port — we'll pick the actual URL out of the host's
         // "Now listening on: ..." log line.
-        info.Environment["ASPNETCORE_URLS"] = "http://127.0.0.1:0";
+        // #223. A fixed, reachable port instead of 127.0.0.1:0.
+        //
+        // Flowable runs in a container and calls back to the app to execute a
+        // workflow behaviour. On a random loopback port it could never reach this
+        // one, so it reached the app in the autonate-web container instead —
+        // against a different database, where the workflow the test just published
+        // does not exist. No behaviour could be verified end to end.
+        //
+        // Bound on all interfaces because host.docker.internal resolves to the
+        // host's LAN address from inside the container; loopback-only is
+        // unreachable from there. Test host only — no compose file publishes this,
+        // so the loopback-binding invariant is untouched.
+        var callbackPort = FindFreePort();
+        info.Environment["ASPNETCORE_URLS"] = $"http://+:{callbackPort}";
+        info.Environment["WorkflowBehaviors__CallbackBaseUrlOverride"] =
+            $"http://host.docker.internal:{callbackPort}";
         // Skip the dev Dapr sidecar probe so the host doesn't refuse to start.
         info.Environment["AUTONATE_ALLOW_RUNNING_WITHOUT_DAPR"] = "true";
         // The whole point: the user-typed login flow is unreachable when
@@ -222,11 +254,13 @@ public sealed class AutoNateE2EFixture : IAsyncLifetime
             if (e.Data is null) return;
             stdoutBuffer.Add(e.Data);
 
-            // Kestrel logs e.g. "Now listening on: http://127.0.0.1:54321"
-            var match = Regex.Match(e.Data, @"Now listening on:\s*(http://\S+)");
-            if (match.Success)
+            // #223. The port is chosen up front now, so the log line is only the
+            // readiness signal — the URL is not parsed out of it. Binding "+"
+            // makes Kestrel log "http://[::]:54321", which is a valid listen
+            // address and a useless base URL for a browser to navigate to.
+            if (Regex.IsMatch(e.Data, @"Now listening on:\s*http://"))
             {
-                listeningUrlSource.TrySetResult(match.Groups[1].Value.TrimEnd('/'));
+                listeningUrlSource.TrySetResult($"http://127.0.0.1:{callbackPort}");
             }
         };
         _appProcess.ErrorDataReceived += (_, e) =>
