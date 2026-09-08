@@ -3465,3 +3465,40 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   catches a signal, and whatever #156 decides about who receives one applies
   unchanged.
   **Issue:** #164, #156
+
+- **Defect found in #112's SHIPPED code by #162's test, fixed here.**
+  `ExtractMessageDeclarations` classified every message-carrying `startEvent` as a
+  process start. A start event inside an **event subprocess** starts a handler
+  within an already-running instance — it is a catch. Classifying it as a start
+  made the correlator call `StartProcessInstanceByMessage`, which Flowable refuses
+  ("no subscription to message with name '…' found") because no process-level
+  start event carries it. The symptom was a 500 on a send that should simply have
+  been delivered.
+  **Why #112's own tests missed it:** every diagram in them put the message start
+  at process level, which is the case that works. The shape only exists once event
+  subprocesses do. Recorded on #112 as well, so the gap is on that issue's record
+  and not only in the story that tripped over it.
+  **Issue:** #162, #112
+
+- **Rule 2 (#162): a non-interrupting ERROR start event is refused at publish.**
+  BPMN does not allow one — an error always interrupts the scope it escapes — and
+  the engine interrupts regardless, verified. So the diagram promises something
+  the engine will not honour, silently. My own first test asserted the opposite
+  and failed, which is how this surfaced.
+  **Issue:** #162
+
+- **Discovered and filed, not fixed:** #226 — the execution variable endpoints
+  answer **500** for a body with no `variables` (a raw `NullReferenceException`),
+  for an add that conflicts (Flowable says 409), and for a type mismatch (Flowable
+  says 400). This is the surface #112 points operators at for unsticking a
+  process, so a 500 there is the wrong signal and pages someone. Outside #162's
+  scope; filed rather than fixed.
+  **Issue:** #162, #226
+
+- **#162's conditional handler confirms #158's wiring is genuinely reused.**
+  Flowable allows a conditional start ONLY inside an event subprocess, which is
+  why #158 could refuse the process-level placement but not deliver the working
+  one. The test sets the variable through the app's own update path and the
+  handler fires — which only works because that path calls
+  `EvaluateConditionalEventsAsync`, as #158 established the engine requires.
+  **Issue:** #162, #158

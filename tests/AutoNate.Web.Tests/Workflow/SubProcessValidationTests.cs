@@ -233,17 +233,33 @@ public sealed class SubProcessValidationTests
     }
 
     [Fact]
-    public void An_event_subprocess_is_left_to_its_own_story()
+    public void An_event_subprocess_is_refused_by_its_own_story_not_this_one()
     {
-        // An event subprocess is triggered rather than entered, and #162 owns its
-        // start-event rule. Claiming it here would produce two stories refusing the
-        // same shape with different words.
+        // This guard was written when #162 did not exist, asserting that #161's
+        // subprocess rule left event subprocesses alone so the two stories would
+        // not refuse the same shape in different words. #162 has since landed and
+        // now owns it, so the assertion moves from "nobody refuses this" to
+        // "exactly one story does, and it is the right one" — which is what the
+        // guard was protecting all along.
         var result = WorkflowBpmnXml.ValidateProcess(Process("""
             <bpmn:subProcess id="handler" name="On error" triggeredByEvent="true">
               <bpmn:userTask id="t" name="Handle" />
             </bpmn:subProcess>
         """));
 
-        Assert.DoesNotContain(result.Errors, e => e.Contains("On error", StringComparison.Ordinal));
+        // #162's rule fires: an event subprocess is TRIGGERED, so the problem is
+        // that nothing can trigger it.
+        Assert.Contains(
+            result.Errors,
+            e => e.Contains("On error", StringComparison.Ordinal)
+                 && e.Contains("nothing can ever trigger it", StringComparison.Ordinal));
+
+        // #161's does not: it is about a subprocess the engine cannot ENTER,
+        // which is a different sentence for a different shape. Two rules refusing
+        // one diagram with different explanations is the confusion this guards.
+        Assert.DoesNotContain(
+            result.Errors,
+            e => e.Contains("On error", StringComparison.Ordinal)
+                 && e.Contains("cannot enter it", StringComparison.Ordinal));
     }
 }

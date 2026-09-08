@@ -141,6 +141,50 @@ public sealed class WorkflowMessageCorrelatorTests
     }
 
     [Fact]
+    public async Task A_message_start_event_inside_an_event_subprocess_delivers_rather_than_starting()
+    {
+        // #162 found this as a defect in #112 as shipped. A start event inside an
+        // EVENT SUBPROCESS starts that handler within an already-running
+        // instance — it is a catch, not a way to start a process. Classifying it
+        // as a process start made the correlator call StartProcessInstanceByMessage,
+        // which Flowable refuses:
+        //
+        //   "Cannot start process instance by message: no subscription to
+        //    message with name '…' found."
+        //
+        // …because no PROCESS-level start event carries that message. The symptom
+        // was a 500 on a send that should simply have been delivered.
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:message id="Msg_1" name="nudge" />
+              <bpmn:process id="orders" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:subProcess id="handler" triggeredByEvent="true">
+                  <bpmn:startEvent id="hs" flowable:autonateCorrelationKey="orderId">
+                    <bpmn:messageEventDefinition messageRef="Msg_1" />
+                  </bpmn:startEvent>
+                </bpmn:subProcess>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+        var flowable = new StubFlowableClient();
+        flowable.WaitingExecutionsByMessage["nudge"] = new[] { "exec-7" };
+        var correlator = NewCorrelator(xml, flowable);
+
+        var result = await correlator.CorrelateAsync(ProcessKey, "nudge", "ORD-1", null);
+
+        Assert.Equal(WorkflowMessageCorrelator.Outcome.Delivered, result.Outcome);
+        Assert.Contains("DeliverMessageToExecution:exec-7:nudge", flowable.Calls);
+
+        // The half that pins the fix: it must NOT try to start a new instance.
+        Assert.DoesNotContain(flowable.Calls,
+            c => c.StartsWith("StartProcessInstanceByMessage", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task A_receive_task_is_triggered_rather_than_sent_a_message()
     {
         // Verified against Flowable 8.0.0: a receive task carries no message

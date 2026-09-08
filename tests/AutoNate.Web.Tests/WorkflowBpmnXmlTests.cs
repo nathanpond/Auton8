@@ -1951,6 +1951,82 @@ public sealed class WorkflowBpmnXmlTests
             """;
     }
 
+    // #162. Both shapes deploy cleanly and can never trigger, so nothing but this
+    // stands between the author and a handler that silently never runs.
+    [Fact]
+    public void Validate_RefusesAnEventSubProcessWithNoStartEvent()
+    {
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(EventSubProcessDiagram(startEvent: null));
+
+        Assert.Contains(errors, e => e.Contains("has no start event", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_RefusesAnEventSubProcessStartingOnNothing()
+    {
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(
+            EventSubProcessDiagram(startEvent: "<bpmn:startEvent id=\"hs\" />"));
+
+        Assert.Contains(errors, e => e.Contains("starts on nothing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_AcceptsAnEventSubProcessWithATypedStartEvent()
+    {
+        // The complement. Without it both tests above pass against a rule that
+        // refuses every event subprocess.
+        var errors = WorkflowBpmnXml.ValidateExecutableProcess(EventSubProcessDiagram(
+            startEvent: "<bpmn:startEvent id=\"hs\"><bpmn:errorEventDefinition errorRef=\"Err_1\" /></bpmn:startEvent>"));
+
+        Assert.DoesNotContain(errors, e => e.Contains("event subprocess", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_LeavesAnOrdinarySubProcessAlone()
+    {
+        // An ordinary subprocess starts with a plain start event and MUST — the
+        // rule above would be exactly wrong applied to one, and #161 already
+        // requires it to have one.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="p" name="P" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="sub" />
+                               <bpmn:subProcess id="sub" name="Ordinary">
+                                 <bpmn:startEvent id="is" />
+                                 <bpmn:sequenceFlow id="if0" sourceRef="is" targetRef="it" />
+                                 <bpmn:userTask id="it" name="Work" />
+                               </bpmn:subProcess>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        Assert.DoesNotContain(
+            WorkflowBpmnXml.ValidateExecutableProcess(xml),
+            e => e.Contains("starts on nothing", StringComparison.Ordinal));
+    }
+
+    private static string EventSubProcessDiagram(string? startEvent) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          id="Definitions_1"
+                          targetNamespace="http://autonate.dev/workflows">
+          <bpmn:error id="Err_1" errorCode="E1" />
+          <bpmn:process id="p" name="P" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="work" />
+            <bpmn:userTask id="work" name="Work" />
+            <bpmn:subProcess id="handler" name="Handler" triggeredByEvent="true">
+              {{startEvent ?? string.Empty}}
+              <bpmn:userTask id="ht" name="Handle" />
+            </bpmn:subProcess>
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
     [Fact]
     public void ApplyProcessMetadata_StripsLegacyClassAttribute_OnServiceTaskSnapshot()
     {

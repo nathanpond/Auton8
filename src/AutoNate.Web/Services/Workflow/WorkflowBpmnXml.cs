@@ -491,6 +491,8 @@ public static partial class WorkflowBpmnXml
             // #164: a gateway that cannot be a choice, or points somewhere the
             // engine will not follow.
             errors.AddRange(BuildEventBasedGatewayErrors(document));
+            // #162: an event subprocess that can never trigger.
+            errors.AddRange(BuildEventSubProcessErrors(document));
 
             // #158: every condition in the diagram, through the one shared check.
             // Sequence flows included, so exclusive and inclusive gateways benefit
@@ -1273,6 +1275,11 @@ public static partial class WorkflowBpmnXml
         return declarations;
     }
 
+    private static bool IsInsideEventSubProcess(XElement element) =>
+        element.Ancestors(BpmnNamespace + "subProcess")
+            .Any(sp => string.Equals(
+                sp.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase));
+
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -1312,6 +1319,14 @@ public static partial class WorkflowBpmnXml
             var localName = element.Name.LocalName;
             var kind = localName switch
             {
+                // #162. A start event inside an EVENT SUBPROCESS starts that
+                // handler within an already-running instance — it is a catch, not
+                // a way to start a process. Classifying it as Start made the
+                // correlator try to start a brand-new instance by message, which
+                // Flowable refuses ("no subscription to message with name …")
+                // because no process-level start event carries it. Found by #162's
+                // message-handler test; a defect in #112 as shipped.
+                "startEvent" when IsInsideEventSubProcess(element) => WorkflowMessageTargetKind.Catch,
                 "startEvent" => WorkflowMessageTargetKind.Start,
                 "intermediateCatchEvent" or "boundaryEvent" => WorkflowMessageTargetKind.Catch,
                 "receiveTask" => WorkflowMessageTargetKind.ReceiveTask,
@@ -2270,7 +2285,11 @@ public static partial class WorkflowBpmnXml
         return
         [
             .. BuildUncaughtThrownCodeErrors(document),
-            .. BuildEventBasedGatewayErrors(document)
+            .. BuildEventBasedGatewayErrors(document),
+            // #162 — an event subprocess that can never trigger, or one promising
+            // not to interrupt when the engine will interrupt anyway. Both deploy
+            // cleanly and neither tells the author anything.
+            .. BuildEventSubProcessErrors(document)
         ];
     }
 
@@ -2413,6 +2432,74 @@ public static partial class WorkflowBpmnXml
                       "an event. Every path out of an event-based gateway must start with an " +
                       "intermediate catch event — that is what it waits on. As drawn, this " +
                       "diagram cannot be deployed.");
+            }
+        }
+
+        return errors;
+    }
+
+    // #162. An event subprocess starts when its own start event triggers, never by
+    // a sequence flow. Two shapes deploy cleanly and can never trigger, so the
+    // engine will not catch either:
+    //
+    //   * no start event at all — nothing to trigger on;
+    //   * a plain NONE start event — the shape a normal subprocess uses, which
+    //     inside triggeredByEvent="true" means "starts on nothing".
+    //
+    // Both look reasonable in the diagram, which is what makes them worth
+    // refusing: an event subprocess that silently never runs is indistinguishable
+    // from one whose event never happened.
+    private static IReadOnlyList<string> BuildEventSubProcessErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var eventSubProcess in document.Descendants(BpmnNamespace + "subProcess")
+                     .Where(sp => string.Equals(
+                         sp.Attribute("triggeredByEvent")?.Value, "true", StringComparison.OrdinalIgnoreCase)))
+        {
+            var label = LabelOf(eventSubProcess);
+
+            // Direct children only. A start event nested inside a subprocess
+            // WITHIN this handler starts that inner scope, not this one, and
+            // counting it would accept a handler that still cannot trigger.
+            var startEvents = eventSubProcess.Elements(BpmnNamespace + "startEvent").ToList();
+
+            if (startEvents.Count == 0)
+            {
+                errors.Add(
+                    $"The event subprocess '{label}' has no start event, so nothing can ever " +
+                    "trigger it. Give it a start event of the type it should react to — an " +
+                    "error, message, timer, signal, escalation or condition. As drawn it " +
+                    "deploys and never runs, which looks the same as its event never happening.");
+                continue;
+            }
+
+            foreach (var startEvent in startEvents)
+            {
+                var hasDefinition = startEvent.Elements()
+                    .Any(child => child.Name.Namespace == BpmnNamespace
+                                  && child.Name.LocalName.EndsWith("EventDefinition", StringComparison.Ordinal));
+
+                var isError = startEvent.Elements(BpmnNamespace + "errorEventDefinition").Any();
+                if (isError && string.Equals(
+                        startEvent.Attribute("isInterrupting")?.Value, "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add(
+                        $"The event subprocess '{label}' catches an error and is marked as not " +
+                        "interrupting, which BPMN does not allow — an error always interrupts " +
+                        "the scope it escapes from. Verified: the engine interrupts regardless, " +
+                        "so as drawn the diagram promises something it does not do. Remove the " +
+                        "setting, or catch an escalation instead if the work should carry on.");
+                }
+
+                if (hasDefinition) continue;
+
+                errors.Add(
+                    $"The event subprocess '{label}' starts with a plain start event, which " +
+                    "means it starts on nothing. An event subprocess is entered by its event, " +
+                    "never by a sequence flow — give the start event an error, message, timer, " +
+                    "signal, escalation or condition definition, or make this an ordinary " +
+                    "subprocess.");
             }
         }
 

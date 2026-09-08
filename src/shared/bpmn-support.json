@@ -171,31 +171,31 @@
     {
       "name": "Conditional Start Event",
       "category": "Start Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "startEvent",
       "eventDefinition": "conditional",
-      "reason": null,
+      "reason": "#162: triggers when its condition becomes true, inside an event subprocess -- the only place Flowable allows one, which is why #158 could refuse the process-level placement but not deliver the working one. Reuses #158 evaluate-conditions trigger.",
       "evidence": "legal only inside an event subprocess, not at process level"
     },
     {
       "name": "Error Start Event",
       "category": "Start Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "startEvent",
       "eventDefinition": "error",
-      "reason": null,
+      "reason": "#162: catches an error raised anywhere in the containing scope, including from a nested subprocess. A non-interrupting error start is refused: BPMN forbids it and the engine interrupts regardless, so the diagram would promise something it does not do.",
       "evidence": "deployed and started"
     },
     {
       "name": "Escalation Start Event",
       "category": "Start Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "startEvent",
       "eventDefinition": "escalation",
-      "reason": null,
+      "reason": "#162: catches an escalation raised in the containing scope, and a non-interrupting one lets that scope carry on -- asserted in its own right rather than by analogy with error.",
       "evidence": "deployed and started"
     },
     {
@@ -511,11 +511,11 @@
     {
       "name": "Event Sub-Process",
       "category": "Sub-Processes",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "subProcess",
       "eventDefinition": "triggeredByEvent",
-      "reason": null,
+      "reason": "#162: starts on its own event rather than a sequence flow. Interrupting cancels the containing scope (asserted on the cancellation); non-interrupting runs alongside it. An event subprocess with no start event, or one starting on nothing, is refused at publish -- both deploy cleanly and never trigger.",
       "evidence": "deployed and started"
     },
     {
