@@ -163,6 +163,7 @@ public static partial class WorkflowBpmnXml
 
         var document = XDocument.Parse(xml);
         ExpandMessageSendEvents(document);
+        ApplySignalScopes(document);
 
         var declaration = document.Declaration is null
             ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -241,6 +242,105 @@ public static partial class WorkflowBpmnXml
                 new XAttribute("targetRef", endId)));
 
             AddShapeBeside(document, elementId, endId);
+        }
+    }
+
+    // #156. The author's signal scope, moved onto the signal the engine reads.
+    //
+    // Scope is recorded on the EVENT in the authored diagram
+    // (flowable:autonateSignalScope) because moddle refuses to attach an
+    // attribute to a freshly created root element in the studio. Here it becomes
+    // Flowable's own flowable:scope on the <bpmn:signal>, so the ENGINE enforces
+    // the scope rather than Auton8 filtering a broadcast afterwards.
+    //
+    // Instance scope is the owner's decision (option 1): `instance` and `global`,
+    // no "same definition" scope — Flowable has no such thing natively, and
+    // building one would have meant intercepting a throw that fires inside the
+    // engine.
+    //
+    // Two events sharing a name but not a scope are genuinely different
+    // subscriptions, so a second signal element is created for the minority
+    // scope rather than one of them silently winning.
+    // The studio records the scope as an extension ELEMENT on the event, because
+    // moddle would not let it write an attribute onto an event parsed without one.
+    private static string? ReadSignalScope(XElement element) =>
+        element.Element(BpmnNamespace + "extensionElements")?
+            .Elements()
+            .FirstOrDefault(child => child.Name.LocalName == "autonateSignalScope")?
+            .Attribute("value")?.Value;
+
+    private static void ApplySignalScopes(XDocument document)
+    {
+        var root = document.Root;
+        if (root is null) return;
+
+        var signalsById = root.Elements(BpmnNamespace + "signal")
+            .Where(signal => !string.IsNullOrWhiteSpace(signal.Attribute("id")?.Value))
+            .ToDictionary(signal => signal.Attribute("id")!.Value, signal => signal, StringComparer.Ordinal);
+        if (signalsById.Count == 0) return;
+
+        // One signal element per (name, scope) actually used. The FIRST scope seen
+        // for a name reuses the original element; a second scope for the same name
+        // gets its own, because two events that agree on a name but not on who
+        // hears it are genuinely different subscriptions and cannot share one.
+        var byNameAndScope = new Dictionary<(string Name, bool Scoped), XElement>();
+
+        foreach (var element in document.Descendants().ToList())
+        {
+            if (element.Name.Namespace != BpmnNamespace) continue;
+
+            var definition = element.Elements(BpmnNamespace + "signalEventDefinition").FirstOrDefault();
+            var signalRef = definition?.Attribute("signalRef")?.Value;
+            if (definition is null
+                || string.IsNullOrWhiteSpace(signalRef)
+                || !signalsById.TryGetValue(signalRef!, out var original))
+            {
+                continue;
+            }
+
+            var name = original.Attribute("name")?.Value ?? signalRef!;
+
+            // Three states, not two. An event that says nothing is NOT the same as
+            // one that says "global":
+            //
+            //   "instance" — scope the signal.
+            //   "global"   — unscope it.
+            //   absent     — leave the signal exactly as authored.
+            //
+            // The third case matters because a diagram may already carry
+            // Flowable's own flowable:scope, written by hand or by another
+            // modeller. Treating absent as "global" stripped it, silently widening
+            // a signal its author had deliberately narrowed. That is how this was
+            // found: a test wrote flowable:scope directly, publish removed it, and
+            // the instance-scoped assertion failed only under load — in isolation
+            // the check ran before the other instance had reacted, so it passed
+            // for the wrong reason.
+            var declared = ReadSignalScope(element);
+            if (string.IsNullOrWhiteSpace(declared)) continue;
+
+            var wantScoped = string.Equals(declared, "instance", StringComparison.OrdinalIgnoreCase);
+
+            var key = (name, wantScoped);
+            if (!byNameAndScope.TryGetValue(key, out var target))
+            {
+                var nameTaken = byNameAndScope.Keys.Any(k => k.Name == name);
+                if (nameTaken)
+                {
+                    target = new XElement(original);
+                    target.SetAttributeValue("id", $"{signalRef}_{(wantScoped ? "scoped" : "global")}");
+                    original.AddAfterSelf(target);
+                }
+                else
+                {
+                    target = original;
+                }
+
+                target.SetAttributeValue(
+                    FlowableNamespace + "scope", wantScoped ? "processInstance" : null);
+                byNameAndScope[key] = target;
+            }
+
+            definition.SetAttributeValue("signalRef", target.Attribute("id")?.Value);
         }
     }
 

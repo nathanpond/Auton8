@@ -231,11 +231,11 @@
     {
       "name": "Intermediate Throw (Signal)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "intermediateThrowEvent",
       "eventDefinition": "signal",
-      "reason": null,
+      "reason": "#156: raises a signal and execution continues past it. Unlike its message counterpart, Flowable executes this as authored.",
       "evidence": "deployed and started"
     },
     {
@@ -281,11 +281,11 @@
     {
       "name": "Intermediate Catch (Signal)",
       "category": "Intermediate Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "intermediateCatchEvent",
       "eventDefinition": "signal",
-      "reason": null,
+      "reason": "#156: waits for a signal by name, within the scope the author declared.",
       "evidence": "deployed and started"
     },
     {
@@ -331,11 +331,11 @@
     {
       "name": "Signal Boundary",
       "category": "Boundary Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "boundaryEvent",
       "eventDefinition": "signal",
-      "reason": null,
+      "reason": "#156: interrupting and non-interrupting both verified; non-interrupting leaves the guarded activity running.",
       "evidence": "deployed and started"
     },
     {
@@ -401,11 +401,11 @@
     {
       "name": "Signal End",
       "category": "End Events",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "endEvent",
       "eventDefinition": "signal",
-      "reason": null,
+      "reason": "#156: raises its signal and ends the path.",
       "evidence": "deployed and started"
     },
     {

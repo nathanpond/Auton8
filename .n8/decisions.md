@@ -3548,3 +3548,61 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   the relative project path stopped resolving. In each case the fix was reading
   WHAT failed rather than THAT it failed.
   **Issue:** #113
+
+- **Decision (#156, user's call): signal scope is INSTANCE, not definition.**
+  The story defined `process` scope three incompatible ways; the owner chose
+  option 1. Scopes are `instance` (default for a new signal) and `global`; there
+  is no "same definition" scope. The Demo, which described instance scope, is now
+  correct as written; the Decisions section and Test plan, which said definition,
+  are superseded and recorded as such on the issue.
+  **Issue:** #156
+
+- **Divergence from a criterion, deliberately (#156):** the issue asks that scope
+  be serialised in the autonate namespace. Instead the DEPLOYED copy carries
+  Flowable's own `flowable:scope="processInstance"`, so **the engine enforces the
+  scope** rather than Auton8 filtering a broadcast afterwards. That touches no
+  do-not-rename identifier — it adds nothing to the autonate namespace rather than
+  changing its shape. The criterion existed because the definition-scope reading
+  had no native support; the instance reading does.
+  **Issue:** #156
+
+- **Verified before building on it (#156):** `flowable:scope="processInstance"`
+  does NOT break a signal START event — a broadcast still starts an instance.
+  Scope constrains catching within a running instance and is ignored for starting
+  one, which is what makes "an existing signal-start workflow keeps working" safe
+  rather than hopeful.
+  **Issue:** #156
+
+- **Three attempts to write one attribute, recorded because the failure was
+  silent (#156).** The scope had to reach the saved diagram from the studio:
+  1. `created.$attrs = …` on a freshly created `bpmn:Signal` root — threw
+     *"Cannot set property $attrs of #<Base> which has only a getter"*.
+  2. `writeFlowableAttribute` on the EVENT — silently did nothing, because an
+     element parsed without any extension attribute has no `$attrs` either.
+  3. A namespaced key through `modeling.updateProperties` — also did not
+     serialise.
+  Settled on an extension ELEMENT via `moddle.createAny`, the mechanism this file
+  already uses for the call activity's in/out mappings, with publish moving it
+  onto the signal root. Only the first attempt failed loudly; the other two looked
+  like success and produced a diagram missing the setting.
+  **Issue:** #156
+
+- **Rule 1 defect in my own #156 publish step, found by the full suite.**
+  `ApplySignalScopes` treated "the event says nothing" as "the event says global"
+  and CLEARED `flowable:scope`, silently widening an instance-scoped signal into a
+  broadcast. Any diagram carrying Flowable's own scope — hand-written or from
+  another modeller — would have lost it on publish. It now distinguishes three
+  states: `instance` scopes, `global` unscopes, **absent leaves the diagram exactly
+  as authored**.
+  **The test that should have caught it was green.** It asserted the other instance
+  was untouched immediately after the signal, and in isolation that instance had
+  simply not reacted yet — the assertion measured scheduling, not scope. Only the
+  full run, where load shifted the timing, exposed it.
+  **Fixed in the test too:** it now waits for the raising run to handle the signal
+  on BOTH its paths, then re-checks the other instance after a settle, and authors
+  the diagram the way the studio does rather than hand-writing the attribute
+  publish is meant to produce. Mutation-checked.
+  **Third instance this session of the same shape** — a negative assertion that
+  runs too early is indistinguishable from the feature working, like the 405 that
+  satisfied `!completed.Ok` and the poll predicate that was true before the save.
+  **Issue:** #156

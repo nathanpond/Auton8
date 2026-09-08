@@ -1158,6 +1158,15 @@ function describeBusinessObject(businessObject) {
     description.callOutputs = callActivity.callOutputs;
   }
 
+  const signalEvent = describeSignalElement(businessObject);
+  if (signalEvent) {
+    // #156. Present only on signal-carrying events.
+    description.signalEventName = signalEvent.signalEventName;
+    description.signalEventScope = signalEvent.signalEventScope;
+    description.signalEventIsNew = signalEvent.signalEventIsNew;
+    description.signalEventInterrupting = signalEvent.signalEventInterrupting;
+  }
+
   const codedEvent = describeCodedEvent(businessObject);
   if (codedEvent) {
     // #114. Present only on error/escalation events; absence keeps everything
@@ -1391,6 +1400,153 @@ export function updateCallActivityProperties(modelerHandle, payload) {
     calledElement: normalizeOptionalString(payload.calledElement),
     extensionElements
   });
+}
+
+// #156. Signal events: throw, catch, boundary and end. Two things matter — the
+// name, which is what matches one end to the other, and the scope.
+//
+// Scope lives on the root <bpmn:signal> element as Flowable's own
+// flowable:scope, so THE ENGINE enforces it. The alternative was an Auton8
+// attribute and our own filtering on top of a broadcast, which would have meant
+// reimplementing something the engine already does correctly.
+//
+//   instance — flowable:scope="processInstance". Only this run of this workflow.
+//   global   — no attribute. Any subscriber anywhere, which is BPMN's default and
+//              the reason two unrelated workflows using "approved" silently couple.
+function describeSignalElement(businessObject) {
+  if (!businessObject) return null;
+
+  const definitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const definition = definitions.find((d) => d && d.$type === "bpmn:SignalEventDefinition");
+  if (!definition) return null;
+
+  const ref = definition.signalRef;
+  const resolved = typeof ref === "string" ? null : ref;
+
+  return {
+    signalEventName: (typeof ref === "string" ? ref : resolved?.name ?? resolved?.id) ?? "",
+    // Absent means global — Flowable's default, and the shape every diagram
+    // authored before this story carries. Reported as it is rather than
+    // defaulted to instance, so opening an existing signal does not silently
+    // propose changing what a deployed process does.
+    // Read from the EVENT, not the signal root: moddle refuses to attach an
+    // attribute to a freshly created root element ("Cannot set property $attrs
+    // of #<Base> which has only a getter"), so the author's choice is recorded
+    // here and publish writes Flowable's own flowable:scope onto the root.
+    // Absent means global — Flowable's default, and what every diagram authored
+    // before this story carries.
+    signalEventScope: readSignalScope(businessObject),
+    // A new element has no signal yet; the editor defaults THOSE to instance.
+    signalEventIsNew: !ref,
+    signalEventInterrupting:
+      businessObject.$type === "bpmn:BoundaryEvent"
+        ? businessObject.cancelActivity !== false
+        : null
+  };
+}
+
+// Absent means global — Flowable's default, and what every diagram authored
+// before this story carries. Read as it is rather than defaulted to instance, so
+// opening an existing signal does not silently propose narrowing a deployed
+// process.
+function readSignalScope(businessObject) {
+  const values = Array.isArray(businessObject?.extensionElements?.values)
+    ? businessObject.extensionElements.values
+    : [];
+  const found = values.find((value) => {
+    const type = value?.$type ?? "";
+    const local = type.includes(":") ? type.split(":")[1] : type;
+    return local === "autonateSignalScope";
+  });
+  const raw = found?.value ?? found?.$attrs?.value;
+  return raw === "instance" ? "instance" : "global";
+}
+
+// #156. Writes the signal name and scope, maintaining the root element behind it.
+export function updateSignalElementProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update this signal event.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  const businessObject = element?.businessObject;
+  if (!businessObject) {
+    throw new Error(`Element '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const eventDefinitions = Array.isArray(businessObject.eventDefinitions)
+    ? businessObject.eventDefinitions
+    : [];
+  const definition = eventDefinitions.find(
+    (d) => d && d.$type === "bpmn:SignalEventDefinition"
+  );
+  if (!definition) {
+    throw new Error(`Element '${payload.id}' does not carry a signal definition.`);
+  }
+
+  const name = normalizeOptionalString(payload.signalName);
+  const scope = payload.scope === "global" ? "global" : "instance";
+  const root = name ? ensureSignalRootElement(modeler, moddle, name) : undefined;
+
+  modeling.updateModdleProperties(element, definition, { signalRef: root });
+
+  // The scope rides on the event as an extension ELEMENT, and publish moves it
+  // onto the signal root as Flowable's own attribute.
+  //
+  // An element, not an attribute, after two attribute routes failed on an event
+  // parsed without any extension attribute: `$attrs` is getter-only on those, so
+  // a direct write silently did nothing, and a namespaced key through
+  // updateProperties did not serialise either. createAny is the mechanism this
+  // file already uses for the call activity's in/out mappings, and it round-trips.
+  const scopeElement = moddle.createAny(
+    "flowable:autonateSignalScope", FLOWABLE_NAMESPACE, { value: scope });
+
+  const keptExtensions = Array.isArray(businessObject.extensionElements?.values)
+    ? businessObject.extensionElements.values.filter((value) => {
+        const type = value?.$type ?? "";
+        const local = type.includes(":") ? type.split(":")[1] : type;
+        return local !== "autonateSignalScope";
+      })
+    : [];
+
+  const properties = {
+    name: normalizeOptionalString(payload.name),
+    extensionElements: moddle.create("bpmn:ExtensionElements", {
+      values: [...keptExtensions, scopeElement]
+    })
+  };
+  if (businessObject.$type === "bpmn:BoundaryEvent" && typeof payload.interrupting === "boolean") {
+    properties.cancelActivity = payload.interrupting;
+  }
+  modeling.updateProperties(element, properties);
+}
+
+// One root element per name. Scope is NOT part of the key here: it lives on the
+// event until publish, which is what separates two events sharing a name but not
+// a scope into distinct signals in the deployed copy.
+function ensureSignalRootElement(modeler, moddle, name) {
+  const definitions = modeler.getDefinitions?.();
+  if (!definitions) throw new Error("The BPMN definitions are not available.");
+
+  const rootElements = definitions.get ? definitions.get("rootElements") : definitions.rootElements;
+
+  const existing = (rootElements ?? []).find(
+    (candidate) => candidate?.$type === "bpmn:Signal" && candidate.name === name
+  );
+  if (existing) return existing;
+
+  const created = moddle.create("bpmn:Signal", {
+    id: `Signal_${name.replace(/[^A-Za-z0-9_-]/g, "_")}`,
+    name
+  });
+  rootElements.push(created);
+  return created;
 }
 
 // #114. Error and escalation events are one shape with two codes. The code lives

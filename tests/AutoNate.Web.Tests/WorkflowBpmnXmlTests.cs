@@ -1785,6 +1785,128 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Empty(document.Descendants(bpmn + "serviceTask"));
     }
 
+    // #156. Scope is authored on the EVENT and becomes Flowable's own attribute on
+    // the SIGNAL at publish, so the engine enforces it rather than Auton8
+    // filtering a broadcast afterwards.
+    [Fact]
+    public void ExpandForDeployment_WritesInstanceScopeOntoTheSignal()
+    {
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(SignalDiagram("instance", "instance")));
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var signal = document.Root!.Elements(bpmn + "signal").Single();
+        Assert.Equal("processInstance", signal.Attribute(flowable + "scope")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesAHandAuthoredScopeAlone()
+    {
+        // An event that says NOTHING is not the same as one that says "global".
+        // A diagram may already carry Flowable's own flowable:scope — written by
+        // hand or by another modeller — and publish must not widen it.
+        //
+        // This is a regression test: the first version treated absent as global
+        // and stripped the attribute, which turned an instance-scoped signal into
+        // a broadcast. It surfaced only under load, because in isolation the
+        // assertion ran before the other instance had reacted.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:signal id="Sig_1" name="approved" flowable:scope="processInstance" />
+                             <bpmn:process id="p" name="P" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:intermediateCatchEvent id="catch">
+                                 <bpmn:signalEventDefinition signalRef="Sig_1" />
+                               </bpmn:intermediateCatchEvent>
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        Assert.Equal(
+            "processInstance",
+            document.Root!.Elements(bpmn + "signal").Single().Attribute(flowable + "scope")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesAGlobalSignalUnscoped()
+    {
+        // The complement, and the one that protects deployed behaviour: an event
+        // with no scope attribute means global, which is Flowable's default and
+        // what every diagram authored before this story carries. Defaulting to
+        // instance here would silently narrow them on the next publish.
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(SignalDiagram(null, null)));
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var signal = document.Root!.Elements(bpmn + "signal").Single();
+        Assert.Null(signal.Attribute(flowable + "scope"));
+    }
+
+    [Fact]
+    public void ExpandForDeployment_SplitsASignalTwoEventsScopeDifferently()
+    {
+        // Two events agreeing on a name but not on who hears it are genuinely
+        // different subscriptions. Sharing one signal element would make one of
+        // them silently win.
+        var document = XDocument.Parse(
+            WorkflowBpmnXml.ExpandForDeployment(SignalDiagram("instance", "global")));
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        var signals = document.Root!.Elements(bpmn + "signal").ToList();
+        Assert.Equal(2, signals.Count);
+        Assert.Single(signals, s => s.Attribute(flowable + "scope")?.Value == "processInstance");
+        Assert.Single(signals, s => s.Attribute(flowable + "scope") is null);
+
+        // And the two events point at different signals.
+        var refs = document.Descendants(bpmn + "signalEventDefinition")
+            .Select(d => d.Attribute("signalRef")?.Value)
+            .ToList();
+        Assert.Equal(2, refs.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    private static string SignalDiagram(string? throwScope, string? catchScope)
+    {
+        string Ext(string? scope) =>
+            scope is null
+                ? string.Empty
+                : $"""
+                    <bpmn:extensionElements>
+                      <flowable:autonateSignalScope value="{scope}" />
+                    </bpmn:extensionElements>
+                  """;
+
+        return $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1"
+                              targetNamespace="http://autonate.dev/workflows">
+              <bpmn:signal id="Sig_1" name="approved" />
+              <bpmn:process id="p" name="P" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="throw" />
+                <bpmn:intermediateThrowEvent id="throw">
+            {{Ext(throwScope)}}
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateThrowEvent>
+                <bpmn:intermediateCatchEvent id="catch">
+            {{Ext(catchScope)}}
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateCatchEvent>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+    }
+
     [Fact]
     public void ExpandForDeployment_LeavesAPlainEndEventAlone()
     {

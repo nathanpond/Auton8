@@ -242,6 +242,16 @@ type CodedEventEditor = {
   interrupting: boolean | null;
 };
 
+type SignalEventEditor = {
+  id: string;
+  type: string;
+  name: string;
+  signalName: string;
+  // "instance" | "global"
+  scope: string;
+  interrupting: boolean | null;
+};
+
 type VariableMapping = { source: string; target: string };
 
 type CallActivityEditor = {
@@ -340,6 +350,11 @@ type ElementSelection = {
   calledElement?: string | null;
   callInputs?: { source: string; target: string }[] | null;
   callOutputs?: { source: string; target: string }[] | null;
+  // #156. Present only on signal events.
+  signalEventName?: string | null;
+  signalEventScope?: string | null;
+  signalEventIsNew?: boolean | null;
+  signalEventInterrupting?: boolean | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -479,6 +494,7 @@ export default function WorkflowStudio() {
   const [messageEditor, setMessageEditor] = useState<MessageElementEditor | null>(null);
   const [codedEventEditor, setCodedEventEditor] = useState<CodedEventEditor | null>(null);
   const [callActivityEditor, setCallActivityEditor] = useState<CallActivityEditor | null>(null);
+  const [signalEditor, setSignalEditor] = useState<SignalEventEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
   const [conditionalEventEditor, setConditionalEventEditor] =
@@ -706,6 +722,35 @@ export default function WorkflowStudio() {
       return;
     }
     setCallActivityEditor(null);
+
+    // #156. Signal events carry their own definition type; without this they
+    // reach the generic editor with nowhere to put a name or a scope.
+    if (selection && typeof selection.signalEventName === "string") {
+      setSignalEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        signalName: selection.signalEventName,
+        // A signal that already exists keeps the scope it has — opening one must
+        // not silently propose changing what a deployed process does. Only a
+        // NEW signal defaults to instance.
+        scope: selection.signalEventIsNew ? "instance" : (selection.signalEventScope ?? "global"),
+        interrupting:
+          typeof selection.signalEventInterrupting === "boolean"
+            ? selection.signalEventInterrupting
+            : null
+      });
+      setScriptTaskEditor(null);
+      setServiceTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setMessageEditor(null);
+      setCodedEventEditor(null);
+      setCallActivityEditor(null);
+      setGenericEditor(null);
+      return;
+    }
+    setSignalEditor(null);
 
     // #114. Error and escalation events, routed before the message branch: they
     // carry their own definition type and would otherwise reach the generic
@@ -1354,6 +1399,24 @@ export default function WorkflowStudio() {
       setCallActivityEditor(null);
     });
 
+  const applySignalEvent = () =>
+    runBusy("applying signal settings", async () => {
+      if (!handle || !signalEditor) {
+        throw new Error("Select a signal event before applying changes.");
+      }
+      if (!signalEditor.signalName.trim()) {
+        throw new Error("Give the signal a name — that is what matches one end to the other.");
+      }
+      await workflow.updateSignalElementProperties(handle, {
+        id: signalEditor.id,
+        name: signalEditor.name,
+        signalName: signalEditor.signalName,
+        scope: signalEditor.scope,
+        interrupting: signalEditor.interrupting
+      });
+      setSignalEditor(null);
+    });
+
   const applyGeneric = () =>
     runBusy("applying element changes", async () => {
       if (!handle || !genericEditor) {
@@ -1838,6 +1901,19 @@ export default function WorkflowStudio() {
             setMessageEditor(null);
           }}
           onApply={applyMessageElement}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {signalEditor && (
+        <SignalEventModal
+          editor={signalEditor}
+          onChange={setSignalEditor}
+          onClose={() => {
+            if (busy) return;
+            setSignalEditor(null);
+          }}
+          onApply={applySignalEvent}
           disabled={!!busy || !handle}
         />
       )}
@@ -4150,6 +4226,111 @@ function CallActivityModal({
             Close
           </Button>
           <Button onClick={onApply} disabled={disabled || !editor.calledElement.trim()}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #156. One editor for every signal event — throw, catch, boundary, end — because
+// they share one mechanism: a name raised at one point and caught at another.
+//
+// The failure mode worth designing against is a mistyped name, which produces
+// silence rather than an error, so the note says that out loud.
+function SignalEventModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: SignalEventEditor;
+  onChange: (next: SignalEventEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const isThrowing =
+    editor.type === "bpmn:EndEvent" || editor.type === "bpmn:IntermediateThrowEvent";
+
+  return (
+    <Modal opened onClose={onClose} title={`${humanizeBpmnType(editor.type)} (Signal)`} size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          {isThrowing
+            ? "Raises a signal. Everything listening for that name reacts — a signal is a broadcast, unlike a message, which goes to exactly one waiting run."
+            : "Waits for a signal with this name to be raised."}
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Event name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Signal event name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Approved"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Signal name</span>
+          <input
+            className="form-control"
+            aria-label="Signal name"
+            value={editor.signalName}
+            onChange={(e) => onChange({ ...editor, signalName: e.target.value })}
+            placeholder="approved"
+          />
+          <p className="workflow-modal-note">
+            This is what matches one end to the other, character for character. A name nothing
+            listens for is not an error &mdash; a signal is a broadcast, so it simply reaches
+            nobody, which looks exactly like a mistyped name.
+          </p>
+        </label>
+
+        <label className="workflow-field">
+          <span>Who hears it</span>
+          <select
+            className="form-select"
+            aria-label="Who hears it"
+            value={editor.scope}
+            onChange={(e) => onChange({ ...editor, scope: e.target.value })}
+          >
+            <option value="instance">Only this run of this workflow</option>
+            <option value="global">Any workflow listening for this name</option>
+          </select>
+          <p className="workflow-modal-note">
+            {editor.scope === "instance"
+              ? "The safe default. Another run of this same workflow will not react, and neither will anything else."
+              : "Careful: every workflow listening for this name reacts, including ones you did not write. Two unrelated workflows both using a name like “approved” will couple to each other, and neither diagram will show it."}
+          </p>
+        </label>
+
+        {editor.interrupting !== null && (
+          <Switch
+            label="Stop the attached step while this is handled"
+            description={
+              "On, the step is cancelled and only this path continues. Off, the step keeps " +
+              "running and this path runs alongside it."
+            }
+            checked={editor.interrupting}
+            onChange={(e) => onChange({ ...editor, interrupting: e.currentTarget.checked })}
+          />
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || !editor.signalName.trim()}>
             Apply
           </Button>
         </Group>
