@@ -1121,6 +1121,95 @@ public static partial class WorkflowBpmnXml
     // attribute whose prefix is undeclared.
     internal const string CorrelationKeyAttribute = "autonateCorrelationKey";
 
+    internal const string CalledElementTypeAttribute = "calledElementType";
+
+    /// <summary>
+    /// The process keys this diagram's call activities target (#113).
+    /// </summary>
+    /// <remarks>
+    /// Keys only — a diagram already carrying pinned definition ids (because it
+    /// was round-tripped from a deployed copy) is left alone, since re-pinning it
+    /// would silently move it to a newer child.
+    /// </remarks>
+    public static IReadOnlyList<(string ElementId, string CalledKey)> ExtractCallActivityTargets(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return Array.Empty<(string, string)>();
+
+        XDocument document;
+        try { document = XDocument.Parse(xml); }
+        catch (System.Xml.XmlException) { return Array.Empty<(string, string)>(); }
+
+        var targets = new List<(string, string)>();
+        foreach (var call in document.Descendants(BpmnNamespace + "callActivity"))
+        {
+            var elementId = call.Attribute("id")?.Value;
+            var calledElement = call.Attribute("calledElement")?.Value;
+            if (string.IsNullOrWhiteSpace(elementId) || string.IsNullOrWhiteSpace(calledElement)) continue;
+
+            // Already pinned by a previous publish; not a key to resolve again.
+            if (string.Equals(
+                    call.Attribute(FlowableNamespace + CalledElementTypeAttribute)?.Value,
+                    "id", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            targets.Add((elementId!, calledElement!.Trim()));
+        }
+
+        return targets;
+    }
+
+    /// <summary>
+    /// Rewrites each call activity to the exact child definition that exists now
+    /// (#113), so republishing the child cannot change what an already-deployed
+    /// parent calls.
+    /// </summary>
+    /// <remarks>
+    /// Flowable resolves a `calledElement` KEY at run time, to the latest version
+    /// — verified: an unchanged parent picked up a child version deployed after
+    /// it. This issue decided the opposite, because a running process must not
+    /// change behaviour underneath its owner.
+    ///
+    /// Pinning also bounds recursion by construction. A parent can only pin to a
+    /// definition that already exists, so every call points strictly backwards in
+    /// deployment order and the chain must terminate. A process whose first
+    /// version calls itself has nothing to resolve and is refused; a later version
+    /// pins to the earlier one, which is finite.
+    ///
+    /// Applied to the DEPLOYED copy only. The stored diagram keeps the key the
+    /// author picked, which is what the studio shows them.
+    /// </remarks>
+    public static string PinCallActivityTargets(
+        string xml, IReadOnlyDictionary<string, string> definitionIdsByKey)
+    {
+        if (string.IsNullOrWhiteSpace(xml) || definitionIdsByKey.Count == 0) return xml;
+
+        var document = XDocument.Parse(xml);
+        foreach (var call in document.Descendants(BpmnNamespace + "callActivity"))
+        {
+            var calledElement = call.Attribute("calledElement")?.Value?.Trim();
+            if (string.IsNullOrWhiteSpace(calledElement)) continue;
+            if (string.Equals(
+                    call.Attribute(FlowableNamespace + CalledElementTypeAttribute)?.Value,
+                    "id", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!definitionIdsByKey.TryGetValue(calledElement!, out var definitionId)) continue;
+
+            call.SetAttributeValue("calledElement", definitionId);
+            call.SetAttributeValue(FlowableNamespace + CalledElementTypeAttribute, "id");
+        }
+
+        var declaration = document.Declaration is null
+            ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            : $"{document.Declaration}\n";
+
+        return declaration + document.ToString(SaveOptions.DisableFormatting);
+    }
+
     internal const string TargetProcessKeyAttribute = "autonateTargetProcessKey";
 
     /// <summary>

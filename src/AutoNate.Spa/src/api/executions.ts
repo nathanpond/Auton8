@@ -81,6 +81,29 @@ export async function getExecutionLog(
   return data;
 }
 
+// #113. The child instances a call activity in this execution started. The
+// engine records the relationship; without surfacing it a waiting call activity
+// looks like a hung process, because the parent's own task list is empty.
+export type ChildExecutionSummary = {
+  id: string;
+  name: string | null;
+  processDefinitionId: string;
+  activityId: string | null;
+  suspended: boolean;
+  startUserId: string | null;
+};
+
+export async function getExecutionChildren(
+  processInstanceId: string,
+  signal?: AbortSignal
+): Promise<ChildExecutionSummary[]> {
+  const { data } = await api.get<ChildExecutionSummary[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/children`,
+    { signal }
+  );
+  return data;
+}
+
 export async function getExecutionTasks(
   processInstanceId: string,
   signal?: AbortSignal

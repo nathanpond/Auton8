@@ -378,6 +378,19 @@ internal sealed class StubFlowableClient : IFlowableClient
 
     public string StartedByMessageInstanceId { get; set; } = "started-by-message";
 
+    public Dictionary<string, IReadOnlyList<FlowableProcessInstanceSummary>> ChildInstances { get; } =
+        new(StringComparer.Ordinal);
+
+    public Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetChildProcessInstancesAsync(
+        string parentProcessInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"GetChildProcessInstances:{parentProcessInstanceId}");
+        return Task.FromResult(ChildInstances.TryGetValue(parentProcessInstanceId, out var children)
+            ? children
+            : (IReadOnlyList<FlowableProcessInstanceSummary>)Array.Empty<FlowableProcessInstanceSummary>());
+    }
+
     public Task<string> StartProcessInstanceByMessageAsync(
         string messageName,
         IReadOnlyDictionary<string, object?>? variables = null,

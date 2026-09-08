@@ -491,11 +491,11 @@
     {
       "name": "Call Activity",
       "category": "Tasks",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "callActivity",
       "eventDefinition": null,
-      "reason": null,
+      "reason": "#113: the author picks a published workflow; publish resolves that key to the definition that exists then and pins the deployed copy by id, because Flowable otherwise resolves the key at run time to whatever is latest \u2014 verified, an unchanged parent picked up a child version published after it.",
       "evidence": "first probe named a callee that did not exist; with a real callee, executes"
     },
     {

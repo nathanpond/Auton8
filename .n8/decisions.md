@@ -3378,3 +3378,57 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   **The rule this breaks:** a non-zero exit is not evidence of the failure you
   expected; read what actually failed. Same class as the static-assets clobber.
   **Issue:** #114
+
+- **Decision (#113): call activities are pinned to a definition id at publish.**
+  Flowable resolves a `calledElement` KEY at run time to the latest version —
+  verified: an unchanged, already-deployed parent picked up a child version
+  published after it. The issue decided the opposite ("a running process never
+  changes behaviour underneath its owner"), so publish resolves the author's key
+  to the definition id existing at that moment and writes
+  `flowable:calledElementType="id"` on the DEPLOYED copy only. The stored diagram
+  keeps the key, which is what the studio shows.
+  **One mechanism, three criteria:** picking-not-typing becomes meaningful because
+  the key is resolved; a key resolving to nothing is refused at publish rather
+  than failing when an instance reaches the call; and the version is bound at
+  parent-deployment time.
+  **Recursion falls out of it.** A parent can only pin to a definition that
+  already exists, so every call points strictly backwards in deployment order and
+  the chain terminates. A first version calling itself has nothing to resolve and
+  is refused. Asserted rather than assumed.
+  **Issue:** #113
+
+- **Deliberately not probed (#113):** unbounded recursion against the shared
+  Flowable. Running it would be a denial of service against a service the rest of
+  this milestone depends on, and the outcome is not in doubt. The bound is
+  structural (above) and tested at publish instead. Recording the decision rather
+  than the experiment.
+  **Issue:** #113
+
+- **Rule 3 (#113): `moddle.create("flowable:In", …)` throws — the studio loads no
+  Flowable moddle extension.** The in/out mappings are written with
+  `moddle.createAny(name, nsUri, …)`, which serialises under the qualified name
+  without needing a registered type. Same root constraint as #168's
+  `flowable:async`, but the fix differs because these are child ELEMENTS rather
+  than attributes.
+  **How it was found:** the studio test failed as "the Save button is not
+  clickable" — Apply was throwing, so the modal stayed open over Save. The test
+  now waits for the modal to close as Apply's success signal, which is what turned
+  a misleading symptom into the actual cause.
+  **Issue:** #113
+
+- **AC5 (#113) — reported as not done, then done.** I flagged that the child
+  execution was not visible from the parent, rather than ticking it, and then
+  implemented it: `GET /api/executions/{id}/children` over the engine's
+  `superProcessInstanceId` relationship, plus a "Called Workflows (n)" tab that
+  opens the child. The tab appears only when there IS a child, so a process
+  without a call activity does not carry an empty tab implying otherwise.
+  **Why it mattered more than it sounds:** the engine probe showed a waiting
+  parent's own task list is EMPTY. Without this, a call activity is
+  indistinguishable from a hung process from the parent — the exact complaint the
+  issue opens with, and the story's stated truth ("when a call activity is stuck,
+  a user can open the child and see why") would have been false.
+  **A slip the E2E caught:** my link pointed at `/workflow-executions/{id}`; the
+  real route is `executions/:id`. A component test would have asserted the same
+  wrong string I had just written. Only navigating for real finds this class of
+  bug.
+  **Issue:** #113

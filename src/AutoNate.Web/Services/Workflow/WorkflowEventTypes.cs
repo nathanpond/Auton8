@@ -65,6 +65,7 @@ public static class WorkflowAdminEventTypes
     public const string ExecutionHistoryViewed = "workflow.execution.history.viewed";
     public const string ExecutionLogViewed = "workflow.execution.log.viewed";
     public const string ExecutionTasksViewed = "workflow.execution.tasks.viewed";
+    public const string ExecutionChildrenViewed = "workflow.execution.children.viewed";
     public const string ExecutionCompletedAssigneesViewed = "workflow.execution.completed-assignees.viewed";
     public const string TasksAssignedToMeViewed = "workflow.task.assigned-to-me.viewed";
     public const string TasksAssignedToTeamViewed = "workflow.task.assigned-to-team.viewed";

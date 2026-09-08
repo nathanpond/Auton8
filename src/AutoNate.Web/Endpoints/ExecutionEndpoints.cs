@@ -511,6 +511,29 @@ public static class ExecutionEndpoints
             return Results.Ok(tasks);
         }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
 
+        // #113. The child instances a call activity in this one started.
+        //
+        // Without this a stuck call activity is a process with an empty task list
+        // and no explanation — the engine knows where the work is and the app had
+        // no way to say so.
+        executions.MapGet("/{processInstanceId}/children", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var children = await flowable.GetChildProcessInstancesAsync(
+                processInstanceId, cancellationToken);
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.ExecutionChildrenViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { resultCount = children.Count },
+                cancellationToken);
+            return Results.Ok(children);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
         executions.MapGet("/{processInstanceId}/activities/{activityId}/completed-assignees", async (
             string processInstanceId,
             string activityId,

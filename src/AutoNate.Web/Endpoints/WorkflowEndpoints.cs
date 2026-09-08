@@ -280,6 +280,44 @@ public static class WorkflowEndpoints
                 return Results.BadRequest(new { errors = thrownCodeErrors });
             }
 
+            // #113. Every call activity is resolved to the child definition that
+            // exists RIGHT NOW and pinned to it by id.
+            //
+            // Flowable resolves a calledElement key at run time, to the latest
+            // version — verified: an unchanged, already-deployed parent picked up
+            // a child version published after it. A running process must not
+            // change behaviour underneath its owner, so publish pins instead.
+            //
+            // A key resolving to nothing is refused here rather than deployed.
+            // Flowable accepts such a diagram happily and fails only when an
+            // instance reaches the call, by which time it is someone else's
+            // problem at the worst moment.
+            var callTargets = WorkflowBpmnXml.ExtractCallActivityTargets(model.BpmnXml);
+            var definitionIdsByKey = new Dictionary<string, string>(StringComparer.Ordinal);
+            var unresolved = new List<string>();
+            foreach (var (elementId, calledKey) in callTargets)
+            {
+                if (definitionIdsByKey.ContainsKey(calledKey)) continue;
+
+                var child = await flowable.GetLatestProcessDefinitionAsync(calledKey, cancellationToken);
+                if (child is null || string.IsNullOrWhiteSpace(child.Id))
+                {
+                    unresolved.Add(
+                        $"The step '{elementId}' calls a workflow with key '{calledKey}', and no " +
+                        "published workflow has that key. Publish that workflow first, or pick a " +
+                        "different one — published as-is, this process fails when it reaches that " +
+                        "step rather than now.");
+                    continue;
+                }
+
+                definitionIdsByKey[calledKey] = child.Id;
+            }
+
+            if (unresolved.Count > 0)
+            {
+                return Results.BadRequest(new { errors = unresolved });
+            }
+
             // #112. Expanded at DEPLOY, not at save. Flowable rejects an
             // intermediate throw (Message) outright and silently ignores a message
             // end event, so the deployed copy carries service tasks on the
@@ -292,7 +330,9 @@ public static class WorkflowEndpoints
             // preparing must not be able to deploy something the engine refuses.
             var deployable = model with
             {
-                BpmnXml = WorkflowBpmnXml.ExpandForDeployment(model.BpmnXml)
+                BpmnXml = WorkflowBpmnXml.PinCallActivityTargets(
+                    WorkflowBpmnXml.ExpandForDeployment(model.BpmnXml),
+                    definitionIdsByKey)
             };
 
             var deployment = await flowable.DeployProcessAsync(deployable, cancellationToken);

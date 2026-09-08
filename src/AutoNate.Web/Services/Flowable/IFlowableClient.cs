@@ -192,6 +192,16 @@ public interface IFlowableClient
 
     // Starts a new instance through a message start event. Returns the new
     // instance id.
+    // #113. The instances a call activity in this one started.
+    //
+    // The engine records the relationship (superProcessInstanceId) and nothing in
+    // the app surfaced it. That matters more than it sounds: while a parent waits
+    // on a call activity its OWN task list is empty, so from the parent alone a
+    // running child is indistinguishable from a hung process.
+    Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetChildProcessInstancesAsync(
+        string parentProcessInstanceId,
+        CancellationToken cancellationToken = default);
+
     Task<string> StartProcessInstanceByMessageAsync(
         string messageName,
         IReadOnlyDictionary<string, object?>? variables = null,

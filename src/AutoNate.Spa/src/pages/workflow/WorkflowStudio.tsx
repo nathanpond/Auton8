@@ -242,6 +242,17 @@ type CodedEventEditor = {
   interrupting: boolean | null;
 };
 
+type VariableMapping = { source: string; target: string };
+
+type CallActivityEditor = {
+  id: string;
+  type: string;
+  name: string;
+  calledElement: string;
+  inputs: VariableMapping[];
+  outputs: VariableMapping[];
+};
+
 type GenericElementEditor = {
   id: string;
   type: string;
@@ -325,6 +336,10 @@ type ElementSelection = {
   codedEventKind?: string | null;
   codedEventCode?: string | null;
   codedEventInterrupting?: boolean | null;
+  // #113. Present only on a call activity.
+  calledElement?: string | null;
+  callInputs?: { source: string; target: string }[] | null;
+  callOutputs?: { source: string; target: string }[] | null;
 } | null;
 
 function looksLikeExpression(value: string | null | undefined): boolean {
@@ -463,6 +478,7 @@ export default function WorkflowStudio() {
   const [serviceTaskEditor, setServiceTaskEditor] = useState<ServiceTaskEditor | null>(null);
   const [messageEditor, setMessageEditor] = useState<MessageElementEditor | null>(null);
   const [codedEventEditor, setCodedEventEditor] = useState<CodedEventEditor | null>(null);
+  const [callActivityEditor, setCallActivityEditor] = useState<CallActivityEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
   const [conditionalEventEditor, setConditionalEventEditor] =
@@ -669,6 +685,28 @@ export default function WorkflowStudio() {
     setTimerBoundaryEditor(null);
       return;
     }
+    // #113. A call activity carries its own configuration and would otherwise
+    // reach the generic editor, where the author could only rename it.
+    if (selection && selection.type === "bpmn:CallActivity") {
+      setCallActivityEditor({
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        calledElement: selection.calledElement ?? "",
+        inputs: selection.callInputs ?? [],
+        outputs: selection.callOutputs ?? []
+      });
+      setScriptTaskEditor(null);
+      setServiceTaskEditor(null);
+      setSequenceFlowEditor(null);
+      setUserTaskEditor(null);
+      setMessageEditor(null);
+      setCodedEventEditor(null);
+      setGenericEditor(null);
+      return;
+    }
+    setCallActivityEditor(null);
+
     // #114. Error and escalation events, routed before the message branch: they
     // carry their own definition type and would otherwise reach the generic
     // editor with nowhere to put a code.
@@ -1298,6 +1336,24 @@ export default function WorkflowStudio() {
       setCodedEventEditor(null);
     });
 
+  const applyCallActivity = () =>
+    runBusy("applying call activity settings", async () => {
+      if (!handle || !callActivityEditor) {
+        throw new Error("Select a call activity before applying changes.");
+      }
+      if (!callActivityEditor.calledElement.trim()) {
+        throw new Error("Pick which workflow this step should run.");
+      }
+      await workflow.updateCallActivityProperties(handle, {
+        id: callActivityEditor.id,
+        name: callActivityEditor.name,
+        calledElement: callActivityEditor.calledElement,
+        inputs: callActivityEditor.inputs,
+        outputs: callActivityEditor.outputs
+      });
+      setCallActivityEditor(null);
+    });
+
   const applyGeneric = () =>
     runBusy("applying element changes", async () => {
       if (!handle || !genericEditor) {
@@ -1782,6 +1838,20 @@ export default function WorkflowStudio() {
             setMessageEditor(null);
           }}
           onApply={applyMessageElement}
+          disabled={!!busy || !handle}
+        />
+      )}
+
+      {callActivityEditor && (
+        <CallActivityModal
+          editor={callActivityEditor}
+          currentProcessKey={currentModel?.processKey ?? null}
+          onChange={setCallActivityEditor}
+          onClose={() => {
+            if (busy) return;
+            setCallActivityEditor(null);
+          }}
+          onApply={applyCallActivity}
           disabled={!!busy || !handle}
         />
       )}
@@ -3898,6 +3968,174 @@ function CodedEventModal({
             Close
           </Button>
           <Button onClick={onApply} disabled={disabled || !editor.code.trim()}>
+            Apply
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #113. Choosing, not typing. The list is the published workflows, which is what
+// makes the publish-time check meaningful: a key picked from here resolves, and
+// publish pins the exact version it resolved to.
+//
+// The current workflow is excluded. A first version calling itself has nothing to
+// resolve and is refused at publish anyway; leaving it in the list would offer a
+// choice that cannot work.
+function CallActivityModal({
+  editor,
+  currentProcessKey,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: CallActivityEditor;
+  currentProcessKey: string | null;
+  onChange: (next: CallActivityEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const { data: workflows = [], isLoading } = useWorkflows();
+
+  const choices = workflows.filter(
+    (w) => w.publishedVersionNumber != null && w.processKey !== currentProcessKey
+  );
+  const chosenIsMissing =
+    editor.calledElement.length > 0 &&
+    !choices.some((w) => w.processKey === editor.calledElement);
+
+  const renderMappings = (
+    label: string,
+    hint: string,
+    rows: VariableMapping[],
+    onRows: (next: VariableMapping[]) => void
+  ) => (
+    <Box>
+      <Text size="sm" fw={500}>{label}</Text>
+      <Text size="xs" c="dimmed" mb="xs">{hint}</Text>
+      <Stack gap="xs">
+        {rows.map((row, index) => (
+          <Group key={index} gap="xs" wrap="nowrap">
+            <input
+              className="form-control"
+              aria-label={`${label} source ${index + 1}`}
+              value={row.source}
+              placeholder="from"
+              onChange={(e) =>
+                onRows(rows.map((r, i) => (i === index ? { ...r, source: e.target.value } : r)))
+              }
+            />
+            <Text size="sm" c="dimmed">→</Text>
+            <input
+              className="form-control"
+              aria-label={`${label} target ${index + 1}`}
+              value={row.target}
+              placeholder="to"
+              onChange={(e) =>
+                onRows(rows.map((r, i) => (i === index ? { ...r, target: e.target.value } : r)))
+              }
+            />
+            <Button
+              variant="subtle"
+              size="compact-sm"
+              aria-label={`Remove ${label} row ${index + 1}`}
+              onClick={() => onRows(rows.filter((_, i) => i !== index))}
+            >
+              Remove
+            </Button>
+          </Group>
+        ))}
+        <Button
+          variant="default"
+          size="compact-sm"
+          onClick={() => onRows([...rows, { source: "", target: "" }])}
+        >
+          Add {label.toLowerCase()}
+        </Button>
+      </Stack>
+    </Box>
+  );
+
+  return (
+    <Modal opened onClose={onClose} title="Call Activity" size="lg">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Runs another workflow as a step here and waits for it to finish. The version running
+          now is locked in when you publish this workflow &mdash; republishing the other one
+          will not change what this step calls, so a process already running cannot change
+          behaviour underneath you.
+        </Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <label className="workflow-field">
+          <span>Step name (optional)</span>
+          <input
+            className="form-control"
+            aria-label="Call activity name"
+            value={editor.name}
+            onChange={(e) => onChange({ ...editor, name: e.target.value })}
+            placeholder="Run credit check"
+          />
+        </label>
+
+        <label className="workflow-field">
+          <span>Workflow to run</span>
+          <select
+            className="form-select"
+            aria-label="Workflow to run"
+            value={editor.calledElement}
+            disabled={isLoading}
+            onChange={(e) => onChange({ ...editor, calledElement: e.target.value })}
+          >
+            <option value="">{isLoading ? "Loading…" : "Select a workflow…"}</option>
+            {choices.map((w) => (
+              <option key={w.id} value={w.processKey}>
+                {w.name}
+              </option>
+            ))}
+            {/* A key saved earlier whose workflow is gone or unpublished stays
+                visible, so an author can see what is wired up before changing it
+                rather than finding the field mysteriously blank. */}
+            {chosenIsMissing && (
+              <option value={editor.calledElement}>
+                {editor.calledElement} (not published on this server)
+              </option>
+            )}
+          </select>
+          {chosenIsMissing && (
+            <p className="workflow-modal-note text-warning">
+              Nothing published has that key. Publishing this workflow will be refused until it
+              exists &mdash; which is deliberate: otherwise this step fails when someone runs it.
+            </p>
+          )}
+        </label>
+
+        {renderMappings(
+          "Send in",
+          "Variables from this workflow, and the name each arrives under in the other one.",
+          editor.inputs,
+          (inputs) => onChange({ ...editor, inputs })
+        )}
+
+        {renderMappings(
+          "Bring back",
+          "Variables from the other workflow, and the name each returns under here.",
+          editor.outputs,
+          (outputs) => onChange({ ...editor, outputs })
+        )}
+
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onApply} disabled={disabled || !editor.calledElement.trim()}>
             Apply
           </Button>
         </Group>

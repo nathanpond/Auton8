@@ -1150,6 +1150,14 @@ function describeBusinessObject(businessObject) {
     description.retryPoint = serviceTask.retryPoint;
   }
 
+  const callActivity = describeCallActivity(businessObject);
+  if (callActivity) {
+    // #113. Present only on a call activity.
+    description.calledElement = callActivity.calledElement;
+    description.callInputs = callActivity.callInputs;
+    description.callOutputs = callActivity.callOutputs;
+  }
+
   const codedEvent = describeCodedEvent(businessObject);
   if (codedEvent) {
     // #114. Present only on error/escalation events; absence keeps everything
@@ -1240,6 +1248,7 @@ function describeServiceTask(businessObject) {
 // namespace URI is on the do-not-rename list: changing it orphans the property
 // on every diagram that already carries it.
 const AUTONATE_ATTR_PREFIX = "autonate:";
+const FLOWABLE_NAMESPACE = "http://flowable.org/bpmn";
 
 // #153: mark script tasks that declare an identity, so a reviewer can see the
 // privileged steps by looking at the diagram rather than opening each one.
@@ -1280,6 +1289,108 @@ function writeAutoNateAttribute(businessObject, name, value) {
     return;
   }
   businessObject.$attrs[key] = value;
+}
+
+// #113. A call activity runs another workflow as a step. Three things matter:
+// which workflow, what goes in, and what comes back.
+//
+// The KEY is stored, not a version — the studio shows the author what they
+// picked. Publish resolves it to the exact definition that exists then and pins
+// the deployed copy to it, so republishing the child cannot change what an
+// already-deployed parent calls.
+function describeCallActivity(businessObject) {
+  if (!businessObject || businessObject.$type !== "bpmn:CallActivity") return null;
+
+  const extension = businessObject.extensionElements;
+  const values = Array.isArray(extension?.values) ? extension.values : [];
+  // Matched case-insensitively on the local name. These are written with
+  // moddle.createAny (the studio loads no Flowable moddle extension, so there is
+  // no typed flowable:In to create), which round-trips the qualified name exactly
+  // as authored — and a diagram from another modeller may capitalise differently.
+  const mappings = (localName) =>
+    values
+      .filter((value) => {
+        const type = value?.$type ?? "";
+        const local = type.includes(":") ? type.split(":")[1] : type;
+        return local.toLowerCase() === localName;
+      })
+      .map((value) => ({
+        source: value.source ?? value.$attrs?.source ?? "",
+        target: value.target ?? value.$attrs?.target ?? ""
+      }))
+      .filter((pair) => pair.source.length > 0 || pair.target.length > 0);
+
+  return {
+    calledElement: businessObject.calledElement ?? "",
+    callInputs: mappings("in"),
+    callOutputs: mappings("out")
+  };
+}
+
+// #113. Writes the chosen workflow key and the variable mappings.
+export function updateCallActivityProperties(modelerHandle, payload) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  const moddle = modeler?.get?.("moddle", false);
+  if (!elementRegistry || !modeling || !moddle || !payload?.id) {
+    throw new Error("The BPMN modeler is not ready to update the call activity.");
+  }
+
+  const element = elementRegistry.get(payload.id);
+  if (!element?.businessObject || element.businessObject.$type !== "bpmn:CallActivity") {
+    throw new Error(`Call activity '${payload.id}' is no longer available in the diagram.`);
+  }
+
+  const businessObject = element.businessObject;
+
+  const pairs = (list, type) =>
+    (Array.isArray(list) ? list : [])
+      .map((pair) => ({
+        source: normalizeOptionalString(pair?.source),
+        target: normalizeOptionalString(pair?.target)
+      }))
+      // A half-filled row maps nothing and would serialise as an attribute
+      // pointing at an empty name, which reads as configured and is not.
+      .filter((pair) => pair.source && pair.target)
+      // createAny, not create: bpmn-js here loads no Flowable moddle extension, so
+      // "flowable:In" is not a type it knows and create() throws on it. createAny
+      // produces an element that serialises under the qualified name given, which
+      // is what the engine reads.
+      .map((pair) =>
+        moddle.createAny(type, FLOWABLE_NAMESPACE, {
+          source: pair.source,
+          target: pair.target
+        }));
+
+  const mappings = [
+    ...pairs(payload.inputs, "flowable:in"),
+    ...pairs(payload.outputs, "flowable:out")
+  ];
+
+  // Everything that is NOT a mapping is preserved — a call activity may carry
+  // other extension elements, and rebuilding the list from scratch would drop
+  // them silently.
+  const isMapping = (value) => {
+    const type = value?.$type ?? "";
+    const local = type.includes(":") ? type.split(":")[1] : type;
+    return local.toLowerCase() === "in" || local.toLowerCase() === "out";
+  };
+  const existing = Array.isArray(businessObject.extensionElements?.values)
+    ? businessObject.extensionElements.values.filter((value) => value && !isMapping(value))
+    : [];
+
+  const combined = [...existing, ...mappings];
+  const extensionElements =
+    combined.length > 0
+      ? moddle.create("bpmn:ExtensionElements", { values: combined })
+      : undefined;
+
+  modeling.updateProperties(element, {
+    name: normalizeOptionalString(payload.name),
+    calledElement: normalizeOptionalString(payload.calledElement),
+    extensionElements
+  });
 }
 
 // #114. Error and escalation events are one shape with two codes. The code lives

@@ -1599,6 +1599,46 @@ public sealed class FlowableClient(
         await EnsureSuccessAsync(response, $"trigger execution {executionId}");
     }
 
+    public async Task<IReadOnlyList<FlowableProcessInstanceSummary>> GetChildProcessInstancesAsync(
+        string parentProcessInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(parentProcessInstanceId))
+        {
+            return Array.Empty<FlowableProcessInstanceSummary>();
+        }
+
+        // POST /query, because the GET form does not expose superProcessInstanceId.
+        var query = new Dictionary<string, object?>
+        {
+            ["superProcessInstanceId"] = parentProcessInstanceId
+        };
+
+        using var response = await _httpClient.PostAsJsonAsync(
+            "service/query/process-instances", query, cancellationToken);
+        await EnsureSuccessAsync(response, $"list child instances of {parentProcessInstanceId}");
+
+        var page = await DeserializeAsync<FlowableListResponse<FlowableProcessInstanceResponse>>(
+            response, cancellationToken);
+        if (page.Data is null || page.Data.Count == 0)
+        {
+            return Array.Empty<FlowableProcessInstanceSummary>();
+        }
+
+        return page.Data
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .Select(item => new FlowableProcessInstanceSummary
+            {
+                Id = item.Id ?? string.Empty,
+                Name = string.IsNullOrWhiteSpace(item.Name) ? null : item.Name,
+                ProcessDefinitionId = item.ProcessDefinitionId ?? string.Empty,
+                ActivityId = item.ActivityId,
+                Suspended = item.Suspended,
+                StartUserId = item.StartUserId
+            })
+            .ToArray();
+    }
+
     public async Task<string> StartProcessInstanceByMessageAsync(
         string messageName,
         IReadOnlyDictionary<string, object?>? variables = null,

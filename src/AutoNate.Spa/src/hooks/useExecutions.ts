@@ -22,7 +22,9 @@ import {
   reassignTaskAtNode,
   TaskFormConfig,
   updateExecutionVariables,
-  updateTaskDueDateAtNode
+  updateTaskDueDateAtNode,
+  ChildExecutionSummary,
+  getExecutionChildren
 } from "@/api/executions";
 import {
   FlowableTaskSummary,
@@ -88,6 +90,15 @@ export function useExecutionTasks(id: string | null) {
   return useQuery<FlowableTaskSummary[]>({
     queryKey: executionTasksQueryKey(id ?? "unset"),
     queryFn: ({ signal }) => (id ? getExecutionTasks(id, signal) : Promise.resolve([])),
+    enabled: Boolean(id)
+  });
+}
+
+// #113.
+export function useExecutionChildren(id: string | null) {
+  return useQuery<ChildExecutionSummary[]>({
+    queryKey: ["execution-children", id ?? "unset"],
+    queryFn: ({ signal }) => (id ? getExecutionChildren(id, signal) : Promise.resolve([])),
     enabled: Boolean(id)
   });
 }
