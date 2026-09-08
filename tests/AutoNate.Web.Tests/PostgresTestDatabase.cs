@@ -49,10 +49,17 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     // CreateAsync_KeysAreSequentialUnderConcurrency, which opens twenty at
     // once, but the cause was suite-wide rather than anything about that test.
     //
-    // Ten is comfortably above what any single class needs concurrently; the
-    // twenty-way test simply queues for a free connection instead of opening a
+    // Ten is above what any single class needs concurrently; the twenty-way
+    // test simply queues for a free connection instead of opening a
     // twenty-first. The idle settings return connections to the server quickly
     // so a finished class stops holding any.
+    //
+    // #215: "comfortably" used to appear in that first line, and it was wrong —
+    // one `FROM Notes` request fans out more than ten contexts at once, so it
+    // queues. Queueing is fine in itself, but it makes the computations yield,
+    // and that is how a race in ContentAuthorizer's memo became visible only
+    // under load. Ten stays; the race is fixed at its source. Read a flake here
+    // as a hint to look for shared state, not as a reason to raise this number.
     private const string PoolTuning =
         "Maximum Pool Size=10;Connection Idle Lifetime=15;Connection Pruning Interval=5";
 
@@ -146,6 +153,14 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             Console.WriteLine($"[test-db-sweep] Skipped: {exception.GetType().Name}: {exception.Message}");
         }
     }
+
+    // #215. TestResourceSweepTests plants an orphan role and asserts that its own
+    // SweepAsync call is what dropped it. The startup sweep runs once per process
+    // and, under load, can land between the plant and the assertion — it drops the
+    // role first, and the test's own sweep truthfully reports having dropped
+    // nothing. Draining the startup sweep before planting leaves that test as the
+    // only sweeper, which is the condition its assertion actually assumes.
+    internal static Task EnsureStartupSweepCompleteAsync() => EnsureSweptAsync();
 
     public static async Task<PostgresTestDatabase> CreateAsync(bool seedLocalAdmin = true)
     {

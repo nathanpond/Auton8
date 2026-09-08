@@ -18,10 +18,16 @@ public sealed class SystemIssueRemediationDispatcher(
     IAuditEventPublisher auditPublisher,
     IServiceScopeFactory scopeFactory,
     IOptions<SystemIssueOptions> options,
-    ILogger<SystemIssueRemediationDispatcher> logger) : BackgroundService
+    ILogger<SystemIssueRemediationDispatcher> logger,
+    // #215. One clock decides both when a retry is scheduled and when it is
+    // due. Defaults to the system clock, so production behaviour is unchanged;
+    // the parameter exists so a test can move that clock and prove the
+    // eligibility window follows it rather than the database server's.
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly SystemIssueOptions _options = options.Value;
     private readonly IReadOnlyList<IIssueRemediator> _remediators = remediators.ToList();
+    private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -137,20 +143,39 @@ public sealed class SystemIssueRemediationDispatcher(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var tx = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
+        // #215. The cutoff is the caller's clock, not the database server's.
+        //
+        // next_remediation_after_utc is written from the same clock (see
+        // DispatchOneAsync), so comparing it against the server's NOW() asks
+        // two different clocks to agree. They mostly do, and then the suite
+        // runs on a machine where Postgres is in a VM whose clock lags under
+        // host CPU pressure: a row scheduled with zero backoff is written at
+        // the client's "now" and is not yet <= the server's "now", so the next
+        // tick silently skips it. That is what made
+        // SystemIssueRemediationTests.Failing_remediator_caps_attempts_and_
+        // leaves_issue_open flake under load and pass in isolation — it counts
+        // three ticks and got two.
+        //
+        // Reading and writing the schedule with one clock removes the
+        // disagreement. Every other timestamp this dispatcher writes is
+        // already client-side, so client-side is the coherent choice.
+        var cutoffUtc = _clock.GetUtcNow().UtcDateTime;
+
         var batch = await dbContext.SystemIssues
             .FromSqlRaw(
                 """
                 SELECT * FROM system_issues
                 WHERE state = 'open'
                   AND next_remediation_after_utc IS NOT NULL
-                  AND next_remediation_after_utc <= NOW()
+                  AND next_remediation_after_utc <= {2}
                   AND auto_remediation_attempt_count < {0}
                 ORDER BY next_remediation_after_utc
                 LIMIT {1}
                 FOR UPDATE SKIP LOCKED
                 """,
                 _options.MaxRemediationAttempts,
-                _options.RemediationBatchSize)
+                _options.RemediationBatchSize,
+                cutoffUtc)
             .ToListAsync(cancellationToken);
 
         if (batch.Count == 0)
@@ -207,7 +232,7 @@ public sealed class SystemIssueRemediationDispatcher(
                 row.State = SystemIssueStates.AutoResolved;
                 row.ResolutionKind = SystemIssueResolutionKinds.AutoRemediated;
                 row.ResolutionNotes = success.Notes;
-                row.ResolvedAtUtc = DateTime.UtcNow;
+                row.ResolvedAtUtc = _clock.GetUtcNow().UtcDateTime;
                 row.AutoRemediationAttemptCount += 1;
                 row.AutoRemediationLastError = null;
                 row.NextRemediationAfterUtc = null;
@@ -234,7 +259,8 @@ public sealed class SystemIssueRemediationDispatcher(
                 }
                 else
                 {
-                    row.NextRemediationAfterUtc = DateTime.UtcNow + ComputeBackoff(row.AutoRemediationAttemptCount);
+                    row.NextRemediationAfterUtc =
+                        _clock.GetUtcNow().UtcDateTime + ComputeBackoff(row.AutoRemediationAttemptCount);
                 }
                 await auditPublisher.PublishAsync(
                     SystemIssueEventTopic.TopicName,

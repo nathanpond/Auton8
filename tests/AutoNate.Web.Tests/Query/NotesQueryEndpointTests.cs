@@ -30,7 +30,12 @@ public sealed class NotesQueryEndpointTests
         await client.GetAsync("/api/auth/me");
 
         var resp = await client.PostAsJsonAsync("/api/query", new { query = "FROM Notes" });
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        // The endpoint's catch-all turns *any* exception into a 400, so a bare
+        // status assertion reports "Actual: BadRequest" and nothing about why.
+        // #215: carry the body into the failure message.
+        Assert.True(
+            resp.StatusCode == HttpStatusCode.OK,
+            $"Expected OK, got {resp.StatusCode}: {await resp.Content.ReadAsStringAsync()}");
 
         var body = await resp.Content.ReadFromJsonAsync<ExecuteQueryResponseDto>();
         Assert.NotNull(body);

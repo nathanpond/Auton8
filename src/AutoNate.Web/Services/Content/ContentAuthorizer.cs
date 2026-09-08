@@ -17,10 +17,24 @@ public sealed class ContentAuthorizer : IContentAuthorizer
     // edit) with the same actor; each call otherwise re-runs the grant load,
     // membership query, and full closure scan. Memoize by (user, kind, action)
     // so repeat calls within a request collapse to a single computation.
-    // Endpoint flow is sequential await — no Task.WhenAll across this service —
-    // so a plain Dictionary is safe.
-    private readonly Dictionary<(Guid UserId, string Kind, string Action), ContentAccessSet>
+    // #215. This used to say "endpoint flow is sequential await, so a plain
+    // Dictionary is safe" — and it was, until NotesQueryEntity started issuing
+    // five or six GetAllowedIdsAsync calls under one Task.WhenAll. Two of them
+    // completing at once corrupted the Dictionary, and the AQL endpoint's
+    // catch-all turned that into a 400, so `FROM Notes` failed under load with
+    // no clue why. A scoped service cannot require its callers to be
+    // sequential; the gate below is what makes that true rather than hoped for.
+    //
+    // The value is the in-flight Task, not the computed set, so concurrent
+    // callers asking for the same (user, kind, action) share one computation
+    // instead of racing to start two. Sharing the Task also shares its
+    // cancellation and its faults — fine here, because the instance is scoped
+    // to one request and every caller in that request passes that request's
+    // token, so there is no second lifetime to disagree about.
+    private readonly Dictionary<(Guid UserId, string Kind, string Action), Task<ContentAccessSet>>
         _accessSetCache = new();
+
+    private readonly object _accessSetCacheGate = new();
 
     public ContentAuthorizer(
         IDbContextFactory<AutoNateDbContext> dbFactory,
@@ -337,14 +351,21 @@ public sealed class ContentAuthorizer : IContentAuthorizer
         }
 
         var cacheKey = (userId.Value, kind, action);
-        if (_accessSetCache.TryGetValue(cacheKey, out var cached))
+
+        // The lock covers only the lookup-and-store. ComputeAllowedIdsAsync is
+        // async, so calling it here returns at its first await — nothing is
+        // awaited while the gate is held.
+        Task<ContentAccessSet> computation;
+        lock (_accessSetCacheGate)
         {
-            return cached;
+            if (!_accessSetCache.TryGetValue(cacheKey, out computation!))
+            {
+                computation = ComputeAllowedIdsAsync(userId.Value, kind, action, ct);
+                _accessSetCache[cacheKey] = computation;
+            }
         }
 
-        var computed = await ComputeAllowedIdsAsync(userId.Value, kind, action, ct);
-        _accessSetCache[cacheKey] = computed;
-        return computed;
+        return await computation;
     }
 
     private async Task<ContentAccessSet> ComputeAllowedIdsAsync(

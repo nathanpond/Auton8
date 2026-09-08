@@ -12,6 +12,12 @@ public sealed class TestResourceSweepTests
     [Fact]
     public async Task An_orphaned_plugin_role_is_removed()
     {
+        // #215: drain the once-per-process startup sweep before planting, or it can
+        // run concurrently, drop the role first, and leave the sweep below with
+        // nothing to report. Counting drops is the point of this test, so the count
+        // has to be attributable to the call under test.
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
         var role = $"plg_orph{Guid.NewGuid():N}"[..20];
         await ExecuteAsync("postgres", $"create role \"{role}\";");
 
@@ -21,6 +27,77 @@ public sealed class TestResourceSweepTests
 
             Assert.True(counts.Roles > 0, "The sweep reported dropping no roles.");
             Assert.False(await RoleExistsAsync(role), "An orphaned plugin role survived the sweep.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+        }
+    }
+
+    // #215. The sweep listed pg_database and then connected to each name in turn,
+    // and treated ANY failure as "cannot see this database's schemas, so assume
+    // every role is in use" — returning 0 without examining anything. The suite
+    // creates and drops a database per test class in parallel with the sweep, so a
+    // name that was listed and then vanished is the normal case, not an edge one.
+    // The visible symptom was this class failing about eleven minutes into a full
+    // run with "the sweep reported dropping no roles".
+    //
+    // The timing cannot be reproduced from outside, so the database list is
+    // supplied instead: a name that is not there is exactly the state the race
+    // produces. Against the old code this test drops nothing and fails.
+    [Fact]
+    public async Task A_database_that_vanished_mid_sweep_does_not_abort_the_role_pass()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        var role = $"plg_gone{Guid.NewGuid():N}"[..20];
+        await ExecuteAsync("postgres", $"create role \"{role}\";");
+
+        try
+        {
+            // "postgres" is real; the second name was dropped by another test class
+            // between the listing and the connect, as far as this sweep can tell.
+            var dropped = await TestResourceSweep.SweepOrphanedPluginRolesAsync(
+                ["postgres", $"autonate_test_{Guid.NewGuid():N}"]);
+
+            Assert.True(
+                dropped > 0,
+                "A database disappearing mid-sweep aborted the whole role pass; " +
+                "the sweep reported dropping no roles.");
+            Assert.False(
+                await RoleExistsAsync(role),
+                "The orphaned role survived a sweep that should have skipped only the missing database.");
+        }
+        finally
+        {
+            await ExecuteAsync("postgres", $"drop role if exists \"{role}\";");
+        }
+    }
+
+    // The conservative half of the same decision: a database that EXISTS but
+    // cannot be read still stops the pass, because its schemas might be the thing
+    // keeping a role alive. Asserting the skip without this would licence dropping
+    // roles on any connection error.
+    [Fact]
+    public async Task A_database_that_cannot_be_read_still_stops_the_role_pass()
+    {
+        await PostgresTestDatabase.EnsureStartupSweepCompleteAsync();
+
+        var role = $"plg_keep{Guid.NewGuid():N}"[..20];
+        await ExecuteAsync("postgres", $"create role \"{role}\";");
+
+        try
+        {
+            // A real database this connection is refused on: connecting as a role
+            // with no CONNECT privilege fails with something other than
+            // "database does not exist".
+            var dropped = await TestResourceSweep.SweepOrphanedPluginRolesAsync(
+                ["postgres", "template0"]);
+
+            Assert.Equal(0, dropped);
+            Assert.True(
+                await RoleExistsAsync(role),
+                "A role was dropped even though a live database's schemas could not be read.");
         }
         finally
         {

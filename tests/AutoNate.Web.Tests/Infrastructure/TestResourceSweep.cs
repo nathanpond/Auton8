@@ -52,13 +52,21 @@ internal static class TestResourceSweep
     /// <summary>
     /// Drops `plg_*` roles that no live database has a schema for.
     /// </summary>
-    private static async Task<int> SweepOrphanedPluginRolesAsync()
+    private static async Task<int> SweepOrphanedPluginRolesAsync() =>
+        await SweepOrphanedPluginRolesAsync(databases: null);
+
+    // #215. The database list is injectable so a test can include a name that is
+    // not there — the state the sweep is really exposed to, because the suite
+    // drops a database per test class in parallel with it. Reproducing that by
+    // timing is not possible from outside; supplying the list is exact.
+    internal static async Task<int> SweepOrphanedPluginRolesAsync(
+        IReadOnlyList<string>? databases)
     {
         var roles = await QueryStringsAsync("postgres",
             "select rolname from pg_roles where rolname like 'plg\\_%';");
         if (roles.Count == 0) return 0;
 
-        var databases = await QueryStringsAsync("postgres",
+        databases ??= await QueryStringsAsync("postgres",
             "select datname from pg_database where datistemplate = false and datallowconn;");
 
         // Every schema name in use anywhere. A role matching one of these is
@@ -74,10 +82,24 @@ internal static class TestResourceSweep
                     schemasInUse.Add(schema);
                 }
             }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InvalidCatalogName)
+            {
+                // #215. The database was dropped between listing pg_database and
+                // connecting to it — which happens constantly, because the suite
+                // creates and drops a database per test class in parallel with this
+                // sweep. A database that no longer exists holds no schemas, so it
+                // constrains nothing and skipping it is exact, not a guess.
+                //
+                // This used to fall into the bail-out below, so a sweep running
+                // alongside a busy suite returned 0 having examined nothing. The
+                // visible symptom was TestResourceSweepTests reporting "the sweep
+                // dropped no roles" about eleven minutes into a full run.
+            }
             catch (PostgresException)
             {
-                // Unreachable database: treat every role as in use rather than
-                // risk dropping one whose schema we simply could not see.
+                // A database that exists but could not be read. Unlike the case
+                // above we genuinely cannot see its schemas, so treat every role as
+                // in use rather than risk dropping one that is serving a plugin.
                 return 0;
             }
         }

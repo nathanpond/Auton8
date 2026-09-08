@@ -168,7 +168,8 @@ public sealed class SystemIssueRemediationTests
     private static SystemIssueRemediationDispatcher CreateDispatcher(
         PostgresTestDatabase db,
         IIssueRemediator remediator,
-        SystemIssueOptions? options = null)
+        SystemIssueOptions? options = null,
+        TimeProvider? clock = null)
     {
         var services = new ServiceCollection().BuildServiceProvider();
         return new SystemIssueRemediationDispatcher(
@@ -182,7 +183,84 @@ public sealed class SystemIssueRemediationTests
                 RemediationBaseBackoff = TimeSpan.FromMilliseconds(1),
                 RemediationMaxBackoff = TimeSpan.FromMilliseconds(1)
             }),
-            logger: NullLogger<SystemIssueRemediationDispatcher>.Instance);
+            logger: NullLogger<SystemIssueRemediationDispatcher>.Instance,
+            timeProvider: clock);
+    }
+
+    // A fixed clock. Enough for these two tests: neither advances time.
+    private sealed class FrozenClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    // #215. next_remediation_after_utc is written from the dispatcher's clock,
+    // and the eligibility query used to compare it against the database
+    // server's NOW(). Two clocks, and the suite runs against Postgres in a VM
+    // whose clock drifts under host CPU pressure — a row scheduled with zero
+    // backoff landed a few milliseconds "in the future" as far as the server
+    // was concerned, so the next tick skipped it. That is what made
+    // Failing_remediator_caps_attempts_and_leaves_issue_open count three ticks
+    // and get two under load while passing in isolation.
+    //
+    // These two tests pin the property that removes the disagreement: the
+    // window is decided by the dispatcher's own clock. Both would fail against
+    // a server-clock comparison, which is the point — a test that only ran the
+    // dispatcher at real "now" cannot tell the two implementations apart.
+    [Fact]
+    public async Task A_dispatcher_whose_clock_is_behind_does_not_pick_up_a_due_row()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var store = new EfCoreSystemIssueStore(
+            db.CreateDbContextFactory(), new NoopAuditEventPublisher(), new NoopCriticalIssueNotifier());
+
+        await store.RecordAsync(new SystemIssueDraft(
+            DetectorId: AlwaysFailRemediator.DetectorIdValue,
+            Category: SystemIssueCategories.Bus,
+            Severity: SystemIssueSeverities.Error,
+            Fingerprint: "synthetic:clock-behind",
+            Title: "due by the server's clock, not the dispatcher's",
+            RemediationDueAtUtc: DateTime.UtcNow));
+
+        // An hour behind. The row is long due by the server's NOW(), so a
+        // server-clock comparison would dispatch it.
+        var dispatcher = CreateDispatcher(
+            db,
+            new AlwaysFailRemediator(),
+            clock: new FrozenClock(DateTimeOffset.UtcNow.AddHours(-1)));
+
+        Assert.Equal(0, await dispatcher.DispatchBatchAsync(CancellationToken.None));
+
+        await using var read = db.CreateDbContext();
+        var issue = Assert.Single(await read.SystemIssues.AsNoTracking().ToListAsync());
+        Assert.Equal(0, issue.AutoRemediationAttemptCount);
+    }
+
+    [Fact]
+    public async Task A_dispatcher_whose_clock_is_ahead_picks_up_a_row_scheduled_for_later()
+    {
+        await using var db = await PostgresTestDatabase.CreateAsync();
+        var store = new EfCoreSystemIssueStore(
+            db.CreateDbContextFactory(), new NoopAuditEventPublisher(), new NoopCriticalIssueNotifier());
+
+        // Scheduled half an hour out: not yet due by the server's clock.
+        await store.RecordAsync(new SystemIssueDraft(
+            DetectorId: AlwaysFailRemediator.DetectorIdValue,
+            Category: SystemIssueCategories.Bus,
+            Severity: SystemIssueSeverities.Error,
+            Fingerprint: "synthetic:clock-ahead",
+            Title: "not yet due by the server's clock",
+            RemediationDueAtUtc: DateTime.UtcNow.AddMinutes(30)));
+
+        var dispatcher = CreateDispatcher(
+            db,
+            new AlwaysFailRemediator(),
+            clock: new FrozenClock(DateTimeOffset.UtcNow.AddHours(1)));
+
+        Assert.Equal(1, await dispatcher.DispatchBatchAsync(CancellationToken.None));
+
+        await using var read = db.CreateDbContext();
+        var issue = Assert.Single(await read.SystemIssues.AsNoTracking().ToListAsync());
+        Assert.Equal(1, issue.AutoRemediationAttemptCount);
     }
 
     private static async Task<AuditOutboxEntry> SeedDeadLetterAsync(

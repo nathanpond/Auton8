@@ -3052,3 +3052,91 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   and invisible to CI because its class carries `RequiresService=Flowable`, which CI
   excludes by trait.
   **Issue:** #214, #221
+
+- **Decision:** all three flaky classes were diagnosed separately, and they had
+  **three different causes** — which is why the story insisted on it.
+  1. `SystemIssueEndpointsTests` — the process-global `BackgroundExceptionTrap`,
+     as the story predicted. Fixed in test wiring only.
+  2. `NotesQueryEndpointTests` — **not** the trap. `ContentAuthorizer` memoizes
+     `GetAllowedIdsAsync` in a plain `Dictionary` on the scoped instance, on a
+     premise its own comment stated: "endpoint flow is sequential await — no
+     `Task.WhenAll` across this service". `NotesQueryEntity` broke that premise,
+     issuing five or six of those calls under one `Task.WhenAll`. Concurrent
+     writes corrupted the Dictionary; the AQL endpoint catches everything and
+     returns 400, so the only visible symptom was `Expected: OK / Actual:
+     BadRequest`. A **production** bug, not a test artifact.
+  3. `SystemIssueRemediationTests` — neither of the above. The eligibility query
+     compared `next_remediation_after_utc` (written from the client clock)
+     against Postgres's `NOW()`. Two clocks; the VM's drifts under host CPU
+     pressure, so a zero-backoff row read as a few milliseconds in the future
+     and the tick skipped it. The test counts three ticks and got two.
+  **Why:** the story's warning was right — the trap is a real cause for exactly
+  one of the three, and had I let it explain all three, two genuine defects
+  (one of them shipping) would have been closed as fixed.
+  **Issue:** #215
+
+- **Decision:** `ContentAuthorizer`'s memo now stores the in-flight `Task` behind
+  a lock rather than the computed value.
+  **Why:** guarding only the writes would stop the corruption but let N
+  simultaneous callers each run the computation the memo exists to avoid. The
+  lock covers lookup-and-store only — `ComputeAllowedIdsAsync` is async, so
+  nothing is awaited while it is held.
+  **Rejected:** `ConcurrentDictionary.GetOrAdd`, whose factory can run more than
+  once; the losing task still executes and, if it faults, becomes an unobserved
+  task exception — which is what #215's other cause is about.
+  **Issue:** #215
+
+- **Decision:** `SystemIssueRemediationDispatcher` took an optional
+  `TimeProvider` (defaulting to `TimeProvider.System`, so production is
+  unchanged), and its eligibility query now compares against that clock.
+  **Why:** without a clock seam the fix is untestable — a test that runs the
+  dispatcher at real "now" cannot distinguish a client-clock comparison from a
+  server-clock one, and the guard would have been a source-grep assertion. With
+  it, two tests move the clock an hour either way and fail against the old
+  implementation in both directions. Verified by reverting the SQL and watching
+  them fail 2/6, then restoring.
+  **Issue:** #215
+
+- **Method note:** every regression test here was run against the pre-fix state
+  first, and the first two versions of `ContentAuthorizerConcurrencyTests`
+  **passed** pre-fix — they were vacuous. The principal was built from
+  `LocalUser.Id` (a `long`) rather than `LocalUser.UserId` (the `Guid` the
+  identity claim carries), so every call short-circuited to the
+  `ContentAccessSet.Empty` singleton before reaching the memo. A barrier alone
+  was also not enough: on a warm connection the computation completes without
+  yielding, so callers never overlap. The test now asserts the actor resolves,
+  and wraps the DbContext factory to force a real yield.
+  **Why recorded:** a concurrency test that passes before the fix is worse than
+  none — it certifies the bug as fixed.
+  **Issue:** #215
+
+- **Discovered during verification: a fourth flaky class — and my first
+  diagnosis of it was wrong.**
+  `TestResourceSweepTests.An_orphaned_plugin_role_is_removed` (from #214) failed
+  in two of the first three full runs with "The sweep reported dropping no
+  roles." I first blamed the once-per-process startup sweep in
+  `PostgresTestDatabase.CreateAsync` racing the test's plant, and made the test
+  drain it. The next three runs failed the same way — and the timestamps said
+  why: the failure lands about **eleven minutes** into a run, nowhere near
+  startup.
+  **The real cause is a defect in the sweep itself.**
+  `SweepOrphanedPluginRolesAsync` lists `pg_database`, connects to each name, and
+  treated **any** failure as "cannot see this database's schemas, so assume every
+  role is in use" — `return 0`, having examined nothing. The suite creates and
+  drops a database per test class in parallel with the sweep, so a name that was
+  listed and has since vanished is the *normal* case. Under load the cluster-wide
+  sweep silently did nothing and reported zero, which is worse than the flake it
+  surfaced as: #214's sweep was not sweeping.
+  **Fix:** a vanished database (`3D000`) is skipped — it holds no schemas, so it
+  constrains nothing and skipping it is exact. A database that exists but cannot
+  be read keeps the conservative bail-out, since its schemas might be what keeps
+  a role alive. Both halves are asserted.
+  **Testability:** the timing cannot be reproduced from outside, so the database
+  list is injectable and the test supplies a name that is not there. Verified by
+  restoring the single broad `catch` and watching the vanished-database test fail.
+  **The drain added by the wrong diagnosis was kept** — it closes a real if
+  narrower window (the count assertion assumes no other sweeper is running) — but
+  it was not the cause, and this entry says so rather than leaving it looking like
+  the fix.
+  **Rule 1** (bug in code this story touches, fixed with the story).
+  **Issue:** #215, #214
