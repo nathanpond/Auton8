@@ -371,11 +371,11 @@
     {
       "name": "Cancel Boundary",
       "category": "Boundary Events",
-      "studio": "coming-soon",
-      "engine": "executes",
+      "studio": "withdrawn",
+      "engine": "cannot-execute",
       "localName": "boundaryEvent",
       "eventDefinition": "cancel",
-      "reason": null,
+      "reason": "#220 descoped: the BPMN rollback idiom fails at runtime on Flowable 8.0.0 -- the boundary cannot resolve the transaction execution, and one path corrupts act_ru_execution with a foreign-key violation. Engine defect, tracked in #228.",
       "evidence": "BoundaryCancelEventActivityBehavior ships; minimal transaction completed before the cancel applied"
     },
     {
@@ -431,11 +431,11 @@
     {
       "name": "Cancel End",
       "category": "End Events",
-      "studio": "coming-soon",
-      "engine": "executes",
+      "studio": "withdrawn",
+      "engine": "cannot-execute",
       "localName": "endEvent",
       "eventDefinition": "cancel",
-      "reason": null,
+      "reason": "#220 descoped: raising cancel from inside a transaction fails at runtime on Flowable 8.0.0. Engine defect, tracked in #228.",
       "evidence": "CancelEndEventActivityBehavior ships; same fixture limitation"
     },
     {
@@ -521,11 +521,11 @@
     {
       "name": "Transaction",
       "category": "Sub-Processes",
-      "studio": "coming-soon",
-      "engine": "executes",
+      "studio": "withdrawn",
+      "engine": "cannot-execute",
       "localName": "transaction",
       "eventDefinition": null,
-      "reason": null,
+      "reason": "#220 descoped: the container deploys and runs, but its distinguishing behaviour -- rollback via cancel events -- does not (#228). Offering it would be offering a subprocess under a name that promises rollback it cannot do.",
       "evidence": "deployed and started"
     },
     {

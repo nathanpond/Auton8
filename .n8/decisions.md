@@ -3631,3 +3631,66 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   across two instances with a global signal, where B hearing it proves the signal
   left A. Same class as #162's interrupting-event-subprocess probe.
   **Issue:** #156
+
+## /n8-plan M4 (re-plan to clear blockers) — 2026-09-08
+
+- **#220 descoped on engine evidence (user's call).** A transaction subprocess
+  with a cancel end event and a cancel boundary — the BPMN rollback idiom —
+  **fails at runtime on Flowable 8.0.0**, with two distinct errors: "No execution
+  found for sub process of boundary cancel event", and a Postgres **foreign-key
+  violation inside `act_ru_execution`**. The diagram is valid BPMN; the failure is
+  in the engine's own execution-tree bookkeeping.
+  **Withdrawn:** `Cancel Boundary`, `Cancel End`, and `Transaction` — the last
+  deliberately, because the container works but offering it would promise rollback
+  it cannot do. Departure declared in `BpmnSupportManifestTests`, not edited in
+  quietly.
+  **Tracked in #228** so the defect outlives the story.
+  **Compensation is NOT withdrawn.** Probed separately and it works: the handler
+  ran and execution continued. #115 stands on its own. Recorded explicitly because
+  the two are usually described together and withdrawing both by association would
+  have removed a working feature.
+  **Issue:** #220, #228, #115
+
+- **#163's missing piece is a REST surface, not engine support (user's call: build
+  it).** An ad-hoc subprocess deploys, runs, and parks correctly with no tasks —
+  the engine supports choosing an activity internally. What does not exist is any
+  HTTP way to enumerate or start one: `enabled-activities` returns **500** on both
+  the execution and process-instance routes. Added scope: two endpoints in
+  `flowable-extension/`, which is where engine gaps belong and already ships in the
+  Flowable image with its own Java tests.
+  **Issue:** #163
+
+- **#225: publish will run the FULL validation set (user's call).** Every rule was
+  written as a gate and has only ever been advisory; three consecutive stories were
+  built assuming publish gates. The hand-curated
+  `ValidateStructureForPublish` subset goes away.
+  **The care this needs:** it can reject diagrams that publish today, so the story
+  requires counting how many stored models would now be refused as *evidence*
+  rather than discovering it on someone's next save.
+  **#226 folded into it** — same species one endpoint over: a caller error answered
+  as 500 rather than 4xx.
+  **Issue:** #225, #226
+
+- **#223 fixed BEFORE #218 and #219 (user's call).** #112 and #114 both shipped
+  with the workaround, and #114 still carries an unticked criterion because of it.
+  A third and fourth story doing the same would make the workaround the norm.
+  #218 and #219 are now labelled blocked and sequenced behind it. Its definition of
+  done includes #114's blocked criterion becoming demonstrable — a fix that does
+  not enable that has not solved the problem.
+  **Issue:** #223, #218, #219, #114
+
+- **Triage of the rest:** #222 → not an M4 story, input to M5's operator-visibility
+  work (it is why #168's last criterion stays unticked, and the coupling it
+  describes — marking a retry point is also what makes a failure visible — is worth
+  M5 seeing). #227 → left open for the pages/menus area, deliberately not closed as
+  "flaky" given that all four of #215's flakes had distinct real causes. #221 →
+  closed on consistent passing, with the stale-container explanation recorded as
+  correlation rather than proven cause.
+  **Issue:** #222, #226, #227, #221
+
+- **#162's open question carried out as #229** so it survives that story closing:
+  an interrupting event subprocess beside the error end event in the SAME scope
+  left a parallel sibling running, while the canonical shape cancels correctly.
+  Not filed as a defect — filed as a difference an author can draw without knowing
+  it exists, needing a decision either way.
+  **Issue:** #229, #162

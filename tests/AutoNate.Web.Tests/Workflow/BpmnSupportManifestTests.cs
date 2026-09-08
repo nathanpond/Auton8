@@ -265,6 +265,22 @@ public sealed class BpmnSupportManifestTests
             // verdict is defensible for what it measured — the element runs — and
             // the departure is that it does not do the one thing it exists for.
             ["Signal End"] = BpmnSupportManifest.EngineExecutes,
+
+            // #220 / #228. The inventory's "executes" is right about what it
+            // measured — all three deploy and a transaction subprocess runs — and
+            // wrong about the only thing they exist for. The BPMN rollback idiom
+            // (cancel end inside, cancel boundary outside) fails at RUNTIME on
+            // Flowable 8.0.0: the boundary cannot resolve the transaction's
+            // execution, and one path corrupts act_ru_execution with a foreign-key
+            // violation. That is an engine defect, not a modelling error.
+            //
+            // Marked cannot-execute and withdrawn. Compensation is deliberately
+            // NOT included here: probed separately, it works, so #115 stands on
+            // its own — the two are usually described together and it would be
+            // easy to withdraw both by association.
+            ["Cancel Boundary"] = BpmnSupportManifest.EngineCannotExecute,
+            ["Cancel End"] = BpmnSupportManifest.EngineCannotExecute,
+            ["Transaction"] = BpmnSupportManifest.EngineCannotExecute,
         };
 
         var rows = JsonNode.Parse(File.ReadAllText(InventoryRowsPath))!.AsArray();
