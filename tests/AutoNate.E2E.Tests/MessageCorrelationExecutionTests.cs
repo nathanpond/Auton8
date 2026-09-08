@@ -443,6 +443,62 @@ public sealed class MessageCorrelationExecutionTests : E2ETestBase
             """;
     }
 
+    [Fact]
+    public async Task A_send_task_sends_through_the_same_behaviour_mechanism()
+    {
+        // #112's send-task criterion, which the original tests never exercised as
+        // an element — they covered the expanded throw and end events, which take
+        // the same route but are not a sendTask.
+        //
+        // Same topology limit as those (#223): the behaviour runs against a
+        // different app and database than the test publishes to, so what is
+        // assertable here is that the element DEPLOYS and RUNS the behaviour, with
+        // delivery proved separately by the endpoint tests above.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var receiverKey = $"mc_src_{Guid.NewGuid():N}"[..24];
+        var senderKey = $"mc_snt_{Guid.NewGuid():N}"[..24];
+        var messageName = $"{receiverKey}_shipped";
+
+        await PublishAsync(api, receiverKey, ReceiverDiagram(receiverKey, messageName));
+        await PublishAsync(api, senderKey, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="{{senderKey}}" name="Send Task" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="send" />
+                <bpmn:sendTask id="send" name="Tell them"
+                               flowable:delegateExpression="${autonateBehaviorDelegate}"
+                               flowable:autonateServiceKind="behavior"
+                               flowable:behaviorKey="autonate.send-message"
+                               flowable:autonateMessageName="{{messageName}}"
+                               flowable:autonateTargetProcessKey="{{receiverKey}}"
+                               flowable:autonateCorrelationKey="orderId"
+                               flowable:async="true" />
+                <bpmn:sequenceFlow id="f1" sourceRef="send" targetRef="after" />
+                <bpmn:userTask id="after" name="After sending" />
+              </bpmn:process>
+              {{Di(senderKey, "s", "send", "after")}}
+            </bpmn:definitions>
+            """);
+
+        var sender = await StartAsync(api, senderKey, new { orderId = "ORD-S" });
+
+        // A send task is not a wait state: execution continues past it.
+        await EventuallyAsync(api, sender,
+            names => names.Contains("After sending"), "the sender to continue past the send task");
+
+        // And it really invoked the send behaviour rather than being an inert
+        // task — the behaviour writes its outcome whatever that outcome is.
+        var outcome = await ReadProcessVariableAsync(sender, SendMessageResultVariable);
+        Assert.False(
+            string.IsNullOrWhiteSpace(outcome),
+            $"The send task did not run the send behaviour: no {SendMessageResultVariable} was written.");
+    }
+
     // start -> catch("paymentCleared", correlate on orderId) -> "Paid",
     // with a user task in front so the instance is observable while it waits.
     private static string CatchDiagram(string key) => $$"""

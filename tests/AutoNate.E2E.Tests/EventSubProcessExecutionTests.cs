@@ -227,6 +227,103 @@ public sealed class EventSubProcessExecutionTests : E2ETestBase
         Assert.Contains("Condition met", names);
         // Non-interrupting: the guarded work carries on.
         Assert.Contains("Ongoing work", names);
+
+        // The handler can read the containing scope's variables. This is not
+        // incidental: the condition itself is evaluated against `escalate`, so a
+        // handler that could not see the scope's variables could not have fired at
+        // all — and the variable is read back here rather than inferred from that.
+        Assert.Equal(
+            "true",
+            (await ReadProcessVariableAsync(instance, "escalate"))?.ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task A_timer_handler_fires_on_its_own_schedule()
+    {
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"esp_t_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, key, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="{{key}}" name="Timer Handler" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="ongoing" />
+                <bpmn:userTask id="ongoing" name="Ongoing work" />
+                <bpmn:subProcess id="handler" name="Handler" triggeredByEvent="true">
+                  <bpmn:startEvent id="hs" isInterrupting="false">
+                    <bpmn:timerEventDefinition>
+                      <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT2S</bpmn:timeDuration>
+                    </bpmn:timerEventDefinition>
+                  </bpmn:startEvent>
+                  <bpmn:sequenceFlow id="hf" sourceRef="hs" targetRef="ht" />
+                  <bpmn:userTask id="ht" name="Timer fired" />
+                </bpmn:subProcess>
+              </bpmn:process>
+              {{Di(key, "s", "ongoing", "handler")}}
+            </bpmn:definitions>
+            """);
+
+        var instance = await StartAsync(api, key);
+        Assert.DoesNotContain("Timer fired", await TaskNamesAsync(api, instance));
+
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("Timer fired"), "the timer handler to fire");
+
+        Assert.Contains("Timer fired", names);
+        // Non-interrupting: the guarded work is untouched.
+        Assert.Contains("Ongoing work", names);
+    }
+
+    [Fact]
+    public async Task A_signal_handler_runs_when_its_signal_is_raised()
+    {
+        // Signal SCOPE is #156's subject and is blocked on a contradiction in its
+        // own definition. Nothing here depends on it: this asserts that a signal
+        // start event inside an event subprocess catches a signal raised in the
+        // same instance, which is true under every scope #156 might choose.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var key = $"esp_s_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, key, $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:signal id="Sig_1" name="{{key}}_raise" />
+              <bpmn:process id="{{key}}" name="Signal Handler" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="fork" />
+                <bpmn:parallelGateway id="fork" />
+                <bpmn:sequenceFlow id="f1" sourceRef="fork" targetRef="ongoing" />
+                <bpmn:userTask id="ongoing" name="Ongoing work" />
+                <bpmn:sequenceFlow id="f2" sourceRef="fork" targetRef="raise" />
+                <bpmn:intermediateThrowEvent id="raise">
+                  <bpmn:signalEventDefinition signalRef="Sig_1" />
+                </bpmn:intermediateThrowEvent>
+                <bpmn:sequenceFlow id="f3" sourceRef="raise" targetRef="afterRaise" />
+                <bpmn:userTask id="afterRaise" name="After raising" />
+                <bpmn:subProcess id="handler" name="Handler" triggeredByEvent="true">
+                  <bpmn:startEvent id="hs" isInterrupting="false">
+                    <bpmn:signalEventDefinition signalRef="Sig_1" />
+                  </bpmn:startEvent>
+                  <bpmn:sequenceFlow id="hf" sourceRef="hs" targetRef="ht" />
+                  <bpmn:userTask id="ht" name="Signal handled" />
+                </bpmn:subProcess>
+              </bpmn:process>
+              {{Di(key, "s", "fork", "ongoing", "raise", "afterRaise", "handler")}}
+            </bpmn:definitions>
+            """);
+
+        var instance = await StartAsync(api, key);
+        var names = await EventuallyAsync(api, instance,
+            n => n.Contains("Signal handled"), "the signal handler to run");
+
+        Assert.Contains("Signal handled", names);
+        Assert.Contains("Ongoing work", names);
     }
 
     [Fact]
@@ -291,6 +388,28 @@ public sealed class EventSubProcessExecutionTests : E2ETestBase
           {{Di(key, "s", "fork", "ongoing", "inner", "handler")}}
         </bpmn:definitions>
         """;
+
+    /// <summary>Reads one process variable straight from the engine.</summary>
+    private static async Task<string?> ReadProcessVariableAsync(string processInstanceId, string name)
+    {
+        using var client = Support.FlowableDeploymentSweep.CreateClient(
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_URL") ?? "http://localhost:8080/flowable-rest",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_USER") ?? "rest-admin",
+            Environment.GetEnvironmentVariable("AUTONATE_FLOWABLE_PASSWORD") ?? "test");
+
+        var body = await client.GetStringAsync(
+            $"service/runtime/process-instances/{Uri.EscapeDataString(processInstanceId)}/variables");
+        using var document = JsonDocument.Parse(body);
+        foreach (var variable in document.RootElement.EnumerateArray())
+        {
+            if (variable.GetProperty("name").GetString() == name)
+            {
+                return variable.TryGetProperty("value", out var value) ? value.ToString() : null;
+            }
+        }
+
+        return null;
+    }
 
     private static string Di(string processKey, params string[] elementIds)
     {

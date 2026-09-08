@@ -4069,6 +4069,20 @@ function CallActivityModal({
           behaviour underneath you.
         </Text>
 
+        {/* #113. Both of these are consequences of pinning that an author has to
+            be told, because neither is guessable from the diagram. */}
+        <Alert color="blue" variant="light" title="Two things to know">
+          <Text size="sm">
+            <strong>To pick up a newer version of the other workflow, publish this one again.</strong>{" "}
+            That is the only way to move a call activity forward &mdash; which is deliberate, but it
+            does mean a fix to a shared workflow reaches callers only as each is republished.
+          </Text>
+          <Text size="sm" mt="xs">
+            <strong>Cancelling a run of this workflow also cancels the run it started here.</strong>{" "}
+            The other workflow&apos;s run ends with the same reason; it is not left going on its own.
+          </Text>
+        </Alert>
+
         <Group gap="xs" wrap="wrap">
           <Code>{editor.id}</Code>
           <Code>{editor.type}</Code>

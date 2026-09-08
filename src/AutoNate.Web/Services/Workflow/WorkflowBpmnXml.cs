@@ -178,10 +178,26 @@ public static partial class WorkflowBpmnXml
             if (element.Name.Namespace != BpmnNamespace) continue;
 
             var localName = element.Name.LocalName;
-            if (localName is not ("intermediateThrowEvent" or "endEvent")) continue;
+
+            // #112 (completed later, when a test finally exercised the element).
+            // A sendTask cannot carry the behaviour bridge either: Flowable
+            // refuses it outright —
+            //   'flowable-sendtask-invalid-implementation': One of the attributes
+            //   'type' or 'operation' is mandatory on sendTask
+            // — so the criterion "a send task sends through the behaviour
+            // mechanism service tasks already use" is unreachable as written. It
+            // is reachable by the same route the throw events take: the author
+            // draws a send task and configures it like a service task, and publish
+            // turns it into one.
+            var isSendTask = localName == "sendTask"
+                && string.Equals(
+                    element.Attribute(FlowableNamespace + "behaviorKey")?.Value,
+                    SendMessageBehaviorKey, StringComparison.Ordinal);
+
+            if (localName is not ("intermediateThrowEvent" or "endEvent") && !isSendTask) continue;
 
             var definition = element.Elements(BpmnNamespace + "messageEventDefinition").FirstOrDefault();
-            if (definition is null) continue;
+            if (definition is null && !isSendTask) continue;
 
             var elementId = element.Attribute("id")?.Value;
             if (string.IsNullOrWhiteSpace(elementId)) continue;
@@ -191,7 +207,7 @@ public static partial class WorkflowBpmnXml
             // The service task keeps the ORIGINAL id, so every sequence flow and
             // every BPMNShape that references it stays valid without rewriting a
             // single one.
-            definition.Remove();
+            definition?.Remove();
             element.Name = BpmnNamespace + "serviceTask";
             element.SetAttributeValue(FlowableNamespace + "delegateExpression", AutoNateBehaviorDelegateExpression);
             element.SetAttributeValue(FlowableNamespace + "autonateServiceKind", ServiceTaskBehaviorKind);

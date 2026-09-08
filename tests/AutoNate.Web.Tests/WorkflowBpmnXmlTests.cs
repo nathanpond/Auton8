@@ -1723,6 +1723,68 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Single(XDocument.Parse(twice).Descendants(bpmn + "serviceTask"));
     }
 
+    // #112, completed after a test finally exercised the element. Flowable refuses
+    // a sendTask carrying a delegateExpression — "one of the attributes 'type' or
+    // 'operation' is mandatory on sendTask" — so the behaviour bridge reaches it
+    // by the same publish-time route the throw events take.
+    [Fact]
+    public void ExpandForDeployment_ExpandsASendTaskOnTheBehaviourBridge()
+    {
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="sender" name="Sender" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="send" />
+                               <bpmn:sendTask id="send" name="Tell them"
+                                              flowable:behaviorKey="autonate.send-message"
+                                              flowable:autonateTargetProcessKey="receiver" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+        XNamespace flowable = "http://flowable.org/bpmn";
+
+        Assert.Empty(document.Descendants(bpmn + "sendTask"));
+
+        var serviceTask = document.Descendants(bpmn + "serviceTask").Single();
+        Assert.Equal("send", serviceTask.Attribute("id")?.Value);
+        Assert.Equal("${autonateBehaviorDelegate}", serviceTask.Attribute(flowable + "delegateExpression")?.Value);
+        Assert.Equal("autonate.send-message", serviceTask.Attribute(flowable + "behaviorKey")?.Value);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesASendTaskItDoesNotOwnAlone()
+    {
+        // A send task wired to something else is not ours to rewrite — an author
+        // may legitimately use Flowable's own `type`/`operationRef` route, which
+        // is what the manifest's Send Task departure already records.
+        const string xml = """
+                           <?xml version="1.0" encoding="UTF-8"?>
+                           <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                             xmlns:flowable="http://flowable.org/bpmn"
+                                             id="Definitions_1"
+                                             targetNamespace="http://autonate.dev/workflows">
+                             <bpmn:process id="sender" name="Sender" isExecutable="true">
+                               <bpmn:startEvent id="s" />
+                               <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="send" />
+                               <bpmn:sendTask id="send" name="Mail" flowable:type="mail" />
+                             </bpmn:process>
+                           </bpmn:definitions>
+                           """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        XNamespace bpmn = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+        Assert.Single(document.Descendants(bpmn + "sendTask"));
+        Assert.Empty(document.Descendants(bpmn + "serviceTask"));
+    }
+
     [Fact]
     public void ExpandForDeployment_LeavesAPlainEndEventAlone()
     {

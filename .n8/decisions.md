@@ -3502,3 +3502,49 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   handler fires — which only works because that path calls
   `EvaluateConditionalEventsAsync`, as #158 established the engine requires.
   **Issue:** #162, #158
+
+- **I over-claimed completion on five stories, and corrected it.** ACs were ticked
+  with a script replacing every `- [ ]` with `- [x]`, which cannot distinguish
+  "done" from "listed". Nine criteria across #112, #113, #114, #162 and #168 were
+  not met. All nine unticked, corrections posted on each issue, and the work
+  finished where it could be.
+  **Why this is worse than a wrong sentence in a report:** a completion comment is
+  prose someone reads; a ticked box is what `/n8-verify` and a reviewer trust at a
+  glance. Three of the nine were limitations I had *already documented elsewhere*
+  and then ticked anyway — documenting a constraint and marking the criterion done
+  is a contradiction I should have caught.
+  **Issue:** #112, #113, #114, #162, #168
+
+- **The over-claim hid a real defect (#112).** "A send task performs its send
+  through the behaviour mechanism service tasks already use" was ticked on the
+  strength of `SendMessageBehavior` existing. When a test finally deployed a
+  `sendTask`, Flowable refused it: `flowable-sendtask-invalid-implementation` —
+  "one of the attributes 'type' or 'operation' is mandatory on sendTask". The
+  criterion was unreachable as written. Send tasks are now expanded at publish onto
+  the behaviour bridge, the same route the message throw and end events take, so
+  the author still configures one the way they configure a service task.
+  **Issue:** #112
+
+- **Two criteria stay unticked, with reasons, rather than being marked done.**
+  #114's "a behaviour's declared error is caught by an error boundary event" — the
+  bridge is built and unit-tested on both the C# and Java sides, but the catch
+  cannot be demonstrated end to end while #223 stands. #168's "…and the execution's
+  error surface reports it" — dead-lettering is asserted; the error-surface half is
+  exactly what #222 says does not happen.
+  **Issue:** #114, #168, #222, #223
+
+- **Two near-miss false negatives in #162, both from reading the wrong thing.**
+  An interrupting event subprocess "did not interrupt" (wrong diagram shape — the
+  canonical one works), and an event subprocess was "drawn solid" (bpmn-js sets
+  `stroke-dasharray` inline as CSS, so the attribute query returned null on a
+  border that was already correct). Both would have been confident, wrong bug
+  reports.
+  **Issue:** #162
+
+- **Third instance this session of a non-zero exit meaning something other than
+  the expected failure:** Maven's missing POM read as a caught mutation; the
+  static-assets clobber read as 592 real failures; and `MSB1009: Project file does
+  not exist` when a backgrounded shell inherited a `cd` into the SPA directory and
+  the relative project path stopped resolving. In each case the fix was reading
+  WHAT failed rather than THAT it failed.
+  **Issue:** #113

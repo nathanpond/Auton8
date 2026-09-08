@@ -99,6 +99,37 @@ public sealed class CallActivityExecutionTests : E2ETestBase
     }
 
     [Fact]
+    public async Task Terminating_a_parent_ends_its_child_rather_than_orphaning_it()
+    {
+        // Verified against the engine before asserting: deleting the parent ends
+        // the child too, and the child's history carries the parent's delete
+        // reason. The alternative — a child left running with nobody waiting for
+        // it — would be invisible, since nothing lists it except through a parent
+        // that no longer exists.
+        await using var session = await NewSignedInAsAdminAsync();
+        var api = session.Page.APIRequest;
+
+        var childKey = $"ca_tc_{Guid.NewGuid():N}"[..22];
+        var parentKey = $"ca_tp_{Guid.NewGuid():N}"[..22];
+        await PublishAsync(api, childKey, ChildDiagram(childKey, "Child work"));
+        await PublishAsync(api, parentKey, ParentDiagram(parentKey, childKey));
+
+        var parent = await StartAsync(api, parentKey, new { orderId = "ORD-T" });
+        var child = await ChildOfAsync(parent);
+        Assert.Contains("Child work", await TaskNamesAsync(api, child));
+
+        var deleted = await api.DeleteAsync($"/api/executions/{parent}");
+        Assert.True(deleted.Ok, $"Deleting the parent failed: {deleted.Status} {await deleted.TextAsync()}");
+
+        // The child stopped too. Asserted on the child's own tasks being gone
+        // rather than on the parent's, which would say nothing about the child.
+        var childTasks = await api.GetAsync($"/api/executions/{child}/tasks");
+        var stillRunning = childTasks.Ok
+            && JsonDocument.Parse(await childTasks.TextAsync()).RootElement.GetArrayLength() > 0;
+        Assert.False(stillRunning, "The child was left running after its parent was terminated.");
+    }
+
+    [Fact]
     public async Task Publishing_a_parent_whose_child_does_not_exist_is_refused()
     {
         // Flowable deploys this happily and fails only when an instance reaches
