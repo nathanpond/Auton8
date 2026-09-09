@@ -60,6 +60,20 @@ public class FlowableExecutionEventAutoConfiguration {
         return new AutoNateBehaviorDelegate(properties);
     }
 
+    // #163. Actuator endpoints, not @RestController — see AdhocSubProcessEndpoint
+    // for why the @RestController half of the precedent does not work.
+    @Bean
+    AdhocSubProcessEndpoint adhocSubProcessEndpoint(org.flowable.engine.RuntimeService runtimeService) {
+        return new AdhocSubProcessEndpoint(runtimeService);
+    }
+
+    @Bean
+    AdhocSubProcessActionEndpoint adhocSubProcessActionEndpoint(
+        org.flowable.engine.RuntimeService runtimeService
+    ) {
+        return new AdhocSubProcessActionEndpoint(runtimeService);
+    }
+
     @Bean
     FlowableScriptTaskSupportController flowableScriptTaskSupportController(
         FlowableScriptTaskSupportService scriptTaskSupportService
