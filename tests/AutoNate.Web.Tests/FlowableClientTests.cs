@@ -143,7 +143,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Get, "service/repository/process-definitions",
             HttpStatusCode.InternalServerError, "boom");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.GetLatestProcessDefinitionAsync("k"));
         Assert.Contains("Flowable could not query the latest deployed process definition", ex.Message);
     }
@@ -463,7 +463,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Post, "service/runtime/tasks/t-3",
             HttpStatusCode.BadRequest, "task already completed");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.CompleteTaskAsync("t-3"));
         Assert.Contains("Flowable could not complete the user task", ex.Message);
         Assert.Contains("task already completed", ex.Message);
@@ -517,7 +517,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-3",
             HttpStatusCode.BadRequest, "no such user");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.UpdateTaskAssigneeAsync("t-3", "ghost"));
         Assert.Contains("Flowable could not reassign the user task", ex.Message);
     }
@@ -561,7 +561,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Put, "service/runtime/tasks/t-3",
             HttpStatusCode.BadRequest, "task already completed");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.UpdateTaskDueDateAsync("t-3", DateTimeOffset.UtcNow));
         Assert.Contains("Flowable could not update the user task due date", ex.Message);
     }
@@ -606,12 +606,16 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Put, "service/runtime/process-instances/inst-1/variables",
             HttpStatusCode.BadRequest, "bad var");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.UpdateProcessVariablesAsync("inst-1", new[]
             {
                 new ProcessVariableUpdate { Name = "x", Value = 1 }
             }));
         Assert.Contains("Flowable could not update the process variables", ex.Message);
+
+        // #226. The status is the point: the endpoint passes Flowable's own 4xx
+        // through instead of relabelling a caller error as a server fault.
+        Assert.Equal(HttpStatusCode.BadRequest, ex.StatusCode);
     }
 
     // --- GetCompletedAssigneesForActivityAsync -------------------------------
@@ -988,7 +992,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Post, "service/runtime/signals",
             HttpStatusCode.BadRequest, "no listener");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.BroadcastSignalAsync("Nope"));
         Assert.Contains("broadcast signal 'Nope'", ex.Message);
     }
@@ -1056,7 +1060,7 @@ public sealed class FlowableClientTests
         stub.WhenStatus(HttpMethod.Get, "service/runtime/executions",
             HttpStatusCode.InternalServerError, "boom");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<FlowableRequestException>(() =>
             client.ListExecutionsBySignalSubscriptionAsync("record.created"));
         Assert.Contains("list executions waiting on 'record.created'", ex.Message);
     }

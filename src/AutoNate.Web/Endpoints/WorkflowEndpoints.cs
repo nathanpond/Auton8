@@ -270,14 +270,28 @@ public static class WorkflowEndpoints
                 }
             }
 
-            // The small set of rules enforced at publish rather than only at
-            // prepare — see ValidateStructureForPublish for the membership
-            // criterion. Prepare is advisory: the studio calls it, a direct API
-            // caller need not.
-            var structureErrors = WorkflowBpmnXml.ValidateStructureForPublish(model.BpmnXml);
-            if (structureErrors.Count > 0)
+            // #225. The FULL validation set, at the endpoint that actually
+            // deploys.
+            //
+            // It used to be the small promoted subset, because prepare was where
+            // validation lived and the studio happens to call prepare first. A
+            // direct API caller does not, so every rule written as a gate was
+            // advisory — an unsupported element, a subprocess with no start
+            // event, a timer boundary that never fires, all reached the engine
+            // unchecked.
+            //
+            // This is a real contract change and was measured before being made:
+            // 4 of the 11 models in the dev database are newly refused, every one
+            // for a defect that already fails at run time (the script API #147
+            // removed, and #153's unresolvable identity). It converts a silent
+            // runtime failure into a loud publish-time one.
+            //
+            // Run on the STORED xml, before expansion, so an author is told about
+            // the element they drew rather than one publish generated.
+            var validationErrors = WorkflowBpmnXml.ValidateProcess(model.BpmnXml).Errors;
+            if (validationErrors.Count > 0)
             {
-                return Results.BadRequest(new { errors = structureErrors });
+                return Results.BadRequest(new { errors = validationErrors });
             }
 
             // #113. Every call activity is resolved to the child definition that

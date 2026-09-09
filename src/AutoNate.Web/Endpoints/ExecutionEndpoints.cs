@@ -590,7 +590,31 @@ public static class ExecutionEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            await flowable.UpdateProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            // #226. `variables` missing from the body deserialises to null, and the
+            // next line dereferenced it — a malformed request answered as a 500
+            // NullReferenceException. A body we cannot read is the caller's to fix.
+            if (request?.Variables is null or { Count: 0 })
+            {
+                return Results.BadRequest(new
+                {
+                    message = "The request body must contain a non-empty 'variables' array."
+                });
+            }
+
+            try
+            {
+                await flowable.UpdateProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                // Flowable classified this correctly — 409 for a variable that
+                // already exists, 400 for a value its converter cannot take.
+                // Re-wrapping it as a 500 loses that and pages someone about a
+                // typo. Its 5xx is not caught: that one really is a fault.
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
             // #158: Flowable does not re-evaluate conditional events when a variable
             // changes. Without this, a process parked on `${approved == true}` stays
             // parked after someone sets `approved` to true here — the feature looks
@@ -618,7 +642,31 @@ public static class ExecutionEndpoints
             IAuditEventPublisher auditPublisher,
             CancellationToken cancellationToken) =>
         {
-            await flowable.AddProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            // #226. `variables` missing from the body deserialises to null, and the
+            // next line dereferenced it — a malformed request answered as a 500
+            // NullReferenceException. A body we cannot read is the caller's to fix.
+            if (request?.Variables is null or { Count: 0 })
+            {
+                return Results.BadRequest(new
+                {
+                    message = "The request body must contain a non-empty 'variables' array."
+                });
+            }
+
+            try
+            {
+                await flowable.AddProcessVariablesAsync(processInstanceId, request.Variables, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                // Flowable classified this correctly — 409 for a variable that
+                // already exists, 400 for a value its converter cannot take.
+                // Re-wrapping it as a 500 loses that and pages someone about a
+                // typo. Its 5xx is not caught: that one really is a fault.
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
             // #158: Flowable does not re-evaluate conditional events when a variable
             // changes. Without this, a process parked on `${approved == true}` stays
             // parked after someone sets `approved` to true here — the feature looks

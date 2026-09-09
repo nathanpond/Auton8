@@ -182,10 +182,13 @@ public sealed class WorkflowEndpointsTests
 
     // #160: the story's demo, at the endpoint that actually gates the SPA.
     //
-    // Written against /prepare rather than /publish deliberately: /publish goes
-    // straight to DeployProcessAsync and does not validate, so the same test
-    // pointed at /publish would pass with a successful deploy — which is the
-    // silent no-op this milestone exists to end, reproduced in the test suite.
+    // Written against /prepare because that is the surface the SPA uses.
+    //
+    // It used to carry a second reason — that /publish went straight to
+    // DeployProcessAsync and validated nothing, so the same test pointed there
+    // would pass with a successful deploy. #225 fixed that: publish now runs the
+    // full set, and PublishWorkflow_RefusesADiagramPrepareWouldReject below is
+    // the test that says so.
     [Fact]
     public async Task PrepareWorkflow_RefusesHandAuthoredLinkEvents_AndOffersTheAlternative()
     {
@@ -426,6 +429,66 @@ public sealed class WorkflowEndpointsTests
         response.EnsureSuccessStatusCode();
 
         Assert.Contains("Deploy:publish_me", factory.FlowableStub.Calls);
+    }
+
+    // #225. Publish used to run only a promoted handful of rules, so every other
+    // rule in the set was advisory: the studio calls prepare first, a direct API
+    // caller need not, and their diagram reached the engine unchecked.
+    [Fact]
+    public async Task PublishWorkflow_RefusesADiagramPrepareWouldReject()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        // A business rule task: cannot-execute in the manifest because the DMN
+        // engine is absent from the image, so no diagram can fix it.
+        var xml = SimpleBpmn.Replace(
+            "</bpmn:process>",
+            "<bpmn:businessRuleTask id=\"brt\" name=\"Decide\" /></bpmn:process>",
+            StringComparison.Ordinal);
+
+        var model = new WorkflowModel
+        {
+            Id = id, Name = "Refuse Me", ProcessKey = "refuse_me", BpmnXml = xml
+        };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Business Rule Task", await response.Content.ReadAsStringAsync(),
+            StringComparison.Ordinal);
+
+        // And it never reached the engine. Asserting the 400 alone would pass for
+        // an implementation that deployed first and then complained.
+        Assert.DoesNotContain("Deploy:refuse_me", factory.FlowableStub.Calls);
+    }
+
+    // The complement, and the one that matters most: a gate that refused
+    // everything would satisfy the test above and break the product.
+    // PublishWorkflow_DelegatesToFlowableStub already covers the happy path, so
+    // this pins the specific risk — that the full set rejects diagrams the
+    // promoted subset accepted.
+    [Fact]
+    public async Task PublishWorkflow_StillAcceptsAValidDiagram()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var id = Guid.NewGuid();
+        var model = new WorkflowModel
+        {
+            Id = id, Name = "Fine", ProcessKey = "still_fine", BpmnXml = SimpleBpmn
+        };
+        (await client.PostAsJsonAsync("/api/workflows/", model)).EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/workflows/{id}/publish", model);
+
+        response.EnsureSuccessStatusCode();
+        Assert.Contains("Deploy:still_fine", factory.FlowableStub.Calls);
     }
 
     [Fact]

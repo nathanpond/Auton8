@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using AutoNate.Web.Endpoints;
 using AutoNate.Web.Models;
+using AutoNate.Web.Services.Flowable;
 using Xunit;
 
 namespace AutoNate.Web.Tests;
@@ -389,5 +390,81 @@ public sealed class ExecutionEndpointsTests
         Assert.NotNull(assignees);
         Assert.Equal(new[] { "alice", "bob" }, assignees);
         Assert.Contains("CompletedAssignees:inst-q:userTask_review", factory.FlowableStub.Calls);
+    }
+
+    // ── #226: caller errors on the variable endpoints ────────────────────────
+    //
+    // This is the surface an operator uses to unstick a process — #112 points
+    // people straight at it. A 500 while doing that is the wrong signal, and a
+    // 500 is what pages someone.
+
+    [Fact]
+    public async Task PostVariables_WithNoVariablesInTheBody_Returns400()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        // `variables` deserialises to null and the handler dereferenced it, so a
+        // malformed body came back as a 500 NullReferenceException.
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/proc-1/variables", new { escalate = true });
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("variables", await response.Content.ReadAsStringAsync(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PostVariables_WhenFlowableReportsAConflict_PassesThe409Through()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        factory.FlowableStub.AddVariablesFailure = new FlowableRequestException(
+            System.Net.HttpStatusCode.Conflict,
+            "create the process variables",
+            "Flowable could not create the process variables. HTTP 409 Conflict. " +
+            "Variable 'escalate' is already present on execution 'proc-1'.");
+
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/proc-1/variables",
+            new { variables = new[] { new { name = "escalate", value = "true", type = "string" } } });
+
+        // Flowable classified this correctly. Re-wrapping it as a 500 threw that
+        // away and turned a typo into an incident.
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("already present", await response.Content.ReadAsStringAsync(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PostVariables_WhenFlowableItselfFaults_StaysA500()
+    {
+        await using var factory = await AutoNateWebApplicationFactory.CreateAsync();
+        factory.FlowableStub.AddVariablesFailure = new FlowableRequestException(
+            System.Net.HttpStatusCode.InternalServerError,
+            "create the process variables",
+            "Flowable could not create the process variables. HTTP 500 .");
+
+        var client = factory.CreateClient();
+        await PrimeAuthAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/executions/proc-1/variables",
+            new { variables = new[] { new { name = "escalate", value = "true", type = "string" } } });
+
+        // The complement. Passing every Flowable failure through would relabel a
+        // genuine engine fault as the caller's fault and stop it paging anyone —
+        // the same defect pointing the other way.
+        Assert.Equal(System.Net.HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
+    // The mutating endpoints below are gated; the GETs in this file are not, so
+    // this file had no priming until #226 added a POST.
+    private static async Task PrimeAuthAsync(HttpClient client)
+    {
+        (await client.GetAsync("/api/workflows/")).EnsureSuccessStatusCode();
     }
 }

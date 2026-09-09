@@ -451,12 +451,19 @@ internal sealed class StubFlowableClient : IFlowableClient
 
     public Dictionary<string, List<ProcessVariableUpdate>> VariableAdditionsByInstance { get; } = new();
 
+    /// <summary>#226. When set, AddProcessVariablesAsync throws it.</summary>
+    public Exception? AddVariablesFailure { get; set; }
+
     public Task AddProcessVariablesAsync(
         string processInstanceId,
         IReadOnlyList<ProcessVariableUpdate> additions,
         CancellationToken cancellationToken = default)
     {
         Calls.Add($"AddVariables:{processInstanceId}");
+        // #226. Lets a test stand in for Flowable answering 409 for a variable
+        // that already exists, so the endpoint's status mapping is exercised
+        // without needing the engine.
+        if (AddVariablesFailure is not null) throw AddVariablesFailure;
         if (!VariableAdditionsByInstance.TryGetValue(processInstanceId, out var list))
         {
             list = new List<ProcessVariableUpdate>();

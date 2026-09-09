@@ -1997,7 +1997,15 @@ public sealed class FlowableClient(
 
         var body = await response.Content.ReadAsStringAsync();
         var details = string.IsNullOrWhiteSpace(body) ? "No response body was returned." : body;
-        throw new InvalidOperationException($"Flowable could not {operation}. HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}");
+
+        // #226. Carries the status Flowable answered with, so a caller error it
+        // already classified can be passed through as that same class instead of
+        // becoming a 500. FlowableRequestException derives from
+        // InvalidOperationException, so every existing catch is unaffected.
+        throw new FlowableRequestException(
+            response.StatusCode,
+            operation,
+            $"Flowable could not {operation}. HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}");
     }
 
     private static async Task<T> DeserializeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)

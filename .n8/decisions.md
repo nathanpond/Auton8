@@ -3788,3 +3788,34 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   `WorkflowStudio.tsx` must be cleared by every other branch, and that list is the
   most fragile thing in the file.
   **Issue:** #218
+
+- **#225: publish runs the full validation set (user's call), measured before
+  making it.** `ValidateProcess` ran only on `/prepare`. The studio calls prepare
+  first; a direct API caller need not, so every rule written as a gate was
+  advisory and reached the engine unchecked. Publish now runs the whole set and
+  answers 400.
+  **The impact, as evidence rather than a guess:** running the full set against
+  every stored model in the dev database and subtracting what publish already
+  enforced, **4 of 11 models are newly refused** — every one for the script API
+  #147 removed (which #195 already warns about) or #153's unresolvable identity.
+  Those models already fail at run time; the change converts a silent runtime
+  failure into a loud publish-time one. It is still a contract change, and the
+  number is a dev-database order of magnitude, not a production figure. **No
+  migration written** — the models still open and save, and the errors name the
+  exact script and fix; flagged on the issue rather than decided quietly.
+  Validation runs on the STORED xml, before expansion, so an author hears about
+  the element they drew and not one publish generated.
+  **#226 folded in.** `variables` missing from the body deserialised to null and
+  was dereferenced — a malformed request answered as a 500 NullReferenceException.
+  And every Flowable failure became a bare `InvalidOperationException`, so a 409
+  ("already present") or a 400 ("Converter can only convert booleans") reached the
+  client as a 500 with a stack trace, on the very surface #112 points operators at
+  for unsticking a process. `FlowableRequestException` now carries the upstream
+  status and the endpoints pass a 4xx through; a 5xx is deliberately NOT passed
+  through, because that one is a real fault and should still page someone.
+  **Unexpected consequence worth recording:** the new type derives from
+  `InvalidOperationException` so production catches are unaffected, but xUnit's
+  `Assert.ThrowsAsync<T>` is an EXACT type match, so 7 existing client tests
+  failed. They now name the new type and pin the carried status, which is
+  stronger than what they asserted before.
+  **Issue:** #225, #226
