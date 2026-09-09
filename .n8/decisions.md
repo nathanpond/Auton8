@@ -4091,3 +4091,23 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   connection. `FlowableRoleIsolationTests` names `AutoNate` too but already skips
   when it is absent, so it needed nothing.
   **Issue:** #214, #236
+
+- **Audit of the milestone's own record-keeping, after the merge.** Asked whether
+  every departure and known issue is logged, the answer was **no**, and two gaps
+  were real:
+  1. **#218's "invalid route is terminal, not retried" departure existed only as
+     an unticked checkbox.** I had described it in a completion comment as "one
+     line if you want it" and then filed nothing, so the remaining work was
+     findable only by reading that comment. Now **#237**, with the three options
+     and why option 3 is what the criterion actually wants.
+  2. **#228 carried neither a milestone nor `needs-triage`**, so it sat in no
+     queue at all — invisible to `/n8-plan`'s triage sweep and to every milestone
+     view. It is the engine defect underpinning the withdrawn transaction/cancel
+     elements, which makes it the last thing that should go missing. Labelled.
+  **Not gaps, but worth stating:** six discovered-work issues (#222, #224, #227,
+  #229, #230, #234) sit on `needs-triage` with no milestone **by design** — that
+  is the pipeline, and planning assigns them. And the departures that are engine
+  limitations with nothing to do — #115's missing variable snapshot, #156's
+  namespace constraint — correctly have no issue; they are unticked criteria on
+  stories that stay open, which is where a reader would look.
+  **Issue:** #237, #228, #218
