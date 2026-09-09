@@ -687,6 +687,94 @@ public static class ExecutionEndpoints
         }).DisableAntiforgery()
           .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
 
+        // #163. An ad-hoc subprocess has no predetermined order: the process says
+        // what CAN be done and a person decides what happens next. These three
+        // endpoints are that person's surface.
+        executions.MapGet("/{processInstanceId}/adhoc", async (
+            string processInstanceId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            var states = await flowable.GetAdhocSubProcessesAsync(processInstanceId, cancellationToken);
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.AdhocActivitiesViewed,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { subProcessCount = states.Count },
+                cancellationToken);
+
+            return Results.Ok(states);
+        }).RequirePermission(EntityKinds.WorkflowExecution, Actions.View, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/adhoc/{executionId}/activities/{activityId}", async (
+            string processInstanceId,
+            string executionId,
+            string activityId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await flowable.StartAdhocActivityAsync(executionId, activityId, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                // An activity that is not enabled, or an execution that is not an
+                // ad-hoc subprocess. #226's rule: the engine classified it, so do
+                // not relabel it as a server fault.
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
+
+            // An ad-hoc process has no fixed order to reconstruct afterwards, so
+            // this record is the only account of what was decided and by whom.
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.AdhocActivityStarted,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { executionId, activityId },
+                cancellationToken);
+
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
+        executions.MapPost("/{processInstanceId}/adhoc/{executionId}/complete", async (
+            string processInstanceId,
+            string executionId,
+            IFlowableClient flowable,
+            IAuditEventPublisher auditPublisher,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await flowable.CompleteAdhocSubProcessAsync(executionId, cancellationToken);
+            }
+            catch (FlowableRequestException exception) when (exception.IsCallerError)
+            {
+                return Results.Json(
+                    new { message = exception.Message },
+                    statusCode: (int)exception.StatusCode);
+            }
+
+            await auditPublisher.PublishAsync(
+                WorkflowAdminEventTopic.TopicName,
+                WorkflowAdminEventTypes.AdhocSubProcessCompleted,
+                WorkflowResourceKinds.Execution,
+                resource: new { processInstanceId },
+                details: new { executionId },
+                cancellationToken);
+
+            return Results.NoContent();
+        }).DisableAntiforgery()
+          .RequirePermission(EntityKinds.WorkflowExecution, Actions.Override, "processInstanceId");
+
         executions.MapPost("/{processInstanceId}/tasks/{taskId}/force-complete", async (
             string processInstanceId,
             string taskId,

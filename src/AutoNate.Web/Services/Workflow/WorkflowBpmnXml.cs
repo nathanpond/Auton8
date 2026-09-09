@@ -1050,6 +1050,7 @@ public static partial class WorkflowBpmnXml
             //
             // One set now, so "the validation set" means one thing. Prepare gains
             // them too, which is where an author would rather meet them anyway.
+            errors.AddRange(BuildAdhocSubProcessErrors(document));
             errors.AddRange(BuildStructureErrors(document));
             // #167: elements the studio converts away, and converted tasks nobody can do.
             errors.AddRange(BuildNonWaitingTaskErrors(document));
@@ -3263,6 +3264,45 @@ public static partial class WorkflowBpmnXml
                 "condition becoming true while the process is already running. To start a " +
                 "process when a condition holds, start it another way and wait on an " +
                 "intermediate catch conditional event instead.");
+        }
+
+        return errors;
+    }
+
+    // #163. An ad-hoc subprocess with no completion condition can never finish.
+    //
+    // Flowable deploys it happily and the instance then sits in the subprocess
+    // forever, with the parent unable to continue — a hang, not a feature, which
+    // is the line epic #40 draws.
+    private static IReadOnlyList<string> BuildAdhocSubProcessErrors(XDocument document)
+    {
+        var errors = new List<string>();
+
+        foreach (var adhoc in document.Descendants(BpmnNamespace + "adHocSubProcess"))
+        {
+            var label = Trimmed(adhoc.Attribute("name")?.Value)
+                        ?? Trimmed(adhoc.Attribute("id")?.Value)
+                        ?? "Unnamed ad-hoc subprocess";
+
+            var condition = Trimmed(adhoc.Element(BpmnNamespace + "completionCondition")?.Value);
+            if (condition is null)
+            {
+                errors.Add(
+                    $"The ad-hoc subprocess '{label}' has no completion condition. Without one it can " +
+                    "never finish and the process stops there — set a condition that becomes true when " +
+                    "the case is done.");
+                continue;
+            }
+
+            // The same expression check every other condition in the diagram
+            // gets. A completion condition that cannot parse is the same hang one
+            // step further along — the subprocess simply never completes.
+            var problem = WorkflowConditionValidation.DescribeSyntaxProblem(condition);
+            if (problem is not null)
+            {
+                errors.Add($"The ad-hoc subprocess '{label}' has a completion condition that " +
+                           $"cannot be evaluated: {problem}");
+            }
         }
 
         return errors;

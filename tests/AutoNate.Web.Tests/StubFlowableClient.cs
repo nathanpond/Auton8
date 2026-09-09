@@ -138,6 +138,30 @@ internal sealed class StubFlowableClient : IFlowableClient
     public IReadOnlyDictionary<string, string> ExpansionSourceMap { get; set; }
         = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    // #163
+    public List<AdhocSubProcessState> AdhocSubProcesses { get; } = [];
+
+    public Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AdhocList:{processInstanceId}");
+        return Task.FromResult<IReadOnlyList<AdhocSubProcessState>>(AdhocSubProcesses);
+    }
+
+    public Task StartAdhocActivityAsync(
+        string executionId, string activityId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AdhocStart:{executionId}:{activityId}");
+        return Task.CompletedTask;
+    }
+
+    public Task CompleteAdhocSubProcessAsync(
+        string executionId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add($"AdhocComplete:{executionId}");
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {

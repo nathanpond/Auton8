@@ -1,3 +1,4 @@
+import type { AdhocSubProcessState } from "@/api/executions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addExecutionVariables,
@@ -24,7 +25,8 @@ import {
   updateExecutionVariables,
   updateTaskDueDateAtNode,
   ChildExecutionSummary,
-  getExecutionChildren
+  getExecutionChildren,
+  getAdhocSubProcesses
 } from "@/api/executions";
 import {
   FlowableTaskSummary,
@@ -82,6 +84,17 @@ export function useExecutionLog(id: string | null) {
   return useQuery<WorkflowExecutionLogEntry[]>({
     queryKey: executionLogQueryKey(id ?? "unset"),
     queryFn: ({ signal }) => (id ? getExecutionLog(id, signal) : Promise.resolve([])),
+    enabled: Boolean(id)
+  });
+}
+
+// #163.
+export const adhocQueryKey = (id: string) => ["executions", "adhoc", id] as const;
+
+export function useAdhocSubProcesses(id: string | null) {
+  return useQuery<AdhocSubProcessState[]>({
+    queryKey: adhocQueryKey(id ?? "unset"),
+    queryFn: ({ signal }) => (id ? getAdhocSubProcesses(id, signal) : Promise.resolve([])),
     enabled: Boolean(id)
   });
 }

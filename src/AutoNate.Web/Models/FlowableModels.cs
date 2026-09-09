@@ -338,3 +338,26 @@ public sealed record class ProcessVariableUpdate
 
     public string? Type { get; init; }
 }
+
+// #163. One ad-hoc subprocess inside a running instance, and what a person may
+// start in it.
+//
+// ExecutionId, not the activity id, is what the engine's ad-hoc commands take —
+// there can be more than one live instance of the same ad-hoc subprocess, and
+// they have separate enabled sets.
+public sealed record class AdhocSubProcessState
+{
+    public string ExecutionId { get; init; } = string.Empty;
+
+    public string ActivityId { get; init; } = string.Empty;
+
+    public IReadOnlyList<AdhocActivity> EnabledActivities { get; init; } = [];
+}
+
+/// <summary>One activity a person may start in an ad-hoc subprocess (#163).</summary>
+public sealed record class AdhocActivity
+{
+    public string Id { get; init; } = string.Empty;
+
+    public string? Name { get; init; }
+}

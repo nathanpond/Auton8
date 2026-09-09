@@ -531,12 +531,12 @@
     {
       "name": "Ad-Hoc Sub-Process",
       "category": "Sub-Processes",
-      "studio": "coming-soon",
+      "studio": "supported",
       "engine": "executes",
       "localName": "adHocSubProcess",
       "eventDefinition": null,
-      "reason": null,
-      "evidence": "deployed and started"
+      "reason": "#163: Flowable runs it and exposes NO REST surface for it. AdhocSubProcessActivityBehavior ships in 8.0.0 and RuntimeService carries the commands, but flowable-rest exposes none of them, so the extension adds actuator endpoints for listing enabled activities, starting one, and completing the subprocess. Verified: nothing auto-starts, the enabled activities come back with their names, and starting one twice produces two live instances of it \u2014 the repeatability that distinguishes this element from a parallel subprocess. Publish refuses an ad-hoc subprocess with no completion condition, which would otherwise deploy and then never finish.",
+      "evidence": "deployed and started; enabled activities listed and started twice"
     },
     {
       "name": "Event-Based Gateway",

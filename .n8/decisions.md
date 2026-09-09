@@ -3863,3 +3863,31 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   `Cancel Boundary` and `Cancel End` are already withdrawn, so this is
   compensation by explicit throw, not transaction rollback.
   **Issue:** #115, #225, #114
+
+- **#163: the story's prescribed precedent does not work, so the endpoints are
+  actuator endpoints.** It said to follow `FlowableScriptTaskSupportController` —
+  a `@RestController` under `/service/autonate/`. That half of the precedent
+  registers as a bean and its route is **never mapped**: Flowable's REST
+  application does not include the extension package in its handler mapping, and
+  the endpoint answers *"No endpoint GET
+  /flowable-rest/service/autonate/script-task-support"*. The half that works is
+  the actuator `@Endpoint` beside it, which is exactly why `FlowableClient` probes
+  `actuator/scriptTaskSupport` FIRST and treats `/service/` as a fallback.
+  Following the written precedent would have shipped an endpoint nothing could
+  reach.
+  **`-parameters` is now on, and that is load-bearing.** Spring reads an actuator
+  `@Selector`'s name from the compiled parameter name; without it the Flowable
+  container **does not start at all** — not a warning, not a 500 on one endpoint.
+  It went unnoticed because the only actuator endpoint here took no parameters. I
+  broke the local container discovering this and rebuilt it.
+  **Verified before building:** the subprocess is active with nothing auto-started,
+  enabled activities come back with their names, and starting one **twice**
+  produces two live instances of it — the repeatability that distinguishes ad-hoc
+  from a parallel subprocess, and the thing a naive implementation removes.
+  **Refused at publish: an ad-hoc subprocess with no completion condition.** It
+  deploys happily and then never finishes, with the parent unable to continue —
+  epic #40's hang, not a feature.
+  **Not delivered, and left unticked rather than glossed:** the studio controls
+  for authoring the completion condition and the `ordering` attribute. Running a
+  case works end to end; authoring one still needs the XML.
+  **Issue:** #163

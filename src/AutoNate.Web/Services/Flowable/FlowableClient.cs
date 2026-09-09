@@ -626,6 +626,45 @@ public sealed class FlowableClient(
         };
     }
 
+    // #163. The ad-hoc surface lives on the extension's ACTUATOR endpoints, not
+    // under service/. Flowable's REST application never maps a @RestController
+    // from the extension package — the same reason the script-task capability
+    // probe tries actuator/ first.
+    public async Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
+        string processInstanceId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"actuator/adhocActivities/{Uri.EscapeDataString(processInstanceId)}", cancellationToken);
+        await EnsureSuccessAsync(response, "list the ad-hoc subprocess activities");
+
+        return await DeserializeAsync<AdhocSubProcessState[]>(response, cancellationToken);
+    }
+
+    public async Task StartAdhocActivityAsync(
+        string executionId, string activityId, CancellationToken cancellationToken = default)
+    {
+        // An actuator write operation is a POST with a JSON body, even when every
+        // argument is in the path.
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"actuator/adhocExecute/{Uri.EscapeDataString(executionId)}/{Uri.EscapeDataString(activityId)}")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, $"start the ad-hoc activity '{activityId}'");
+    }
+
+    public async Task CompleteAdhocSubProcessAsync(
+        string executionId, CancellationToken cancellationToken = default)
+    {
+        // "complete" is a reserved activity id on the extension's write endpoint;
+        // an actuator endpoint has one write operation, so completing rides the
+        // same selector shape as starting.
+        await StartAdhocActivityAsync(executionId, "complete", cancellationToken);
+    }
+
     public async Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default)
     {

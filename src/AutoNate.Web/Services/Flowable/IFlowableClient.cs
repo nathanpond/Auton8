@@ -40,6 +40,21 @@ public interface IFlowableClient
     /// Separate from the diagram detail because the history endpoint needs the
     /// same mapping and has no reason to pull the whole diagram to get it.
     /// </remarks>
+    /// <summary>
+    /// Which activities can be started right now in each ad-hoc subprocess of a
+    /// running instance (#163).
+    /// </summary>
+    Task<IReadOnlyList<AdhocSubProcessState>> GetAdhocSubProcessesAsync(
+        string processInstanceId, CancellationToken cancellationToken = default);
+
+    /// <summary>Starts one enabled activity in an ad-hoc subprocess (#163).</summary>
+    Task StartAdhocActivityAsync(
+        string executionId, string activityId, CancellationToken cancellationToken = default);
+
+    /// <summary>Completes an ad-hoc subprocess regardless of its condition (#163).</summary>
+    Task CompleteAdhocSubProcessAsync(
+        string executionId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyDictionary<string, string>> GetExpansionSourceMapAsync(
         string processInstanceId, CancellationToken cancellationToken = default);
 

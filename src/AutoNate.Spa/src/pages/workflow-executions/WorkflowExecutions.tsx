@@ -1,3 +1,4 @@
+import AdhocActivities from "./AdhocActivities";
 import { toast } from "@/components/notifications/toast";
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -31,6 +32,7 @@ import {
   useExecutionHistory,
   useExecutionChildren,
   useExecutionTasks,
+  useAdhocSubProcesses,
   useExecutions,
   useDeleteAllExecutions,
   useDeleteExecution,
@@ -513,7 +515,7 @@ type ExecutionContentProps = {
   onError: (message: string) => void;
 };
 
-type ExecutionTab = "diagram" | "history" | "log" | "children";
+type ExecutionTab = "diagram" | "history" | "log" | "children" | "adhoc";
 
 export function ExecutionContent({
   processInstanceId,
@@ -524,6 +526,8 @@ export function ExecutionContent({
   const [tab, setTab] = useState<ExecutionTab>("diagram");
   const { data: detail, isLoading: detailLoading, error } = useExecutionDiagram(processInstanceId);
   const { data: tasks = [] } = useExecutionTasks(processInstanceId);
+  // #163.
+  const { data: adhocSubProcesses = [] } = useAdhocSubProcesses(processInstanceId);
   // Lifted from the History tab so the diagram-tab hover tooltip can show
   // assignees on user-task nodes that have already completed without waiting
   // for the user to click into History first.
@@ -756,6 +760,10 @@ export function ExecutionContent({
           {children.length > 0 && (
             <Tabs.Tab value="children">Called Workflows ({children.length})</Tabs.Tab>
           )}
+          {/* #163. Same rule as Called Workflows: only shown when there is
+              something to show. A process with no ad-hoc subprocess must not
+              carry an empty tab implying it has case work. */}
+          {adhocSubProcesses.length > 0 && <Tabs.Tab value="adhoc">Case Work</Tabs.Tab>}
         </Tabs.List>
 
         {/* Each panel stays mounted (`keepMounted`) so the BPMN viewer
@@ -857,6 +865,14 @@ export function ExecutionContent({
 
         <Tabs.Panel value="log" p="md">
           {tab === "log" && <ExecutionLog processInstanceId={processInstanceId} />}
+        </Tabs.Panel>
+        <Tabs.Panel value="adhoc" p="md" keepMounted>
+          <AdhocActivities
+            processInstanceId={processInstanceId}
+            subProcesses={adhocSubProcesses}
+            onError={onError}
+            onStarted={onTaskCompleted}
+          />
         </Tabs.Panel>
       </Tabs>
 

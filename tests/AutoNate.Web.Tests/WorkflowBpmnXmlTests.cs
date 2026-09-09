@@ -6,6 +6,51 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    // ── #163: ad-hoc subprocess ──────────────────────────────────────────────
+
+    private static string Adhoc(string? completionCondition) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+          <bpmn:process id="casework" name="Case work" isExecutable="true">
+            <bpmn:startEvent id="s" />
+            <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="adhoc" />
+            <bpmn:adHocSubProcess id="adhoc" name="Case work">
+              <bpmn:userTask id="a1" name="Call the customer" />
+              {(completionCondition is null
+                ? ""
+                : $"<bpmn:completionCondition xsi:type=\"bpmn:tFormalExpression\">{completionCondition}</bpmn:completionCondition>")}
+            </bpmn:adHocSubProcess>
+            <bpmn:sequenceFlow id="f1" sourceRef="adhoc" targetRef="e" />
+            <bpmn:endEvent id="e" />
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    [Fact]
+    public void ValidateProcess_RefusesAnAdhocSubProcessWithNoCompletionCondition()
+    {
+        // Flowable deploys this happily and the instance then sits in the
+        // subprocess forever with the parent unable to continue. A hang, not a
+        // feature — which is the line epic #40 draws.
+        var result = WorkflowBpmnXml.ValidateProcess(Adhoc(null));
+
+        var error = Assert.Single(result.Errors, e => e.Contains("Case work", StringComparison.Ordinal));
+        Assert.Contains("never finish", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsAnAdhocSubProcessWithACompletionCondition()
+    {
+        // The complement: a rule that refused every ad-hoc subprocess would
+        // satisfy the test above and make the element unusable.
+        var result = WorkflowBpmnXml.ValidateProcess(Adhoc("${done == true}"));
+
+        Assert.DoesNotContain(result.Errors, e =>
+            e.Contains("ad-hoc subprocess", StringComparison.OrdinalIgnoreCase));
+    }
+
     // #115/#225. The guard for a regression that already happened once and that
     // nothing caught: #225 pointed publish at ValidateProcess, which did not
     // contain the promoted structure rules, so three of them silently stopped

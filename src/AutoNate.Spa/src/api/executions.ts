@@ -294,3 +294,52 @@ export async function getCompletedAssigneesForActivity(
   );
   return data;
 }
+
+// #163. An ad-hoc subprocess holds activities with no predetermined order: the
+// process says what CAN be done and a person decides what happens next.
+export type AdhocActivity = {
+  id: string;
+  name: string | null;
+};
+
+export type AdhocSubProcessState = {
+  // The ENGINE execution, not the activity — there can be more than one live
+  // instance of the same ad-hoc subprocess, each with its own enabled set.
+  executionId: string;
+  activityId: string;
+  enabledActivities: AdhocActivity[];
+};
+
+export async function getAdhocSubProcesses(
+  processInstanceId: string,
+  signal?: AbortSignal
+): Promise<AdhocSubProcessState[]> {
+  const { data } = await api.get<AdhocSubProcessState[]>(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/adhoc`,
+    { signal }
+  );
+  return data;
+}
+
+// Starting the same activity twice is legitimate and runs it twice — that
+// repeatability is what distinguishes an ad-hoc subprocess from a parallel one.
+export async function startAdhocActivity(
+  processInstanceId: string,
+  executionId: string,
+  activityId: string
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/adhoc/` +
+      `${encodeURIComponent(executionId)}/activities/${encodeURIComponent(activityId)}`
+  );
+}
+
+export async function completeAdhocSubProcess(
+  processInstanceId: string,
+  executionId: string
+): Promise<void> {
+  await api.post(
+    `/api/executions/${encodeURIComponent(processInstanceId)}/adhoc/` +
+      `${encodeURIComponent(executionId)}/complete`
+  );
+}
