@@ -21,10 +21,10 @@ public sealed class WorkflowBpmnXmlTests
           <bpmn:process id="router" name="Router" isExecutable="true">
             <bpmn:startEvent id="s" />
             <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
-            <bpmn:complexGateway id="cg" name="Choose" scriptFormat="javascript"
-                                 autonate:runAs="system">
-              <bpmn:script>return 'fa';</bpmn:script>
-            </bpmn:complexGateway>
+            <bpmn:complexGateway id="cg" name="Choose"
+                                 autonate:scriptFormat="javascript"
+                                 autonate:routeScript="return 'fa';"
+                                 autonate:runAs="system" />
             <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="ta" />
             <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="tb" />
             <bpmn:userTask id="ta" name="Route A" />
@@ -88,6 +88,8 @@ public sealed class WorkflowBpmnXmlTests
         Assert.Null(gateway.Attribute("scriptFormat"));
         Assert.Null(gateway.Element(Bpmn218 + "script"));
         Assert.Null(gateway.Attribute(Autonate218 + "runAs"));
+        Assert.Null(gateway.Attribute(Autonate218 + "routeScript"));
+        Assert.Null(gateway.Attribute(Autonate218 + "scriptFormat"));
 
         // The authoring data is not lost — it moved to the node that runs it.
         var scriptTask = document.Descendants(Bpmn218 + "scriptTask").Single();
@@ -157,8 +159,8 @@ public sealed class WorkflowBpmnXmlTests
     public void ExpandForDeployment_LeavesTheAuthorsDefaultFlowUnconditioned()
     {
         var xml = ComplexGatewayXml.Replace(
-            "id=\"cg\" name=\"Choose\" scriptFormat=\"javascript\"",
-            "id=\"cg\" name=\"Choose\" scriptFormat=\"javascript\" default=\"fb\"",
+            "id=\"cg\" name=\"Choose\"",
+            "id=\"cg\" name=\"Choose\" default=\"fb\"",
             StringComparison.Ordinal);
         Assert.Contains("default=\"fb\"", xml);
 
@@ -182,7 +184,7 @@ public sealed class WorkflowBpmnXmlTests
     [Fact]
     public void ExpandForDeployment_GivesAGatewayWithNoScriptAWorkingStarterBody()
     {
-        var xml = ComplexGatewayXml.Replace("<bpmn:script>return 'fa';</bpmn:script>", "");
+        var xml = ComplexGatewayXml.Replace("autonate:routeScript=\"return 'fa';\"", "");
 
         var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
         var script = document.Descendants(Bpmn218 + "scriptTask").Single()
@@ -191,6 +193,42 @@ public sealed class WorkflowBpmnXmlTests
         // A freshly dropped gateway must publish. Taking the first route is
         // visibly wrong; an empty script is invisibly broken.
         Assert.Contains("return 'fa';", script);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_AlsoAcceptsAHandAuthoredScriptChild()
+    {
+        // The studio writes an autonate: attribute because bpmn-js drops a
+        // <bpmn:script> child on this element. An imported diagram written the
+        // obvious way must still run — the constraint is the modeller's, and it
+        // is not the importer's problem.
+        // Its own literal rather than surgery on the shared fixture. The first
+        // version of this test edited ComplexGatewayXml and silently failed to
+        // match, so the attribute stayed and the test proved nothing about the
+        // child at all.
+        const string handAuthored = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="router" name="Router" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="cg" />
+                <bpmn:complexGateway id="cg" name="Choose">
+                  <bpmn:script>return 'fb';</bpmn:script>
+                </bpmn:complexGateway>
+                <bpmn:sequenceFlow id="fa" sourceRef="cg" targetRef="ta" />
+                <bpmn:sequenceFlow id="fb" sourceRef="cg" targetRef="tb" />
+                <bpmn:userTask id="ta" name="Route A" />
+                <bpmn:userTask id="tb" name="Route B" />
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(handAuthored));
+
+        Assert.Equal("return 'fb';",
+            document.Descendants(Bpmn218 + "scriptTask").Single()
+                .Element(Bpmn218 + "script")?.Value);
     }
 
     [Fact]
@@ -217,9 +255,10 @@ public sealed class WorkflowBpmnXmlTests
         // The expansion returns a new string; the input it was given is the
         // author's stored diagram and must be unchanged. This is the assertion
         // that catches an expansion mutating a shared XDocument.
-        Assert.Equal(before, ComplexGatewayXml);
+        Assert.Equal(ComplexGatewayXml, before);
         Assert.Contains("complexGateway", ComplexGatewayXml);
         Assert.DoesNotContain("scriptTask", ComplexGatewayXml);
+        Assert.Contains("routeScript", ComplexGatewayXml);
     }
 
     // Rewritten for #107. This asserted that a business rule task, an event

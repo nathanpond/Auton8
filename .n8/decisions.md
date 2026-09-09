@@ -3762,3 +3762,29 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   reasoning — and guessing it wrong silently loses an author's script, which is the
   exact failure this milestone exists to end.
   **Issue:** #218, #230, #103, #223
+
+- **#218 (studio): the routing script is an attribute, because bpmn-js drops the
+  child — proven, not reasoned.** The obvious storage is a `<bpmn:script>` child on
+  the gateway. bpmn-js is vendored as a browser bundle with no Flowable moddle
+  extension, and its moddle has no `script` property on `ComplexGateway`, so it
+  DROPS the child when it re-serialises. The first version of
+  `ComplexGatewayStudioRoundTripTests` seeded one, saved in the studio, and the
+  script came back gone — an author would have lost their code on their next save
+  with nothing to say so. The script now lives in `autonate:routeScript`, the
+  `$attrs` route `runAs` already uses, and newlines survive (escaped `&#xA;`). A
+  hand-authored `<bpmn:script>` child is still READ, so an imported diagram written
+  the obvious way works; it is normalised onto the attribute on first save.
+  **Rule 1 — a latent bug in `writeAutoNateAttribute`.** It did
+  `businessObject.$attrs = businessObject.$attrs ?? {}`. moddle defines `$attrs` on
+  `Base` with only a getter, so that assignment throws *"Cannot set property $attrs
+  of #<Base> which has only a getter"*. Every element it had been used on happened
+  to have a writable own property; a complex gateway does not. The symptom was
+  silent — Apply failed, the panel stayed open over the Save button, and the
+  console was clean because the error went to a toast. It now mutates `$attrs`
+  rather than assigning it, which also fixes it for any future element.
+  **The panel is reused, not duplicated.** A complex gateway routes to the existing
+  script panel: same fields, retitled, with the result variable hidden because a
+  gateway's is generated and bound to the flow conditions. Every editor added to
+  `WorkflowStudio.tsx` must be cleared by every other branch, and that list is the
+  most fragile thing in the file.
+  **Issue:** #218

@@ -387,7 +387,7 @@ public static partial class WorkflowBpmnXml
                 // map onto the same shape in the diagram, and an operator
                 // reading the history needs to know which one failed.
                 new XAttribute("name", ComplexGatewayScriptTaskName(gateway.Attribute("name")?.Value)),
-                new XAttribute("scriptFormat", Trimmed(gateway.Attribute("scriptFormat")?.Value) ?? "javascript"),
+                new XAttribute("scriptFormat", ReadComplexGatewayScriptFormat(gateway) ?? "javascript"),
                 // flowable:, NOT the bare attribute. Flowable validates the
                 // deployed XML against the strict BPMN schema, which has no
                 // `resultVariable` on bpmn:scriptTask — a bare one is refused
@@ -426,6 +426,8 @@ public static partial class WorkflowBpmnXml
             // author configured the element, which the stored model keeps and
             // the engine has no use for.
             gateway.Attribute("scriptFormat")?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute)?.Remove();
+            gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute)?.Remove();
             gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ScriptTaskIdentity.RunAsAttribute)?.Remove();
             gateway.Attribute(ScriptTaskIdentity.RunAsAttribute)?.Remove();
             gateway.Element(BpmnNamespace + "script")?.Remove();
@@ -520,9 +522,34 @@ public static partial class WorkflowBpmnXml
     // The routes the script may return, as a comma-separated list of flow ids.
     internal const string ComplexGatewayRoutesAttribute = "autonateAllowedRoutes";
 
+    // The routing script lives in an autonate: ATTRIBUTE, not a <bpmn:script>
+    // child, and that is a browser fact rather than a preference.
+    //
+    // bpmn-js is vendored with no Flowable moddle extension, and its moddle has
+    // no script property on ComplexGateway — so it DROPS a <bpmn:script> child
+    // when it re-serialises the diagram. Proven, not assumed: seeding one and
+    // saving in the studio came back with the script gone
+    // (ComplexGatewayStudioRoundTripTests). An author would have lost their code
+    // on their next save, with nothing to say so.
+    //
+    // Attributes in the autonate namespace survive through $attrs, which is the
+    // mechanism runAs already uses, and the serialiser escapes the newlines.
+    internal const string ComplexGatewayScriptAttribute = "routeScript";
+    internal const string ComplexGatewayScriptFormatAttribute = "scriptFormat";
+
     /// <summary>An author's routing script, stored on the gateway itself.</summary>
+    /// <remarks>
+    /// The child element is still read, so a hand-authored or imported diagram
+    /// written the obvious way works. Only the studio's own round trip needs the
+    /// attribute.
+    /// </remarks>
     private static string? ReadComplexGatewayScript(XElement gateway) =>
-        gateway.Element(BpmnNamespace + "script")?.Value;
+        Trimmed(gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute)?.Value)
+        ?? gateway.Element(BpmnNamespace + "script")?.Value;
+
+    private static string? ReadComplexGatewayScriptFormat(XElement gateway) =>
+        Trimmed(gateway.Attribute(ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute)?.Value)
+        ?? Trimmed(gateway.Attribute("scriptFormat")?.Value);
 
     // A freshly dropped gateway has no script yet, and publishing must not fail
     // on that — it takes the first route, which is visible and wrong rather than
@@ -1959,25 +1986,22 @@ public static partial class WorkflowBpmnXml
     {
         if (!string.IsNullOrWhiteSpace(snapshot.ScriptFormat))
         {
-            element.SetAttributeValue("scriptFormat", snapshot.ScriptFormat);
+            element.SetAttributeValue(
+                ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptFormatAttribute,
+                snapshot.ScriptFormat);
         }
 
+        // Null means the studio did not send one, which must not clear a script
+        // someone already has — the same distinction RetryPoint draws.
         if (snapshot.Script is null) return;
 
-        var scriptElement = element.Element(BpmnNamespace + "script");
-        if (string.IsNullOrWhiteSpace(snapshot.Script))
-        {
-            scriptElement?.Remove();
-            return;
-        }
+        element.SetAttributeValue(
+            ScriptTaskIdentity.AutoNateNamespace + ComplexGatewayScriptAttribute,
+            string.IsNullOrWhiteSpace(snapshot.Script) ? null : snapshot.Script);
 
-        if (scriptElement is null)
-        {
-            element.Add(new XElement(BpmnNamespace + "script", snapshot.Script));
-            return;
-        }
-
-        scriptElement.Value = snapshot.Script;
+        // A diagram imported with the child form is normalised onto the
+        // attribute, because the child will not survive the author's next save.
+        element.Element(BpmnNamespace + "script")?.Remove();
     }
 
     private static void ApplyUserTaskSnapshot(XElement element, WorkflowElementSnapshot snapshot)
@@ -2490,7 +2514,7 @@ public static partial class WorkflowBpmnXml
             var gatewayId = gateway.Attribute("id")?.Value;
             var label = gateway.Attribute("name")?.Value ?? gatewayId ?? "Unnamed complex gateway";
 
-            var scriptFormat = gateway.Attribute("scriptFormat")?.Value;
+            var scriptFormat = ReadComplexGatewayScriptFormat(gateway);
             // Unset is fine — the expansion defaults it to javascript. Set to
             // something the sandbox cannot run is not.
             if (!string.IsNullOrWhiteSpace(scriptFormat)
@@ -2505,7 +2529,7 @@ public static partial class WorkflowBpmnXml
             // The same sandbox, so the same surface rules. Skipping this would
             // leave one script in the product that can still reach for the JVM
             // binding, found at run time by whoever starts the process.
-            var scriptBody = gateway.Element(BpmnNamespace + "script")?.Value;
+            var scriptBody = ReadComplexGatewayScript(gateway);
             if (!string.IsNullOrWhiteSpace(scriptBody))
             {
                 foreach (var rejection in ScriptSurfaceRules.FindRejected(scriptBody))

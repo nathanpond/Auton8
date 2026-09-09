@@ -1074,13 +1074,28 @@ function describeBusinessObject(businessObject) {
     id: businessObject.id,
     type: businessObject.$type,
     name: typeof businessObject.name === "string" ? businessObject.name : null,
-    scriptFormat: typeof businessObject.scriptFormat === "string" ? businessObject.scriptFormat : null,
+    scriptFormat:
+      businessObject.$type === "bpmn:ComplexGateway"
+        ? readAutoNateAttribute(businessObject, "scriptFormat")
+        : typeof businessObject.scriptFormat === "string"
+          ? businessObject.scriptFormat
+          : null,
     // #153. Stored in the autonate namespace, which is on the do-not-rename
     // list. Read from $attrs the same way every other namespaced property in
     // this file is: bpmn-js has no moddle extension loaded for it, so
     // modeling.updateProperties would serialise it without the prefix.
     runAs: readAutoNateAttribute(businessObject, "runAs"),
-    script: typeof businessObject.script === "string" ? businessObject.script : null,
+    // #218. A complex gateway's routing script is an autonate: ATTRIBUTE, not a
+    // <bpmn:script> child. bpmn-js's moddle has no script property on
+    // ComplexGateway and DROPS the child on save — proven in
+    // ComplexGatewayStudioRoundTripTests, where a seeded child came back gone.
+    // $attrs survives, which is the same route runAs already takes.
+    script:
+      businessObject.$type === "bpmn:ComplexGateway"
+        ? readAutoNateAttribute(businessObject, "routeScript")
+        : typeof businessObject.script === "string"
+          ? businessObject.script
+          : null,
     resultVariable: typeof businessObject.resultVariable === "string" ? businessObject.resultVariable : null,
     conditionExpression: typeof conditionExpression?.body === "string" ? conditionExpression.body : null,
     assignee: readFlowableString(businessObject, "assignee"),
@@ -1291,13 +1306,31 @@ function readAutoNateAttribute(businessObject, name) {
 
 function writeAutoNateAttribute(businessObject, name, value) {
   if (!businessObject) return;
-  businessObject.$attrs = businessObject.$attrs ?? {};
+
+  // MUTATE $attrs; never assign it. moddle defines $attrs on Base with only a
+  // getter, so `businessObject.$attrs = ...` throws
+  //   "Cannot set property $attrs of #<Base> which has only a getter"
+  // and the assignment above did that unconditionally. It went unnoticed because
+  // the elements this was used on until now already had a writable own property;
+  // a complex gateway does not, so the whole apply failed with the panel left
+  // open over the Save button (#218).
+  let attrs = businessObject.$attrs;
+  if (!attrs) {
+    try {
+      businessObject.$attrs = {};
+    } catch {
+      // Getter-only and nothing behind it. Nowhere to write.
+    }
+    attrs = businessObject.$attrs;
+  }
+  if (!attrs) return;
+
   const key = `${AUTONATE_ATTR_PREFIX}${name}`;
   if (value === null || value === undefined || value === "") {
-    delete businessObject.$attrs[key];
+    delete attrs[key];
     return;
   }
-  businessObject.$attrs[key] = value;
+  attrs[key] = value;
 }
 
 // #113. A call activity runs another workflow as a step. Three things matter:
@@ -2058,19 +2091,35 @@ export function updateScriptTaskProperties(modelerHandle, task) {
   }
 
   const element = elementRegistry.get(task.id);
-  if (!element?.businessObject || element.businessObject.$type !== "bpmn:ScriptTask") {
+  const type = element?.businessObject?.$type;
+  // #218. A complex gateway carries a routing script, and it is edited through
+  // the same panel — the fields are the same fields.
+  const isGateway = type === "bpmn:ComplexGateway";
+  if (!element?.businessObject || (type !== "bpmn:ScriptTask" && !isGateway)) {
     throw new Error(`Script task '${task.id}' is no longer available in the diagram.`);
   }
 
-  modeling.updateProperties(element, {
-    name: normalizeOptionalString(task.name),
-    // The author's language choice, stored in the standard BPMN attribute
-    // rather than an Auton8-specific one (#154). Defaulted rather than trusted:
-    // a task authored before Python support carries no value.
-    scriptFormat: task.scriptFormat === "python" ? "python" : "javascript",
-    script: typeof task.script === "string" ? task.script : "",
-    resultVariable: normalizeOptionalString(task.resultVariable)
-  });
+  const scriptFormat = task.scriptFormat === "python" ? "python" : "javascript";
+  const script = typeof task.script === "string" ? task.script : "";
+
+  if (isGateway) {
+    // Name through modeling so the canvas relabels; everything else through
+    // $attrs, because the modeller models none of it on this element and
+    // silently drops what it cannot model.
+    modeling.updateProperties(element, { name: normalizeOptionalString(task.name) });
+    writeAutoNateAttribute(element.businessObject, "scriptFormat", scriptFormat);
+    writeAutoNateAttribute(element.businessObject, "routeScript", script);
+  } else {
+    modeling.updateProperties(element, {
+      name: normalizeOptionalString(task.name),
+      // The author's language choice, stored in the standard BPMN attribute
+      // rather than an Auton8-specific one (#154). Defaulted rather than trusted:
+      // a task authored before Python support carries no value.
+      scriptFormat,
+      script,
+      resultVariable: normalizeOptionalString(task.resultVariable)
+    });
+  }
 
   // #153: the identity declaration. Written after updateProperties so it is
   // not cleared by it, and only when set — an unset value is the default
