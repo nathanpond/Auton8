@@ -421,7 +421,7 @@ that is where most of the value is.
 - [ ] A fixture backs the inventory row
 - [ ] A test asserts behaviour, not deployment — and for anything that waits, that it *resumes*
 - [ ] **This skill is corrected for anything it got wrong, in this PR** — and if it needed no change, the completion comment says so explicitly
-- [ ] `npm run lint` passes without raising `--max-warnings` (currently 103 — a
+- [ ] `npm run lint` passes without raising `--max-warnings` (currently 100 — a
       ratchet). If your story consumes a warning, **lower it to the new count in the
       same commit**: the budget tracks reality downward only. #158 took it 104 → 103
       by using an import that was sitting unused.

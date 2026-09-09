@@ -4018,3 +4018,35 @@ Run while M4 was being executed, so the slate was live. Deltas only.
   completion condition. The markers themselves come from stock bpmn-js; the fields
   behind them do not, and this is the same authoring gap as #163 and #166.
   **Issue:** #159, #103, #107
+
+- **The three authoring panels (#159, #163, #166), and the refactor they forced.**
+  Adding three editors to `WorkflowStudio.tsx` meant adding them to every branch's
+  clear-list — 195 such lines already, 148 of them inside `onRequestConfigure`,
+  growing quadratically with each editor. Replaced by one `clearEditors()` called
+  at the top of the callback: same behaviour, and adding an editor is now a
+  one-line change instead of a seventeen-line one. Verified by the 18 studio E2E
+  tests before anything was built on it.
+  **One panel, three shapes**, discriminated by `kind`, for the same reason.
+  **Rule 1 — three real bugs found by making the panels persist**, none of which a
+  unit test could have caught:
+  1. **`modeling.updateProperties` routes an unknown prefixed key into `$attrs`;
+     `updateModdleProperties` does not** — it sets a plain property the writer
+     never serialises. The nested `loopCharacteristics` therefore needs a direct
+     `$attrs` write plus a separate command.
+  2. **An imported diagram declares no `xmlns:autonate`**, and without the
+     declaration moddle cannot serialise an `autonate:` attribute at all — the
+     panel works, Apply reports success, and the value is absent from the export.
+     Auton8's own starter diagram has always declared it, which is why this only
+     bites diagrams authored elsewhere. Now declared on the prepare path beside
+     the flowable one.
+  3. **The studio writes the data type on the `dataObjectReference`** (the shape an
+     author selects) while the engine reads it off the `dataObject` behind it. The
+     publish expansion now resolves `dataObjectRef` onto its target.
+  **Filed, not fixed: #234.** Prepare's errors block SAVE, not just publish, so an
+  author cannot save a work-in-progress diagram containing any refusable element —
+  an ad-hoc subprocess before its completion condition is set, for instance. #225
+  widened that set, so every rule promoted to a publish refusal silently became a
+  save refusal too. The same shape as the problem #225 fixed, one surface over.
+  **The lint ratchet went DOWN, 103 → 100.** Four dead imports removed rather than
+  raising the budget; the skill's quoted number follows.
+  **Issue:** #159, #163, #166, #234

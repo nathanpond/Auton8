@@ -14,11 +14,7 @@ import {
   Group,
   List,
   Modal,
-  MultiSelect,
-  NumberInput,
-  Paper,
   Radio,
-  ScrollArea,
   Select,
   Stack,
   Switch,
@@ -263,6 +259,23 @@ type CallActivityEditor = {
   outputs: VariableMapping[];
 };
 
+// #159/#163/#166. One editor for the three element-data shapes, discriminated by
+// `kind`. Three separate editors would each have to be cleared by every branch —
+// the pattern clearEditors() exists to end.
+type ElementDataEditor =
+  | { kind: "adhoc"; id: string; type: string; name: string; completionCondition: string; sequential: boolean }
+  | { kind: "dataObject"; id: string; type: string; name: string; dataType: string }
+  | {
+      kind: "multiInstance";
+      id: string;
+      type: string;
+      name: string;
+      collection: string;
+      elementVariable: string;
+      completionCondition: string;
+      sequential: boolean;
+    };
+
 type GenericElementEditor = {
   id: string;
   type: string;
@@ -304,6 +317,13 @@ type ElementSelection = {
   script?: string | null;
   resultVariable?: string | null;
   conditionExpression?: string | null;
+  adhocCompletionCondition?: string | null;
+  adhocOrdering?: string | null;
+  dataObjectType?: string | null;
+  multiInstanceCollection?: string | null;
+  multiInstanceElementVariable?: string | null;
+  multiInstanceCompletionCondition?: string | null;
+  multiInstanceSequential?: boolean | null;
   assignee?: string | null;
   candidateUsers?: string[] | null;
   candidateGroups?: string[] | null;
@@ -497,6 +517,7 @@ export default function WorkflowStudio() {
   const [signalEditor, setSignalEditor] = useState<SignalEventEditor | null>(null);
   const [gatewayEditor, setGatewayEditor] = useState<GatewayEditor | null>(null);
   const [genericEditor, setGenericEditor] = useState<GenericElementEditor | null>(null);
+  const [elementDataEditor, setElementDataEditor] = useState<ElementDataEditor | null>(null);
   const [conditionalEventEditor, setConditionalEventEditor] =
     useState<ConditionalEventEditor | null>(null);
   const [timerBoundaryEditor, setTimerBoundaryEditor] =
@@ -531,7 +552,34 @@ export default function WorkflowStudio() {
     setDirty(true);
   }, []);
 
+  // Every element editor this component owns. Adding one means adding it
+  // here and nowhere else.
+  const clearEditors = useCallback(() => {
+    setCallActivityEditor(null);
+    setCodedEventEditor(null);
+    setConditionalEventEditor(null);
+    setGatewayEditor(null);
+    setGenericEditor(null);
+    setMessageEditor(null);
+    setScriptTaskEditor(null);
+    setSequenceFlowEditor(null);
+    setServiceTaskEditor(null);
+    setSignalEditor(null);
+    setSignalStartEditor(null);
+    setTimerBoundaryEditor(null);
+    setTimerIntermediateEditor(null);
+    setTimerStartEditor(null);
+    setUserTaskEditor(null);
+  }, []);
+
   const onRequestConfigure = useCallback((raw: unknown) => {
+    // #159/#163/#166. One call, at the top, instead of every branch clearing
+    // every other editor. That pattern was 148 lines inside this callback and
+    // grew quadratically: each editor added had to be cleared in every branch,
+    // and the one branch that forgot left two modals open at once. Clearing
+    // first and letting the matching branch set its own is the same behaviour
+    // with the failure mode removed.
+    clearEditors();
     const selection = raw as ElementSelection;
     // #157. Before the conditional branch: both boundary shapes carry
     // cancelActivity, and only the timer one carries the boundaryTimer* keys, so
@@ -557,16 +605,6 @@ export default function WorkflowStudio() {
         interrupting: selection.cancelActivity !== false,
         attachedTo: selection.attachedTo ?? null
       });
-      setConditionalEventEditor(null);
-      setTimerStartEditor(null);
-      setSignalStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
       return;
     }
     // #158. First branch, because a conditional BOUNDARY event is the one shape no
@@ -589,15 +627,6 @@ export default function WorkflowStudio() {
         interrupting:
           selection.type === "bpmn:BoundaryEvent" ? selection.cancelActivity !== false : null
       });
-      setTimerStartEditor(null);
-      setSignalStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
       return;
     }
     const isTimerIntermediateCatch =
@@ -617,16 +646,6 @@ export default function WorkflowStudio() {
           selection.timerDate
         )
       );
-      setTimerStartEditor(null);
-      setSignalStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
       return;
     }
     const isTimerStart =
@@ -654,16 +673,6 @@ export default function WorkflowStudio() {
           ? "Auton8 doesn't recognize this cron expression. The picker is locked — edit the raw cron below or clear it to start fresh."
           : null
       });
-      setSignalStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
       return;
     }
     const isSignalStart =
@@ -689,16 +698,6 @@ export default function WorkflowStudio() {
           ? [...selection.recordTypeShortCodes]
           : []
       });
-      setTimerStartEditor(null);
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
       return;
     }
     // #113. A call activity carries its own configuration and would otherwise
@@ -712,16 +711,8 @@ export default function WorkflowStudio() {
         inputs: selection.callInputs ?? [],
         outputs: selection.callOutputs ?? []
       });
-      setScriptTaskEditor(null);
-      setServiceTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setMessageEditor(null);
-      setCodedEventEditor(null);
-      setGenericEditor(null);
       return;
     }
-    setCallActivityEditor(null);
 
     // #156. Signal events carry their own definition type; without this they
     // reach the generic editor with nowhere to put a name or a scope.
@@ -740,17 +731,8 @@ export default function WorkflowStudio() {
             ? selection.signalEventInterrupting
             : null
       });
-      setScriptTaskEditor(null);
-      setServiceTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setMessageEditor(null);
-      setCodedEventEditor(null);
-      setCallActivityEditor(null);
-      setGenericEditor(null);
       return;
     }
-    setSignalEditor(null);
 
     // #114. Error and escalation events, routed before the message branch: they
     // carry their own definition type and would otherwise reach the generic
@@ -767,15 +749,8 @@ export default function WorkflowStudio() {
             ? selection.codedEventInterrupting
             : null
       });
-      setScriptTaskEditor(null);
-      setServiceTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setMessageEditor(null);
-      setGenericEditor(null);
       return;
     }
-    setCodedEventEditor(null);
 
     // #112. Before the service-task branch — a send task is a message element
     // first, and a receive task would otherwise land in the generic editor with
@@ -794,14 +769,8 @@ export default function WorkflowStudio() {
         // silently diverge from it.
         editableMessageName: selection.type === "bpmn:SendTask"
       });
-      setScriptTaskEditor(null);
-      setServiceTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setGenericEditor(null);
       return;
     }
-    setMessageEditor(null);
 
     const isServiceTask =
       !!selection &&
@@ -819,16 +788,6 @@ export default function WorkflowStudio() {
         behaviorKey: selection.behaviorKey ?? "",
         retryPoint: selection.retryPoint === true
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
       return;
     }
     // #218. A complex gateway routes on an author's script, and the fields it
@@ -836,6 +795,46 @@ export default function WorkflowStudio() {
     // twentieth editor of its own — every editor added to this component has to
     // be cleared by every other branch, and that list is already the most
     // fragile thing in the file.
+    // #159/#163/#166. Before the task branches, because a multi-instance marker
+    // sits on an activity that also matches one of them — presence of the
+    // multiInstance* keys is the discriminator, per load-bearing fact 3.
+    if (selection && "multiInstanceCollection" in selection) {
+      setElementDataEditor({
+        kind: "multiInstance",
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        collection: selection.multiInstanceCollection ?? "",
+        elementVariable: selection.multiInstanceElementVariable ?? "",
+        completionCondition: selection.multiInstanceCompletionCondition ?? "",
+        sequential: selection.multiInstanceSequential === true
+      });
+      return;
+    }
+
+    if (selection && "adhocCompletionCondition" in selection) {
+      setElementDataEditor({
+        kind: "adhoc",
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        completionCondition: selection.adhocCompletionCondition ?? "",
+        sequential: selection.adhocOrdering === "Sequential"
+      });
+      return;
+    }
+
+    if (selection && "dataObjectType" in selection) {
+      setElementDataEditor({
+        kind: "dataObject",
+        id: selection.id,
+        type: selection.type,
+        name: selection.name ?? "",
+        dataType: selection.dataObjectType ?? ""
+      });
+      return;
+    }
+
     if (selection && (selection.type === "bpmn:ScriptTask" || selection.type === "bpmn:ComplexGateway")) {
       setScriptTaskEditor({
         id: selection.id,
@@ -849,16 +848,6 @@ export default function WorkflowStudio() {
         script: selection.script ?? "",
         resultVariable: selection.resultVariable ?? ""
       });
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
     } else if (selection && selection.type === "bpmn:SequenceFlow") {
       setSequenceFlowEditor({
         id: selection.id,
@@ -867,16 +856,6 @@ export default function WorkflowStudio() {
         conditionExpression: selection.conditionExpression ?? "",
         sourceType: selection.sourceType ?? null
       });
-      setScriptTaskEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
     } else if (
       selection &&
       (selection.type === "bpmn:ExclusiveGateway" || selection.type === "bpmn:InclusiveGateway")
@@ -898,16 +877,6 @@ export default function WorkflowStudio() {
         defaultFlowId: validDefaultFlowId,
         outgoingFlows
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
     } else if (selection && selection.type === "bpmn:UserTask") {
       const assignee = selection.assignee ?? "";
       const candidateUsers = selection.candidateUsers ?? [];
@@ -937,44 +906,15 @@ export default function WorkflowStudio() {
         userFormMode,
         userFormShortCode: (selection.userFormShortCode ?? "").trim()
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
     } else if (selection) {
       setGenericEditor({
         id: selection.id,
         type: selection.type,
         name: selection.name ?? ""
       });
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
     } else {
-      setScriptTaskEditor(null);
-      setSequenceFlowEditor(null);
-      setUserTaskEditor(null);
-      setSignalStartEditor(null);
-      setTimerStartEditor(null);
-      setTimerIntermediateEditor(null);
-      setServiceTaskEditor(null);
-      setGatewayEditor(null);
-      setGenericEditor(null);
-    setConditionalEventEditor(null);
-    setTimerBoundaryEditor(null);
     }
-  }, []);
+  }, [clearEditors]);
 
   const onTasksConverted = useCallback(
     (converted: Array<{ id: string; name: string | null; was: string }>) => {
@@ -1420,6 +1360,15 @@ export default function WorkflowStudio() {
         interrupting: signalEditor.interrupting
       });
       setSignalEditor(null);
+    });
+
+  const applyElementData = () =>
+    runBusy("applying element changes", async () => {
+      if (!handle || !elementDataEditor) {
+        throw new Error("Select an element before applying changes.");
+      }
+      await workflow.updateElementDataProperties(handle, elementDataEditor);
+      setElementDataEditor(null);
     });
 
   const applyGeneric = () =>
@@ -1960,6 +1909,19 @@ export default function WorkflowStudio() {
           }}
           onApply={applyGateway}
           disabled={!!busy || !handle}
+        />
+      )}
+
+      {elementDataEditor && (
+        <ElementDataModal
+          editor={elementDataEditor}
+          onChange={setElementDataEditor}
+          onClose={() => {
+            if (busy) return;
+            setElementDataEditor(null);
+          }}
+          onApply={applyElementData}
+          disabled={!!busy}
         />
       )}
 
@@ -2659,6 +2621,137 @@ function CreateWorkflowModal({
           </Button>
           <Button onClick={onCreate} loading={busy} disabled={!name.trim()}>
             Create
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+// #159/#163/#166. The panel behind the three element-data shapes.
+//
+// Each field is a real label bound to its control, and the copy says what the
+// value DOES rather than naming the BPMN attribute — an author setting a
+// completion condition is deciding when the case is finished, not editing
+// `completionCondition`.
+function ElementDataModal({
+  editor,
+  onChange,
+  onClose,
+  onApply,
+  disabled
+}: {
+  editor: ElementDataEditor;
+  onChange: (next: ElementDataEditor) => void;
+  onClose: () => void;
+  onApply: () => void;
+  disabled: boolean;
+}) {
+  const title =
+    editor.kind === "adhoc"
+      ? "Case Work"
+      : editor.kind === "dataObject"
+        ? "Data"
+        : "Repeat For Each";
+
+  return (
+    <Modal opened onClose={onClose} title={title} size="lg">
+      <Stack gap="md">
+        <Group gap="xs" wrap="wrap">
+          <Code>{editor.id}</Code>
+          <Code>{editor.type}</Code>
+        </Group>
+
+        <TextInput
+          label="Name"
+          value={editor.name}
+          onChange={(e) => onChange({ ...editor, name: e.currentTarget.value })}
+        />
+
+        {editor.kind === "adhoc" && (
+          <>
+            <Text size="sm" c="dimmed">
+              The steps inside run in no fixed order — a person picks what happens next,
+              as often as they need, until this condition is true.
+            </Text>
+            <TextInput
+              label="Finished when"
+              placeholder="${approved == true}"
+              description="Without this the section can never finish, and publishing is refused."
+              value={editor.completionCondition}
+              onChange={(e) => onChange({ ...editor, completionCondition: e.currentTarget.value })}
+            />
+            <Switch
+              label="Run the steps one at a time"
+              checked={editor.sequential}
+              onChange={(e) => onChange({ ...editor, sequential: e.currentTarget.checked })}
+            />
+          </>
+        )}
+
+        {editor.kind === "dataObject" && (
+          <>
+            <Text size="sm" c="dimmed">
+              Declares a process variable by this name. Conditions can then use it without
+              being warned that nothing sets it.
+            </Text>
+            <Select
+              label="Type"
+              data={[
+                { value: "", label: "Not specified" },
+                { value: "xsd:string", label: "Text" },
+                { value: "xsd:double", label: "Number" },
+                { value: "xsd:boolean", label: "Yes / no" },
+                { value: "xsd:dateTime", label: "Date and time" }
+              ]}
+              description="Sets the variable's starting type. It is not enforced once the process is running."
+              value={editor.dataType}
+              onChange={(value) => onChange({ ...editor, dataType: value ?? "" })}
+            />
+          </>
+        )}
+
+        {editor.kind === "multiInstance" && (
+          <>
+            <Text size="sm" c="dimmed">
+              Runs this step once per item in a list. Each run sees its own item under the
+              name below.
+            </Text>
+            <TextInput
+              label="List to repeat over"
+              placeholder="${items}"
+              value={editor.collection}
+              onChange={(e) => onChange({ ...editor, collection: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Name for each item"
+              placeholder="item"
+              description="Scripts read it with variables.get('item')."
+              value={editor.elementVariable}
+              onChange={(e) => onChange({ ...editor, elementVariable: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Stop early when"
+              placeholder="${nrOfCompletedInstances >= 2}"
+              description="Optional. Remaining runs are cancelled when this becomes true."
+              value={editor.completionCondition}
+              onChange={(e) => onChange({ ...editor, completionCondition: e.currentTarget.value })}
+            />
+            <Switch
+              label="Run them one at a time"
+              description="Off means every item runs at once."
+              checked={editor.sequential}
+              onChange={(e) => onChange({ ...editor, sequential: e.currentTarget.checked })}
+            />
+          </>
+        )}
+
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose} disabled={disabled}>
+            Cancel
+          </Button>
+          <Button onClick={onApply} loading={disabled}>
+            Apply
           </Button>
         </Group>
       </Stack>

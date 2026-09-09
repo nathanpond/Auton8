@@ -50,6 +50,8 @@ public static class WorkflowConditionValidation
     };
 
     /// <summary>An expression written somewhere in the diagram, with where it came from.</summary>
+    private static readonly XNamespace AutoNate = "http://autonate.dev/workflows";
+
     public readonly record struct Site(string Element, string Where, string Expression);
 
     public readonly record struct Result(IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings);
@@ -157,10 +159,14 @@ public static class WorkflowConditionValidation
                 yield return new Site(label, "The collection", collection);
             }
 
-            var completion = multiInstance.Element(Bpmn + "completionCondition");
-            if (completion is not null)
+            // Either spelling: the studio writes an autonate: attribute (a child
+            // element does not survive the modeller), publish turns it into the
+            // child, and a hand-authored diagram may carry either.
+            var completion = multiInstance.Attribute(AutoNate + "completionCondition")?.Value
+                             ?? multiInstance.Element(Bpmn + "completionCondition")?.Value;
+            if (!string.IsNullOrWhiteSpace(completion))
             {
-                yield return new Site(label, "The completion condition", completion.Value);
+                yield return new Site(label, "The completion condition", completion);
             }
         }
     }

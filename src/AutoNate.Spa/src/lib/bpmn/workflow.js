@@ -1110,6 +1110,14 @@ function describeBusinessObject(businessObject) {
     userFormShortCode: readFlowableString(businessObject, "userFormShortCode")
   };
 
+  // #159/#163/#166. The three element-data shapes, merged CONDITIONALLY so a
+  // key's presence is what routes the studio (load-bearing fact 3). An
+  // unconditional key would send every subprocess to the ad-hoc panel.
+  const elementData = describeElementData(businessObject);
+  if (elementData) {
+    Object.assign(description, elementData);
+  }
+
   if (signal) {
     // Only present for signal start events. Used by the SPA to discriminate
     // from plain start events; downstream code treats `signalName` as the
@@ -1272,6 +1280,7 @@ function describeServiceTask(businessObject) {
 // namespace URI is on the do-not-rename list: changing it orphans the property
 // on every diagram that already carries it.
 const AUTONATE_ATTR_PREFIX = "autonate:";
+const FLOWABLE_ATTR_PREFIX = "flowable:";
 const FLOWABLE_NAMESPACE = "http://flowable.org/bpmn";
 
 // #153: mark script tasks that declare an identity, so a reviewer can see the
@@ -1297,6 +1306,46 @@ export function refreshScriptIdentityMarkers(modelerHandle) {
       canvas.addMarker(element.id, "an8-script-author");
     }
   }
+}
+
+// #159/#163/#166. Everything an author configures on an ad-hoc subprocess, a
+// data object, or a multi-instance marker.
+//
+// All of it is read from autonate:/flowable: attributes rather than moddle
+// properties or child elements, because bpmn-js drops what its moddle does not
+// model — a <bpmn:completionCondition> on one of these is gone on the next save,
+// taking the author's condition with it. Publish rewrites the attributes into
+// the elements the engine reads.
+function describeElementData(businessObject) {
+  const type = businessObject?.$type;
+  if (!type) return null;
+
+  if (type === "bpmn:AdHocSubProcess") {
+    return {
+      adhocCompletionCondition: readAutoNateAttribute(businessObject, "completionCondition") ?? "",
+      adhocOrdering: businessObject.ordering === "Sequential" ? "Sequential" : "Parallel"
+    };
+  }
+
+  if (type === "bpmn:DataObjectReference" || type === "bpmn:DataObject") {
+    return { dataObjectType: readAutoNateAttribute(businessObject, "dataType") ?? "" };
+  }
+
+  // The marker lives on the ACTIVITY, in loopCharacteristics — bpmn-js's own
+  // replace menu puts it there, so an author can already apply the marker; what
+  // it cannot do is fill in the fields behind it.
+  const loop = businessObject.loopCharacteristics;
+  if (loop && loop.$type === "bpmn:MultiInstanceLoopCharacteristics") {
+    return {
+      multiInstanceCollection: readFlowableString(loop, "collection") ?? "",
+      multiInstanceElementVariable: readFlowableString(loop, "elementVariable") ?? "",
+      multiInstanceCompletionCondition: readAutoNateAttribute(loop, "completionCondition") ?? "",
+      // isSequential defaults to false in BPMN, and parallel is the common case.
+      multiInstanceSequential: loop.isSequential === true
+    };
+  }
+
+  return null;
 }
 
 function readAutoNateAttribute(businessObject, name) {
@@ -3537,4 +3586,81 @@ function clearExecutionState(viewerHandle) {
   }
 
   viewerHandle.activeMarkers = [];
+}
+
+// #159/#163/#166. Writes what describeElementData reads.
+//
+// Everything goes through `modeling`, including the namespaced attributes.
+// bpmn-js puts an unknown key straight into $attrs, so this stores the same
+// thing writeAutoNateAttribute would — but it also pushes a COMMAND, and that is
+// the whole point.
+//
+// The first version wrote $attrs directly and called
+// `modeling.updateProperties(element, { name })` alongside it to push one. When
+// the author had not changed the name that update was a no-op, no command
+// reached the stack, the studio's dirty flag stayed false, and Save wrote
+// nothing — the edit vanished with the panel reporting success. That is
+// load-bearing fact 3 in the add-bpmn-element skill, walked into anyway.
+export function updateElementDataProperties(modelerHandle, editor) {
+  const modeler = modelerHandle?.modeler;
+  const elementRegistry = modeler?.get?.("elementRegistry", false);
+  const modeling = modeler?.get?.("modeling", false);
+  if (!elementRegistry || !modeling || !editor?.id) {
+    throw new Error("The BPMN modeler is not ready to update this element.");
+  }
+
+  const element = elementRegistry.get(editor.id);
+  const businessObject = element?.businessObject;
+  if (!businessObject) {
+    throw new Error(`Element '${editor.id}' is no longer available in the diagram.`);
+  }
+
+  const name = normalizeOptionalString(editor.name);
+
+  if (editor.kind === "adhoc") {
+    modeling.updateProperties(element, {
+      name,
+      // `ordering` is standard BPMN on AdHocSubProcess; the condition is ours.
+      ordering: editor.sequential ? "Sequential" : "Parallel",
+      [`${AUTONATE_ATTR_PREFIX}completionCondition`]:
+        normalizeOptionalString(editor.completionCondition)
+    });
+    return;
+  }
+
+  if (editor.kind === "dataObject") {
+    modeling.updateProperties(element, {
+      name,
+      [`${AUTONATE_ATTR_PREFIX}dataType`]: normalizeOptionalString(editor.dataType)
+    });
+    return;
+  }
+
+  if (editor.kind === "multiInstance") {
+    const loop = businessObject.loopCharacteristics;
+    if (!loop) {
+      throw new Error(
+        `'${editor.id}' is no longer marked as multi-instance. Apply the marker from ` +
+        "the element's replace menu first."
+      );
+    }
+
+    // The marker's fields live on the NESTED moddle object, and the two update
+    // helpers are not interchangeable there: `updateProperties` routes an unknown
+    // prefixed key into $attrs, `updateModdleProperties` sets it as a plain
+    // property that the writer never serialises. So the namespaced attributes are
+    // written to $attrs directly...
+    writeFlowableAttribute(loop, "collection", editor.collection);
+    writeFlowableAttribute(loop, "elementVariable", editor.elementVariable);
+    writeAutoNateAttribute(loop, "completionCondition", editor.completionCondition);
+
+    // ...and isSequential goes through updateModdleProperties, which is what
+    // pushes the command. Without a command the studio never re-serialises and
+    // the $attrs above are lost.
+    modeling.updateProperties(element, { name });
+    modeling.updateModdleProperties(element, loop, { isSequential: editor.sequential === true });
+    return;
+  }
+
+  throw new Error(`Unknown element data editor kind '${editor.kind}'.`);
 }

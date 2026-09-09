@@ -88,6 +88,7 @@ public static partial class WorkflowBpmnXml
             ?? throw new InvalidOperationException(BuildMissingProcessDefinitionMessage(document));
 
         EnsureFlowableNamespaceDeclared(document);
+        EnsureAutoNateNamespaceDeclared(document);
         PruneOrphanSignalRoots(document);
 
         var oldProcessKey = processElement.Attribute("id")?.Value;
@@ -166,6 +167,7 @@ public static partial class WorkflowBpmnXml
         ExpandSignalEndEvents(document);
         ExpandCompensationEndEvents(document);
         ExpandDataObjectTypes(document);
+        ExpandCompletionConditions(document);
         ExpandComplexGateways(document);
         ApplySignalScopes(document);
 
@@ -321,10 +323,31 @@ public static partial class WorkflowBpmnXml
     // #112, #156, #115 and #218 already use.
     private static void ExpandDataObjectTypes(XDocument document)
     {
+        // The author selects the REFERENCE on the canvas — a dataObjectReference is
+        // the shape, and the dataObject behind it is invisible — so the studio
+        // writes the type there. The engine reads it off the dataObject, so the
+        // reference's declaration is resolved onto its target here.
+        var typeByDataObjectId = document.Descendants(BpmnNamespace + "dataObjectReference")
+            .Select(reference => (
+                Target: Trimmed(reference.Attribute("dataObjectRef")?.Value),
+                Type: Trimmed(reference.Attribute(
+                    ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Value)))
+            .Where(pair => pair.Target is not null && pair.Type is not null)
+            .GroupBy(pair => pair.Target!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Type!, StringComparer.Ordinal);
+
         foreach (var dataObject in document.Descendants(BpmnNamespace + "dataObject"))
         {
             var declaredType = Trimmed(
                 dataObject.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Value);
+
+            if (declaredType is null
+                && Trimmed(dataObject.Attribute("id")?.Value) is { } objectId
+                && typeByDataObjectId.TryGetValue(objectId, out var fromReference))
+            {
+                declaredType = fromReference;
+            }
+
             if (declaredType is null) continue;
 
             // An author who hand-wrote itemSubjectRef meant it; do not overwrite.
@@ -339,6 +362,48 @@ public static partial class WorkflowBpmnXml
             dataObject.Attribute(ScriptTaskIdentity.AutoNateNamespace + DataObjectTypeAttribute)?.Remove();
         }
     }
+
+    // #159/#163. A completion condition an author typed in the studio, rewritten
+    // into the child element the engine reads.
+    //
+    // Stored as an autonate: ATTRIBUTE for the same reason a data object's type
+    // is (load-bearing fact 8): a `<bpmn:completionCondition>` child is a moddle
+    // property on some element types and not others, and anything the modeller
+    // does not model it drops on save — silently, taking the author's condition
+    // with it. The attribute survives; this puts the child back on the way out.
+    //
+    // Order matters. In `adHocSubProcess` the completion condition must come
+    // AFTER every flow element, or the deployment is refused:
+    //   cvc-complex-type.2.4.d: Invalid content was found starting with element
+    //   'completionCondition'
+    // which is how the first hand-written probe of that element failed.
+    private static void ExpandCompletionConditions(XDocument document)
+    {
+        var owners = document.Descendants()
+            .Where(e => e.Name.Namespace == BpmnNamespace
+                        && e.Name.LocalName is "adHocSubProcess" or "multiInstanceLoopCharacteristics")
+            .ToList();
+
+        foreach (var owner in owners)
+        {
+            var declared = Trimmed(
+                owner.Attribute(ScriptTaskIdentity.AutoNateNamespace + CompletionConditionAttribute)?.Value);
+            if (declared is null) continue;
+
+            owner.Attribute(ScriptTaskIdentity.AutoNateNamespace + CompletionConditionAttribute)?.Remove();
+
+            // An author who hand-wrote the child meant it.
+            if (owner.Element(BpmnNamespace + "completionCondition") is not null) continue;
+
+            owner.Add(new XElement(
+                BpmnNamespace + "completionCondition",
+                new XAttribute(XsiNamespace + "type", "bpmn:tFormalExpression"),
+                declared));
+        }
+    }
+
+    /// <summary>Where an authored completion condition lives in the stored diagram (#159/#163).</summary>
+    internal const string CompletionConditionAttribute = "completionCondition";
 
     /// <summary>Where a data object's declared type lives in the stored diagram (#166).</summary>
     internal const string DataObjectTypeAttribute = "dataType";
@@ -2207,6 +2272,28 @@ public static partial class WorkflowBpmnXml
         return string.Join(",", trimmed);
     }
 
+    // #159/#163/#166. An IMPORTED diagram declares no autonate namespace, and
+    // without the declaration moddle cannot serialise an `autonate:` attribute at
+    // all — the studio's panels appear to work, Apply reports success, and the
+    // value is gone from the saved XML.
+    //
+    // Auton8's own starter diagram has always declared it, which is why this only
+    // bites a diagram authored somewhere else. Declared on the prepare path, the
+    // same place the flowable namespace is.
+    private static void EnsureAutoNateNamespaceDeclared(XDocument document)
+    {
+        var definitions = document.Root;
+        if (definitions is null) return;
+
+        var alreadyDeclared = definitions.Attributes()
+            .Any(a => a.IsNamespaceDeclaration
+                      && a.Value == ScriptTaskIdentity.AutoNateNamespace.NamespaceName);
+        if (alreadyDeclared) return;
+
+        definitions.SetAttributeValue(
+            XNamespace.Xmlns + "autonate", ScriptTaskIdentity.AutoNateNamespace.NamespaceName);
+    }
+
     private static void EnsureFlowableNamespaceDeclared(XDocument document)
     {
         var root = document.Root;
@@ -3348,7 +3435,9 @@ public static partial class WorkflowBpmnXml
                         ?? Trimmed(adhoc.Attribute("id")?.Value)
                         ?? "Unnamed ad-hoc subprocess";
 
-            var condition = Trimmed(adhoc.Element(BpmnNamespace + "completionCondition")?.Value);
+            var condition = Trimmed(
+                adhoc.Attribute(ScriptTaskIdentity.AutoNateNamespace + CompletionConditionAttribute)?.Value)
+                ?? Trimmed(adhoc.Element(BpmnNamespace + "completionCondition")?.Value);
             if (condition is null)
             {
                 errors.Add(

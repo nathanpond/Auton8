@@ -6,6 +6,126 @@ namespace AutoNate.Web.Tests;
 
 public sealed class WorkflowBpmnXmlTests
 {
+    [Fact]
+    public void ApplyProcessMetadata_KeepsAutoNateAttributesOnDataAndMarkers()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:flowable="http://flowable.org/bpmn"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="p" name="P" isExecutable="true">
+                <bpmn:dataObject id="d" name="amount" />
+                <bpmn:dataObjectReference id="dr" name="amount" dataObjectRef="d"
+                                          autonate:dataType="xsd:double" />
+                <bpmn:userTask id="t" name="Handle">
+                  <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                      flowable:collection="${orders}" flowable:elementVariable="item"
+                      autonate:completionCondition="${done}" />
+                </bpmn:userTask>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        // WITH snapshots, which is how the studio actually calls it — the studio
+        // sends one per element, and a handler that clears what a snapshot omits
+        // is exactly how an attribute survives export and still vanishes.
+        var prepared = WorkflowBpmnXml.ApplyProcessMetadata(xml, "p", "P",
+        [
+            new WorkflowElementSnapshot("dr", "bpmn:DataObjectReference", "amount"),
+            new WorkflowElementSnapshot("t", "bpmn:UserTask", "Handle")
+        ]);
+
+        Assert.Contains("dataType", prepared, StringComparison.Ordinal);
+        Assert.Contains("collection", prepared, StringComparison.Ordinal);
+        Assert.Contains("completionCondition", prepared, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_TurnsAnAuthoredCompletionConditionIntoTheChildElement()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="casework" isExecutable="true">
+                <bpmn:adHocSubProcess id="adhoc" name="Case work"
+                                      autonate:completionCondition="${done == true}">
+                  <bpmn:userTask id="a1" name="Call" />
+                </bpmn:adHocSubProcess>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        var adhoc = document.Descendants(Bpmn218 + "adHocSubProcess").Single();
+
+        var condition = Assert.Single(adhoc.Elements(Bpmn218 + "completionCondition"));
+        Assert.Equal("${done == true}", condition.Value);
+        Assert.Null(adhoc.Attribute(Autonate218 + "completionCondition"));
+
+        // The child must come AFTER every flow element. The strict schema puts it
+        // last, and a deployment with it first is refused outright:
+        //   cvc-complex-type.2.4.d: Invalid content was found starting with
+        //   element 'completionCondition'
+        Assert.Equal("completionCondition", adhoc.Elements().Last().Name.LocalName);
+    }
+
+    [Fact]
+    public void ExpandForDeployment_LeavesAHandWrittenCompletionConditionAlone()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="casework" isExecutable="true">
+                <bpmn:adHocSubProcess id="adhoc" autonate:completionCondition="${ignored}">
+                  <bpmn:userTask id="a1" name="Call" />
+                  <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${mine == true}</bpmn:completionCondition>
+                </bpmn:adHocSubProcess>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        var document = XDocument.Parse(WorkflowBpmnXml.ExpandForDeployment(xml));
+        var adhoc = document.Descendants(Bpmn218 + "adHocSubProcess").Single();
+
+        // An imported diagram that already spells it the engine's way meant it —
+        // and must not end up with two conditions.
+        var condition = Assert.Single(adhoc.Elements(Bpmn218 + "completionCondition"));
+        Assert.Equal("${mine == true}", condition.Value);
+    }
+
+    [Fact]
+    public void ValidateProcess_AcceptsAnAdhocCompletionConditionWrittenAsAnAttribute()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                              xmlns:autonate="http://autonate.dev/workflows"
+                              id="Definitions_1" targetNamespace="http://autonate.dev/workflows">
+              <bpmn:process id="casework" isExecutable="true">
+                <bpmn:startEvent id="s" />
+                <bpmn:sequenceFlow id="f0" sourceRef="s" targetRef="adhoc" />
+                <bpmn:adHocSubProcess id="adhoc" name="Case work"
+                                      autonate:completionCondition="${done == true}">
+                  <bpmn:userTask id="a1" name="Call" />
+                </bpmn:adHocSubProcess>
+              </bpmn:process>
+            </bpmn:definitions>
+            """;
+
+        // The studio's spelling must satisfy the "needs a completion condition"
+        // rule, or an author who sets one in the panel is refused for not having
+        // set one.
+        Assert.DoesNotContain(WorkflowBpmnXml.ValidateProcess(xml).Errors, e =>
+            e.Contains("never finish", StringComparison.Ordinal));
+    }
+
     // ── #159: multi-instance and the loop marker ─────────────────────────────
 
     private static string WithMarker(string marker) => $"""
